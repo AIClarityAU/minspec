@@ -32,6 +32,12 @@ a read would take bytes out of a message on its way to that session.
 WHAT IT CANNOT SEE, stated rather than hidden:
   * A session whose input is not a pipe (a terminal, or a socket when the editor
     launches the CLI directly rather than through a container). Those are skipped.
+  * Any running process on a machine with no /proc (macOS, Windows). There `self`
+    says nothing, and `start` names only a session that wrote its exit record.
+  * An ENDED session whose first prompt was written before the CLI recorded where a
+    prompt came from (about 2026-09-22). Its transcript does not show it was a panel
+    a person typed into, so it is not named once it has ended. While it still runs
+    headless it IS named: that path reads the process, not the transcript.
   * A session killed long before this one started (a container restart after an idle
     night). Only the last RECENT_S seconds are examined, so a stale loss is not
     re-announced at every start for days. Tracked as #2633.
@@ -85,11 +91,21 @@ def read_hook_input():
             break
         chunks.append(chunk)
         size += len(chunk)
+        if chunk.rstrip().endswith(b"}"):
+            # Possibly complete. If it parses, answer now: a caller that leaves the
+            # stream open must not cost every prompt the whole deadline.
+            data = parse_envelope(chunks)
+            if data is not None:
+                return data
+    return parse_envelope(chunks) or {}
+
+
+def parse_envelope(chunks):
     try:
         data = json.loads(b"".join(chunks).decode("utf-8", "replace"))
     except ValueError:
-        return {}
-    return data if isinstance(data, dict) else {}
+        return None
+    return data if isinstance(data, dict) else None
 
 
 def config_dir():
@@ -137,22 +153,27 @@ def is_unattended_run(pid):
 
 
 def looks_like_cli(pid):
-    """True when the process is a Claude Code CLI, by the same three signals the
-    inbox drain uses (#2215): the command name, the old argument markers, or the
-    versioned binary path, which `comm` (just a version number there) does not show."""
+    """True when the process IS a Claude Code CLI: by its command name, by the binary
+    it runs (the versioned per-release binary shows only a version number as its
+    name, #2215), or by the program it was started as. Deliberately NOT by a marker
+    anywhere in its arguments: the shell that runs this very hook has the repo path
+    in its arguments, and a checkout under a folder called "claude-code" would then
+    be taken for the CLI and end the walk one process too early."""
     try:
         with open("/proc/%d/comm" % pid, "r", errors="replace") as f:
-            if "claude" in f.read():
+            if f.read().strip() == "claude":
                 return True
     except OSError:
         pass
-    joined = b" ".join(argv_of(pid))
-    if b"/claude/versions/" in joined or b"claude-code" in joined or b"anthropic.claude" in joined:
-        return True
+    programs = [arg.decode("utf-8", "replace") for arg in argv_of(pid)[:2]]
     try:
-        return "/claude/versions/" in os.readlink("/proc/%d/exe" % pid)
+        programs.append(os.readlink("/proc/%d/exe" % pid))
     except OSError:
-        return False
+        pass
+    for program in programs:
+        if "/claude/versions/" in program or "@anthropic-ai/claude-code/" in program or os.path.basename(program) == "claude":
+            return True
+    return False
 
 
 def probe(pid):
@@ -298,6 +319,10 @@ def head_facts(path):
     """What kind of session wrote this transcript: (a prompt was seen, an origin field
     was seen, it is an editor panel a human typed into)."""
     prompt_seen = origin_seen = panel = False
+    # Every record in the span is parsed, on purpose. Parsing only lines that look like
+    # a prompt saved 27 ms over the 30 newest real transcripts (41 ms to 14 ms, measured
+    # 2026-10-09) and would go blind, silently, on any change in how the CLI spaces its
+    # JSON: no prompt seen means no "could not classify" warning either.
     for record in json_lines(read_span(path, 0, HEAD_BYTES)):
         if record.get("type") != "user":
             continue
@@ -393,7 +418,7 @@ def mode_self(hook):
     pid = own_process(hook.get("session_id"), entries)
     if pid is None or not is_stream_driven(pid) or probe(pid) != "headless":
         return
-    mine = next((e for e in entries if e.get("pid") == pid), None)
+    mine = next((e for e in entries if e.get("pid") == pid and alive(e)), None)
     folder = hook.get("cwd") or (mine or {}).get("cwd")
     peers = []
     for entry in entries:

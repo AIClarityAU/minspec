@@ -38,6 +38,17 @@ const SLUG = '-home-somebody-code-project';
 const ME = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
 const THIRD = '33333333-3333-4333-8333-333333333333';
+const FOURTH = '44444444-4444-4444-8444-444444444444';
+
+/**
+ * The unit reads /proc, and so does every fixture here. Where there is none (macOS,
+ * Windows) the unit can inspect no running process, by design, and these cases cannot
+ * be built, so they are skipped by NAME rather than left to fail on a missing file.
+ * CI runs Linux only; the always-on case at the end of this file is what makes a skip
+ * visible in the run's output.
+ */
+const onLinux = process.platform === 'linux';
+const suite = onLinux ? describe : describe.skip;
 
 /**
  * A fake session. `attached` keeps a writer on its standard input; `headless` closes
@@ -125,29 +136,93 @@ open(out + '.tmp', 'wb').write(p.stdout)
 os.rename(out + '.tmp', out)
 `;
 
+/** The same, for a nested "CLI" that is a shell: $3 is python, $4 the unit. */
+const NESTED_SH = String.raw`
+"$3" "$4" self < "$5" > "$6.tmp"
+mv "$6.tmp" "$6"
+`;
+
 let scratch: string;
 let launcherPath: string;
 let nestedScript: string;
 let nestedCli: string;
+let realPython: string;
+let decoyProgram: string;
+let decoyScript: string;
+let scriptNamedClaude: string;
+let packageScript: string;
+let versionedProgram: string;
+let binaryUnderAnotherName: string;
+let shellNested: string;
+
+/**
+ * Every way a real Claude Code CLI shows up in a process list, as (program, script)
+ * pairs for the launcher's --nested-cli / --nested-script. Each pair is recognised by
+ * exactly ONE signal, so dropping a signal from the unit fails exactly one case. The
+ * three panel processes live on 2026-10-09 all had the versioned shape: name
+ * "2.1.283", started as and running `.../claude/versions/2.1.283`.
+ */
+const CLI_SHAPES: Array<[string, () => [string, string]]> = [
+  ['a program named claude', () => [nestedCli, nestedScript]],
+  ['a script named claude run by an interpreter', () => [realPython, scriptNamedClaude]],
+  ['the npm package run by an interpreter', () => [realPython, packageScript]],
+  ['a versioned binary, whose name is only a version number (#2215)', () => [versionedProgram, nestedScript]],
+  ['a versioned binary started under another name', () => [binaryUnderAnotherName, shellNested]],
+];
 let home: string;
 let launchers: ChildProcess[] = [];
 let seq = 0;
 
 beforeAll(() => {
+  if (!onLinux) return;
   scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'session-panel-'));
   launcherPath = path.join(scratch, 'fake-session.py');
   fs.writeFileSync(launcherPath, LAUNCHER);
   nestedScript = path.join(scratch, 'nested.py');
   fs.writeFileSync(nestedScript, NESTED);
   // A process the kernel names "claude": the same interpreter under that name.
-  const python = spawnSync('python3', ['-c', 'import os, sys; print(os.path.realpath(sys.executable))'], { encoding: 'utf-8' }).stdout.trim();
+  realPython = spawnSync('python3', ['-c', 'import os, sys; print(os.path.realpath(sys.executable))'], { encoding: 'utf-8' }).stdout.trim();
   nestedCli = path.join(scratch, 'claude');
-  fs.symlinkSync(python, nestedCli);
+  fs.symlinkSync(realPython, nestedCli);
+  // NOT a CLI, twice over: a program whose name only CONTAINS the word (the kernel
+  // names this process "claude-helper"), running an ordinary script that happens to
+  // live under a folder called "claude-code", as a checkout of anything by that name would.
+  decoyProgram = path.join(scratch, 'claude-helper');
+  fs.symlinkSync(realPython, decoyProgram);
+  decoyScript = path.join(scratch, 'claude-code', 'nested.py');
+  fs.mkdirSync(path.dirname(decoyScript));
+  fs.writeFileSync(decoyScript, NESTED);
+
+  // The real shapes (see CLI_SHAPES).
+  const at = (...parts: string[]): string => {
+    const p = path.join(scratch, ...parts);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    return p;
+  };
+  scriptNamedClaude = at('npm-bin', 'claude');
+  fs.writeFileSync(scriptNamedClaude, NESTED);
+  packageScript = at('node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+  fs.writeFileSync(packageScript, NESTED);
+  versionedProgram = at('share', 'claude', 'versions', '2.1.283');
+  fs.symlinkSync(realPython, versionedProgram);
+  // Recognised only by the binary it RUNS: a real file under .../claude/versions/,
+  // started through a link with an unrelated name. A copy, not a link: the kernel
+  // reports the file a process runs with links resolved.
+  const bash = fs.realpathSync(spawnSync('bash', ['-c', 'printf %s "$BASH"'], { encoding: 'utf-8' }).stdout);
+  const versionedBinary = at('opt', 'claude', 'versions', '9.9.9');
+  fs.copyFileSync(bash, versionedBinary);
+  fs.chmodSync(versionedBinary, 0o755);
+  binaryUnderAnotherName = at('bin', 'agent');
+  fs.symlinkSync(versionedBinary, binaryUnderAnotherName);
+  shellNested = at('nested.sh');
+  fs.writeFileSync(shellNested, NESTED_SH);
 });
 afterAll(() => {
+  if (!onLinux) return;
   fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 beforeEach(() => {
+  if (!onLinux) return;
   home = fs.mkdtempSync(path.join(scratch, 'home-'));
   fs.mkdirSync(path.join(home, '.claude', 'sessions'), { recursive: true });
   fs.mkdirSync(projectDir(), { recursive: true });
@@ -177,10 +252,9 @@ interface Fake {
 }
 async function fake(mode: 'attached' | 'headless' | 'not-a-pipe', extra: string[] = []): Promise<Fake> {
   const ready = path.join(scratch, `ready-${++seq}.json`);
-  const l = spawn('python3', [launcherPath, mode, ready, ...extra], {
-    stdio: 'ignore',
-    env: { ...process.env, HOME: home },
-  });
+  const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
+  delete env.CLAUDE_CONFIG_DIR; // the unit a fake starts must read the fixture registry
+  const l = spawn('python3', [launcherPath, mode, ready, ...extra], { stdio: 'ignore', env });
   launchers.push(l);
   await waitForFile(ready);
   return { ...(JSON.parse(fs.readFileSync(ready, 'utf-8')) as { pid: number; procStart: string }), ready };
@@ -335,7 +409,7 @@ const startInput = (extra: object = {}): object => ({
 });
 const promptInput = (sid: string): object => ({ session_id: sid, cwd: FOLDER, hook_event_name: 'UserPromptSubmit', prompt: 'next' });
 
-describe('a session is told when its own panel is gone (UserPromptSubmit)', () => {
+suite('a session is told when its own panel is gone (UserPromptSubmit)', () => {
   it('says so, by name, the moment its input has no writer (#2380)', async () => {
     const f = await fake('headless');
     register({ ...f, sessionId: OTHER });
@@ -435,17 +509,54 @@ describe('a session is told when its own panel is gone (UserPromptSubmit)', () =
     expect(unit('self', promptInput(THIRD)).out).toBe('');
   });
 
-  it('does not tell a print-mode run started INSIDE a headless session that it lost a panel', async () => {
+  it.each(CLI_SHAPES)('does not tell a print-mode run started INSIDE a headless session that it lost a panel: %s', async (_shape, paths) => {
     // A review or a dispatched agent runs `claude -p` from a panel session's shell.
     // Its own hooks fire, and the panel session is further up its ancestry. Walking
     // past its own process would tell it to stop work it was started to do.
+    const [program, script] = paths();
     const trigger = path.join(scratch, `trigger-${++seq}.json`);
     const out = path.join(scratch, `out-${seq}.txt`);
-    await fake('headless', ['--child-unit', UNIT, '--trigger', trigger, '--out', out, '--nested-cli', nestedCli, '--nested-script', nestedScript]);
+    await fake('headless', ['--child-unit', UNIT, '--trigger', trigger, '--out', out, '--nested-cli', program, '--nested-script', script]);
     fs.writeFileSync(`${trigger}.tmp`, JSON.stringify(promptInput(OTHER)));
     fs.renameSync(`${trigger}.tmp`, trigger);
     await waitForFile(out);
     expect(fs.readFileSync(out, 'utf-8')).toBe('');
+  });
+
+  it('is not stopped by a process that merely has the word in its name or in a path it was given', async () => {
+    // The counterpart of the case above, and the reason "is this a CLI" asks what the
+    // program IS: its exact name, never a word found somewhere in its name or in its
+    // arguments. The shell that runs the hook carries the checkout path in its
+    // arguments. Taken for the CLI, it ends the walk one process short of the session,
+    // which is then never told it lost its panel.
+    const trigger = path.join(scratch, `trigger-${++seq}.json`);
+    const out = path.join(scratch, `out-${seq}.txt`);
+    await fake('headless', ['--child-unit', UNIT, '--trigger', trigger, '--out', out, '--nested-cli', decoyProgram, '--nested-script', decoyScript]);
+    fs.writeFileSync(`${trigger}.tmp`, JSON.stringify(promptInput(OTHER)));
+    fs.renameSync(`${trigger}.tmp`, trigger);
+    await waitForFile(out);
+    expect(fs.readFileSync(out, 'utf-8')).toContain(NO_PANEL);
+  });
+
+  it('does not take its folder from the stale registry entry of a pid it now holds', async () => {
+    // The registry keeps a killed process's entry, and pids are reused. An entry with
+    // this process's pid but another start time describes some OTHER session: its
+    // folder is not ours, and the sessions in it are not ours to hand over to.
+    const trigger = path.join(scratch, `trigger-${++seq}.json`);
+    const out = path.join(scratch, `out-${seq}.txt`);
+    const gone = await fake('headless', ['--child-unit', UNIT, '--trigger', trigger, '--out', out]);
+    const elsewhere = await fake('attached');
+    register({ pid: gone.pid, procStart: '1', sessionId: THIRD, cwd: '/home/somebody/code/elsewhere' });
+    register({ ...elsewhere, sessionId: FOURTH, name: 'a session in another project', cwd: '/home/somebody/code/elsewhere' });
+    // No folder in the hook input, so the registry is the only place one could come from.
+    const noFolder = { session_id: OTHER, hook_event_name: 'UserPromptSubmit', prompt: 'next' };
+    fs.writeFileSync(`${trigger}.tmp`, JSON.stringify(noFolder));
+    fs.renameSync(`${trigger}.tmp`, trigger);
+    await waitForFile(out);
+    const said = fs.readFileSync(out, 'utf-8');
+    expect(said).toContain(NO_PANEL);
+    expect(said).not.toContain('a session in another project');
+    expect(said).toMatch(/none is live/);
   });
 
   it('claims nothing about a session whose input it cannot inspect', async () => {
@@ -489,9 +600,40 @@ describe('a session is told when its own panel is gone (UserPromptSubmit)', () =
     unit('start', startInput());
     expect(await queuedBytes(f)).toBe(4096);
   });
+
+  it('answers as soon as its input is complete, even when the caller never closes the stream', async () => {
+    // This runs before every prompt. The read is bounded at two seconds so that an
+    // input left open cannot hold a session; without an early answer that bound is
+    // also the price of every prompt whenever the caller leaves the stream open.
+    // Three of each, interleaved, and the fastest of each: a busy machine slows both.
+    const f = await fake('attached');
+    register({ ...f, sessionId: OTHER });
+    const timed = (holdOpen: boolean): Promise<number> =>
+      new Promise((resolve, reject) => {
+        const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
+        delete env.CLAUDE_CONFIG_DIR;
+        const began = process.hrtime.bigint();
+        const p = spawn('python3', [UNIT, 'self'], { stdio: ['pipe', 'ignore', 'ignore'], env });
+        p.once('error', reject);
+        p.once('exit', () => {
+          resolve(Number(process.hrtime.bigint() - began) / 1e6);
+          p.stdin?.destroy();
+        });
+        p.stdin?.on('error', () => undefined);
+        p.stdin?.write(`${JSON.stringify(promptInput(OTHER))}\n`);
+        if (!holdOpen) p.stdin?.end();
+      });
+    const closed: number[] = [];
+    const open: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      closed.push(await timed(false));
+      open.push(await timed(true));
+    }
+    expect(Math.min(...open) - Math.min(...closed)).toBeLessThan(1000);
+  });
 });
 
-describe('a new session is told which sessions lost their panel (SessionStart)', () => {
+suite('a new session is told which sessions lost their panel (SessionStart)', () => {
   let me: Fake;
   beforeEach(async () => {
     me = await registerMe();
@@ -605,7 +747,7 @@ describe('a new session is told which sessions lost their panel (SessionStart)',
   });
 });
 
-describe('a schedule that died with its session is named (#2379)', () => {
+suite('a schedule that died with its session is named (#2379)', () => {
   beforeEach(async () => {
     await registerMe();
   });
@@ -659,7 +801,7 @@ describe('a schedule that died with its session is named (#2379)', () => {
   });
 });
 
-describe('it fails visibly, and never fatally', () => {
+suite('it fails visibly, and never fatally', () => {
   beforeEach(async () => {
     await registerMe();
   });
@@ -699,7 +841,7 @@ describe('it fails visibly, and never fatally', () => {
   });
 });
 
-describe('hook wiring, by execution', () => {
+suite('hook wiring, by execution', () => {
   /**
    * session-start.sh is not run in place: the real one can launch the inbox drain
    * and the tooling radar. A copy in an otherwise empty scripts/hooks/ has no drain,
@@ -789,5 +931,14 @@ describe('hook wiring, by execution', () => {
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('No scope declared');
     expect(r.stdout).not.toContain(NO_PANEL);
+  });
+});
+
+describe('where these cases run', () => {
+  // Never skipped. Its NAME is the record: a run on a machine with no /proc shows one
+  // passing line that says the rest did not run, instead of a green file that reads
+  // as "all of it passed".
+  it(onLinux ? 'every case above ran: this machine has /proc' : 'EVERY CASE ABOVE WAS SKIPPED: no /proc on this machine', () => {
+    expect(fs.existsSync('/proc/self/stat')).toBe(onLinux);
   });
 });
