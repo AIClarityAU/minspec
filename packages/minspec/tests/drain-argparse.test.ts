@@ -24,9 +24,13 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
+import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
 
 // Module scope, never a hook: vitest resolves timeouts before beforeAll runs (#1399).
 useShellTimeout();
+// Module scope: nothing in this file may depend on drain or quota knobs in the surrounding
+// environment, so it runs with hostile ones planted there (#2574, helpers/drain-env.ts).
+useHostileAmbientDrainKnobs();
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const DRAIN_SRC = path.join(REPO_ROOT, 'scripts', 'drain-inbox.sh');
@@ -72,11 +76,11 @@ interface Run {
   stderr: string;
 }
 
-function run(args: string[]): Run {
+function run(args: string[], env: NodeJS.ProcessEnv = {}): Run {
   try {
     const stdout = execFileSync('bash', [drain, ...args], {
       encoding: 'utf-8',
-      env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
+      env: { ...drainBaseEnv(), PATH: `${binDir}:${process.env.PATH}`, ...env },
     });
     return { status: 0, stdout, stderr: '' };
   } catch (e: unknown) {
@@ -128,7 +132,26 @@ describe('#1591 — every argument is parsed, not just $1', () => {
     // be able to override an earlier one), not as evidence the bug is fixed. The two
     // cases that actually go red pre-fix are the #1591 case and the second-position
     // unknown flag.
-    const r = run(['--continuous', '--once']);
+    //
+    // This is the ONE case in this file that reaches a real --once cycle (every other
+    // case here exits before run_cycle). Left on the script's defaults it takes the
+    // LIVE drain's own lock/log/run-dir/quota-file — harmless in CI (nothing else is
+    // there), but on a machine running a real drain it either stops at the lock (if
+    // one is held) or writes into that drain's log and run dir (#2012, #2583). Give
+    // it its own of each so the result never depends on what else is running.
+    const quota = path.join(ws, 'quota.json');
+    fs.writeFileSync(quota, JSON.stringify({
+      used_percentage: 1,
+      resets_at: Math.floor(Date.now() / 1000) + 3600,
+      observed_at: Math.floor(Date.now() / 1000),
+    }));
+    const r = run(['--continuous', '--once'], {
+      MINSPEC_DRAIN_LOCK: path.join(ws, 'lock'),
+      MINSPEC_DRAIN_LOG: path.join(ws, 'log'),
+      MINSPEC_DRAIN_RUN_DIR: '',
+      MINSPEC_DRAIN_SELF_REFRESH: '0',
+      MINSPEC_QUOTA_FILE: quota,
+    });
     expect(r.status).toBe(0);
     expect(r.stdout).not.toMatch(/Continuous drain in background/);
   });
