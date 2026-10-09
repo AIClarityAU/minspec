@@ -33,7 +33,6 @@ import {
   getRepoFromRemote,
   createGitHubIssue,
   parkTopic,
-  createParkingLotEntry,
   type ParkingLotEntry,
 } from '../src/lib/parking-lot';
 

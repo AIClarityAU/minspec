@@ -405,7 +405,7 @@ describe('#1628 — a reopen after an automated close vetoes re-closing', () => 
   });
 
   it('the close comment states an observation, not a completion claim', () => {
-    const out = runReconciler('reconcile_done_issues', { done: '1068\n', pr: '1230\n' }, [
+    runReconciler('reconcile_done_issues', { done: '1068\n', pr: '1230\n' }, [
       [ev('closed', '2026-01-01T00:00:00Z')],
     ]);
     const calls = ghCalls();

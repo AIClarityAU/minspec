@@ -15,7 +15,7 @@
  * quietly, per `.minspec/constitution.md` invariant 2.
  */
 
-import { readFileSync, statSync, existsSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join, relative, dirname, sep } from 'path';
 import {
   validateDrSequence,
