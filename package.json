@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "preinstall": "node scripts/check-npm-toolchain.mjs",
-    "prepare": "git config core.hooksPath .githooks || true && npm run build --workspace=@aiclarity/shared",
+    "prepare": "node scripts/prepare.mjs",
     "pretest": "node scripts/check-node-modules-integrity.mjs && npm run check:swallowed-gate && npm run build --workspace=@aiclarity/shared",
     "test": "vitest run",
     "test:watch": "vitest",
