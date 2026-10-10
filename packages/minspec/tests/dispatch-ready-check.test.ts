@@ -1026,11 +1026,24 @@ describe('dispatch-ready-check.sh — the author filter is actually WIRED UP (#1
     // lines earlier, so it proves nothing about THIS one — flagged in the PR #1257
     // review as a title-overclaim, and it is the same "assertion weaker than its name"
     // shape that keeps recurring. Anchor on the `feedback=` assignment instead.
-    const feedbackAt = code.indexOf('feedback=$(gh pr view');
+    //
+    // The read no longer starts at `gh pr view`. That command gives a login beside each
+    // comment and nothing that says which account it is, so the comments now come from
+    // dispatch_pr_trusted_comments (lib/dispatch-author-gate.sh), which asks GitHub for
+    // the account and for everyone who edited the comment (#1203). So the anchor is the
+    // assignment alone, there must be exactly one, and BOTH filters must be in that one
+    // pipeline. dispatch-author-gate.test.ts runs the function itself against comments
+    // from unlisted accounts; this pins the wiring.
+    const feedbackAt = code.indexOf('feedback=$(');
     expect(feedbackAt, 'the REVIEW_VERDICT read must exist').toBeGreaterThan(-1);
+    expect(code.indexOf('feedback=$(', feedbackAt + 1), 'there is one REVIEW_VERDICT read, not two').toBe(-1);
     const readBlock = code.slice(feedbackAt, code.indexOf('fix_prompt=', feedbackAt));
+    expect(readBlock, 'this is the read that selects a REVIEW_VERDICT').toContain('REVIEW_VERDICT_BEGIN');
     expect(readBlock, 'the REVIEW_VERDICT read itself must pipe through the filter')
       .toContain('--trusted-comment-bodies');
+    expect(readBlock, 'the comments must come from the read that says which account wrote each one')
+      .toContain('dispatch_pr_trusted_comments "$REPO" "$pr_num"');
+    expect(readBlock, 'a login-only read of the comments must not feed the fix agent').not.toContain('gh pr view');
   });
 
   it('this wiring check is not vacuous — it fails on a file that lacks the call', () => {

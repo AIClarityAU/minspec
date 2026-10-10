@@ -4,16 +4,17 @@
  * `_API_KEY`, `_TOKEN` or `_SECRET` is in it, whatever the launcher itself was holding.
  *
  * ROOT CAUSE this makes un-committable. The launch sites started the agent behind
- * `AGENT_ENV_SCRUB` (scripts/lib/agent-context.sh), which builds the child's environment by
- * REMOVING one named variable from the launcher's own. So every other exported name was
- * passed on. scripts/lib/gh-bot.sh installs the launcher's GitHub token with `export`, into
- * that same shell, on the launcher's first write: the agent received it along with every
- * secret-named variable the operator's session happened to carry.
+ * `AGENT_ENV_SCRUB`, an array scripts/lib/agent-context.sh used to define, which built the
+ * child's environment by REMOVING one named variable from the launcher's own. So every
+ * other exported name was passed on. scripts/lib/gh-bot.sh installs the launcher's GitHub
+ * token with `export`, into that same shell, on the launcher's first write: the agent
+ * received it along with every secret-named variable the operator's session happened to
+ * carry. The array is gone; that file now holds the program that builds the list.
  *
- * WHAT SHOULD HAVE CAUGHT IT. agent-context-slim.test.ts asks whether each launcher applies
- * the scrub, and answers from the launcher's text plus the text of the libraries it
- * sources. The library's own text contains the scrub, so a launcher that sources it passes
- * whatever its child is given. Nothing looked at a child.
+ * WHAT SHOULD HAVE CAUGHT IT. agent-context-slim.test.ts asked whether each launcher
+ * applied the scrub, and answered from the launcher's text plus the text of the libraries
+ * it sourced. The library's own text contained the scrub, so a launcher that sourced it
+ * passed whatever its child was given. Nothing looked at a child.
  *
  * So this suite looks at the child. Each block starts a real launcher (see
  * helpers/agent-launch-harness.ts for what is real and what is a stub) and reads the
@@ -32,14 +33,15 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
 import {
+  APP,
   CREDENTIAL_SHAPE,
   DISPATCH,
   FIXTURE_VALUE,
+  FOUNDER,
   ISSUE_BODY_MARKER,
   LAUNCH_ENV,
   NAMED_CREDENTIALS,
   TRIAGE,
-  author,
   cleanupLaunchHarness,
   credentialNames,
   reviewVerdict,
@@ -54,7 +56,7 @@ import {
 useShellTimeout();
 afterEach(cleanupLaunchHarness);
 
-const TRUSTED = { author: author('harvest316') };
+const TRUSTED = { author: FOUNDER };
 
 /** What the launcher is holding when it starts the agent, one fixture per row. */
 const HELD = [
@@ -196,7 +198,7 @@ describe('T0: the triage agent, started by the real scripts/triage-inbox.sh', ()
 });
 
 describe('T0: the fix agent, started by the real shepherd_fix', () => {
-  const comments = [{ login: 'minspec-sdd', association: 'CONTRIBUTOR', body: reviewVerdict('BOT-FINDING') }];
+  const comments = [{ author: APP, association: 'CONTRIBUTOR', body: reviewVerdict('BOT-FINDING') }];
 
   it.each(HELD)('holds no credential when the launcher has: $name', ({ held }) => {
     const r = runFixAgent({ comments, env: withFixtureValues(held) });
@@ -210,10 +212,13 @@ describe('T0: the fix agent, started by the real shepherd_fix', () => {
     for (const [name, value] of Object.entries(NEEDED)) expect(launch.env[name], name).toBe(value);
     // The launcher minted for its own comment before it started the agent.
     expect(r.ghWrites).toContain('pr comment token=present');
+    // The stub agent brings back no commit. The function reports that and publishes nothing.
+    expect(r.fixReturned).toBe(1);
+    expect(r.stdout).not.toContain('PUBLISHED');
   });
 });
 
-describe('scripts/lib/agent-launch-env.sh: the allowlist itself', () => {
+describe('scripts/lib/agent-context.sh: the allowlist itself', () => {
   /** Run the wrapper with exactly this environment. PATH is added so `bash` and friends resolve. */
   function launch(args: string[], env: Record<string, string> = {}) {
     return spawnSync('bash', [LAUNCH_ENV, ...args], {

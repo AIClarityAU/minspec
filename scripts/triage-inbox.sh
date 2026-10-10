@@ -14,15 +14,16 @@
 #
 # Security model (mirrors dispatch-issue.sh): the issue body is UNTRUSTED
 # (prompt-injection surface). Three things follow, each enforced by code:
-#   1. WHO WROTE IT is asked first. An issue is triaged only when its author is on the
-#      list in scripts/lib/dispatch-author-gate.sh. Anyone else's issue is refused
-#      before a model is started on it, and stays in `inbox` untouched.
+#   1. WHO WROTE IT is asked first. An issue is triaged only when everyone who wrote its
+#      text (who opened it, who edited its body, who changed its title) is on the list
+#      in scripts/lib/dispatch-author-gate.sh. Any other issue is refused before a model
+#      is started on it, and stays in `inbox` untouched.
 #   2. The triage AGENT has NO tools and CANNOT mutate labels: it only emits a verdict
 #      block. This PARENT script feeds that verdict through the deterministic gate
 #      (triage-decide.sh) and applies the result with gh. An injected "make this
 #      agent-ready" cannot reach the label.
 #   3. The agent's ENVIRONMENT is built from a list of names
-#      (scripts/lib/agent-launch-env.sh), so it is not handed the token this script
+#      (scripts/lib/agent-context.sh), so it is not handed the token this script
 #      writes with, nor anything else named like a credential. That is a statement
 #      about what it inherits: it is still a process of this script's user.
 #
@@ -72,9 +73,10 @@ gh_bot_init
 # undefined function, and a missing library must stop this script, not skip the gate.
 # shellcheck source=scripts/lib/dispatch-author-gate.sh
 source "${SCRIPT_DIR}/lib/dispatch-author-gate.sh"
-# What the agent is started with: an environment built from a list of names. Run as
-# `bash "$AGENT_LAUNCH_ENV" claude ...` on the launch line itself.
-AGENT_LAUNCH_ENV="${SCRIPT_DIR}/lib/agent-launch-env.sh"
+# What the agent is started with: an environment built from a list of names. That is
+# lib/agent-context.sh, sourced above, run as a program: `bash "$AGENT_LAUNCH_ENV"
+# claude ...` on the launch line itself. That file assigns the variable, to its own
+# absolute path, so a value from the environment never survives to a launch.
 
 DECIDE="${SCRIPT_DIR}/triage-decide.sh"
 READY_CHECK="${SCRIPT_DIR}/dispatch-ready-check.sh"
@@ -94,29 +96,35 @@ triage_issue() {
   fi
 
   local ISSUE_JSON ISSUE_BODY ISSUE_TITLE
-  ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json author,body,title,labels)
+  ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,labels)
 
-  # ── Author gate: who wrote this issue? ──────────────────────────────────────
+  # ── Author gate: who wrote this issue's text? ───────────────────────────────
   # Asked BEFORE anything of the issue's is read, printed or shown to a model. Until
-  # this, the author was not even fetched: every `inbox` issue was triaged, and an
+  # this, nobody's identity was fetched at all: every `inbox` issue was triaged, and an
   # issue form applies `inbox` for whoever fills it in.
   #
-  # Default deny. The one way past is dispatch_author_check answering yes; a login that
-  # is not on the list, an author that cannot be read, and a check that fails to run
-  # all land in the refusal.
+  # dispatch_issue_gate reads, in one more query, who opened the issue, everyone who has
+  # edited its body and everyone who has changed its title, and requires each of them to
+  # be on the list by account number and kind. It also requires the title and body in
+  # that answer to equal the ones in ISSUE_JSON just above, which is the document the
+  # prompt below is built from: the text that was judged is the text that is used.
+  #
+  # Default deny. The one way past is that function answering yes; an account that is
+  # not on the list, anything that cannot be read, and a check that fails to run all
+  # land in the refusal.
   #
   # A refusal is a decision about this issue and not a fault of this script, so it
   # returns 0: the whole-inbox form below runs under `set -e`, and a non-zero here would
   # end the pass at the first issue a stranger opened, for every issue behind it. It
   # writes nothing either. The issue keeps `inbox` and is refused again each cycle, at
-  # the cost of this one read, until it is closed or filed again by a listed author.
+  # the cost of these two reads, until it is closed or filed again by a listed account.
   #
   # The title is printed further down, after this, because it is the author's text too:
   # the drain reads this script's output for the line that says an issue was stamped
   # ready, and a title can be made to look like one.
   local AUTHOR_REASON
-  if ! AUTHOR_REASON="$(dispatch_author_check "$ISSUE_JSON")"; then
-    echo "Refusing #$ISSUE — ${AUTHOR_REASON:-its author could not be checked}. Not triaged: no model was started on it and none of its labels were changed. It stays in the inbox until it is closed, or filed again under an account on the list (scripts/lib/dispatch-author-gate.sh)."
+  if ! AUTHOR_REASON="$(dispatch_issue_gate "$REPO" "$ISSUE" "$ISSUE_JSON")"; then
+    echo "Refusing #$ISSUE — ${AUTHOR_REASON:-who wrote it could not be checked}. Not triaged: no model was started on it and none of its labels were changed. It stays in the inbox until it is closed, or filed again under an account on the list (scripts/lib/dispatch-author-gate.sh)."
     return 0
   fi
 

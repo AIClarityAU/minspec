@@ -4,8 +4,9 @@
 #
 # The drain's PR-side counterpart to dispatch-issue.sh (#239 extended). Where
 # dispatch-issue.sh builds a NEW branch for an issue, this SWEEPS an existing open
-# PR and, when it carries a fixable problem, dispatches a credential-free agent (or
-# a mechanical merge) to fix it IN PLACE on the PR branch, then re-pushes so CI
+# PR and, when it carries a fixable problem, dispatches an agent that is not handed
+# this script's token (or a mechanical merge) to fix it IN PLACE on the PR branch,
+# then re-pushes so CI
 # re-reviews. The human still holds the merge keystroke — remediation never merges.
 #
 # Problem classes handled (see classify_pr):
@@ -28,8 +29,11 @@
 # hand-crafted human PR is never auto-edited under this sweep.
 #
 # Security model (identical to dispatch-issue.sh, reused not re-implemented):
-#   • the agent is CREDENTIAL-FREE (no gh / git push / remote / network tools). It
-#     only edits + commits locally. THIS parent does every credentialed op.
+#   • the agent is started WITHOUT this script's token: its environment is built from
+#     a list of names (lib/agent-context.sh) that the token is not on, and its tool
+#     list has no gh / git push / remote / network. It only edits + commits locally.
+#     THIS parent does every credentialed op. (It is still a process of this script's
+#     user; see lib/agent-context.sh for what that leaves open.)
 #   • the pre-publish EGRESS GUARD (scripts/lib/agent-egress.sh, #358) scans the new
 #     commits BEFORE the push and FAILS CLOSED on any secret/exfil hit.
 #   • ai-review:* labels are NEVER mutated here — CI (ai-review.yml, as the bot) owns
@@ -447,8 +451,28 @@ post_marked_comment() {
 ${marker}" 2>/dev/null || true
 }
 
-# Same scoped, credential-free tool allow-list as dispatch-issue.sh (no gh / push /
-# remote / network — the agent edits + commits only; the parent publishes).
+# ── What the remediation agent is started with ───────────────────────────────
+# The agent edits and commits in its worktree and THIS script publishes, so the agent
+# needs no GitHub token: every push, comment and label below is the parent's, made
+# after the agent has exited. But this script HOLDS one, exported into this very shell
+# on its first write (lib/gh-bot.sh), and the agent runs the pull request's own build,
+# which is code this script did not write. So the launch below goes through
+# "$AGENT_LAUNCH_ENV": lib/agent-context.sh, sourced at the top of this script, run as a
+# program. It builds the agent's environment from a list of names that the token is not
+# on.
+#
+# That file assigns the variable itself, to its own absolute path: a value that arrived
+# in the environment is overwritten before the launch, and because the path is absolute
+# the launch, made after `cd "$WORKTREE"`, runs THIS checkout's copy and never the one
+# on the pull request's branch.
+#
+# No `--model-login`: the drain runs this on an operator's machine, where the CLI's
+# login is a file under HOME.
+
+# Same scoped tool allow-list as dispatch-issue.sh (no gh / push / remote / network —
+# the agent edits + commits only; the parent publishes). The list limits what the MODEL
+# may ask for; the build it runs is arbitrary code, which is why the environment above
+# is what carries the weight.
 ALLOWED_TOOLS="Read,Edit,Write,Glob,Grep,Bash(npm test),Bash(npm run validate),Bash(npm run lint),Bash(npm run build),Bash(npm ci),Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
 
 echo "Fetching PR #$PR ($REPO)..."
@@ -811,7 +835,7 @@ ESCALATED_ALREADY=0
 
 echo "  Launching remediation agent (model: $RUN_MODEL, log: $LOG)..."
 while true; do
-  if (cd "$WORKTREE" && "${AGENT_ENV_SCRUB[@]}" claude -p "$RUN_PROMPT" \
+  if (cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$RUN_PROMPT" \
         "${AGENT_CONTEXT_ARGS[@]}" \
         --model "$RUN_MODEL" \
         --allowedTools "$ALLOWED_TOOLS" \

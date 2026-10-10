@@ -119,7 +119,7 @@ _gh_bot_adopt() {
   # processes and must carry it, and so must the scripts the drain starts. The other
   # side of that is that EVERY process this shell starts from here on inherits it. An
   # agent is such a process, and must not: dispatch-issue.sh and triage-inbox.sh start
-  # theirs through lib/agent-launch-env.sh, which builds the agent's environment from a
+  # theirs through lib/agent-context.sh, which builds the agent's environment from a
   # list of names that this one (and the stamp below) can never be on.
   export GH_TOKEN="$tok"
   _GH_BOT_OWNED=1

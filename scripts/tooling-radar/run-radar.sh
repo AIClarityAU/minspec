@@ -138,9 +138,16 @@ echo "radar: scanning (model=$MODEL, web tools only) …"
 # tool here, that test fails, and it is meant to: widening the scan stage's reach
 # is a security decision, not a config tweak.
 # This stage is a headless `claude -p` launcher too, so it takes the same ambient-
-# context pin and inherited-env scrub as every other one (#1203). It lives one
-# directory deeper, which is why it was missed before — the enforcement gate is now
-# recursive so a nested launcher cannot slip through again.
+# context pin as every other one, and is started the same way: through
+# "$AGENT_LAUNCH_ENV" (lib/agent-context.sh, sourced just below, run as a program),
+# which builds its environment from a list of names (#1203). It
+# reads pages nobody here wrote, and stage 2 below holds the App credential, so
+# nothing of this shell's reaches it but what is on that list. It needs no login
+# variable (the timer runs it on an operator's machine, where the login is a file
+# under HOME) and no GitHub token (it files nothing; stage 2 does).
+#
+# It lives one directory deeper, which is why it was missed before — the enforcement
+# gate is recursive so a nested launcher cannot slip through again.
 #
 # Sourced HERE, not at startup: the `--due` / `--status` seams above are pure
 # scheduling checks that never launch an agent, and they are exercised against stub
@@ -150,7 +157,7 @@ echo "radar: scanning (model=$MODEL, web tools only) …"
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/../lib/agent-context.sh"
 
-"${AGENT_ENV_SCRUB[@]}" claude -p "$(cat "$PROMPT")" \
+bash "$AGENT_LAUNCH_ENV" claude -p "$(cat "$PROMPT")" \
   "${AGENT_CONTEXT_ARGS[@]}" \
   --model "$MODEL" \
   --output-format json \

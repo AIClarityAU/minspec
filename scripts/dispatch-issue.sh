@@ -598,22 +598,30 @@ fi
 #
 #   dispatch-author-gate.sh   WHOSE issue may be dispatched, and whose comments an agent
 #                             may be shown. One list, shared with triage-inbox.sh.
-#   agent-launch-env.sh       WHAT an agent is started with: an environment built from a
-#                             list of names. It is a program, run on each launch line as
-#                             `bash "$AGENT_LAUNCH_ENV" claude ...`, so a launch that
-#                             names a missing or empty path starts nothing.
+#   "$AGENT_LAUNCH_ENV"       WHAT an agent is started with: an environment built from a
+#                             list of names. It is lib/agent-context.sh, sourced with
+#                             the libraries at the top, run as a program on each launch
+#                             line as `bash "$AGENT_LAUNCH_ENV" claude ...`.
+#
+# That file assigns AGENT_LAUNCH_ENV itself, unconditionally, to its own absolute path.
+# A value that arrived in the environment is overwritten before any launch can use it,
+# and because the path is absolute the launches below, made after `cd "$WORKTREE"`, run
+# THIS checkout's copy and never the one in the agent's worktree, which an earlier run
+# on that branch could have edited. Nothing in this script assigns it.
 # shellcheck source=scripts/lib/dispatch-author-gate.sh
 source "${SCRIPT_DIR}/lib/dispatch-author-gate.sh"
-AGENT_LAUNCH_ENV="${SCRIPT_DIR}/lib/agent-launch-env.sh"
 
 echo "Fetching issue #$ISSUE..."
 # Fetch `state` + `comments` alongside labels: this view IS the point-in-time
 # re-validation for the #406 staleness re-check AND the #983 verdict-record check
 # below. The verdict record lives in the triage comment (GitHub-side: shared,
 # auditable, and surviving a fresh clone — no local state file to strand), so the
-# comments are gate INPUT, not decoration. `author` is what the author gate further
-# down reads: until it was added here, nothing on this path knew who wrote the issue.
-ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json author,body,title,labels,state,comments)
+# comments are gate INPUT, not decoration.
+#
+# ONE read, used throughout: the title and body in this document are what the readiness
+# gate fingerprints, what the author gate further down requires the judged text to equal,
+# and what the prompt is built from. Nothing below reads the issue's text again.
+ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,labels,state,comments)
 ISSUE_BODY=$(echo "$ISSUE_JSON" | jq -r '"# " + .title + "\n\n" + .body')
 ISSUE_TITLE=$(echo "$ISSUE_JSON" | jq -r '.title')
 ISSUE_LABELS=$(echo "$ISSUE_JSON" | jq -r '.labels[].name')
@@ -726,15 +734,23 @@ if [[ "$READY_OK" -ne 1 ]]; then
   exit_declined
 fi
 
-# ── Author gate: who wrote this issue? ───────────────────────────────────────
+# ── Author gate: who wrote this issue's text? ────────────────────────────────
 # The gate above establishes that the issue is open, still labelled, and backed by a
 # fresh verdict record from a trusted COMMENT author. That author is the bot that
 # triaged it, so the record proves triage ran. It says nothing about whose text triage
-# ran on, and until this block nothing here did: the issue's author was not fetched.
+# ran on, and until this block nothing here did: nobody's identity was fetched.
 #
-# An issue is dispatched only when its author is on the list in
-# scripts/lib/dispatch-author-gate.sh. Not "a collaborator" and not "has write access":
-# see that file for why, and for why the list has no switch.
+# An issue is dispatched only when everyone who wrote its text is on the list in
+# scripts/lib/dispatch-author-gate.sh: who opened it, everyone who has edited its body,
+# and everyone who has changed its title, each by account number and kind and never by
+# login. Not "a collaborator" and not "has write access": see that file for why, and for
+# why the list has no switch.
+#
+# THE TEXT JUDGED IS THE TEXT USED. dispatch_issue_gate makes one more read to learn who
+# those accounts are, and requires the title and body in that answer to equal, exactly,
+# the ones in ISSUE_JSON: the single document ISSUE_BODY and ISSUE_TITLE were built from
+# above and the prompt is built from below. An issue edited between the two reads is
+# refused here and offered again on the next cycle.
 #
 # WHERE IT SITS. After the readiness gate, so an issue that is already refused keeps its
 # own reason in the words it always had. Before the claim, so a refusal here has started
@@ -743,26 +759,26 @@ fi
 # this far. This is the same answer given again at the last moment before a launch,
 # because a label can be applied by hand and the readiness gate would then let it by.
 #
-# DEFAULT DENY. AUTHOR_OK starts at 0 and one thing sets it: dispatch_author_check
-# answering yes. A login that is not on the list, an author that cannot be read, and a
+# DEFAULT DENY. AUTHOR_OK starts at 0 and one thing sets it: dispatch_issue_gate
+# answering yes. An account that is not on the list, anything that cannot be read, and a
 # check that could not run all leave it at 0.
 #
 # A refusal is "refused before starting" to a caller that asked (#2641, exit_declined),
 # so it uses no slot of the drain's queue limit, and exit 0 to one that did not. Nothing
-# is written to the issue: its author is visible on it, which makes this one of the
-# self-evident refusals, like a closed issue. The drain offers it again each cycle and
-# says so (NOTHING DISPATCHED, when that leaves nothing started) until its ready label
-# is removed or it is filed again by a listed author.
+# is written to the issue: who wrote and edited it is visible on it, which makes this
+# one of the self-evident refusals, like a closed issue. The drain offers it again each
+# cycle and says so (NOTHING DISPATCHED, when that leaves nothing started) until its
+# ready label is removed or it is filed again by a listed account.
 AUTHOR_OK=0
 AUTHOR_REASON=""
-if AUTHOR_REASON="$(dispatch_author_check "$ISSUE_JSON")"; then
+if AUTHOR_REASON="$(dispatch_issue_gate "$REPO" "$ISSUE" "$ISSUE_JSON")"; then
   AUTHOR_OK=1
 fi
 if [[ "$AUTHOR_OK" -ne 1 ]]; then
-  echo "Refusing #$ISSUE — ${AUTHOR_REASON:-its author could not be checked}. Nothing was started: no claim, no label, no worktree and no agent. Remove its ready label, or file it again under an account on the list (scripts/lib/dispatch-author-gate.sh)."
+  echo "Refusing #$ISSUE — ${AUTHOR_REASON:-who wrote it could not be checked}. Nothing was started: no claim, no label, no worktree and no agent. Remove its ready label, or file it again under an account on the list (scripts/lib/dispatch-author-gate.sh)."
   exit_declined
 fi
-echo "Author: ${AUTHOR_REASON} — on the dispatch author list."
+echo "Author: ${AUTHOR_REASON} — and everyone who edited its text is on the dispatch author list."
 
 # ── Which MODE did the gate authorise? (#1169 / DR-076) ──────────────────────
 # The gate's success output is not decoration: `ready` is a full build, `ready-specify`
@@ -1127,10 +1143,11 @@ echo "Running headless agent (log: $LOG)..."
 # definition (test files, npm scripts it can edit). So the list below limits what
 # the MODEL may ask for, not what then runs. Two things carry the weight instead,
 # and both are code:
-#   1. WHOSE text the agent reads. The author gate above refuses any issue whose
-#      author is not on the list, before the claim.
+#   1. WHOSE text the agent reads. The author gate above refuses, before the claim,
+#      any issue whose title or body was written or edited by an account that is not
+#      on the list.
 #   2. WHAT the agent is started with. Every launch below goes through
-#      agent-launch-env.sh, which builds its environment from a list of names. The
+#      lib/agent-context.sh, which builds its environment from a list of names. The
 #      token this script writes with is installed by `export` (lib/gh-bot.sh) and is
 #      not on that list, nor is anything else named like a credential.
 #      dispatch-env-allowlist.test.ts reads the environment a launched agent was
@@ -1624,11 +1641,16 @@ shepherd_fix() {
   #
   # TWO filters, and a comment must pass both.
   #
-  # `dispatch_trusted_comments` is the author list this script and triage share
-  # (lib/dispatch-author-gate.sh): the pipeline's own App and the founder. A comment from
-  # anyone else is DROPPED, and the run says how many and from whom. Dropped rather than
-  # refusing the fix: refusing would let anyone who can comment on the pull request stop
-  # its shepherd, and on a public repository that is anyone.
+  # `dispatch_pr_trusted_comments` is the author list this script and triage share
+  # (lib/dispatch-author-gate.sh): the pipeline's own App and the founder, each by
+  # account number and kind. It reads the comments in a query of its own, because that is
+  # the only read that says WHICH account wrote a comment: `gh pr view --json comments`
+  # gives a login and nothing else, and for the App that login is one a person could
+  # hold. A comment is kept when its author is listed AND so is everyone who has edited
+  # it (anyone with write access can edit another account's comment, and it still shows
+  # its first author). Anything else is DROPPED, and the run says how many and whose.
+  # Dropped rather than refusing the fix: refusing would let anyone who can comment on
+  # the pull request stop its shepherd, and on a public repository that is anyone.
   #
   # `--trusted-comment-bodies` is the tested seam the verdict-record readers use, and it
   # stays. On its own it admits the bot and anyone whose association is OWNER, MEMBER or
@@ -1654,8 +1676,7 @@ shepherd_fix() {
   # and it would win "last". Unlike the verdict-record case (#1113) the consequence is
   # stale feedback to the fix agent, not a gate bypass, and REVIEW_VERDICT carries no
   # timestamp to rank by. Noted rather than silently accepted.
-  feedback=$(gh pr view "$pr_num" --repo "$REPO" --json comments 2>/dev/null \
-               | dispatch_trusted_comments "pull request #${pr_num}" \
+  feedback=$(dispatch_pr_trusted_comments "$REPO" "$pr_num" \
                | "${SCRIPT_DIR}/dispatch-ready-check.sh" --trusted-comment-bodies 2>/dev/null \
                | awk '/REVIEW_VERDICT_BEGIN/ { buf = ""; inb = 1 }
                       inb                    { buf = buf $0 "\n" }

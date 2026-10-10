@@ -29,6 +29,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { execFileSync } from 'child_process';
+import { provenanceAnswer } from './helpers/agent-launch-harness';
 
 const ROOT = path.resolve(__dirname, '../../..');
 const TRIAGE = path.join(ROOT, 'scripts/triage-inbox.sh');
@@ -69,21 +70,24 @@ function runTriage(verdictBlock: string, opts: { failBatchRemove?: boolean } = {
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
 
-  // `author` is what `gh issue view --json author,...` returns, and triage asks for it:
-  // an issue is triaged only when its author is on the list in
-  // scripts/lib/dispatch-author-gate.sh (dispatch-author-gate.test.ts covers the gate).
   const issueJson = JSON.stringify({
-    author: { login: 'harvest316' },
     title: TITLE,
     body: BODY,
     labels: [{ name: 'inbox' }],
   });
   fs.writeFileSync(path.join(dir, 'issue.json'), issueJson);
   fs.writeFileSync(path.join(dir, 'agent-out.txt'), verdictBlock);
+  // Triage asks GitHub who wrote this issue's text before it triages it, in a read of
+  // its own, and triages only when every one of them is on the list in
+  // scripts/lib/dispatch-author-gate.sh (dispatch-author-gate.test.ts covers the gate).
+  // Here: opened by the founder, never edited, with the same title and body as above.
+  fs.writeFileSync(path.join(dir, 'provenance.json'), provenanceAnswer({ title: TITLE, body: BODY }));
 
   // Stub `gh`: serves the issue view, records every mutation in order, and captures
   // the comment body. Deliberately NOT a network call — the writer under test does
-  // the credentialed work, so the test replaces exactly that boundary.
+  // the credentialed work, so the test replaces exactly that boundary. The read of who
+  // wrote the issue is answered and not logged: the log below is the order of the
+  // operations triage performs on the issue, and that read is not one of them.
   fs.writeFileSync(
     path.join(bin, 'gh'),
     `#!/usr/bin/env bash
@@ -91,6 +95,7 @@ set -u
 sub="\${2:-}"
 case "$sub" in
   view) echo "view" >> "$STUB_LOG"; cat "$STUB_DIR/issue.json" ;;
+  graphql) cat "$STUB_DIR/provenance.json" ;;
   comment)
     echo "comment" >> "$STUB_LOG"
     while [[ $# -gt 0 ]]; do
@@ -115,7 +120,7 @@ exit 0
   // Stub `claude`: the triage agent is credential- and tool-free by design, so its
   // only contribution is the verdict text. The path is written into the stub, not read
   // from $STUB_DIR: the agent is started with an environment built from an allowlist
-  // (scripts/lib/agent-launch-env.sh), so a helper variable set here does not reach it.
+  // (scripts/lib/agent-context.sh), so a helper variable set here does not reach it.
   fs.writeFileSync(
     path.join(bin, 'claude'),
     `#!/usr/bin/env bash\ncat "${path.join(dir, 'agent-out.txt')}"\nexit 0\n`,

@@ -32,9 +32,12 @@
 # Security model (mirrors triage-inbox.sh / dispatch-issue.sh): the diff is
 # UNTRUSTED DATA — a dev agent produced it, possibly from a prompt-injected issue
 # body. The reviewer agent therefore holds:
-#   • NO credentials — no gh, no git, no network, no Bash. It CANNOT push,
-#     comment, label, or merge; it can only return TEXT. Every credentialed
-#     side-effect is the PARENT's job, after this agent has exited.
+#   • NO GitHub credential — its environment is built from a list of names
+#     (lib/agent-context.sh) that the caller's token is not on, and it has no
+#     gh, no git, no network, no Bash. It CANNOT push, comment, label, or merge; it
+#     can only return TEXT. Every credentialed side-effect is the PARENT's job,
+#     after this agent has exited. The one credential it does hold is the model's
+#     own login, which the CLI cannot run without.
 #   • Read-only filesystem tools ONLY (Read, Glob, Grep) so it can open the
 #     files the diff touches and their callers ("read the enclosing function") —
 #     the whole point of an independent review over a blind diff read.
@@ -206,15 +209,24 @@ fi
 # without the flag degrades to "a human must look", not to a silent text-parsed
 # fallback that would quietly reinstate #1157.
 #
-# ANTHROPIC_API_KEY is scrubbed for this probe for the same reason run_reviewer's
-# subscription branch scrubs it (#1402): the failover must be reachable ONLY through
-# the explicit `run_reviewer payg` call, never by ambient environment, and that
+# ── What the reviewer is started with ─────────────────────────────────────────
+# Every start of the CLI below goes through "$AGENT_LAUNCH_ENV": lib/agent-context.sh,
+# sourced at the top of this script, run as a program. It builds the child's
+# environment from a list of names. The caller of this script may hold a GitHub token
+# (dispatch-issue.sh does, and posts the verdict with it), and a reviewer that can Read
+# can read its own process: so the token must not be in that process at all, which is a
+# property of the launch and not of the tool list.
+#
+# That file assigns the variable itself, to its own absolute path: a value that arrived
+# in the environment is overwritten before it is used, and a launch made with cwd in
+# somebody's checkout still runs the copy beside this script.
+
+# The probe is handed NO login at all (#1402): the failover must be reachable ONLY
+# through the explicit `run_reviewer payg` call, never by ambient environment, and that
 # invariant is about what any CHILD sees — a capability probe is a child. `--help`
 # makes no API call, so nothing here needs a credential; handing it one only widens
-# the exposure. The OAuth token is deliberately left in place: it is the credential
-# this path is supposed to carry, and blanket-wiping the environment would "fix" the
-# exposure by breaking the reviewer.
-if [[ -z "$VERDICT_SCHEMA_JSON" ]] || ! ANTHROPIC_API_KEY='' claude -p --help 2>/dev/null | grep -q -- '--json-schema'; then
+# the exposure.
+if [[ -z "$VERDICT_SCHEMA_JSON" ]] || ! bash "$AGENT_LAUNCH_ENV" claude -p --help 2>/dev/null | grep -q -- '--json-schema'; then
   echo "review-branch.sh: CLI lacks --json-schema (or the guard schema is unreadable) — refusing to review; gate fails closed (DR-079)" >&2
   exit 0
 fi
@@ -251,31 +263,32 @@ run_reviewer() {
   errfile="$(mktemp)"
   printf '%s' "$USER_CONTENT" >"$promptfile"
   if [[ "${1:-subscription}" == "payg" ]]; then
-    # PASS-THROUGH, never a literal: this forwards whatever key the caller already
-    # holds in its environment, empty when unset. gitleaks' `generic-api-key` rule
-    # matches the assignment SHAPE regardless of the value, and a scanned line ending
-    # in `\` cannot carry an inline allow — so the value is hoisted onto its own line
-    # to carry one (#1514). Without that, MinSpec scaffolds this file AND the
-    # pre-commit gate that rejects it, and no freshly-initialized repo can make its
-    # first commit. Invisible in this repo because the hook scans only STAGED
-    # changes and this file predates the gate.
-    local payg_env=(CLAUDE_CODE_OAUTH_TOKEN= "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}") # gitleaks:allow
-    AGENT_OUT=$( env "${payg_env[@]}" \
-      "${AGENT_ENV_SCRUB[@]}" claude -p --system-prompt-file "$ROLE_FILE" \
+    # `--model-login ANTHROPIC_API_KEY`: the ONE login this launch is handed, by name.
+    # It is needed, and by this launch only: in CI the CLI has no login file, so the
+    # pay-as-you-go key has to arrive in its environment or the failover cannot run.
+    # Whatever key the caller already holds is forwarded as it is (absent when the
+    # caller holds none); no value is ever written here. The subscription token is not
+    # named, so it is not in the child at all, and the failover cannot ride it.
+    AGENT_OUT=$( bash "$AGENT_LAUNCH_ENV" --model-login ANTHROPIC_API_KEY claude -p --system-prompt-file "$ROLE_FILE" \
       "${AGENT_CONTEXT_ARGS[@]}" \
       --allowedTools "Read,Glob,Grep" --model opus \
       --output-format json --json-schema "$VERDICT_SCHEMA_JSON" <"$promptfile" 2>"$errfile" ) || rc=$?
   else
-    # ANTHROPIC_API_KEY is scrubbed here for the SAME reason the payg branch above
-    # scrubs CLAUDE_CODE_OAUTH_TOKEN: `claude -p` picks ONE credential, and an
-    # API key in the environment WINS over the subscription token. Leave it set and
-    # the "subscription" path silently bills (or fails on) PAYG — which is what
-    # happened once ai-review.yml started forwarding the key for the failover: three
-    # of four voters died with `Credit balance is too low` on a run that never
-    # intended to touch PAYG at all. The failover must be reachable ONLY through the
-    # explicit `run_reviewer payg` call, never by ambient environment.
-    AGENT_OUT=$( ANTHROPIC_API_KEY='' \
-      "${AGENT_ENV_SCRUB[@]}" claude -p --system-prompt-file "$ROLE_FILE" \
+    # `--model-login CLAUDE_CODE_OAUTH_TOKEN`: the ONE login this launch is handed, by
+    # name. It is needed: in CI the subscription login is that variable and nothing
+    # else (on an operator's machine it is a file under HOME, and the variable is
+    # simply absent).
+    #
+    # ANTHROPIC_API_KEY is NOT named, so it is not in the child at all. That is the
+    # same rule the payg branch above keeps for the token, and it matters: `claude -p`
+    # picks ONE credential, and an API key in the environment WINS over the
+    # subscription token. Leave it there and the "subscription" path silently bills
+    # (or fails on) PAYG — which is what happened once ai-review.yml started
+    # forwarding the key for the failover: three of four voters died with `Credit
+    # balance is too low` on a run that never intended to touch PAYG at all. The
+    # failover must be reachable ONLY through the explicit `run_reviewer payg` call,
+    # never by ambient environment.
+    AGENT_OUT=$( bash "$AGENT_LAUNCH_ENV" --model-login CLAUDE_CODE_OAUTH_TOKEN claude -p --system-prompt-file "$ROLE_FILE" \
       "${AGENT_CONTEXT_ARGS[@]}" \
       --allowedTools "Read,Glob,Grep" --model opus \
       --output-format json --json-schema "$VERDICT_SCHEMA_JSON" <"$promptfile" 2>"$errfile" ) || rc=$?
