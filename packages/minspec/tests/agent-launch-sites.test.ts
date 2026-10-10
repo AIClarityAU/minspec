@@ -5,7 +5,11 @@
  * dispatch-env-allowlist.test.ts holds this for the two launchers that read issue text
  * (the dispatcher and triage). This file holds it for the rest, and for the property
  * itself: that there is no start of the CLI anywhere under scripts/ that does not go
- * through scripts/lib/agent-context.sh.
+ * through scripts/lib/agent-context.sh, bar two that are named. Both are in the hand-run
+ * verifier of the extension's own sealed start, which has to start the CLI the way the
+ * extension does. SEALED_START_UNDER_VERIFICATION says what those two are handed (the
+ * whole environment of whoever runs it) and why that is accepted there, and the gate
+ * holds each to what its reason rests on.
  *
  * Root cause this guards: every launch used to sit behind an array that REMOVED one
  * variable from the launcher's own environment and passed the rest on, and the one test
@@ -21,8 +25,9 @@
  *      by a copy at its own relative path in the agent's worktree, and when it is missing
  *      nothing is started.
  *   3. The enumerating gate: every file under scripts/ is read, and a mention of the CLI
- *      that is neither a start through the helper nor on a short list of explained
- *      non-starts fails. A new launcher that inherits cannot be added quietly.
+ *      fails unless it is a start through the helper, or on a short list of explained
+ *      non-starts, or one of the two listed starts of the verifier, whole and in its own
+ *      file. A new launcher that inherits cannot be added quietly.
  *
  * Every "secret" is a fixture value that says so. Nothing here can reach GitHub.
  */
@@ -32,10 +37,14 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
+// The extension's own builders for its one start of the CLI. Read here only to hold the
+// verifier's two listed starts to what is said about them; see SEALED_START_UNDER_VERIFICATION.
+import { aiPassArgs, aiPassEnv } from '../src/lib/epic-backfill';
 import {
   DISPATCH_ISSUE,
   FIXTURE_VALUE,
   FOUNDER,
+  ROOT,
   SCRIPTS,
   checkoutWithoutLaunchHelper,
   cleanupLaunchHarness,
@@ -529,10 +538,19 @@ function startsThroughHelper(text: string, index: number): boolean {
 }
 
 /**
+ * The hand-run verifier of the extension's own sealed start (#2580). The one file under
+ * scripts/ that starts the CLI itself; see SEALED_START_UNDER_VERIFICATION.
+ */
+const VERIFIER = 'verify-sealed-claude-start.ts';
+
+/**
  * Lines that name the CLI and do not start it. Each is matched by the file and a piece of
  * the line, and says why it is not a start. A line that names the CLI and is neither a
  * start through the helper nor on this list fails the gate, so this list is where a human
  * decides, in review, that a new mention is harmless.
+ *
+ * A line that DOES start the CLI never belongs here, whatever the reason for it. "Starts
+ * nothing" would be false of it, and a false reason is worse than a failing gate.
  */
 const NOT_A_START: { file: string; has: string; why: string }[] = [
   { file: 'retriage-unrecorded.sh', has: 'command -v claude >/dev/null', why: 'asks whether the CLI is installed; starts nothing' },
@@ -545,13 +563,90 @@ const NOT_A_START: { file: string; has: string; why: string }[] = [
   { file: 'hooks/session-panel.py', has: 'f.read().strip() == "claude"', why: 'reads the name of an already-running process' },
   { file: 'hooks/session-panel.py', has: 'os.path.basename(program) == "claude"', why: 'compares the path of an already-running process' },
   { file: 'hooks/session-panel.py', has: 'Resume it in a terminal: claude --resume', why: 'text shown to a person' },
+  { file: VERIFIER, has: 'details.push(`claude exited non-zero: ', why: 'a line of the report it prints' },
+  { file: VERIFIER, has: "console.error('FAIL: `claude` is not on PATH", why: 'an error message' },
+  { file: VERIFIER, has: 'the sealed claude start holds against the installed Claude Code.', why: 'the last line of the report it prints' },
+];
+
+interface SealedStart {
+  file: string;
+  /** The WHOLE line, trimmed, and never a piece of it: a start is accepted as it is written, or it is not. */
+  is: string;
+  kind: 'carries a prompt' | 'asks the version';
+  why: string;
+}
+
+/**
+ * Starts of the CLI that do NOT go through the helper, and are accepted as they stand.
+ * A list of its own, apart from NOT_A_START, because nothing on it "starts nothing".
+ *
+ * WHAT THE FILE IS. scripts/verify-sealed-claude-start.ts (#2580) is run by hand to
+ * re-check the one start of the CLI the extension makes itself (`proposeAI`, #2570, in
+ * packages/minspec/src/lib/epic-backfill.ts). It starts the real CLI with the product's
+ * own argument list and the product's own environment, and reads what the installed CLI
+ * did with them. Started through scripts/lib/agent-context.sh it would no longer measure
+ * the product: the allowlist hands on neither of the two variables `aiPassEnv` sets, and
+ * one of them, CLAUDE_CODE_DISABLE_ATTACHMENTS, is a thing the script is run to measure.
+ *
+ * WHAT ITS START IS HANDED, in plain words. `aiPassEnv()` is everything in the
+ * environment of whoever runs the script, with those two variables added. Nothing is
+ * taken out. A GitHub token held in that shell reaches the CLI. That is the thing #1203
+ * stopped for every other start under scripts/, and it is not stopped here.
+ *
+ * WHY THAT IS ACCEPTED HERE. An inherited environment is dangerous in the hands of an
+ * agent that can act, on text someone else wrote, started by a machine with nobody
+ * there. This start holds the environment and is none of the three, and each is
+ * asserted below, not only said:
+ *   - nothing to act with: the product's argument list asks for no tool (`--tools ""`)
+ *     and no MCP server (`--strict-mcp-config`), and the start hands that list over whole
+ *   - nobody else's text: the prompt is the one the script's own `buildDirectPrompt`
+ *     makes, out of fixed sentences and the paths of files the script has just written
+ *   - no machine starts it: no workflow, git hook, package script or other script in
+ *     this repository names the file. A person runs it, in a shell whose environment
+ *     their own CLI holds every time they start one there.
+ *
+ * WHAT THIS DOES NOT SHOW, so that it is not over-trusted. It reads text, and it calls
+ * the product's two builders.
+ *   - Whether the installed CLI obeys `--tools ""` is what the script is run to find
+ *     out. On a release that ignores it the first of the three is gone, and the other
+ *     two are what is left.
+ *   - What `buildDirectPrompt` writes was read by a person. The assertion is only that
+ *     the prompt comes from it.
+ *   - The script wraps `execFile` (`installPatches`), so what reaches the CLI from the
+ *     listed line is the product's list followed by `--model <name>` and, when the
+ *     person running it passes one, `--settings <json>`. Neither is on the line.
+ *   - Three more of its rows start the CLI through `proposeAI` itself, one of them with
+ *     `--no-session-persistence` taken out so that the transcript can be read. Those
+ *     starts are in packages/minspec/src, where ai-pass-single-start.test.ts and
+ *     ai-pass-no-tools.test.ts hold them; no line under scripts/ names the CLI for them.
+ *   - A machine that ran the file without naming it (a pattern such as
+ *     `scripts/verify-*.ts`) would not be found.
+ *
+ * Adding a third entry is a decision of the same weight, and the test that counts them
+ * is where it is made.
+ */
+const SEALED_START_UNDER_VERIFICATION: SealedStart[] = [
+  {
+    file: VERIFIER,
+    is: "const { stdout } = await execFileAsync('claude', lib.aiPassArgs(prompt), {",
+    kind: 'carries a prompt',
+    why: "the verifier's direct row: the product's own argument list and environment, handed to the real CLI whole",
+  },
+  {
+    file: VERIFIER,
+    is: "execFileSync('claude', ['--version'], { timeout: 5000 });",
+    kind: 'asks the version',
+    why:
+      'asks whether a CLI is installed, before anything is run. It carries no prompt and no print mode, so there is ' +
+      'no text for anything to act on. It inherits the whole environment, as the other does',
+  },
 ];
 
 /**
- * How many times each file starts the CLI. Pinned, so that a launcher gaining a start
- * (or a new launcher appearing) is a deliberate edit here, next to the reminder that the
- * new start needs a behavioural test above: this gate reads text, and only a test that
- * runs the launcher sees what its agent is handed.
+ * How many times each file starts the CLI through the helper. Pinned, so that a launcher
+ * gaining a start (or a new launcher appearing) is a deliberate edit here, next to the
+ * reminder that the new start needs a behavioural test above: this gate reads text, and
+ * only a test that runs the launcher sees what its agent is handed.
  */
 const STARTS: Record<string, number> = {
   'dispatch-issue.sh': 2,
@@ -575,10 +670,14 @@ interface Finding {
 }
 
 /** Read one file's code and sort every mention of the CLI. Pure, so it can be tested on text. */
-function classify(file: string, text: string): { starts: CodeLine[]; unexplained: Finding[]; explained: Set<number> } {
+function classify(
+  file: string,
+  text: string,
+): { starts: CodeLine[]; unexplained: Finding[]; explained: Set<number>; sealed: { entry: number; line: CodeLine }[] } {
   const starts: CodeLine[] = [];
   const unexplained: Finding[] = [];
   const explained = new Set<number>();
+  const sealed: { entry: number; line: CodeLine }[] = [];
   for (const l of codeLines(text, file)) {
     const mentions = cliMentions(l.text);
     if (mentions.length === 0) continue;
@@ -586,14 +685,30 @@ function classify(file: string, text: string): { starts: CodeLine[]; unexplained
       starts.push(l);
       continue;
     }
+    // A listed start is its WHOLE line, in its own file. Nothing can be added to the
+    // line and still be it, and the same line in any other file is not it.
+    const seal = SEALED_START_UNDER_VERIFICATION.findIndex((e) => e.file === file && l.text.trim() === e.is);
+    if (seal >= 0) {
+      sealed.push({ entry: seal, line: l });
+      continue;
+    }
     const entry = NOT_A_START.findIndex((e) => e.file === file && l.text.includes(e.has));
     if (entry >= 0) explained.add(entry);
     else unexplained.push({ where: `scripts/${file}:${l.line}`, text: l.text.trim().slice(0, 160) });
   }
-  return { starts, unexplained, explained };
+  return { starts, unexplained, explained, sealed };
 }
 
-describe('T0: no start of the CLI anywhere under scripts/ goes round the allowlist', () => {
+/** Every file under `dir`, at any depth, as full paths. An absent directory holds none. */
+function filesUnder(dir: string): string[] {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const full = path.join(dir, e.name);
+    return e.isDirectory() ? filesUnder(full) : e.isFile() ? [full] : [];
+  });
+}
+
+describe('T0: no start of the CLI anywhere under scripts/ goes round the allowlist unaccounted for', () => {
   const files = codeFiles();
   const read = (file: string) => fs.readFileSync(path.join(SCRIPTS, file), 'utf-8');
   const all = files.map((file) => ({ file, ...classify(file, read(file)) }));
@@ -645,7 +760,8 @@ describe('T0: no start of the CLI anywhere under scripts/ goes round the allowli
         ? 'These lines name the CLI and do not start it through scripts/lib/agent-context.sh. An agent started ' +
           'any other way inherits its launcher\'s whole environment, the GitHub token included (#1203). Start it as ' +
           '`bash "$AGENT_LAUNCH_ENV" claude ...`; or, if the line starts nothing, add it to NOT_A_START in this file ' +
-          `with the reason.\n${unexplained.map((u) => `  ${u.where}: ${u.text}`).join('\n')}`
+          'with the reason. A line that does start it is never a NOT_A_START entry: read SEALED_START_UNDER_VERIFICATION ' +
+          `for the one case accepted, and what had to be shown for it.\n${unexplained.map((u) => `  ${u.where}: ${u.text}`).join('\n')}`
         : 'every mention accounted for',
     ).toEqual([]);
   });
@@ -654,6 +770,139 @@ describe('T0: no start of the CLI anywhere under scripts/ goes round the allowli
     const live = new Set(all.flatMap((f) => [...f.explained]));
     const stale = NOT_A_START.filter((_, i) => !live.has(i)).map((e) => `${e.file}: ${e.has}`);
     expect(stale).toEqual([]);
+  });
+
+  // ── The two starts that do not go through the helper ───────────────────────
+  //
+  // SEALED_START_UNDER_VERIFICATION has the reasoning. These hold the tree to it.
+
+  it('a start that goes round the helper is accepted only as its whole line, and only in its own file', () => {
+    const verdict = (file: string, line: string) => {
+      const c = classify(file, `${line}\n`);
+      return c.unexplained.length > 0 ? 'unexplained' : c.sealed.length > 0 ? 'listed' : c.starts.length > 0 ? 'start' : 'no mention';
+    };
+    for (const e of SEALED_START_UNDER_VERIFICATION) {
+      expect(verdict(e.file, e.is), e.is).toBe('listed');
+      expect(verdict(e.file, `    ${e.is}`), 'indented, as it stands in the file').toBe('listed');
+      // The same line in any other file is a start that goes round the allowlist.
+      expect(verdict('some-new-check.ts', e.is), e.is).toBe('unexplained');
+      expect(verdict(`lib/${e.file}`, e.is), e.is).toBe('unexplained');
+      // And nothing rides on the end of it, or in front of it.
+      expect(verdict(e.file, `${e.is} execFileSync('claude', ['-p', 'x']);`), e.is).toBe('unexplained');
+      expect(verdict(e.file, `execFileSync('claude', ['-p', 'x']); ${e.is}`), e.is).toBe('unexplained');
+    }
+    // In the verifier itself, every other way of starting the CLI.
+    for (const other of [
+      "execFile('claude', ['-p', 'x']);",
+      "execFileSync('claude', ['-p', prompt], { env: process.env });",
+      "spawn('claude', lib.aiPassArgs(prompt), { env: lib.aiPassEnv() });",
+      "const { stdout } = await execFileAsync('claude', ['-p', prompt], {",
+      "const { stdout } = await execFileAsync('claude', [...lib.aiPassArgs(prompt), '--mcp-config', file], {",
+      "const { stdout } = await execFileAsync('claude', lib.aiPassArgs(prompt), { env: process.env });",
+      "const { stdout } = await execFileAsync('claude', lib.aiPassArgs(theirText), {",
+      "execFileSync('claude', ['--version', '-p', 'x'], { timeout: 5000 });",
+      "execFileSync('claude', ['-p', '--help'], { timeout: 5000 });",
+    ]) {
+      expect(verdict(VERIFIER, other), other).toBe('unexplained');
+    }
+  });
+
+  it('the two on the list are in the tree once each, in the one file, and there is no third', () => {
+    const found = all.flatMap((f) => f.sealed.map((s) => `${f.file}: ${SEALED_START_UNDER_VERIFICATION[s.entry].kind}`));
+    // A second copy of either line is a second start; a line that has gone leaves the
+    // list explaining nothing. Both show here.
+    expect(found.sort()).toEqual([`${VERIFIER}: asks the version`, `${VERIFIER}: carries a prompt`]);
+    // What the list itself says: two entries, one of each kind, one file. A third
+    // entry is a new start that inherits, and is decided here, in review.
+    expect(SEALED_START_UNDER_VERIFICATION.map((e) => `${e.file}: ${e.kind}`).sort()).toEqual(found);
+  });
+
+  it("the one that carries a prompt is handed the product's own argument list and environment, and the script's own prompt", () => {
+    const entry = SEALED_START_UNDER_VERIFICATION.find((e) => e.kind === 'carries a prompt');
+    expect(entry).toBeDefined();
+    const lines = codeLines(read(VERIFIER), VERIFIER);
+    const at = lines.findIndex((l) => l.text.trim() === entry!.is);
+    const end = lines.findIndex((l, i) => i > at && l.text.trim() === '});');
+    expect(at, 'the listed line is in the file').toBeGreaterThanOrEqual(0);
+    expect(end, 'and the call it opens is closed').toBeGreaterThan(at);
+    // The argument list is the product's, whole: the line is matched whole, so this is
+    // what the file says. Nothing is spread into it and nothing follows it.
+    expect(entry!.is).toContain("('claude', lib.aiPassArgs(prompt), {");
+    // The options, one to a line, each `name: value,`. Nothing is spread in, so nothing
+    // can bring a second environment with it, and there is no shell.
+    const options = lines.slice(at + 1, end).map((l) => l.text.trim());
+    const given = options.map((o) => /^([A-Za-z]+): (.+),$/.exec(o));
+    expect(given.every((m) => m !== null), options.join(' | ')).toBe(true);
+    expect(given.map((m) => m![1]).sort(), options.join(' | ')).toEqual(['cwd', 'env', 'maxBuffer', 'timeout']);
+    // The environment is the product's builder, called with nothing: so with the
+    // environment of whoever runs the script, and not one the script chose instead.
+    expect(options).toContain('env: lib.aiPassEnv(),');
+    // `lib` is the product's module and is bound once, so these are the product's builders.
+    const bound = (name: string) =>
+      lines.filter((l) => new RegExp(`\\b(?:const|let|var)\\s+${name}\\b|\\b${name}\\s*=(?!=)`).test(l.text)).map((l) => l.text.trim());
+    expect(bound('lib')).toEqual(["const lib = (await import('../packages/minspec/src/lib/epic-backfill')) as EpicBackfillModule;"]);
+    // And `prompt` is the script's own, bound once: no text from anywhere else.
+    expect(bound('prompt')).toEqual(['const prompt = buildDirectPrompt(canaryDir, canaries);']);
+  });
+
+  it("the product's argument list asks for no tool and no MCP server, and its environment is all of the one it is given", () => {
+    const args = aiPassArgs('a prompt');
+    // `--tools` takes a list: the empty string straight after it is "none".
+    expect(args.slice(args.indexOf('--tools'), args.indexOf('--tools') + 2)).toEqual(['--tools', '']);
+    expect(args.filter((a) => a === '--tools')).toHaveLength(1);
+    // With no `--mcp-config`, this loads no server.
+    expect(args).toContain('--strict-mcp-config');
+    expect(args).not.toContain('--mcp-config');
+
+    // What the list above says the start is handed, kept true to the code: everything,
+    // a GitHub token included, and two variables more. If this stops being so, that
+    // text is wrong and is the thing to change.
+    const held = { ...withFixtureValues(['GH_TOKEN', 'GITHUB_TOKEN', 'TAVILY_API_KEY']), TZ: 'Antarctica/Troll' };
+    const handed = aiPassEnv(held);
+    expect(handed, 'aiPassEnv no longer hands on all it is given: reread SEALED_START_UNDER_VERIFICATION').toMatchObject(held);
+    expect(Object.keys(handed).filter((n) => !(n in held)).sort()).toEqual([
+      'CLAUDE_CODE_DISABLE_ATTACHMENTS',
+      'CLAUDE_CODE_DISABLE_AUTO_MEMORY',
+    ]);
+    // Called with nothing, as the verifier calls it, that environment is the caller's own.
+    const marker = 'MINSPEC_FIXTURE_HELD_BY_WHOEVER_RUNS_IT';
+    process.env[marker] = FIXTURE_VALUE;
+    try {
+      expect(aiPassEnv()[marker]).toBe(FIXTURE_VALUE);
+    } finally {
+      delete process.env[marker];
+    }
+  });
+
+  it('the other asks for the version and nothing else: no prompt, no print mode', () => {
+    const entry = SEALED_START_UNDER_VERIFICATION.find((e) => e.kind === 'asks the version');
+    expect(entry).toBeDefined();
+    expect(entry!.is).toMatch(/^execFileSync\('claude', \['--version'\], \{ timeout: \d+ \}\);$/);
+  });
+
+  it('nothing in the repository runs the verifier: no workflow, git hook, package script or other script names it', () => {
+    const names = (text: string) => text.includes(path.basename(VERIFIER, '.ts'));
+    // The predicate sees a name however the file is reached.
+    expect(names('run: npx tsx scripts/verify-sealed-claude-start.ts --model haiku')).toBe(true);
+    expect(names('"verify:sealed": "tsx ./scripts/verify-sealed-claude-start"')).toBe(true);
+    expect(names('npm run validate && scripts/verify-epic-backfill.sh')).toBe(false);
+
+    // Where a machine is told what to run. A document that tells a PERSON to run it is
+    // not one of them, so documents are left out here as they are under scripts/.
+    const places = [
+      ...files.filter((f) => f !== VERIFIER).map((f) => path.join(SCRIPTS, f)),
+      ...filesUnder(path.join(ROOT, '.github')).filter((p) => !NOT_CODE.has(path.extname(p))),
+      ...filesUnder(path.join(ROOT, '.githooks')),
+      path.join(ROOT, 'package.json'),
+      ...fs.readdirSync(path.join(ROOT, 'packages')).map((p) => path.join(ROOT, 'packages', p, 'package.json')).filter((p) => fs.existsSync(p)),
+    ];
+    const relative = places.map((p) => path.relative(ROOT, p));
+    // Not vacuous: the places a machine is told what to run are all among them.
+    expect(relative).toEqual(
+      expect.arrayContaining(['.github/workflows/ci.yml', '.githooks/pre-commit', 'package.json', 'packages/minspec/package.json', 'scripts/drain-inbox.sh']),
+    );
+    expect(relative).not.toContain(`scripts/${VERIFIER}`);
+    expect(places.filter((p) => names(fs.readFileSync(p, 'utf-8'))).map((p) => path.relative(ROOT, p))).toEqual([]);
   });
 
   it('the starts are the ones this file tests, file by file', () => {
