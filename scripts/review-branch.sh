@@ -32,12 +32,18 @@
 # Security model (mirrors triage-inbox.sh / dispatch-issue.sh): the diff is
 # UNTRUSTED DATA — a dev agent produced it, possibly from a prompt-injected issue
 # body. The reviewer agent therefore holds:
-#   • NO GitHub credential — its environment is built from a list of names
-#     (lib/agent-context.sh) that the caller's token is not on, and it has no
-#     gh, no git, no network, no Bash. It CANNOT push, comment, label, or merge; it
-#     can only return TEXT. Every credentialed side-effect is the PARENT's job,
-#     after this agent has exited. The one credential it does hold is the model's
-#     own login, which the CLI cannot run without.
+#   • NO GitHub credential IN ITS OWN PROCESS: its environment is built from a
+#     list of names (lib/agent-context.sh) that the caller's token is not on, and
+#     it has no gh, no git, no network, no Bash. It is given no way to push,
+#     comment, label, or merge; it is asked only to return TEXT. Every credentialed
+#     side-effect is the PARENT's job, after this agent has exited. The one
+#     credential it does hold is the model's own login, which the CLI cannot run
+#     without.
+#     What that does NOT say: that the token is out of this agent's reach. It is
+#     a statement about one process. Other processes of the same user may hold
+#     the caller's token, and what a process holds can be read by its own user,
+#     which an agent that can Read is. Closing that takes a user of its own for
+#     the agent, or a launcher that holds a narrower token. Neither is done here.
 #   • Read-only filesystem tools ONLY (Read, Glob, Grep) so it can open the
 #     files the diff touches and their callers ("read the enclosing function") —
 #     the whole point of an independent review over a blind diff read.
@@ -215,7 +221,9 @@ fi
 # environment from a list of names. The caller of this script may hold a GitHub token
 # (dispatch-issue.sh does, and posts the verdict with it), and a reviewer that can Read
 # can read its own process: so the token must not be in that process at all, which is a
-# property of the launch and not of the tool list.
+# property of the launch and not of the tool list. That keeps it out of the reviewer's
+# OWN process and no further: see the security model at the top of this file for what
+# stays readable by the same user.
 #
 # That file assigns the variable itself, to its own absolute path: a value that arrived
 # in the environment is overwritten before it is used, and a launch made with cwd in

@@ -248,6 +248,38 @@ describe('scripts/lib/agent-context.sh: the allowlist itself', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
+  it('the list is these names and no other: adding one, or taking one away, is an edit to this test in the same review', () => {
+    // The list's own check knows three endings and a few names. It cannot know what a
+    // name it has never seen holds, so what holds the rest is this: every name is written
+    // out here, and a change to the list that is not also a change here fails.
+    expect(allowlist()).toEqual([
+      ...['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL'],
+      ...['PWD', 'TMPDIR', 'TERM'],
+      ...['TZ', 'LANG', 'LANGUAGE', 'LC_ALL', 'LC_CTYPE', 'LC_COLLATE', 'LC_MESSAGES', 'LC_MONETARY', 'LC_NUMERIC', 'LC_TIME'],
+      ...['XDG_CONFIG_HOME', 'XDG_CACHE_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME'],
+      ...['LD_LIBRARY_PATH', 'NODE_OPTIONS', 'NODE_PATH'],
+      ...['HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy'],
+      ...['NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR'],
+      ...['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'],
+      ...['CLAUDE_CONFIG_DIR', 'ANTHROPIC_BASE_URL', 'CLAUDE_EFFORT'],
+    ]);
+  });
+
+  it('nothing on it is from a family that is left off on purpose', () => {
+    // Configuration that arrives in a variable and changes what npm or git RUNS, and
+    // anything of GitHub's. A build that needs one of these gets it from a file.
+    const leftOff = /^(npm_config_|GIT_CONFIG_|GIT_SSH|GIT_ASKPASS|GH_|GITHUB_)/i;
+    expect(allowlist().filter((n) => leftOff.test(n))).toEqual([]);
+    for (const n of ['npm_config_registry', 'NPM_CONFIG_USERCONFIG', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_SSH_COMMAND', 'GH_HOST', 'GITHUB_REPOSITORY']) {
+      expect(leftOff.test(n), n).toBe(true);
+    }
+    // And a started process is handed none of them, whatever its launcher holds.
+    const held = ['npm_config_registry', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0', 'GIT_SSH_COMMAND', 'GH_HOST', 'GITHUB_REPOSITORY'];
+    const given = namesGiven({ HOME: '/nonexistent/fixture-home', ...withFixtureValues(held) });
+    expect(given.filter((n) => held.includes(n))).toEqual([]);
+    expect(given).toContain('HOME');
+  });
+
   it('a started process holds only names that are on the list', () => {
     const everything = {
       HOME: '/nonexistent/fixture-home',

@@ -86,9 +86,11 @@
 #   • scripts/direct-push-audit.ts files under whatever credential its caller holds, and
 #     no workflow in this repository calls it. Its body is commit ids, file paths and a
 #     pusher's login from the audited push; its labels are `bug` and `security`.
-#   • scripts/roles/architect.md tells a dispatched architect to file sub-issues. An
-#     agent is started without a GitHub token (lib/agent-context.sh), so it cannot,
-#     unless `gh` finds a stored login of its own under the agent's home directory.
+#   • scripts/roles/architect.md tells a dispatched architect to file sub-issues. YES,
+#     where it can: an agent is started without a GitHub token in its own environment
+#     (lib/agent-context.sh), and that is a statement about one process. The agent runs
+#     as the launcher's user, so a credential that user can reach is not out of the
+#     agent's reach. What it filed would carry whatever the agent had been reading.
 #   • .github/workflows/supply-chain-daily.yml files as `github-actions[bot]`, which is
 #     NOT on the list: its issues are refused here and wait for a person.
 #

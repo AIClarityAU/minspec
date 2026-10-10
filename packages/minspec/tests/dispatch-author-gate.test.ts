@@ -244,6 +244,15 @@ describe('scripts/lib/dispatch-author-gate.sh: everyone who edited the body must
     expect(r.stdout).toBe(`its body was edited by ${shown(who)}, who is not on the dispatch author list\n`);
   });
 
+  // The whole table the author is tried against, namesakes and near-misses included: one
+  // comparison is only one comparison if every path that reads an account is held to it.
+  it.each(NOT_LISTED)('as somebody who edited the body, %s is refused, and the answer names the account', (_why, a) => {
+    const r = check({ bodyEditors: [FOUNDER, a] });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/^its body was edited by '[^']*' \(.+\), who is not on the dispatch author list\n$/);
+    expect(r.stdout).toContain(`'${a.login}' (`);
+  });
+
   it('the last editor is judged even when the history that came back names only listed accounts', () => {
     const r = check({ bodyEditors: [FOUNDER], provenance: (i) => ({ ...i, editor: STRANGER }) });
     expect(r.status).toBe(1);
@@ -300,6 +309,19 @@ describe('scripts/lib/dispatch-author-gate.sh: everyone who changed the title mu
     const r = check(f);
     expect(r.status).toBe(1);
     expect(r.stdout).toBe(`its title was changed by ${shown(who)}, who is not on the dispatch author list\n`);
+  });
+
+  it.each(NOT_LISTED)('as somebody who changed the title, %s is refused, and the answer names the account', (_why, a) => {
+    const r = check({ titleChangers: [FOUNDER, a] });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/^its title was changed by '[^']*' \(.+\), who is not on the dispatch author list\n$/);
+    expect(r.stdout).toContain(`'${a.login}' (`);
+  });
+
+  it.each(UNREADABLE)('somebody who changed the title and is %s is refused as unreadable', (_why, a) => {
+    const r = check({ titleChangers: [FOUNDER, a, FOUNDER] });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain('an account that changed its title could not be read');
   });
 
   it('a list of changes shorter than its own count is refused', () => {
@@ -980,7 +1002,7 @@ describe('scripts/lib/dispatch-author-gate.sh: filtering a list of comments', ()
 // prints the App under the bare login `minspec-sdd`, and a person can hold that login as
 // their own account, so it kept that person's comments too.
 
-describe('T0: a verdict record counts only from a comment the gate\'s own ACCOUNT wrote', () => {
+describe('T0: a verdict record does not count from a comment by an account that only holds the App\'s LOGIN', () => {
   const NAMESAKE = user('minspec-sdd', 900000010);
   /** An issue that is ready in every way but one: its only record is in this comment. */
   const recordFrom = (author: unknown, association = 'NONE'): IssueFixture => ({
@@ -1008,6 +1030,22 @@ describe('T0: a verdict record counts only from a comment the gate\'s own ACCOUN
     expect(r.worktreeMade).toBe(false);
     expect(r.status, r.out).toBe(DECLINED);
   });
+
+  // STILL OPEN, and written down as a test so nobody reads the title above as more than
+  // it says. The filter keeps a comment whose account is on the list OR whose association
+  // is owner, member or collaborator (scripts/dispatch-ready-check.sh says so in its
+  // header, under #1105). So an account that is NOT on the list, but has been given that
+  // standing, can still write the record that makes an issue dispatchable. The text an
+  // agent reads is not widened by this: the issue's own title and body are judged by the
+  // list alone, above. What it goes round is the triage hold.
+  it.each(['COLLABORATOR', 'MEMBER', 'OWNER'])(
+    'STILL OPEN (#1105): the same record from an account that is not on the list but is shown as %s does count',
+    (association) => {
+      const r = runDispatch({ issue: recordFrom(COLLABORATOR, association), ask: true });
+      expect(r.launches, r.out).toHaveLength(1);
+      expect(r.status, r.out).toBe(dispatchStatus('DISPATCH_RC_STARTED'));
+    },
+  );
 
   it('the readers that hand the filter a document of their own ask GitHub for the account, not only the login', () => {
     // Their comments come from a query of their own and carry no id to ask about

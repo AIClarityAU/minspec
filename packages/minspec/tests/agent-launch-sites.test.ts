@@ -27,7 +27,17 @@
  *   3. The enumerating gate: every file under scripts/ is read, and a mention of the CLI
  *      fails unless it is a start through the helper, or on a short list of explained
  *      non-starts, or one of the two listed starts of the verifier, whole and in its own
- *      file. A new launcher that inherits cannot be added quietly.
+ *      file. A new launcher that names the CLI and inherits cannot be added quietly.
+ *
+ * WHAT THE GATE CANNOT SEE. It reads text for the CLI's name, so it is a tripwire for
+ * the ordinary ways of writing a start, and not a proof that there is no other:
+ *   - a start that never names the CLI under scripts/: a program held in a variable that
+ *     is given its value somewhere this does not read (the environment, a file elsewhere);
+ *   - a start from a file that is not under scripts/ at all;
+ *   - a line of TypeScript that opens with `*` and is code (a multiplication carried onto
+ *     a line of its own) is read as the inside of a comment.
+ * What a started agent actually held is the first kind of test, which runs the launchers
+ * and reads what the child was given. That one does not depend on how a start is spelled.
  *
  * Every "secret" is a fixture value that says so. Nothing here can reach GitHub.
  */
@@ -444,6 +454,11 @@ describe('scripts/lib/agent-context.sh: --model-login hands over one known login
     ['AGENT_ENV_ALLOW', 'fixture_api_key', /fixture_api_key is on the list, and it is named like a credential/],
     ['AGENT_ENV_ALLOW', 'Fixture_Token', /Fixture_Token is on the list, and it is named like a credential/],
     ['AGENT_ENV_ALLOW', 'gh_token', /gh_token is on the list, and it is named like a credential/],
+    // Anything of GitHub's, whatever it holds: the list is held to the same rule the model
+    // logins are.
+    ['AGENT_ENV_ALLOW', 'GH_HOST', /GH_HOST is on the list, and it is GitHub's/],
+    ['AGENT_ENV_ALLOW', 'github_repository', /github_repository is on the list, and it is GitHub's/],
+    ['AGENT_ENV_ALLOW', 'MINSPEC_GH_APP_ID', /MINSPEC_GH_APP_ID is on the list, and it is GitHub's/],
     ['AGENT_MODEL_LOGINS', 'github_app_key', /github_app_key is among the model logins, and it is GitHub's/],
     ['AGENT_MODEL_LOGINS', 'my_gh_bot_login', /my_gh_bot_login is among the model logins, and it is GitHub's/],
   ] as [string, string, RegExp][])('a copy whose %s has gained %s refuses to start anything, whatever case the name is in', (list, name, says) => {
@@ -488,9 +503,10 @@ function codeFiles(dir = SCRIPTS): string[] {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const full = path.join(dir, e.name);
     if (e.isDirectory()) return e.name === 'node_modules' || e.name === '__pycache__' ? [] : codeFiles(full);
+    // A file named like a test is read like any other: a name is something anybody can
+    // give a file, and none under scripts/ names the CLI. A link is not read (isFile is
+    // false for one), which is why a test below fails if scripts/ ever holds a link.
     if (!e.isFile() || NOT_CODE.has(path.extname(e.name)) || e.name === 'LICENSE') return [];
-    // Tests start stubs of their own, by design.
-    if (/\.test\.(ts|js|mjs|cjs)$/.test(e.name) || /^test_.*\.py$/.test(e.name)) return [];
     return [path.relative(SCRIPTS, full)];
   });
 }
@@ -508,7 +524,12 @@ interface CodeLine {
  */
 function codeLines(text: string, file: string): CodeLine[] {
   const shell = /\.(sh|bash)$/.test(file) || !path.extname(file);
-  const comment = /\.(ts|js|mjs|cjs)$/.test(file) ? /^\s*(\/\/|\/\*|\*)/ : /^\s*#/;
+  const script = /\.(ts|js|mjs|cjs)$/.test(file);
+  // A whole-line comment. A line that opens a block comment and closes it with code after
+  // it (`/* note */ run()`), or that closes one and goes on (`*/ run()`), is code.
+  const comment = {
+    test: (l: string) => (script ? /^\s*\/\//.test(l) || (/^\s*(\/\*|\*)/.test(l) && !/\*\/\s*\S/.test(l)) : /^\s*#/.test(l)),
+  };
   const out: CodeLine[] = [];
   const raw = text.split('\n');
   for (let i = 0; i < raw.length; i++) {
@@ -523,12 +544,13 @@ function codeLines(text: string, file: string): CodeLine[] {
 
 /**
  * Where a line names the CLI: the word on its own, however it is reached (a bare command,
- * an absolute path to it, a quoted string in a spawn call), or the name of its package.
+ * an absolute path to it, a quoted string in a spawn call), the name of its package, or
+ * the name of the SDK that starts it without naming any command.
  * `.claude/`, `~/.claude`, `claude.ai` and an address at a mail host are not the CLI.
  */
 function cliMentions(text: string): number[] {
   const at: number[] = [];
-  for (const m of text.matchAll(/(?<![A-Za-z0-9_.@-])claude(?![A-Za-z0-9_./@-])|claude-code/g)) at.push(m.index ?? 0);
+  for (const m of text.matchAll(/(?<![A-Za-z0-9_.@-])claude(?![A-Za-z0-9_./@-])|claude-code|claude[-_]agent[-_]sdk|claude_code_sdk/g)) at.push(m.index ?? 0);
   return at;
 }
 
@@ -781,6 +803,20 @@ describe('T0: no start of the CLI anywhere under scripts/ goes round the allowli
     expect(files).toEqual(expect.arrayContaining(['dispatch-issue.sh', 'tooling-radar/run-radar.sh', 'hooks/session-panel.py', 'lib/gh-bot.sh']));
   });
 
+  it('a file named like a test is read like any other', () => {
+    expect(files).toEqual(expect.arrayContaining(['lib/gh-bot.test.js', 'check-gh-bot-attribution.test.js', 'hooks/test_spec_gate.py']));
+  });
+
+  it('nothing under scripts/ is a link: the scan opens files, and a link is one it would never open', () => {
+    const links = (dir: string): string[] =>
+      fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+        const full = path.join(dir, e.name);
+        if (e.isSymbolicLink()) return [path.relative(SCRIPTS, full)];
+        return e.isDirectory() && e.name !== 'node_modules' && e.name !== '__pycache__' ? links(full) : [];
+      });
+    expect(links(SCRIPTS)).toEqual([]);
+  });
+
   it('the predicate itself: what counts as a start through the helper, and what does not', () => {
     const verdict = (line: string) => {
       const c = classify('some-new-launcher.sh', `${line}\n`);
@@ -809,6 +845,16 @@ describe('T0: no start of the CLI anywhere under scripts/ goes round the allowli
     // In another language.
     expect(classify('x.mjs', "spawn('claude', ['-p', prompt]);\n").unexplained).toHaveLength(1);
     expect(classify('x.py', 'subprocess.run(["claude", "-p", prompt])\n').unexplained).toHaveLength(1);
+    // Through the SDK, which starts the CLI without a command being written anywhere.
+    expect(classify('x.mjs', "import { query } from '@anthropic-ai/claude-agent-sdk';\n").unexplained).toHaveLength(1);
+    expect(classify('x.py', 'from claude_agent_sdk import query\n').unexplained).toHaveLength(1);
+    expect(classify('x.py', 'import claude_code_sdk\n').unexplained).toHaveLength(1);
+    // A comment marker in front of code does not make the line a comment.
+    expect(classify('x.ts', "/* ok */ spawn('claude', ['-p', prompt]);\n").unexplained).toHaveLength(1);
+    expect(classify('x.ts', " */ spawn('claude', ['-p', prompt]);\n").unexplained).toHaveLength(1);
+    expect(classify('x.ts', "/* spawn('claude', ['-p', prompt]) */\n").unexplained).toHaveLength(0);
+    expect(classify('x.ts', ' * runs claude -p for the reviewer\n').unexplained).toHaveLength(0);
+    expect(classify('x.ts', "// spawn('claude', ['-p', prompt]);\n").unexplained).toHaveLength(0);
     // Not the CLI at all.
     expect(verdict('cat "$HOME/.claude/settings.json" .claude/hooks/x.sh')).toBe('no mention');
     expect(verdict('git -c user.email="claude@example.invalid" commit')).toBe('no mention');
@@ -965,7 +1011,7 @@ describe('T0: no start of the CLI anywhere under scripts/ goes round the allowli
     expect(entry!.is).toMatch(/^execFileSync\('claude', \['--version'\], \{ timeout: \d+ \}\);$/);
   });
 
-  it('nothing in the repository runs the verifier: no workflow, git hook, package script or other script names it', () => {
+  it('nothing in the repository runs the verifier: no workflow, git hook, package script, Claude Code hook or other script names it', () => {
     // What a machine would act on is code. A comment that names the file tells it nothing
     // (scripts/lib/agent-context.sh says, in a comment, why this file is the exception),
     // so whole-line comments are dropped here, as they are for every other reading above.
@@ -979,6 +1025,7 @@ describe('T0: no start of the CLI anywhere under scripts/ goes round the allowli
     expect(names('package.json', '    "verify:sealed": "tsx ./scripts/verify-sealed-claude-start"\n')).toBe(true);
     expect(names('scripts/x.sh', 'timeout 600 \\\n  npx tsx "${SCRIPT_DIR}/verify-sealed-claude-start.ts"\n')).toBe(true);
     expect(names('scripts/x.sh', 'echo ok # then scripts/verify-sealed-claude-start.ts\n')).toBe(true);
+    expect(names('.claude/settings.json', '            "command": "npx tsx \\"$CLAUDE_PROJECT_DIR\\"/scripts/verify-sealed-claude-start.ts"\n')).toBe(true);
     // And not a comment, nor a file with a name like it.
     expect(names('scripts/lib/x.sh', '# see scripts/verify-sealed-claude-start.ts\n')).toBe(false);
     expect(names('.github/workflows/x.yml', '      # scripts/verify-sealed-claude-start.ts is run by hand\n')).toBe(false);
@@ -990,13 +1037,26 @@ describe('T0: no start of the CLI anywhere under scripts/ goes round the allowli
       ...files.filter((f) => f !== VERIFIER).map((f) => path.join(SCRIPTS, f)),
       ...filesUnder(path.join(ROOT, '.github')).filter((p) => !NOT_CODE.has(path.extname(p))),
       ...filesUnder(path.join(ROOT, '.githooks')),
+      // What Claude Code is told to run in every session in this repository. A dispatched
+      // agent loads the project's settings too, so a hook here runs inside one.
+      path.join(ROOT, '.claude', 'settings.json'),
+      ...filesUnder(path.join(ROOT, '.claude', 'hooks')).filter((p) => !NOT_CODE.has(path.extname(p))),
+      ...filesUnder(path.join(ROOT, '.minspec', 'hooks')),
       path.join(ROOT, 'package.json'),
       ...fs.readdirSync(path.join(ROOT, 'packages')).map((p) => path.join(ROOT, 'packages', p, 'package.json')).filter((p) => fs.existsSync(p)),
     ];
     const relative = places.map((p) => path.relative(ROOT, p));
     // Not vacuous: the places a machine is told what to run are all among them.
     expect(relative).toEqual(
-      expect.arrayContaining(['.github/workflows/ci.yml', '.githooks/pre-commit', 'package.json', 'packages/minspec/package.json', 'scripts/drain-inbox.sh']),
+      expect.arrayContaining([
+        '.github/workflows/ci.yml',
+        '.githooks/pre-commit',
+        '.claude/settings.json',
+        '.claude/hooks/session-title.sh',
+        'package.json',
+        'packages/minspec/package.json',
+        'scripts/drain-inbox.sh',
+      ]),
     );
     expect(relative).not.toContain(`scripts/${VERIFIER}`);
     expect(places.filter((p) => names(path.relative(ROOT, p), fs.readFileSync(p, 'utf-8'))).map((p) => path.relative(ROOT, p))).toEqual([]);

@@ -308,7 +308,10 @@ _agent_env_die() {
 }
 
 # Is this the name of something no agent may be handed? Case is ignored: the rule is
-# about what a name says it holds.
+# about what a name says it holds. This knows three endings and three names, and no
+# more: a secret under a name of another shape is not seen here. What holds the rest is
+# that the list is short, each name on it has its reason beside it, and a test names
+# every one, so an addition is an edit somebody reviews.
 _agent_env_credential_shaped() {
   local shaped=1
   shopt -s nocasematch
@@ -320,8 +323,9 @@ _agent_env_credential_shaped() {
   return "$shaped"
 }
 
-# Is this the name of something of GitHub's? No launch is handed one of these under any
-# option: the launcher does every GitHub write itself, after the agent has exited.
+# Is this the name of something of GitHub's? No launch is handed one of these, from the
+# list or under any option: the launcher does every GitHub write itself, after the agent
+# has exited. Both lists are held to it below.
 _agent_env_githubs() {
   local github=1
   shopt -s nocasematch
@@ -340,6 +344,9 @@ _agent_env_check_list() {
       || _agent_env_die "the list holds something that is not a variable name. The list is names, never patterns. Nothing was started."
     if _agent_env_credential_shaped "$name"; then
       _agent_env_die "${name} is on the list, and it is named like a credential. No agent may be handed one, so nothing was started. Take it off the list in ${BASH_SOURCE[0]}."
+    fi
+    if _agent_env_githubs "$name"; then
+      _agent_env_die "${name} is on the list, and it is GitHub's. No agent may be handed one, so nothing was started. Take it off the list in ${BASH_SOURCE[0]}."
     fi
   done
   for name in "${AGENT_MODEL_LOGINS[@]}"; do

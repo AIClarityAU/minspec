@@ -91,7 +91,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/lib/agent-context.sh"
 # How this script touches the worktree it checks a pull request's branch out into. That
-# branch was written by an agent, and another agent is then started in it, so nothing in
+# branch is usually an agent's work, but nothing here checks who wrote it: any branch of
+# this repository whose name fits is taken, from whoever can push one, and the list in
+# lib/dispatch-author-gate.sh is asked about commenters only. Another agent is then
+# started in it, so nothing in
 # the worktree is run as this script: git is given the worktree's own git directory and
 # THIS tree's hooks outright. The file's header has the reasoning and the limits.
 # shellcheck source=scripts/lib/agent-worktree.sh
