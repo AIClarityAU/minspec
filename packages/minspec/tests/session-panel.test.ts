@@ -802,6 +802,102 @@ suite('a schedule that died with its session is named (#2379)', () => {
   });
 });
 
+suite('a session killed long before this one started is told about once, not forever (#2633)', () => {
+  // The container-restart case: every panel process dies at once, and the next
+  // session in the folder starts much later - far outside the RECENT_S look-back the
+  // other cases use. The only evidence is the stale registry entry the dead process
+  // left behind (register() with a pid nothing holds proves that: alive() is False
+  // because /proc has no such process), so this path is keyed on the registry, not on
+  // transcript age, and gated by a small state file instead of a time window.
+  const stateFile = (): string => path.join(home, '.cache', 'session-panel', 'announced.json');
+  beforeEach(async () => {
+    await registerMe();
+  });
+
+  it('names it even though its last write was a day ago, far past the 10-minute look-back', () => {
+    register({ pid: 4_100_001, procStart: '987654', sessionId: OTHER });
+    const file = transcript(OTHER, [humanPrompt(OTHER), title(OTHER, 'the old chief of staff')], 24 * 3600);
+    const { out, status } = unit('start', startInput());
+    expect(status).toBe(0);
+    expect(out).toContain(LOSS);
+    expect(out).toContain('the old chief of staff');
+    expect(out).toMatch(/the registry lists no live process for it \(no exit record; last write \d+h ago\)/);
+    expect(out).toContain(file);
+    expect(out).toContain(`claude --resume ${OTHER}`);
+  });
+
+  it('says nothing about a dead entry with no transcript on disk - nothing to read "human panel" from', () => {
+    register({ pid: 4_100_002, procStart: '987655', sessionId: OTHER });
+    expect(unit('start', startInput()).out).toBe('');
+  });
+
+  it('says nothing about a dead entry whose transcript was never a human panel', () => {
+    register({ pid: 4_100_003, procStart: '987656', sessionId: OTHER });
+    transcript(OTHER, [sdkPrompt(OTHER)], 24 * 3600);
+    expect(unit('start', startInput()).out).toBe('');
+  });
+
+  it('never prints a dead entry twice when the recent-transcript path already caught it', () => {
+    // A dead registry entry whose transcript is ALSO recent enough for the ordinary
+    // look-back: both paths would name the same session without the dedupe.
+    register({ pid: 4_100_004, procStart: '987657', sessionId: OTHER });
+    transcript(OTHER, [humanPrompt(OTHER), title(OTHER, 'duplicate check')], 30);
+    const { out } = unit('start', startInput());
+    expect(out.split('duplicate check')).toHaveLength(2); // exactly one occurrence
+  });
+
+  it('records the first sighting in a small state file and announces again within the window', () => {
+    register({ pid: 4_100_005, procStart: '987658', sessionId: OTHER });
+    transcript(OTHER, [humanPrompt(OTHER), title(OTHER, 'the old chief of staff')], 24 * 3600);
+    const first = unit('start', startInput());
+    expect(first.out).toContain(LOSS);
+    const state = JSON.parse(fs.readFileSync(stateFile(), 'utf-8')) as Record<string, number>;
+    expect(typeof state[OTHER]).toBe('number');
+
+    // A second session starting moments later, inside the window, is told too.
+    const second = unit('start', startInput());
+    expect(second.out).toContain(LOSS);
+    expect(second.out).toContain('the old chief of staff');
+  });
+
+  it('falls silent once the announce window has closed, even though the entry is still there', () => {
+    register({ pid: 4_100_006, procStart: '987659', sessionId: OTHER });
+    transcript(OTHER, [humanPrompt(OTHER), title(OTHER, 'the old chief of staff')], 24 * 3600);
+    expect(unit('start', startInput()).out).toContain(LOSS);
+
+    // Back-date the sighting past the 10-minute announce window, standing in for a
+    // session that starts 11 minutes after the loss was first seen rather than
+    // actually waiting 11 minutes in the test.
+    const path_ = stateFile();
+    const state = JSON.parse(fs.readFileSync(path_, 'utf-8')) as Record<string, number>;
+    state[OTHER] = Date.now() / 1000 - 700;
+    fs.writeFileSync(path_, JSON.stringify(state));
+
+    const later = unit('start', startInput());
+    expect(later.out).not.toContain(LOSS);
+    expect(later.out).not.toContain('the old chief of staff');
+  });
+
+  it('is not held up or broken by a corrupt state file - fail-open, never a swallowed loss', () => {
+    fs.mkdirSync(path.join(home, '.cache', 'session-panel'), { recursive: true });
+    fs.writeFileSync(stateFile(), '{ not json');
+    register({ pid: 4_100_007, procStart: '987660', sessionId: OTHER });
+    transcript(OTHER, [humanPrompt(OTHER), title(OTHER, 'the old chief of staff')], 24 * 3600);
+    const { out, status, err } = unit('start', startInput());
+    expect(status).toBe(0);
+    expect(err).not.toMatch(/Traceback/);
+    expect(out).toContain(LOSS);
+    expect(out).toContain('the old chief of staff');
+  });
+
+  it('still says nothing when that same session is simply running fine elsewhere', () => {
+    // The control: a live, non-stale entry in another folder must never feed this path.
+    register({ pid: 4_100_008, procStart: '987661', sessionId: OTHER, cwd: '/home/somebody/code/elsewhere' });
+    transcript(OTHER, [humanPrompt(OTHER), title(OTHER, 'a session in another project')], 24 * 3600);
+    expect(unit('start', startInput()).out).toBe('');
+  });
+});
+
 suite('it fails visibly, and never fatally', () => {
   beforeEach(async () => {
     await registerMe();

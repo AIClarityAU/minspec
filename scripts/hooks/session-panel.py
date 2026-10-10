@@ -16,11 +16,15 @@ statement, made to both sides:
   self   (UserPromptSubmit) - "THIS session has no panel": its own input has no writer.
   start  (SessionStart)     - "these sessions in this folder lost their panel": the ones
                               still running headless, the ones that ended in the last
-                              few minutes without being re-attached, and any schedule
-                              (/loop) they held. That last part is the dead-loop
-                              backstop of #2379, keyed on the record the CLI itself
-                              writes (CronCreate / CronDelete in the transcript) instead
-                              of a marker file that nothing ever wrote.
+                              few minutes without being re-attached, one whose registry
+                              entry was found dead long before this session started (a
+                              container restart, announced once via a small state file
+                              rather than re-announced for as long as the stale entry
+                              sits there - #2633), and any schedule (/loop) they held.
+                              That last part is the dead-loop backstop of #2379, keyed
+                              on the record the CLI itself writes (CronCreate /
+                              CronDelete in the transcript) instead of a marker file
+                              that nothing ever wrote.
 
 It cannot give the conversation back to a panel; only the editor can. It makes the
 loss impossible to miss and names the way back (the transcript path, `--resume`).
@@ -41,8 +45,17 @@ WHAT IT CANNOT SEE, stated rather than hidden:
     a person typed into, so it is not named once it has ended. While it still runs
     headless it IS named: that path reads the process, not the transcript.
   * A session killed long before this one started (a container restart after an idle
-    night). Only the last RECENT_S seconds are examined, so a stale loss is not
-    re-announced at every start for days. Tracked as #2633.
+    night) IS named (#2633), by its dead registry entry rather than by transcript age:
+    alive() already proves the process is gone, with no RECENT_S limit. What this path
+    still cannot do: call a dead entry with no transcript on disk a panel loss (there is
+    nothing to read "human" from, so it is skipped), or tell the difference between a
+    loss nobody has seen yet and one this folder has already been told about - that is
+    what the small state file under ${XDG_CACHE_HOME:-~/.cache}/session-panel/ is for:
+    it remembers the first session that saw a given dead entry and stays quiet after
+    ANNOUNCE_WINDOW_S, forever, even though the registry entry itself is never cleaned
+    up (measured 2026-10-09: 80 of them, the oldest from 2026-09-17). A corrupt or
+    unwritable state file is read as empty, which means "announce it" - the fail-open
+    side costs one repeat announcement, never a silently swallowed loss.
   * A session that is still running, is absent from the registry and has written no
     exit record. The registry is the only witness for such a process, so at start it
     is named, in those words: "the registry lists no live process for it". The
@@ -86,6 +99,9 @@ HEAD_BYTES = 512 * 1024   # where a transcript's first prompt is looked for
 TAIL_BYTES = 256 * 1024   # where its exit record and title are looked for
 INPUT_WAIT_S = 2.0        # never hold a session start on an input that does not close
 NAME_MAX = 80
+ANNOUNCE_WINDOW_S = 600   # a stale registry entry (#2633) is announced only to sessions
+                          # starting this soon after it is FIRST seen, never again after
+STATE_LOCK_WAIT_S = 2.0   # never hold a session start on the announce-state lock either
 UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z")
 
 
@@ -288,6 +304,94 @@ def own_process(session_id, entries):
             return None
         pid, hops = found[0], hops + 1
     return None
+
+
+# ---------------------------------------------------------------- announce-once state
+
+def state_paths():
+    """(state directory, state file, lock file) for the #2633 announce-once record.
+    Same base session-identity.sh already uses for its own per-machine state."""
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    directory = os.path.join(base, "session-panel")
+    return directory, os.path.join(directory, "announced.json"), os.path.join(directory, "announced.lock")
+
+
+def decide_announcements(candidate_sids, known_sids, now):
+    """Which of candidate_sids (dead registry entries whose panel transcript was just
+    found) get announced NOW: ones never seen before (first sight - and now recorded as
+    seen), and ones seen within the last ANNOUNCE_WINDOW_S. Never one seen longer ago
+    than that: the registry entry itself is never cleaned up (measured 2026-10-09: 80
+    of them, the oldest from 2026-09-17), so without this cutoff the same loss would be
+    re-announced at every session start in the folder for as long as the entry sits
+    there.
+
+    known_sids prunes the state file to sessions the registry still lists at all, so
+    it stays bounded by the registry's own size rather than growing forever on top of it.
+
+    Two sessions starting at once must reach the SAME answer for a given sid, or one
+    would announce a loss the other just silently recorded as seen. The read-decide
+    -write below runs under a lock for that reason - but a lock that cannot be taken
+    quickly is not worth holding a session start for: on timeout, or on any error
+    reading or writing the file, this degrades to treating the state as empty, which
+    means "announce it". Fail-open on this side costs one repeat announcement, which
+    is cheap; fail-closed would risk a loss nobody is ever told about, which is exactly
+    what this unit exists to prevent (see 'Never fatal' at the bottom of the file).
+    """
+    directory, state_path, lock_path = state_paths()
+    try:
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+    except OSError:
+        pass
+
+    lock_fd = None
+    try:
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        import fcntl
+        deadline = time.monotonic() + STATE_LOCK_WAIT_S
+        while time.monotonic() < deadline:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                time.sleep(0.02)
+    except (OSError, ImportError):
+        pass  # no lock taken: still correct, just not race-safe under concurrent starts
+
+    try:
+        try:
+            with open(state_path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            if not isinstance(state, dict):
+                state = {}
+        except (OSError, ValueError):
+            state = {}
+
+        state = {sid: seen for sid, seen in state.items() if sid in known_sids and isinstance(seen, (int, float))}
+        announce = set()
+        for sid in candidate_sids:
+            first_seen = state.get(sid)
+            if first_seen is None:
+                state[sid] = now
+                announce.add(sid)
+            elif now - first_seen <= ANNOUNCE_WINDOW_S:
+                announce.add(sid)
+
+        try:
+            tmp = "%s.tmp.%d" % (state_path, os.getpid())
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(state, f)
+            os.replace(tmp, state_path)
+        except OSError:
+            pass
+        return announce
+    finally:
+        if lock_fd is not None:
+            try:
+                import fcntl
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(lock_fd)
 
 
 # ----------------------------------------------------------------------- transcripts
@@ -495,8 +599,11 @@ def mode_start(hook):
         return
     live = {}
     headless = []
+    dead_sids = set()  # #2633: registry entries for THIS folder whose process is gone
     for entry in entries:
         if not alive(entry):
+            if entry.get("sessionId") != me and entry.get("cwd") == folder:
+                dead_sids.add(entry["sessionId"])
             continue
         live[entry["sessionId"]] = entry
         if entry["sessionId"] == me or entry.get("cwd") != folder:
@@ -540,6 +647,40 @@ def mode_start(hook):
             continue
         when = ended_at if ended_at is not None and info.st_mtime - 3600 <= ended_at <= now + 60 else info.st_mtime
         ended.append((when, sid, title, clean_exit, item.path))
+
+    # #2633: a session whose registry entry died long before this one started (a
+    # container restart after an idle night) - not caught above, which only looks back
+    # RECENT_S seconds. alive() already proved its process gone, with no time limit;
+    # what is still needed is a transcript to tell a human panel from anything else,
+    # and the once-only announce gate so the stale entry (never cleaned up) is not
+    # re-announced at every start for as long as it sits in the registry.
+    ended_sids = {sid for _, sid, _, _, _ in ended}
+    stale = []
+    for sid in dead_sids:
+        if sid in ended_sids:
+            continue  # already reported above; no duplicate line for the same session
+        path = os.path.join(directory, sid + ".jsonl")
+        try:
+            info = os.stat(path)
+        except OSError:
+            continue  # no transcript on disk: nothing to read "human panel" from
+        if not stat.S_ISREG(info.st_mode):
+            continue
+        prompt_seen, origin_seen, panel = head_facts(path)
+        prompts_seen += prompt_seen
+        origins_seen += origin_seen
+        if not panel:
+            continue
+        stale.append((sid, path, info))
+    if stale:
+        known_sids = {e.get("sessionId") for e in entries if isinstance(e.get("sessionId"), str)}
+        to_announce = decide_announcements([sid for sid, _, _ in stale], known_sids, now)
+        for sid, path, info in stale:
+            if sid not in to_announce:
+                continue
+            clean_exit, ended_at, title = tail_facts(path, info.st_size)
+            when = ended_at if ended_at is not None and info.st_mtime - 3600 <= ended_at <= now + 60 else info.st_mtime
+            ended.append((when, sid, title, clean_exit, path))
     ended.sort()
 
     out = []
