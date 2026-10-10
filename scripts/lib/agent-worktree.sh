@@ -202,12 +202,22 @@ _agent_worktree_export_pins() {
 # agent_worktree_trusted <program> [arguments]: run a program from the launcher's own
 # tree in the worktree. The program must be named by an absolute path, which is how a
 # launcher names its own files; a bare name would be looked up, and a relative one would
-# be the worktree's. Any git it calls uses the pinned git directory and the launcher's
-# hooks.
+# be the worktree's. It must also not BE in the worktree: an absolute path to a file
+# there names the agent's file just as a relative one does, and it would be run holding
+# everything the launcher holds. Where the program is decides, with links and `..`
+# resolved, and not how its path is spelled; a place that cannot be established is
+# refused too. Any git it calls uses the pinned git directory and the launcher's hooks.
 agent_worktree_trusted() {
   _agent_worktree_pinned || return 1
   if [[ "${1-}" != /* ]]; then
     echo "agent-worktree: '${1-}' is not an absolute path, so it was not run in the worktree as a trusted program." >&2
+    return 1
+  fi
+  local program_dir worktree_dir
+  program_dir="$(cd "$(dirname "$1")" 2>/dev/null && pwd -P)" || program_dir=""
+  worktree_dir="$(cd "$AGENT_WORKTREE" 2>/dev/null && pwd -P)" || worktree_dir=""
+  if [[ -z "$program_dir" || -z "$worktree_dir" || "${program_dir}/" == "${worktree_dir}/"* ]]; then
+    echo "agent-worktree: '${1}' is inside the agent's worktree, or where it is could not be established, so it was not run as a trusted program." >&2
     return 1
   fi
   ( _agent_worktree_export_pins && cd "$AGENT_WORKTREE" && "$@" )

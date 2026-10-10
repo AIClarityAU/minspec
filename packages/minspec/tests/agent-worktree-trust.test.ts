@@ -462,6 +462,45 @@ describe('lib/agent-worktree.sh', () => {
     }
   });
 
+  it('agent_worktree_trusted refuses a program that is inside the worktree, however the path to it is written', () => {
+    // An absolute path is how a launcher names its own files. An absolute path to a file
+    // in the worktree names the AGENT's file, and it would be run holding everything the
+    // launcher holds. So where the program is decides, not how its path is spelled.
+    const planted = path.join(worktree, 'scripts', 'review-branch.sh');
+    const ran = path.join(dir, 'planted-ran');
+    const alias = path.join(dir, 'alias-of-wt');
+    const own = path.join(dir, 'launcher-own.sh');
+    fs.mkdirSync(path.dirname(planted), { recursive: true });
+    fs.writeFileSync(planted, `#!/usr/bin/env bash\necho ran > '${ran}'\n`, { mode: 0o755 });
+    fs.symlinkSync(worktree, alias);
+    try {
+      for (const program of [
+        planted,
+        path.join(fs.realpathSync(worktree), 'scripts', 'review-branch.sh'),
+        `${worktree}/scripts/../scripts/review-branch.sh`,
+        `${repo}/../wt/scripts/review-branch.sh`,
+        `${worktree}//scripts/review-branch.sh`,
+        // Through a link to the worktree that sits outside it.
+        path.join(alias, 'scripts', 'review-branch.sh'),
+        // Where the program is cannot be established, so it is not run either.
+        path.join(dir, 'no-such-directory', 'review-branch.sh'),
+      ]) {
+        const r = sh(`agent_worktree_trusted ${JSON.stringify(program)} x; echo "rc=$?"`, worktree);
+        expect(r.stdout, program).toBe('rc=1\n');
+        expect(r.stderr, program).toMatch(/so it was not run as a trusted program/);
+        expect(fs.existsSync(ran), program).toBe(false);
+      }
+      // Control: the very same file, from a place outside the worktree, is run.
+      fs.copyFileSync(planted, own);
+      fs.chmodSync(own, 0o755);
+      const ok = sh(`agent_worktree_trusted ${JSON.stringify(own)} x; echo "rc=$?"`, worktree);
+      expect(ok.stdout, ok.stderr).toBe('rc=0\n');
+      expect(fs.existsSync(ran)).toBe(true);
+    } finally {
+      for (const p of [path.join(worktree, 'scripts'), alias, ran, own]) fs.rmSync(p, { recursive: true, force: true });
+    }
+  });
+
   it('agent_worktree_trusted runs its program in the worktree with git pointed at the pinned directory and the launcher\'s hooks', () => {
     const r = sh(
       'agent_worktree_trusted /usr/bin/env bash -c \'echo "$PWD|$GIT_DIR|$GIT_WORK_TREE|$(git rev-parse --abbrev-ref HEAD)|$(git config core.hooksPath)"\'',
