@@ -165,13 +165,6 @@ describe('every drain test file runs with the leak primed, or says why not', () 
    * no issue is permanent and says what makes it safe.
    */
   const EXEMPT: Record<string, string> = {
-    'drain-concurrency.test.ts':
-      '#2583: waits for #2296, which is editing its real-cycle harness. Scrubbing first would remove the only outside guard on the live run dir.',
-    'drain-cycle-all-failed.test.ts':
-      '#2583: the same real-cycle harness shape; safe to scrub once #2296 makes an empty run dir mean "none".',
-    'drain-argparse.test.ts':
-      '#2583 and #2012: its one launching test needs its own lock, log, run dir and quota file first.',
-    'drain-selfheal.test.ts': '#2583: waits for #2296, which is adding a test to it.',
     'drain-continuous.test.ts':
       'Pure seams only (--is-quota, --session-alive, --should-continue, --resolve-session-pid). None reads a drain or quota knob.',
     'drain-reconcile.test.ts':
