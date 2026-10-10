@@ -373,6 +373,10 @@ describe('commands', () => {
       vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce(
         'Use PostgreSQL for persistence',
       );
+      // ADR filter gate (#296): "No — create the DR" proceeds.
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(
+        'No — create the DR' as never,
+      );
       vi.mocked(createAdr).mockReturnValueOnce({
         id: 'DR-001',
         title: 'Use PostgreSQL for persistence',
@@ -419,6 +423,10 @@ describe('commands', () => {
       ]);
       vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(
         'Create anyway' as never,
+      );
+      // ADR filter gate (#296): second showWarningMessage call, after dedup.
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(
+        'No — create the DR' as never,
       );
       vi.mocked(createAdr).mockReturnValueOnce({
         id: 'DR-002',
@@ -504,6 +512,9 @@ describe('commands', () => {
         ),
       } as unknown as vscode.WorkspaceConfiguration);
       vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce('My ADR');
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(
+        'No — create the DR' as never,
+      );
       vi.mocked(createAdr).mockReturnValueOnce({
         id: 'DR-002',
         title: 'My ADR',
@@ -525,6 +536,9 @@ describe('commands', () => {
       vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce(
         'Broken ADR',
       );
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(
+        'No — create the DR' as never,
+      );
       vi.mocked(createAdr).mockImplementationOnce(() => {
         throw new Error('disk full');
       });
@@ -540,6 +554,9 @@ describe('commands', () => {
       vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce(
         'Broken ADR',
       );
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(
+        'No — create the DR' as never,
+      );
       vi.mocked(createAdr).mockImplementationOnce(() => {
         throw 'string error'; // eslint-disable-line no-throw-literal
       });
@@ -549,6 +566,55 @@ describe('commands', () => {
       expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
         'MinSpec: Failed to create ADR — string error',
       );
+    });
+  });
+
+  // ─── createAdrCommand — ADR filter gate (#296) ────────────────────────────
+
+  describe('createAdrCommand() — ADR filter gate', () => {
+    it('shows the "undo it in <1 day?" prompt after the dedup gate passes', async () => {
+      vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce('My ADR');
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(
+        'No — create the DR' as never,
+      );
+      vi.mocked(createAdr).mockReturnValueOnce({
+        id: 'DR-002',
+        title: 'My ADR',
+        status: 'proposed',
+        date: '2026-05-27',
+        filePath: '/tmp/test-workspace/docs/decisions/DR-002.md',
+      });
+
+      await createAdrCommand();
+
+      expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+        "MinSpec: Can this decision be undone in under a day? If yes, you probably don't need a DR — just do it.",
+        'Yes — skip, no DR needed',
+        'No — create the DR',
+      );
+      expect(createAdr).toHaveBeenCalled();
+    });
+
+    it('"Yes — skip, no DR needed" abandons creation (no file written)', async () => {
+      vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce('My ADR');
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(
+        'Yes — skip, no DR needed' as never,
+      );
+
+      await createAdrCommand();
+
+      expect(createAdr).not.toHaveBeenCalled();
+    });
+
+    it('dismissing the prompt (Cancel) also abandons creation', async () => {
+      vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce('My ADR');
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(
+        undefined as never,
+      );
+
+      await createAdrCommand();
+
+      expect(createAdr).not.toHaveBeenCalled();
     });
   });
 
