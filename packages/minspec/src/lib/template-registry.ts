@@ -550,7 +550,7 @@ is used only if it can run and falls through otherwise, so a missing runtime deg
 check instead of bricking the commit. Know the limit of the lower tiers: the \`python3\` and
 shell tiers match paths under \`specs/\` literally, so if \`{{specsDir}}/\` differs from that,
 only the Node tier sees your specs and a clean commit is not evidence the frontmatter is
-valid.
+valid (#2684).
 
 ### Decision frontmatter
 
@@ -566,7 +566,7 @@ another DR resolves against an id that was never there to begin with.
 Enforced by the same shell case inside the pre-commit hook's SDD-validation stage that checks
 spec frontmatter, and by \`validate.py\`'s \`DR_ID_RE\` tier. The path is matched literally
 against \`docs/decisions/\`, so a project that has relocated \`{{decisionsDir}}/\` is not covered
-by the lower tiers — the same known limit the spec-frontmatter gate carries.
+by the lower tiers — the same known limit the spec-frontmatter gate carries (#2684).
 
 ### Deferred-work gate
 
@@ -1563,7 +1563,7 @@ minspec_shell_gate() {
         # The path is literal, matching the \\\`specs/\\\` case above — this hook is a
         # managed region rendered without template context, so a project that has
         # relocated its decisions directory is not covered. That is a known limit
-        # of both gates, not a new one.
+        # of both gates, not a new one (#2684).
         case "$(basename -- "$f")" in
           INDEX.md|README.md) ;;
           *)

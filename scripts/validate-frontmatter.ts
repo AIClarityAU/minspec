@@ -957,6 +957,82 @@ try {
   // Template rendering / harness files unreadable — nothing to check, stay silent.
 }
 
+// Rule 24 (FATAL, #2684): a known limit admitted in shipped product source or
+// template text must cite a tracked issue. The commit-message follow-up gate
+// (COMMIT_MSG_HOOK, template-registry.ts) already requires a tracked ref when a
+// commit MESSAGE defers work in prose (DR-023/DR-059) — but nothing applied that
+// same rule to a limit recorded in a comment or in text this repo SHIPS. Found
+// twice in August with no issue anywhere nearby: "Know the limit of the lower
+// tiers" (template-registry.ts, the shipped CLAUDE.md template) and "That is a
+// known limit of both gates" (template-registry.ts, the shipped pre-commit-hook
+// template). A prose-only admission is exactly the leak the deferred-work gate
+// already closes on commit messages — just on a different artifact class.
+//
+// Text match, deliberately approximate (constitution invariant 2: a noisy gate
+// beats a silent one). Scoped to \`packages/*/src/\` — shipped product source —
+// and never \`tests/\`, so a test documenting a deliberate test-only limitation
+// (dr-amendments.test.ts already does this correctly, citing \`#1448\`) is not
+// swept in.
+//
+// "Nearby" is the surrounding PARAGRAPH, not the whole file: the contiguous run
+// of lines sharing the matched line's comment leader (\`*\`, \`#\`, \`//\`, or none
+// for plain template prose), bounded by a blank(-ish) line or a change of
+// leader. A fixed-line-count window would have let an unrelated \`#NNN\` elsewhere
+// in the same function silently satisfy the gate — the hook-template instance
+// above sits six lines from an \`#1908\` that cites a different claim entirely;
+// a paragraph-scoped window still correctly flags it.
+const KNOWN_LIMIT_PATTERN = /\bknow(?:n)?\s+(?:the\s+)?limit/i;
+const ISSUE_REF_PATTERN = /#\d+/;
+const COMMENT_LEADER_PATTERN = /^\s*(\/\*\*|\*\/|\*|\/\/|#)/;
+
+function commentLeader(line: string): string | null {
+  const m = line.match(COMMENT_LEADER_PATTERN);
+  return m ? m[1] : null;
+}
+
+function isKnownLimitParagraphBoundary(line: string, anchorLeader: string | null): boolean {
+  const stripped = line.replace(COMMENT_LEADER_PATTERN, '').trim();
+  if (stripped === '') return true;
+  return anchorLeader !== null && commentLeader(line) !== anchorLeader;
+}
+
+try {
+  let limitFilesScanned = 0;
+  for (const file of safeGlob(join(ROOT, 'packages'), '.ts')) {
+    const rel = relative(ROOT, file).split(sep).join('/');
+    if (!rel.includes('/src/')) continue; // shipped product source only — never tests/
+    limitFilesScanned++;
+
+    const lines = readFileSync(file, 'utf-8').split('\n');
+    lines.forEach((line, i) => {
+      if (!KNOWN_LIMIT_PATTERN.test(line)) return;
+
+      const anchorLeader = commentLeader(line);
+      let start = i;
+      while (start > 0 && !isKnownLimitParagraphBoundary(lines[start - 1], anchorLeader)) start--;
+      let end = i;
+      while (end < lines.length - 1 && !isKnownLimitParagraphBoundary(lines[end + 1], anchorLeader)) end++;
+
+      const paragraph = lines.slice(start, end + 1).join('\n');
+      if (!ISSUE_REF_PATTERN.test(paragraph)) {
+        fail(
+          file,
+          `line ${i + 1}: admits a known limit with no tracked issue nearby — "${line.trim()}". ` +
+            'Cite the issue that tracks it (e.g. "(#NNN)") in the same paragraph (#2684).',
+        );
+      }
+    });
+  }
+  if (limitFilesScanned === 0) {
+    warn('Rule 24 scanned 0 files under packages/*/src/; do not read the green as verified.');
+  }
+} catch (err) {
+  warn(
+    `known-limit check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
+      'Rule 24 validated NOTHING this run; do not read the green as clean.',
+  );
+}
+
 checkCiReviewTemplatesFresh().then(() => {
   if (warnings > 0) {
     console.warn(`\n${warnings} non-fatal warning(s).`);
