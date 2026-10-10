@@ -544,28 +544,90 @@ function startsThroughHelper(text: string, index: number): boolean {
 const VERIFIER = 'verify-sealed-claude-start.ts';
 
 /**
- * Lines that name the CLI and do not start it. Each is matched by the file and a piece of
- * the line, and says why it is not a start. A line that names the CLI and is neither a
- * start through the helper nor on this list fails the gate, so this list is where a human
- * decides, in review, that a new mention is harmless.
+ * Lines that name the CLI and do not start it. Each is matched by the file and the WHOLE
+ * line, trimmed, and says why it is not a start. A line that names the CLI and is neither
+ * a start through the helper nor on this list fails the gate, so this list is where a
+ * human decides, in review, that a new mention is harmless.
+ *
+ * THE WHOLE LINE, AND NOT A PIECE OF IT (#2689). An entry used to be a piece of its line,
+ * and a line that held the piece was explained, all of it. So a start of the CLI written
+ * onto an explained line was explained with it and the gate stayed green. Matched whole,
+ * nothing can be added to an explained line and leave it explained. The price is that an
+ * edit to one of these lines, however small, is an edit here as well; that is the line
+ * being read again by a person, which is what the list is for.
+ *
+ * For a shell command continued over several lines, the line is the joined one, as
+ * `codeLines` makes it. A character outside plain ASCII is written as its escape.
  *
  * A line that DOES start the CLI never belongs here, whatever the reason for it. "Starts
  * nothing" would be false of it, and a false reason is worse than a failing gate.
  */
-const NOT_A_START: { file: string; has: string; why: string }[] = [
-  { file: 'retriage-unrecorded.sh', has: 'command -v claude >/dev/null', why: 'asks whether the CLI is installed; starts nothing' },
-  { file: 'drain-inbox.sh', has: '"$comm" == *claude*', why: 'matches the name of an already-running process to find its own session' },
-  { file: 'tooling-radar/parse-scan.mjs', has: 'claude output was not JSON', why: 'an error message' },
-  { file: 'tooling-radar/parse-scan.mjs', has: 'claude reported an error', why: 'an error message' },
-  { file: 'tooling-radar/parse-scan.mjs', has: 'claude output had no string', why: 'an error message' },
-  { file: 'hooks/session-panel.py', has: 'A print-mode run (`claude -p <prompt>`)', why: 'a docstring' },
-  { file: 'hooks/session-panel.py', has: 'a checkout under a folder called "claude-code"', why: 'a docstring' },
-  { file: 'hooks/session-panel.py', has: 'f.read().strip() == "claude"', why: 'reads the name of an already-running process' },
-  { file: 'hooks/session-panel.py', has: 'os.path.basename(program) == "claude"', why: 'compares the path of an already-running process' },
-  { file: 'hooks/session-panel.py', has: 'Resume it in a terminal: claude --resume', why: 'text shown to a person' },
-  { file: VERIFIER, has: 'details.push(`claude exited non-zero: ', why: 'a line of the report it prints' },
-  { file: VERIFIER, has: "console.error('FAIL: `claude` is not on PATH", why: 'an error message' },
-  { file: VERIFIER, has: 'the sealed claude start holds against the installed Claude Code.', why: 'the last line of the report it prints' },
+const NOT_A_START: { file: string; is: string; why: string }[] = [
+  {
+    file: 'retriage-unrecorded.sh',
+    is: 'command -v claude >/dev/null 2>&1 || { echo "ERROR: the agent CLI is not on PATH \u2014 triage cannot run." >&2; exit 1; }',
+    why: 'asks whether the CLI is installed; starts nothing',
+  },
+  {
+    file: 'drain-inbox.sh',
+    is: 'if [[ "$comm" == *claude* || "$args" == *claude-code* || "$args" == *anthropic.claude*  || "$args" == *"/claude/versions/"* || "$exe" == *"/claude/versions/"* ]]; then',
+    why: 'matches the name of an already-running process to find its own session',
+  },
+  {
+    file: 'tooling-radar/parse-scan.mjs',
+    is: 'throw new Error(`claude output was not JSON (${error.message}); raw transcript kept`);',
+    why: 'an error message',
+  },
+  {
+    file: 'tooling-radar/parse-scan.mjs',
+    is: "throw new Error(`claude reported an error: ${parsed.result || '(no detail)'}`);",
+    why: 'an error message',
+  },
+  {
+    file: 'tooling-radar/parse-scan.mjs',
+    is: "if (!text) throw new Error('claude output had no string `result` field');",
+    why: 'an error message',
+  },
+  {
+    file: 'hooks/session-panel.py',
+    is: 'That is what an editor panel launches. A print-mode run (`claude -p <prompt>`)',
+    why: 'a docstring',
+  },
+  {
+    file: 'hooks/session-panel.py',
+    is: 'in its arguments, and a checkout under a folder called "claude-code" would then',
+    why: 'a docstring',
+  },
+  {
+    file: 'hooks/session-panel.py',
+    is: 'if f.read().strip() == "claude":',
+    why: 'reads the name of an already-running process',
+  },
+  {
+    file: 'hooks/session-panel.py',
+    is: 'if "/claude/versions/" in program or "@anthropic-ai/claude-code/" in program or os.path.basename(program) == "claude":',
+    why: 'compares the path of an already-running process',
+  },
+  {
+    file: 'hooks/session-panel.py',
+    is: 'out.append("      Resume it in a terminal: claude --resume %s" % sid)',
+    why: 'text shown to a person',
+  },
+  {
+    file: VERIFIER,
+    is: 'details.push(`claude exited non-zero: ${String((err as Error).message)}`);',
+    why: 'a line of the report it prints',
+  },
+  {
+    file: VERIFIER,
+    is: "console.error('FAIL: `claude` is not on PATH (or did not answer --version). Nothing was run.');",
+    why: 'an error message',
+  },
+  {
+    file: VERIFIER,
+    is: "console.log(allPass ? 'PASS \u2014 the sealed claude start holds against the installed Claude Code.' : 'FAIL \u2014 see above.');",
+    why: 'the last line of the report it prints',
+  },
 ];
 
 interface SealedStart {
@@ -685,14 +747,15 @@ function classify(
       starts.push(l);
       continue;
     }
-    // A listed start is its WHOLE line, in its own file. Nothing can be added to the
-    // line and still be it, and the same line in any other file is not it.
-    const seal = SEALED_START_UNDER_VERIFICATION.findIndex((e) => e.file === file && l.text.trim() === e.is);
+    // Both lists match the WHOLE line, in its own file. Nothing can be added to a line
+    // and leave it listed, and the same line in any other file is not listed (#2689).
+    const whole = l.text.trim();
+    const seal = SEALED_START_UNDER_VERIFICATION.findIndex((e) => e.file === file && whole === e.is);
     if (seal >= 0) {
       sealed.push({ entry: seal, line: l });
       continue;
     }
-    const entry = NOT_A_START.findIndex((e) => e.file === file && l.text.includes(e.has));
+    const entry = NOT_A_START.findIndex((e) => e.file === file && whole === e.is);
     if (entry >= 0) explained.add(entry);
     else unexplained.push({ where: `scripts/${file}:${l.line}`, text: l.text.trim().slice(0, 160) });
   }
@@ -759,8 +822,8 @@ describe('T0: no start of the CLI anywhere under scripts/ goes round the allowli
       unexplained.length > 0
         ? 'These lines name the CLI and do not start it through scripts/lib/agent-context.sh. An agent started ' +
           'any other way inherits its launcher\'s whole environment, the GitHub token included (#1203). Start it as ' +
-          '`bash "$AGENT_LAUNCH_ENV" claude ...`; or, if the line starts nothing, add it to NOT_A_START in this file ' +
-          'with the reason. A line that does start it is never a NOT_A_START entry: read SEALED_START_UNDER_VERIFICATION ' +
+          '`bash "$AGENT_LAUNCH_ENV" claude ...`; or, if the line starts nothing, add its whole line to NOT_A_START in this ' +
+          'file with the reason. A line that does start it is never a NOT_A_START entry: read SEALED_START_UNDER_VERIFICATION ' +
           `for the one case accepted, and what had to be shown for it.\n${unexplained.map((u) => `  ${u.where}: ${u.text}`).join('\n')}`
         : 'every mention accounted for',
     ).toEqual([]);
@@ -768,8 +831,30 @@ describe('T0: no start of the CLI anywhere under scripts/ goes round the allowli
 
   it('every explained non-start still exists (the list does not outlive what it explains)', () => {
     const live = new Set(all.flatMap((f) => [...f.explained]));
-    const stale = NOT_A_START.filter((_, i) => !live.has(i)).map((e) => `${e.file}: ${e.has}`);
+    const stale = NOT_A_START.filter((_, i) => !live.has(i)).map((e) => `${e.file}: ${e.is}`);
     expect(stale).toEqual([]);
+  });
+
+  it('an explained line is explained only as the whole of it: a start written onto one is seen (#2689)', () => {
+    const verdict = (file: string, line: string) => {
+      const c = classify(file, `${line}\n`);
+      return c.unexplained.length > 0 ? 'unexplained' : c.explained.size > 0 ? 'explained' : c.starts.length > 0 ? 'start' : 'no mention';
+    };
+    for (const e of NOT_A_START) {
+      expect(verdict(e.file, e.is), e.is).toBe('explained');
+      expect(verdict(e.file, `  ${e.is}  `), 'indented, as it stands in the file').toBe('explained');
+      // The same words in any other file explain nothing there.
+      expect(verdict('some-new-launcher.sh', e.is), e.is).toBe('unexplained');
+      // A start after it, or in front of it, on the same line.
+      expect(verdict(e.file, `${e.is} && claude -p "$x"`), e.is).toBe('unexplained');
+      expect(verdict(e.file, `claude -p "$x"; ${e.is}`), e.is).toBe('unexplained');
+      // And a piece of it is not it: the entry is the line, not something the line holds.
+      expect(verdict(e.file, e.is.slice(0, -1)), e.is).toBe('unexplained');
+    }
+    // The two lines this was found with, as they were written. Each holds, whole, the
+    // piece that used to explain it, and each stayed green.
+    expect(verdict(VERIFIER, "details.push(`claude exited non-zero: ${execFileSync('claude', ['-p', 'x'])}`);")).toBe('unexplained');
+    expect(verdict('drain-inbox.sh', 'if [[ "$comm" == *claude* ]] && claude -p "$x"; then')).toBe('unexplained');
   });
 
   // ── The two starts that do not go through the helper ───────────────────────
