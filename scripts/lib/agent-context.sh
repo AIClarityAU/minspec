@@ -124,13 +124,18 @@ fi
 #   bash "$AGENT_LAUNCH_ENV" --names
 #       The list, one name per line.
 #
-# EVERY start of the CLI under scripts/ is written that way, the `--help` probes included:
+# EVERY LAUNCHER under scripts/ starts the CLI that way, the `--help` probes included:
 #
 #     bash "$AGENT_LAUNCH_ENV" claude -p "$PROMPT" ...
 #
-# packages/minspec/tests/agent-launch-sites.test.ts reads every file under scripts/ and
-# fails on a start of the CLI that does not go through here, so a new launcher cannot
-# quietly go back to inheriting.
+# In MinSpec's own repository, packages/minspec/tests/agent-launch-sites.test.ts reads
+# every file under scripts/ and fails on a start of the CLI that does not go through
+# here, so a new launcher cannot quietly go back to inheriting. It lets two starts by,
+# and only those two. Both are in scripts/verify-sealed-claude-start.ts, which a person
+# runs by hand to re-check the extension's own start of the CLI, and which therefore
+# starts it the way the extension does: with the whole environment of whoever runs it,
+# and with no tool and no MCP server. The test lists the two, says why, and holds each to
+# what it says. That file is not a launcher, and it is not shipped beside this one.
 #
 # ONE FILE, ON PURPOSE. The program could have been a file of its own. It is here because
 # every launcher already sources this one, unguarded, so a launcher that can launch at all

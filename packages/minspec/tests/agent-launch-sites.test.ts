@@ -966,11 +966,23 @@ describe('T0: no start of the CLI anywhere under scripts/ goes round the allowli
   });
 
   it('nothing in the repository runs the verifier: no workflow, git hook, package script or other script names it', () => {
-    const names = (text: string) => text.includes(path.basename(VERIFIER, '.ts'));
-    // The predicate sees a name however the file is reached.
-    expect(names('run: npx tsx scripts/verify-sealed-claude-start.ts --model haiku')).toBe(true);
-    expect(names('"verify:sealed": "tsx ./scripts/verify-sealed-claude-start"')).toBe(true);
-    expect(names('npm run validate && scripts/verify-epic-backfill.sh')).toBe(false);
+    // What a machine would act on is code. A comment that names the file tells it nothing
+    // (scripts/lib/agent-context.sh says, in a comment, why this file is the exception),
+    // so whole-line comments are dropped here, as they are for every other reading above.
+    const names = (file: string, text: string) =>
+      codeLines(text, file)
+        .map((l) => l.text)
+        .join('\n')
+        .includes(path.basename(VERIFIER, '.ts'));
+    // The predicate sees a name however the file is reached, in whatever kind of file.
+    expect(names('.github/workflows/x.yml', '      - run: npx tsx scripts/verify-sealed-claude-start.ts --model haiku\n')).toBe(true);
+    expect(names('package.json', '    "verify:sealed": "tsx ./scripts/verify-sealed-claude-start"\n')).toBe(true);
+    expect(names('scripts/x.sh', 'timeout 600 \\\n  npx tsx "${SCRIPT_DIR}/verify-sealed-claude-start.ts"\n')).toBe(true);
+    expect(names('scripts/x.sh', 'echo ok # then scripts/verify-sealed-claude-start.ts\n')).toBe(true);
+    // And not a comment, nor a file with a name like it.
+    expect(names('scripts/lib/x.sh', '# see scripts/verify-sealed-claude-start.ts\n')).toBe(false);
+    expect(names('.github/workflows/x.yml', '      # scripts/verify-sealed-claude-start.ts is run by hand\n')).toBe(false);
+    expect(names('package.json', '    "validate": "npm run validate && scripts/verify-epic-backfill.sh"\n')).toBe(false);
 
     // Where a machine is told what to run. A document that tells a PERSON to run it is
     // not one of them, so documents are left out here as they are under scripts/.
@@ -987,7 +999,10 @@ describe('T0: no start of the CLI anywhere under scripts/ goes round the allowli
       expect.arrayContaining(['.github/workflows/ci.yml', '.githooks/pre-commit', 'package.json', 'packages/minspec/package.json', 'scripts/drain-inbox.sh']),
     );
     expect(relative).not.toContain(`scripts/${VERIFIER}`);
-    expect(places.filter((p) => names(fs.readFileSync(p, 'utf-8'))).map((p) => path.relative(ROOT, p))).toEqual([]);
+    expect(places.filter((p) => names(path.relative(ROOT, p), fs.readFileSync(p, 'utf-8'))).map((p) => path.relative(ROOT, p))).toEqual([]);
+    // The one comment that does name it is where it is said to be, so the rule above is
+    // not passing only because nothing names the file at all.
+    expect(fs.readFileSync(path.join(SCRIPTS, 'lib', 'agent-context.sh'), 'utf-8')).toContain(`scripts/${VERIFIER}`);
   });
 
   it('the starts are the ones this file tests, file by file', () => {
