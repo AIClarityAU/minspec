@@ -99,6 +99,7 @@ ISSUE_STATE="$(printf '%s' "$ISSUE_JSON" | jq -r '.state')"
 ISSUE_TITLE="$(printf '%s' "$ISSUE_JSON" | jq -r '.title')"
 # Composed EXACTLY as triage-inbox.sh composes it, so both sides hash identical bytes.
 ISSUE_BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '"# " + .title + "\n\n" + .body')"
+CURRENT_LABELS="$(printf '%s' "$ISSUE_JSON" | jq -r '.labels[].name')"
 
 if [[ "$ISSUE_STATE" != "OPEN" ]]; then
   echo "ERROR: #${ISSUE} is ${ISSUE_STATE}, not OPEN — nothing to approve." >&2
@@ -173,6 +174,19 @@ if "$READY_CHECK" --is-bot-identity "$APPROVER"; then
   exit 1
 fi
 
+# ── #2644: surface a prior agent attempt BEFORE the typed confirmation ───────
+# `agent-done` and `agent-escalated` are the dispatcher's own record of a run that
+# already happened — a finished build or a crash a human was meant to look at. This
+# approval is about to clear both (see the --remove-label block below), so a human
+# must see that it is re-authorising a repeat, not just rubber-stamping a fresh issue.
+PRIOR_ATTEMPT=""
+if grep -qx "agent-done" <<<"$CURRENT_LABELS"; then
+  PRIOR_ATTEMPT="agent-done"
+fi
+if grep -qx "agent-escalated" <<<"$CURRENT_LABELS"; then
+  PRIOR_ATTEMPT="${PRIOR_ATTEMPT:+${PRIOR_ATTEMPT}, }agent-escalated"
+fi
+
 # ── Control 2: show the consequence, then require the number typed back ──────
 cat <<EOF
 
@@ -181,6 +195,16 @@ cat <<EOF
   Approver ${APPROVER}
   Effect   an agent will build this and open a PR. That PR still needs your merge
            keystroke — approval moves the gate, it does not remove it.
+EOF
+if [[ -n "$PRIOR_ATTEMPT" ]]; then
+  cat <<EOF
+  Note     #${ISSUE} already carries ${PRIOR_ATTEMPT} from an earlier agent run. This
+           approval CLEARS it along with the triage holds (#2644) — you are
+           re-authorising a build after that run finished or was escalated, not
+           erasing the history of it (the comment thread above still records it).
+EOF
+fi
+cat <<EOF
 
 EOF
 read -r -p "  Type ${ISSUE} to approve, anything else to abort: " CONFIRM
@@ -198,33 +222,51 @@ fi
 
 [[ -n "$REASON" ]] || REASON="(no reason given)"
 
+# #2644: say it in the record, not just at the terminal prompt — the comment is what
+# the issue (and the next reader of it) carries forward, the terminal prompt is not.
+PRIOR_NOTE=""
+if [[ -n "$PRIOR_ATTEMPT" ]]; then
+  PRIOR_NOTE=" This also clears \`${PRIOR_ATTEMPT}\`: that recorded an earlier agent run which already finished or was escalated, and this approval re-authorises a build rather than erasing that history — the comment thread above still shows it."
+fi
+
 # RECORD FIRST, labels second — so `agent-ready` never exists, even momentarily,
 # without the approval that authorises it.
 gh issue comment "$ISSUE" --repo "$REPO" --body "$(printf \
-  '## ✅ Approved for dispatch by a human\n\n**%s** reviewed this issue and lifted the `hold:%s` triage hold.\n\n> %s\n\n%s\n\nThis is a human approval recorded THROUGH the dispatch gate, not a label flipped around it (#1084): the block above is the machine-readable record `dispatch-ready-check.sh` requires, and it is keyed to the issue body as approved — **edit the issue and this approval goes stale**, exactly like a triage verdict. `hold:human`, `hold:info` and `hold:unknown` are never liftable this way (DR-072 §3).\n\nThe resulting PR still requires a human merge keystroke.' \
-  "$APPROVER" "$V_HOLD" "$REASON" "$APPROVAL")" >/dev/null
+  '## ✅ Approved for dispatch by a human\n\n**%s** reviewed this issue and lifted the `hold:%s` triage hold.\n\n> %s\n\n%s\n\nThis is a human approval recorded THROUGH the dispatch gate, not a label flipped around it (#1084): the block above is the machine-readable record `dispatch-ready-check.sh` requires, and it is keyed to the issue body as approved — **edit the issue and this approval goes stale**, exactly like a triage verdict. `hold:human`, `hold:info` and `hold:unknown` are never liftable this way (DR-072 §3).%s\n\nThe resulting PR still requires a human merge keystroke.' \
+  "$APPROVER" "$V_HOLD" "$REASON" "$APPROVAL" "$PRIOR_NOTE")" >/dev/null
 
 gh issue edit "$ISSUE" --repo "$REPO" --add-label "agent-ready" >/dev/null
 
 # Clear the labels this approval supersedes. Load-bearing: these are COUNTERMANDING
 # labels at dispatch (dispatch-ready-check.sh's `countermanded` arm), so leaving any
-# of them in place would let a valid approval be vetoed forever. Best-effort but LOUD,
-# never silent (DR-066) — and a failure here HOLDS the issue, it never releases it.
+# of them in place would let a valid approval be vetoed forever — silently, since a
+# countermanded `agent-ready` refuses with no label and no comment (#2644). Best-effort
+# but LOUD, never silent (DR-066) — and a failure here HOLDS the issue, it never
+# releases it.
 #
-# The set is kept BYTE-ALIGNED with that arm's list, `needs-info` included. A
-# hold:tier issue should never carry `needs-info` — but "should never" is exactly the
-# assumption #983 was built on: labels and records CAN disagree, and a stale
-# `needs-info` on an issue whose fresh verdict says `tier` would silently veto a valid
-# approval. Aligning the lists costs nothing and removes the divergence.
-# `agent-quarantined` is deliberately NOT cleared: that is a security quarantine from
-# the egress guard, and only a human retires it explicitly.
+# `agent-done` and `agent-escalated` are included as of #2644: both are written by the
+# dispatcher about a PRIOR run, and escalation means "a human must look" — this script
+# running IS that human having looked, so clearing them here is the human's call, not
+# a bypass of it. The terminal prompt and the approval comment above both say so when
+# either was present, so the clear is never silent about what it is clearing.
+#
+# `agent-quarantined` is the one deliberate exception, left out on purpose: it is a
+# security quarantine from the egress guard, and only a human retires it explicitly,
+# never as a side effect of approving unrelated work.
+#
+# This set is held aligned with the gate's `countermanded` arm
+# (`dispatch-ready-check.sh`'s `for gate in ...` list) by
+# `approve-issue-countermanding-labels.test.ts`, which extracts both lists from source
+# and fails if they diverge by anything other than the named exception above — a
+# comment claiming alignment is not a check (#2644).
+CLEAR_LABELS="needs-review,needs-info,needs-human-review,inbox,agent-done,agent-escalated"
 if ! gh issue edit "$ISSUE" --repo "$REPO" \
-     --remove-label "needs-review,needs-info,needs-human-review,inbox" >/dev/null 2>&1; then
+     --remove-label "$CLEAR_LABELS" >/dev/null 2>&1; then
   # `gh` fails the whole request if ANY named label is absent from the repo, which
   # would leave every one of them in place. Retry singly so one unknown name cannot
   # veto the rest.
   failed=""
-  for one in needs-review needs-info needs-human-review inbox; do
+  for one in needs-review needs-info needs-human-review inbox agent-done agent-escalated; do
     gh issue edit "$ISSUE" --repo "$REPO" --remove-label "$one" >/dev/null 2>&1 || failed+="${one} "
   done
   if [[ -n "$failed" ]]; then
