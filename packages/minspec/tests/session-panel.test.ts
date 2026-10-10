@@ -810,8 +810,9 @@ suite('a session killed long before this one started is told about once, not for
   // because /proc has no such process), so this path is keyed on the registry, not on
   // transcript age, and gated by a small state file instead of a time window.
   const stateFile = (): string => path.join(home, '.cache', 'session-panel', 'announced.json');
+  let me: Fake;
   beforeEach(async () => {
-    await registerMe();
+    me = await registerMe();
   });
 
   it('names it even though its last write was a day ago, far past the 10-minute look-back', () => {
@@ -895,6 +896,25 @@ suite('a session killed long before this one started is told about once, not for
     register({ pid: 4_100_008, procStart: '987661', sessionId: OTHER, cwd: '/home/somebody/code/elsewhere' });
     transcript(OTHER, [humanPrompt(OTHER), title(OTHER, 'a session in another project')], 24 * 3600);
     expect(unit('start', startInput()).out).toBe('');
+  });
+
+  it('says nothing about a dead entry when the registry does not provably work (second review)', () => {
+    // alive() reads False whenever proc_stat() cannot read /proc for that pid at all -
+    // not only when the process is genuinely gone (no /proc, a restricted sandbox).
+    // Without registry_works to prove /proc answered truthfully here (the same proof
+    // the recent-transcript path above requires), this entry is not known to be dead,
+    // and must not be announced as one.
+    register({ pid: 4_100_009, procStart: '987662', sessionId: OTHER });
+    transcript(OTHER, [humanPrompt(OTHER), title(OTHER, 'the old chief of staff')], 24 * 3600);
+    fs.rmSync(registryFile(me.pid));
+    expect(unit('start', startInput()).out).toBe('');
+
+    // The control: once the registry vouches for THIS session again, the same dead
+    // entry is announced.
+    register({ ...me, sessionId: ME });
+    const { out } = unit('start', startInput());
+    expect(out).toContain(LOSS);
+    expect(out).toContain('the old chief of staff');
   });
 });
 

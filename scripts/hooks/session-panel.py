@@ -46,7 +46,10 @@ WHAT IT CANNOT SEE, stated rather than hidden:
     headless it IS named: that path reads the process, not the transcript.
   * A session killed long before this one started (a container restart after an idle
     night) IS named (#2633), by its dead registry entry rather than by transcript age:
-    alive() already proves the process is gone, with no RECENT_S limit. What this path
+    alive() says its process is gone, with no RECENT_S limit - but only when
+    registry_works (the same proof the recent-transcript path above requires), since
+    alive() also reads False whenever /proc cannot be read at all (no /proc, a
+    restricted sandbox), which is not evidence the process is gone. What this path
     still cannot do: call a dead entry with no transcript on disk a panel loss (there is
     nothing to read "human" from, so it is skipped), or tell the difference between a
     loss nobody has seen yet and one this folder has already been told about - that is
@@ -331,11 +334,14 @@ def decide_announcements(candidate_sids, known_sids, now):
     Two sessions starting at once must reach the SAME answer for a given sid, or one
     would announce a loss the other just silently recorded as seen. The read-decide
     -write below runs under a lock for that reason - but a lock that cannot be taken
-    quickly is not worth holding a session start for: on timeout, or on any error
-    reading or writing the file, this degrades to treating the state as empty, which
-    means "announce it". Fail-open on this side costs one repeat announcement, which
-    is cheap; fail-closed would risk a loss nobody is ever told about, which is exactly
-    what this unit exists to prevent (see 'Never fatal' at the bottom of the file).
+    quickly is not worth holding a session start for: on timeout, this proceeds WITHOUT
+    the lock, still reading and deciding from the real state file (racy under
+    concurrent starts, but not wrong on its own). Only an actual error reading or
+    writing the file degrades to treating the state as empty, which means "announce
+    it" for every candidate. Fail-open on that side costs one repeat announcement,
+    which is cheap; fail-closed would risk a loss nobody is ever told about, which is
+    exactly what this unit exists to prevent (see 'Never fatal' at the bottom of the
+    file).
     """
     directory, state_path, lock_path = state_paths()
     try:
@@ -613,6 +619,14 @@ def mode_start(hook):
     # The registry is an internal file. It is only trusted to say "that process is
     # gone" when it demonstrably works, and the proof is that it lists THIS session.
     registry_works = bool(me) and me in live
+    if not registry_works:
+        # alive() returns False whenever proc_stat() cannot read /proc for that pid -
+        # which includes a process that is still very much alive on a machine with no
+        # /proc, or a sandbox that blocks the read. Without registry_works to prove
+        # /proc answers truthfully here, a "dead" entry is not known to be dead, and
+        # announcing it would risk crying "SESSION LOSS" about a session that is
+        # simply still running (#2633 second review).
+        dead_sids = set()
 
     directory = project_dir(hook, folder)
     ended = []
@@ -650,10 +664,12 @@ def mode_start(hook):
 
     # #2633: a session whose registry entry died long before this one started (a
     # container restart after an idle night) - not caught above, which only looks back
-    # RECENT_S seconds. alive() already proved its process gone, with no time limit;
-    # what is still needed is a transcript to tell a human panel from anything else,
-    # and the once-only announce gate so the stale entry (never cleaned up) is not
-    # re-announced at every start for as long as it sits in the registry.
+    # RECENT_S seconds. dead_sids already carries only entries alive() calls gone AND
+    # (per the registry_works check above) that the registry demonstrably proved it
+    # that way, not merely an unreadable /proc; what is still needed is a transcript to
+    # tell a human panel from anything else, and the once-only announce gate so the
+    # stale entry (never cleaned up) is not re-announced at every start for as long as
+    # it sits in the registry.
     ended_sids = {sid for _, sid, _, _, _ in ended}
     stale = []
     for sid in dead_sids:
