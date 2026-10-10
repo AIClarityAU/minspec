@@ -32,6 +32,11 @@ import { generateHarnessFiles } from '../src/lib/scaffold';
 // exist, and a named import would make the whole FILE fail to load — one opaque red
 // instead of a red per claim. This way each assertion below states what is missing.
 import * as gen from '../../../scripts/gen-ci-templates.mjs';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite's own `run()` wrapper calls spawnSync several times; the literal
+// call-site count alone understates it. Module scope — see helpers/shell-timeout.ts.
+useShellTimeout();
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const GUARD = '.github/scripts/ai-review-guard.js';
