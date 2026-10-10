@@ -843,8 +843,6 @@ fi
 if [[ -n "$FORCE_ROLE" ]]; then
   ROLE="$FORCE_ROLE"
 else
-  # `|| true`: grep exits 1 when no role: label exists, which would abort the
-  # whole script under `set -euo pipefail` before the dev fallback could apply.
   # A role is the NAME of a file in scripts/roles: lowercase letters, digits, hyphens.
   # A label is text from GitHub that the author gate does not judge (it judges the title
   # and the body), and this one is joined into a path below and printed into the prompt.
@@ -853,9 +851,22 @@ else
   # their text is not, because the drain reads this output for the CLI's own notices.
   # NOT held here: who applied the label. Whoever may label an issue chooses among the
   # roles that exist, and the first role label GitHub lists is the one used.
-  ROLE=$(echo "$ISSUE_LABELS" | grep -oP '^role:\K[a-z][a-z0-9-]*$' | head -1 || true)  # swallow-ok: grep -oP exits 1 when the issue carries no role: label, which is a legitimate empty; the case below has a default arm
-  ROLE_LABELS_PASSED_OVER=$(echo "$ISSUE_LABELS" | grep -cP '^role:(?![a-z][a-z0-9-]*$)' || true)  # swallow-ok: grep -c prints 0 and exits 1 when no label matches, which is the ordinary case; the count it printed is what is read on the next line
-  if [[ "$ROLE_LABELS_PASSED_OVER" != "0" ]]; then
+  #
+  # Read in the shell itself, with every allowed character written out: no tool is asked,
+  # so there is no tool whose failure could read as "no role label", and no character
+  # range for a locale to widen.
+  ROLE=""
+  ROLE_LABELS_PASSED_OVER=0
+  while IFS= read -r ROLE_LABEL; do
+    [[ "$ROLE_LABEL" == role:* ]] || continue
+    case "${ROLE_LABEL#role:}" in
+      ""|[!abcdefghijklmnopqrstuvwxyz]*|*[!abcdefghijklmnopqrstuvwxyz0123456789-]*)
+        ROLE_LABELS_PASSED_OVER=$(( ROLE_LABELS_PASSED_OVER + 1 )) ;;
+      *)
+        [[ -n "$ROLE" ]] || ROLE="${ROLE_LABEL#role:}" ;;
+    esac
+  done <<< "$ISSUE_LABELS"
+  if (( ROLE_LABELS_PASSED_OVER > 0 )); then
     echo "Warning: #$ISSUE carries ${ROLE_LABELS_PASSED_OVER} \`role:\` label(s) whose text is not a role name (lowercase letters, digits and hyphens). Passed over: such a label selects no role file and is put in no prompt."
   fi
   ROLE="${ROLE:-dev}"

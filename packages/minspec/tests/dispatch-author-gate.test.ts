@@ -1574,6 +1574,42 @@ describe('T3: a role label names a role, and anything else is not a role label',
     }
   });
 
+  it('with two role labels the first one GitHub lists is the one used', () => {
+    // Not a rule anybody chose, and the dispatcher's own comment says so. Written down
+    // so that changing which one wins is a change somebody makes on purpose.
+    for (const [first, second] of [['security', 'architect'], ['architect', 'security']]) {
+      const r = withLabels(`role:${first}`, `role:${second}`);
+      expect(r.launches, r.out).toHaveLength(1);
+      expect(systemPrompt(r), `${first} then ${second}`).toBe(roleFile(first));
+      expect(r.out).not.toMatch(PASSED_OVER);
+    }
+  });
+
+  it('a tool that could not read the labels is not taken for an issue with no role label', () => {
+    // The role used to be picked with `grep ... || true`, so a grep that could not run
+    // the pattern (one without the option the pattern needs, say) read exactly as "this
+    // issue has no role label", and an architect's issue was built as dev. Here every
+    // grep that is asked about a role label fails, and every other grep is the real one.
+    const sb = dispatchSandbox({ [DISPATCH_ISSUE]: { labels: ['agent-ready', 'role:architect'] } });
+    const real = spawnSync('bash', ['-c', 'command -v grep'], { encoding: 'utf-8', env: { PATH: process.env.PATH ?? '' } }).stdout.trim();
+    expect(real).toMatch(/^\//);
+    const broken = path.join(sb.dir, 'broken-grep');
+    fs.mkdirSync(broken);
+    fs.writeFileSync(
+      path.join(broken, 'grep'),
+      `#!/usr/bin/env bash\nfor a in "$@"; do case "$a" in '^role:'*) echo "grep: fixture: cannot run this pattern" >&2; exit 2 ;; esac; done\nexec '${real}' "$@"\n`,
+      { mode: 0o755 },
+    );
+    const r = spawnSync(sb.dispatcher, [DISPATCH_ISSUE], {
+      encoding: 'utf-8',
+      env: { ...sb.env, PATH: `${broken}:${sb.env.PATH}`, MINSPEC_DISPATCH_OUTCOME_STATUS: '1' },
+    });
+    const run = sb.recorded();
+    expect(run.launches, `${r.stdout}${r.stderr}`).toHaveLength(1);
+    expect(systemPrompt(run)).toBe(roleFile('architect'));
+    expect(run.launches[0].prompt).toContain('(Role: architect)');
+  });
+
   it('control: with no role label at all the agent is started as dev, and nothing is said about one', () => {
     const r = withLabels();
     expect(r.launches, r.out).toHaveLength(1);
