@@ -522,6 +522,31 @@ describe('drain-inbox.sh --quota-gate — the WEEKLY ceiling, which the 5h readi
     const r = run(['--quota-gate']);
     expect(r.code).toBe(42);
     expect(r.out).toMatch(/no usable reset time/);
+    // The gate's own printed number names what it would actually sleep: the fixed
+    // backoff, not the 6h clamp (#2603 — those used to disagree, 21600 printed here
+    // while the loop slept toward an unrelated 5h reset).
+    expect(r.out).toMatch(/^defer:1800 /);
+  });
+
+  it("T3 regression (#2603): a weekly hold with a PASSED reset sleeps the fixed backoff, not the 5h reset hours away", () => {
+    // Measured case: weekly 97% with its reset 20s in the past, 5h window 2% with
+    // ~4h left to run. _quota_sleep_plan only took the weekly branch when wr > now,
+    // so a weekly hold with no usable reset time fell through to the 5h branch and
+    // slept toward ITS reset — four hours away for a hold that lifts the moment the
+    // producer publishes the new week. The weekly window's own hold must win this
+    // sleep too, exactly as it already wins the gate's admission verdict.
+    write7({ used_percentage: 2, resets_at: nowSec() + 4 * 3600,
+             seven_day_percentage: 97, seven_day_resets_at: nowSec() - 20 });
+    expect(run(['--quota-gate']).code).toBe(42);
+    const secs = Number(run(['--quota-sleep']).out);
+    expect(secs).toBe(1800);
+    // CONTROL: the same 5h reading with the weekly window NOT binding (room to spare)
+    // sleeps toward the 5h reset as usual — so it is the weekly hold, not some other
+    // change, that redirected the sleep above.
+    write7({ used_percentage: 2, resets_at: nowSec() + 4 * 3600,
+             seven_day_percentage: 10, seven_day_resets_at: nowSec() - 20 });
+    const controlSecs = Number(run(['--quota-sleep']).out);
+    expect(controlSecs).toBeGreaterThan(1800);
   });
 
   it('reports the weekly level in health when it is known', () => {
