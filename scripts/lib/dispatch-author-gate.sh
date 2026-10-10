@@ -523,23 +523,29 @@ dispatch_identify_comments() {
       echo "dispatch-author-gate: could not read who wrote ${what}, so none of them is taken on its login." >&2
       return 1
     fi
-    if ! found="$(jq -c -n --argjson found "$found" --slurpfile answers <(printf '%s' "$answer") '
-          if ($answers | length) != 1 then error("not one document") else $answers[0] end
+    # What has been found so far holds the TEXT of every comment asked about, and how
+    # much text that is is up to whoever writes comments. So it is read from a file
+    # descriptor, like the answer beside it, and never put on jq's command line: one
+    # argument may not be longer than 131,072 bytes, and past that jq is not started.
+    if ! found="$(jq -c -n --slurpfile found <(printf '%s' "$found") --slurpfile answers <(printf '%s' "$answer") '
+          if ($found | length) != 1 or ($answers | length) != 1 then error("not one document") else $answers[0] end
           | if type != "object" or (has("errors") and .errors != null and .errors != [])
                or ((try .data.nodes catch null) | type) != "array"
             then error("not an answer") else . end
           | reduce (.data.nodes[] | select(type == "object" and .__typename == "IssueComment" and (.id | type) == "string")) as $n
-              ($found; .[$n.id] = { body: $n.body, author: $n.author })' 2>/dev/null)" || [[ -z "$found" ]]; then
+              ($found[0]; .[$n.id] = { body: $n.body, author: $n.author })' 2>/dev/null)" || [[ -z "$found" ]]; then
       echo "dispatch-author-gate: GitHub's answer about who wrote ${what} could not be read, so none of them is taken on its login." >&2
       return 1
     fi
   done
-  if ! out="$(printf '%s' "$doc" | jq -c --argjson found "$found" '
+  # The same rule here: everything found, text and all, comes in by a file descriptor.
+  if ! out="$(printf '%s' "$doc" | jq -c --slurpfile found <(printf '%s' "$found") '
         def bare: type == "object" and ((.author | type) != "object" or (.author.__typename | type) != "string");
         def askable: (.id | type) == "string" and (.id | test("^[A-Za-z0-9_=-]{1,128}$"));
-        .comments = [ (.comments // [])[]
+        if ($found | length) != 1 then error("not one document") else . end
+        | .comments = [ (.comments // [])[]
           | if bare and askable
-            then ($found[.id]) as $f
+            then ($found[0][.id]) as $f
                  | if $f == null or ($f.body | type) != "string" or $f.body != .body
                    then error("not covered")
                    else .author = (if ($f.author | type) == "object"

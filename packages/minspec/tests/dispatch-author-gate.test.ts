@@ -1218,6 +1218,107 @@ describe('T3: the two approval scripts read the same filter and make the same di
   });
 });
 
+// ── How much comment text there is must not change the answer ───────────────
+//
+// The lookup gathered the text of every comment it had asked about into one shell
+// variable and handed it to jq as a command-line argument. The kernel refuses a single
+// argument over 131,072 bytes, so past about 128 KiB of comment text jq was never
+// started, its error went nowhere, and the lookup said GitHub's answer "does not cover
+// every one of the comments", which was not what had happened. Two long comments from
+// anybody were enough. The sibling function in the same file already read its documents
+// from a file descriptor for this reason.
+//
+// Root cause: text whose size GitHub's users choose was put on a command line, where
+// the size is capped by the machine, and nothing held this function to the rule the
+// function beside it follows.
+
+describe('T3: how much comment text an issue carries does not change what the filter answers', () => {
+  const STARTED = dispatchStatus('DISPATCH_RC_STARTED');
+  const KIB = 1024;
+  const RECORD: CommentFixture = { author: APP, association: 'CONTRIBUTOR', body: 'THE-RECORD-COMMENT' };
+  /** `count` comments by `author` that together hold `bytes` bytes of `char`. */
+  const filler = (author: unknown, bytes: number, count: number, char = 'A'): CommentFixture[] => {
+    const each = Math.ceil(bytes / count / Buffer.byteLength(char));
+    return Array.from({ length: count }, (_, i) => ({ author, association: 'NONE', body: `${i}:${char.repeat(each)}` }));
+  };
+  /** Run the filter on comments as `gh issue view` prints them: a login and an id, and no account. */
+  function filter(comments: CommentFixture[]) {
+    const sb = dispatchSandbox({ [DISPATCH_ISSUE]: { author: FOUNDER, ready: false, comments } });
+    const r = spawnSync('bash', [READY_CHECK, '--trusted-comment-bodies'], {
+      encoding: 'utf-8',
+      maxBuffer: 64 * KIB * KIB,
+      input: JSON.stringify({
+        comments: comments.map((c, i) => ({
+          id: `IC_fixture_${DISPATCH_ISSUE}_${i}`,
+          author: { login: (c.author as Actor).login },
+          authorAssociation: c.association,
+          body: c.body,
+        })),
+      }),
+      env: sb.env,
+    });
+    return { status: r.status, stdout: r.stdout, stderr: r.stderr, reads: sb.recorded().ghCalls.filter((c) => c === 'api graphql nodes').length };
+  }
+
+  it('control: the fixture really is past the limit on one argument, and under it for the small sizes', () => {
+    const bytes = (c: CommentFixture[]) => c.reduce((n, x) => n + Buffer.byteLength(x.body), 0);
+    expect(bytes(filler(STRANGER, 120 * KIB, 4))).toBeLessThan(131072);
+    expect(bytes(filler(STRANGER, 140 * KIB, 4))).toBeGreaterThan(131072);
+    expect(bytes(filler(STRANGER, 260 * KIB, 4))).toBeGreaterThan(200 * KIB);
+    expect(bytes(filler(STRANGER, 260 * KIB, 2, '中'))).toBeGreaterThan(200 * KIB);
+  });
+
+  // A stranger's text is dropped whatever its size, so the answer is the same bytes as
+  // with no stranger at all. Sizes either side of the limit; where the long text sits
+  // (before the record, after it, both sides); one byte a character and three; a few
+  // long comments and many shorter ones, which takes more than one read.
+  it.each([
+    ['1 KiB', 1 * KIB, 4, 'A', 'before'],
+    ['120 KiB, under the limit', 120 * KIB, 4, 'A', 'before'],
+    ['140 KiB, just over it', 140 * KIB, 4, 'A', 'before'],
+    ['140 KiB, after the record', 140 * KIB, 4, 'A', 'after'],
+    ['260 KiB', 260 * KIB, 4, 'A', 'before'],
+    ['260 KiB, on both sides of the record', 260 * KIB, 4, 'A', 'around'],
+    ['260 KiB in two comments of three-byte characters', 260 * KIB, 2, '中', 'after'],
+    ['260 KiB over a hundred and fifty comments, in two reads', 260 * KIB, 150, 'A', 'around'],
+  ] as [string, number, number, string, 'before' | 'after' | 'around'][])(
+    "strangers' comments of %s leave the answer exactly what it is with none",
+    (_name, bytes, count, char, where) => {
+      const long = filler(STRANGER, bytes, count, char);
+      const half = Math.floor(long.length / 2);
+      const comments = where === 'before' ? [...long, RECORD] : where === 'after' ? [RECORD, ...long] : [...long.slice(0, half), RECORD, ...long.slice(half)];
+      const r = filter(comments);
+      expect(r.stderr).toBe('');
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stdout).toBe(filter([RECORD]).stdout);
+      expect(r.stdout).toBe('THE-RECORD-COMMENT\n');
+      expect(r.reads).toBe(count >= 100 ? 2 : 1);
+    },
+  );
+
+  it.each([
+    ['140 KiB', 140 * KIB, 4],
+    ['260 KiB', 260 * KIB, 4],
+    ['260 KiB over a hundred and fifty comments', 260 * KIB, 150],
+  ] as [string, number, number][])("the App's own comments of %s are all kept, whole", (_name, bytes, count) => {
+    const long = filler(APP, bytes, count).map((c) => ({ ...c, association: 'CONTRIBUTOR' }));
+    const r = filter([...long, RECORD]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout).toBe(`${[...long, RECORD].map((c) => c.body).join('\n')}\n`);
+  });
+
+  it.each([
+    ['none at all', 0],
+    ['1 KiB', 1 * KIB],
+    ['260 KiB', 260 * KIB],
+  ] as [string, number][])("the dispatcher starts the same issue with strangers' comments of %s", (_name, bytes) => {
+    const r = runDispatch({ issue: { author: FOUNDER, comments: bytes > 0 ? filler(STRANGER, bytes, 4) : [] }, ask: true });
+    expect(r.out).not.toMatch(/no-verdict|could not be established/);
+    expect(r.launches, r.out).toHaveLength(1);
+    expect(r.status, r.out).toBe(STARTED);
+  });
+});
+
 describe('scripts/dispatch-ready-check.sh --trusted-comment-bodies: comments that arrive with a login and an id', () => {
   // The stub GitHub of the launch harness, holding one issue's comments. The filter is
   // run on its own, on a document as `gh issue view --json comments` prints it.
