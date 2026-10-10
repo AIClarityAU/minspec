@@ -329,6 +329,27 @@ describe('drain-inbox.sh --quota-publish-wall — the reactive producer', () => 
     at("You've hit your session limit · resets 11:59pm (Australia/Sydney)");
     expect(run(['--quota-gate']).code).toBe(42);
   });
+
+  // #1062 — REGRESSION: extraction now delegates to parseResetInstant (the tested
+  // pure seam in ai-review-guard.js, next to isQuotaExhaustion) instead of a second,
+  // bash-only regex that only ever matched the ABSOLUTE clock form ("resets 8:40am
+  // (Zone)"). isQuotaExhaustion's own pattern (`resets? (at|in)`) already classifies
+  // the RELATIVE form below as quota-exhaustion — is_quota (--is-quota) says so too
+  // — so the old bash-only extractor silently threw the timestamp away on text it
+  // had ALREADY correctly detected as a quota signal, falling back to the flat
+  // QUOTA_BACKOFF guess. Proven base-red/head-green: reverting quota_publish_wall to
+  // its pre-#1062 bash-regex body makes this fail (no clock/ampm/zone token to
+  // match), and the parseResetInstant-backed version passes.
+  it('extracts a RELATIVE reset ("try again in N minutes") — the old bash-only extractor could never parse this shape', () => {
+    const r = at('Claude usage limit reached. Try again in 25 minutes.');
+    expect(r.code).toBe(0);
+    const q = read();
+    const delta = q.resets_at - nowSec();
+    expect(delta).toBeGreaterThan(0);
+    expect(delta).toBeLessThanOrEqual(25 * 60 + 5);
+    expect(delta).toBeGreaterThan(25 * 60 - 30);
+    expect(q.used_percentage).toBeGreaterThanOrEqual(100);
+  });
 });
 
 describe('drain-inbox.sh --quota-health — an inert gate must not be silent', () => {
