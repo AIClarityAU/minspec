@@ -88,6 +88,32 @@ export function extractRequiredCheckPins(rulesetDetail: unknown): RequiredCheckP
 }
 
 /**
+ * Is a single parsed `commits/{sha}/check-runs` response DEMONSTRABLY SHORT —
+ * fewer `check_runs` came back than the response's own `total_count` says exist
+ * (#2639)? GitHub pages this endpoint at 30 by default; a caller that reads one
+ * page without comparing it against `total_count` gets a silently truncated
+ * list on any commit with more than that many check-runs, and a pin whose
+ * disproving run sits past the cut is then reported `unobserved` (inconclusive)
+ * instead of the `mismatch` it should be — the exact #560 bug shape passing
+ * unreported.
+ *
+ * Mirrors `wholeCheckRunListing` in `.github/scripts/ai-review-guard.js` for the
+ * same endpoint: trust `total_count` only when it IS a count. A malformed
+ * response (not an object, no `check_runs` array, non-numeric `total_count`) is
+ * reported as NOT short here — `extractObservedCheckRuns` already treats those
+ * as empty/skippable, and this function's only job is to flag the specific
+ * "fewer runs than GitHub says exist" shape, not malformed input in general.
+ */
+export function isShortCheckRunsPage(checkRunsResponse: unknown): boolean {
+  if (typeof checkRunsResponse !== 'object' || checkRunsResponse === null) return false;
+  const runs = (checkRunsResponse as { check_runs?: unknown }).check_runs;
+  if (!Array.isArray(runs)) return false;
+  const totalCount = (checkRunsResponse as { total_count?: unknown }).total_count;
+  if (!Number.isInteger(totalCount) || (totalCount as number) < 0) return false;
+  return runs.length < (totalCount as number);
+}
+
+/**
  * Flatten one or more parsed `commits/{sha}/check-runs` responses into a flat
  * list of observed check-runs. Tolerant of partial/unexpected JSON per entry —
  * a malformed sample point is skipped, not fatal to the whole audit.
