@@ -71,6 +71,7 @@ import {
   user,
   type Actor,
   type CommentFixture,
+  type DispatchSandbox,
   type FixAgentOptions,
   type IssueFixture,
   type RemediateOptions,
@@ -1019,12 +1020,201 @@ describe('T0: a verdict record counts only from a comment the gate\'s own ACCOUN
     }
   });
 
-  it('when which account wrote the comments cannot be read, no record is taken and the run says why', () => {
-    const r = runDispatch({ issue: { author: FOUNDER, commentAuthorsFail: true }, ask: true });
+  // What happens when which account wrote the comments cannot be READ is the next block.
+});
+
+// ── A lookup that could not be completed is not an answer ───────────────────
+//
+// The filter above asks GitHub which account wrote a comment. That read can fail for
+// reasons that say nothing about the issue: a bad gateway, a rate limit, a token that
+// has expired, a comment edited between the two reads. It used to be folded into the
+// same empty output as "no trusted comment holds a record", and the dispatcher wrote
+// that down: a label that takes the issue out of the queue, and a comment saying it has
+// no verdict. Nothing brought it back.
+//
+// Root cause: the dispatcher threw the filter's exit status away, so "could not ask" and
+// "asked, and there is none" reached the verdict check as the same empty file.
+
+describe('T3: a lookup of who wrote the comments that could not be completed is a fault of the machine, never a verdict', () => {
+  const STARTED = dispatchStatus('DISPATCH_RC_STARTED');
+  const strangers = (n: number): CommentFixture[] =>
+    Array.from({ length: n }, (_, i) => ({ author: STRANGER, association: 'NONE', body: `a stranger's comment ${i}` }));
+  const nodesFile = (sb: DispatchSandbox) => path.join(sb.dir, 'comment-nodes.json');
+  /** Run the real dispatcher on the sandbox's one issue, asking for its answer as the drain does. */
+  const dispatch = (sb: DispatchSandbox) => {
+    const r = spawnSync(sb.dispatcher, [DISPATCH_ISSUE], { encoding: 'utf-8', env: { ...sb.env, MINSPEC_DISPATCH_OUTCOME_STATUS: '1' } });
+    return { status: r.status, out: `${r.stdout}${r.stderr}`, ...sb.recorded(), worktreeMade: fs.existsSync(sb.worktree(DISPATCH_ISSUE)) };
+  };
+
+  // Where the failure falls is varied, and so is how much there is to ask about: the
+  // only read, the second of two, and an answer that arrives and no longer matches.
+  const faults: [string, CommentFixture[], (sb: DispatchSandbox) => () => void][] = [
+    [
+      'the one read fails',
+      [],
+      (sb) => {
+        fs.writeFileSync(`${nodesFile(sb)}.fail`, '');
+        return () => fs.rmSync(`${nodesFile(sb)}.fail`);
+      },
+    ],
+    [
+      'the second of two reads fails, with a hundred and fifty comments to ask about',
+      strangers(150),
+      (sb) => {
+        fs.writeFileSync(`${nodesFile(sb)}.fail-at`, '2');
+        return () => fs.rmSync(`${nodesFile(sb)}.fail-at`);
+      },
+    ],
+    [
+      'a stranger edits a comment between the two reads',
+      strangers(3),
+      (sb) => {
+        const before = fs.readFileSync(nodesFile(sb), 'utf-8');
+        const nodes = JSON.parse(before);
+        nodes[`IC_fixture_${DISPATCH_ISSUE}_1`].body = 'edited since it was read';
+        fs.writeFileSync(nodesFile(sb), JSON.stringify(nodes));
+        return () => fs.writeFileSync(nodesFile(sb), before);
+      },
+    ],
+  ];
+
+  it.each(faults)('when %s: no label, no comment, no agent, and the next run dispatches', (_name, comments, breakIt) => {
+    const sb = dispatchSandbox({ [DISPATCH_ISSUE]: { author: FOUNDER, comments } });
+    const mend = breakIt(sb);
+
+    const first = dispatch(sb);
+    // Nothing is written to the issue: an answer nobody got is not a refusal.
+    expect(first.ghWrites, first.out).toEqual([]);
+    expect(first.posted, first.out).toEqual([]);
+    // And nothing is started on it. It still fails closed for this run.
+    expect(first.launches, first.out).toEqual([]);
+    expect(first.worktreeMade).toBe(false);
+    // It says what happened, and does not say the issue has no verdict.
+    expect(first.out).not.toMatch(/no-verdict/);
+    expect(first.out).toMatch(/Skipping #\d+ this cycle: which of its comments are trusted could not be established/);
+    expect(first.out).toMatch(/so none of them is taken on its login/);
+    // Not "refused": that would hand the drain its slot back to spend on the next issue,
+    // which the same fault would meet. No answer at all, as for the other machine fault.
+    expect(first.status, first.out).toBe(0);
+    expect(first.status).not.toBe(DECLINED);
+
+    mend();
+    const second = dispatch(sb);
+    expect(second.launches, second.out).toHaveLength(1);
+    expect(second.status, second.out).toBe(STARTED);
+  });
+
+  it('control: the same issue with no record at all IS refused, and that refusal is written down', () => {
+    // The other half of the distinction. Here the lookup works and there is simply no
+    // record from a trusted account, which is a fact about the issue.
+    const sb = dispatchSandbox({ [DISPATCH_ISSUE]: { author: FOUNDER, ready: false, comments: strangers(3) } });
+    const r = dispatch(sb);
     expect(r.out).toMatch(/not-ready \[no-verdict\]/);
-    expect(r.stderr).toContain('could not read who wrote the comments this gate was given, so none of them is taken on its login');
     expect(r.launches).toEqual([]);
+    expect(r.ghWrites.some((w) => w.startsWith('issue edit')), r.ghWrites.join(' | ')).toBe(true);
     expect(r.status, r.out).toBe(DECLINED);
+  });
+});
+
+// The same filter has two more readers, and each of them also writes: approve-issue.sh
+// (a person at a terminal) and approve-on-label.sh (a workflow, on a label flip). Both
+// piped the filter straight into the record picker, so a lookup that could not be
+// completed arrived as "this issue carries no triage verdict record". The workflow one
+// then took the label off and posted that on the issue.
+
+describe('T3: the two approval scripts read the same filter and make the same distinction', () => {
+  const SCRIPTS_DIR = path.dirname(READY_CHECK);
+  const strangers: CommentFixture[] = [{ author: STRANGER, association: 'NONE', body: 'a comment from somebody else' }];
+
+  /**
+   * The launch harness's sandbox, with a `gh` in front of its own that also answers the
+   * two reads a label event needs (the timeline, and the labeller's permission) and hands
+   * everything else on.
+   */
+  function approvalSandbox(issue: IssueFixture) {
+    const sb = dispatchSandbox({ [DISPATCH_ISSUE]: issue });
+    const bin = path.join(sb.dir, 'approval-bin');
+    fs.mkdirSync(bin);
+    const harnessBin = sb.env.PATH.split(':')[0];
+    fs.writeFileSync(
+      path.join(bin, 'gh'),
+      [
+        '#!/usr/bin/env bash',
+        'case "$*" in',
+        `  "api repos/"*"/timeline"*) printf '%s\\n' '[{"event":"labeled","label":{"name":"agent-ready"},"actor":{"login":"${FOUNDER.login}"}}]'; exit 0 ;;`,
+        '  "api repos/"*"/collaborators/"*"/permission"*) echo write; exit 0 ;;',
+        'esac',
+        `exec '${harnessBin}/gh' "$@"`,
+        '',
+      ].join('\n'),
+      { mode: 0o755 },
+    );
+    const event = path.join(sb.dir, 'event.json');
+    fs.writeFileSync(event, JSON.stringify({ label: { name: 'agent-ready' }, sender: { login: FOUNDER.login }, issue: { number: Number(DISPATCH_ISSUE) } }));
+    const env = { ...sb.env, PATH: `${bin}:${sb.env.PATH}`, GITHUB_ACTIONS: 'true', GITHUB_EVENT_PATH: event, GITHUB_REPOSITORY: 'AIClarityAU/minspec' };
+    const onLabel = () => {
+      const r = spawnSync('bash', [path.join(SCRIPTS_DIR, 'approve-on-label.sh')], { encoding: 'utf-8', env });
+      return { status: r.status, out: `${r.stdout}${r.stderr}`, ...sb.recorded() };
+    };
+    /** approve-issue.sh refuses to run without a terminal, so it is given one. */
+    const byHand = () => {
+      const r = spawnSync(
+        'python3',
+        ['-c', 'import os, pty, sys\nsys.exit(os.waitstatus_to_exitcode(pty.spawn(sys.argv[1:])))', 'bash', path.join(SCRIPTS_DIR, 'approve-issue.sh'), DISPATCH_ISSUE],
+        { encoding: 'utf-8', env: sb.env, input: '' },
+      );
+      return { status: r.status, out: `${r.stdout}${r.stderr}`, ...sb.recorded() };
+    };
+    const breakLookup = () => fs.writeFileSync(path.join(sb.dir, 'comment-nodes.json.fail'), '');
+    return { onLabel, byHand, breakLookup };
+  }
+
+  it('approve-on-label.sh: a lookup that fails is an error of the run, and the issue is not touched', () => {
+    const a = approvalSandbox({ author: FOUNDER });
+    a.breakLookup();
+    const r = a.onLabel();
+    expect(r.out).toMatch(/ERROR: which of #\d+'s comments are trusted could not be established/);
+    expect(r.out).not.toMatch(/BOUNCED/);
+    expect(r.out).not.toMatch(/carries no triage verdict record/);
+    // The label stays where the person put it, and nothing is posted.
+    expect(r.ghWrites, r.out).toEqual([]);
+    expect(r.posted, r.out).toEqual([]);
+    // Visibly failed, so the job is red and is run again.
+    expect(r.status, r.out).toBe(1);
+  });
+
+  it('approve-on-label.sh, control: with the lookup working the same issue is read, and its record is found', () => {
+    const r = approvalSandbox({ author: FOUNDER }).onLabel();
+    expect(r.out, r.out).not.toMatch(/could not be established|BOUNCED/);
+    expect(r.out).toMatch(/already carries a fresh affirmative verdict/);
+    expect(r.ghWrites, r.out).toEqual([]);
+    expect(r.status, r.out).toBe(0);
+  });
+
+  it('approve-on-label.sh, control: an issue that really has no record IS bounced, and that is written down', () => {
+    const r = approvalSandbox({ author: FOUNDER, ready: false, comments: strangers }).onLabel();
+    expect(r.out).toMatch(/BOUNCED #\d+: This issue carries no triage verdict record/);
+    expect(r.ghWrites.some((w) => w.startsWith('issue edit')), r.ghWrites.join(' | ')).toBe(true);
+    expect(r.posted.join('\n')).toContain('not approvable');
+  });
+
+  it('approve-issue.sh: a lookup that fails says so, approves nothing and writes nothing', () => {
+    const a = approvalSandbox({ author: FOUNDER });
+    a.breakLookup();
+    const r = a.byHand();
+    expect(r.out).toMatch(/ERROR: which of #\d+'s comments are trusted could not be established/);
+    expect(r.out).toMatch(/Nothing was approved and nothing was written/);
+    expect(r.out).not.toMatch(/carries no triage verdict record/);
+    expect(r.ghWrites, r.out).toEqual([]);
+    expect(r.status, r.out).toBe(1);
+  });
+
+  it('approve-issue.sh, controls: with the lookup working it reads the record, and with no record it says there is none', () => {
+    const found = approvalSandbox({ author: FOUNDER }).byHand();
+    expect(found.out).not.toMatch(/could not be established|carries no triage verdict record/);
+    const none = approvalSandbox({ author: FOUNDER, ready: false, comments: strangers }).byHand();
+    expect(none.out).toMatch(/carries no triage verdict record/);
+    expect(none.out).not.toMatch(/could not be established/);
   });
 });
 
@@ -1123,11 +1313,20 @@ describe('scripts/dispatch-ready-check.sh --trusted-comment-bodies: comments tha
       const one = JSON.stringify({ data: { nodes: [nodes[id(0)], nodes[id(2)]] } });
       fs.writeFileSync(path.join(dir, 'comment-nodes.raw.json'), `${one}${one}`);
     }],
-  ])('when %s, it prints nothing, fails, and says so', (_name, prepare) => {
+  ])('when %s, it prints nothing, says so, and leaves with the status that means "could not be completed"', (_name, prepare) => {
     const r = run([viewed(0), viewed(2)], { prepare });
-    expect(r.status).not.toBe(0);
+    // 75, and not 1: a caller can tell "the lookup could not be completed" from every
+    // other way of failing, and both from an answer.
+    expect(r.status).toBe(75);
     expect(r.stdout).toBe('');
     expect(r.stderr).toMatch(/dispatch-author-gate: .*so none of them is taken on its login\./);
+  });
+
+  it('and "no trusted comment" is an ANSWER: status 0 and nothing kept, which no failure above looks like', () => {
+    const r = run([viewed(1), viewed(3)]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.trim()).toBe('');
+    expect(r.reads).toHaveLength(1);
   });
 
   it('when there is no credential to ask with, it prints nothing, fails, and says so', () => {
@@ -1136,7 +1335,7 @@ describe('scripts/dispatch-ready-check.sh --trusted-comment-bodies: comments tha
     const control = run([viewed(0), viewed(2)]);
     expect(control.status, control.stderr).toBe(0);
     const r = run([viewed(0), viewed(2)], { anonymous: true });
-    expect(r.status).not.toBe(0);
+    expect(r.status).toBe(75);
     expect(r.stdout).toBe('');
     expect(r.stderr).toContain('none of them is taken on its login');
   });

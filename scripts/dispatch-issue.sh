@@ -704,10 +704,30 @@ fi
 # alter about itself) before it is ever parsed.
 #
 # The App's own comments are told by its ACCOUNT, which `gh issue view` does not print, so
-# the filter looks that up. Its stderr is left alone: when the lookup fails it says so,
-# and the refusal that follows (no verdict source) would otherwise have no cause on show.
+# the filter looks that up, and that is a read of GitHub. Its stderr is left alone: when
+# the lookup fails it says so.
+#
+# A FILTER THAT COULD NOT FINISH IS NOT A VERDICT. It prints nothing, and so does a
+# filter that finished and found no trusted comment. They are told apart by its exit
+# status and by nothing else, so the status is kept. An empty verdict source handed on
+# regardless reads below as `no-verdict`, which is then WRITTEN to the issue: a label
+# that takes it out of the queue and a comment saying it has no record, on an issue
+# whose record is intact, for a bad gateway. Nothing brought such an issue back.
+#
+# So any status but 0 ends this run here, having written nothing: no label, no comment.
+# The issue keeps its ready label and is offered again next cycle. It still fails closed
+# for THIS run: nothing is started. And it is a plain exit 0, not exit_declined, for the
+# reason given at the scratch-file fault above: this is the machine's fault and will
+# meet the next issue too, so the caller must not be handed its slot back to spend on
+# the rest of the queue.
+TRUSTED_FILTER_STATUS=0
 echo "$ISSUE_JSON" | "${SCRIPT_DIR}/dispatch-ready-check.sh" --trusted-comment-bodies \
-  > "$VERDICT_SRC" || true  # swallow-ok: a filter that fails prints nothing, so the verdict source is empty and the gate below refuses with no-verdict
+  > "$VERDICT_SRC" || TRUSTED_FILTER_STATUS=$?
+if (( TRUSTED_FILTER_STATUS != 0 )); then
+  rm -f "$VERDICT_SRC" "$BODY_FILE"
+  echo "Skipping #$ISSUE this cycle: which of its comments are trusted could not be established (the comment filter left with status ${TRUSTED_FILTER_STATUS}, and its own line on stderr says why). That is a fault of the machine or the network and says nothing about the issue, so nothing is written to it: no label and no comment. Its verdict record was not read. It stays in the queue and is offered again next cycle. Nothing was started (#983: could not tell is never read as ready, and never as refused either)."
+  exit 0
+fi
 # The body EXACTLY as triage composed it, so the two sides hash identical bytes.
 printf '%s' "$ISSUE_BODY" > "$BODY_FILE"
 

@@ -438,6 +438,18 @@ fi
 # the newest record among what it is given, so some of the comments would be worse than
 # none.
 #
+# WHAT THE EXIT STATUS SAYS, because the output cannot. An empty output means two
+# different things, and a caller that confuses them writes a fault of the network onto
+# an issue as if it were a finding about the issue:
+#   0   an ANSWER. The bodies of the trusted comments, which may be none at all.
+#   75  NO ANSWER: the lookup of who wrote a comment could not be completed (the read
+#       failed, GitHub's reply could not be read, or it no longer matched the text that
+#       was read). Nothing is known about the issue's record. Try again later; never
+#       record it as "no verdict".
+#   any other status: the filter could not run on what it was given. Also no answer.
+# 75 is the conventional "temporary failure, try again" status. Every caller treats any
+# status but 0 as no answer; 75 lets its message say which kind.
+#
 # The association arm is as it was (#1105 has what it leaves open).
 #
 # Input: a `comments` list on stdin, as `gh issue view --json comments` prints one.
@@ -470,9 +482,9 @@ if [[ "${1:-}" == "--trusted-comment-bodies" ]]; then
     # The read needs a credential, and takes the pipeline's own the way every other
     # read of who wrote something does (lib/gh-bot.sh).
     # shellcheck source=scripts/lib/gh-bot.sh
-    source "${t_dir}/lib/gh-bot.sh" || exit 1
+    source "${t_dir}/lib/gh-bot.sh" || exit 75
     gh_bot_init
-    t_doc="$(printf '%s' "$t_doc" | dispatch_identify_comments "the comments this gate was given")" || exit 1
+    t_doc="$(printf '%s' "$t_doc" | dispatch_identify_comments "the comments this gate was given")" || exit 75
   fi
   printf '%s' "$t_doc" | jq -r --argjson listed "$t_listed" "$(_dispatch_gate_jq_defs)"'
     [ (.comments // [])[]

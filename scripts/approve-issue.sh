@@ -115,9 +115,21 @@ fi
 # record's OWN verdictAt rather than by position, so a stale record QUOTED inside a
 # later trusted comment cannot masquerade as the current verdict. A hand-rolled
 # "take the last one" here would have shown you a hold that is not the live one.
-RECORD="$(printf '%s' "$ISSUE_JSON" \
-  | "$READY_CHECK" --trusted-comment-bodies \
-  | "$READY_CHECK" --newest-record)"
+#
+# The two steps are taken one at a time so that the filter's exit status is seen. It
+# makes a read of GitHub, and when that read cannot be completed it prints nothing,
+# exactly as it does when there is no trusted comment. Piped straight on, that fault
+# would arrive below as "carries no triage verdict record", which is false. Any status
+# but 0 is NO ANSWER (dispatch-ready-check.sh says which), and stops here.
+TRUSTED_FILTER_STATUS=0
+TRUSTED_BODIES="$(printf '%s' "$ISSUE_JSON" | "$READY_CHECK" --trusted-comment-bodies)" || TRUSTED_FILTER_STATUS=$?
+if (( TRUSTED_FILTER_STATUS != 0 )); then
+  echo "ERROR: which of #${ISSUE}'s comments are trusted could not be established (the comment filter left with status ${TRUSTED_FILTER_STATUS}; its own line above says why)." >&2
+  echo "       That is a fault of the machine or the network, not a finding about the issue: its verdict record was not read." >&2
+  echo "       Nothing was approved and nothing was written. Run this again." >&2
+  exit 1
+fi
+RECORD="$(printf '%s\n' "$TRUSTED_BODIES" | "$READY_CHECK" --newest-record)"
 
 if [[ -z "$RECORD" ]]; then
   echo "ERROR: #${ISSUE} carries no triage verdict record, so there is no hold to approve." >&2

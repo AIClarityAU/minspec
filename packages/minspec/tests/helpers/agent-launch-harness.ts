@@ -200,7 +200,9 @@ exit 0
   // the comment as GitHub holds it; an id it does not have comes back null). It is
   // answered the way GitHub answers it: not at all without a credential, which is what
   // makes a launcher that forgot to present one refuse here as it would for real. A
-  // fixture that is missing, or one marked `.fail`, is a failed read. It is logged as
+  // fixture that is missing, or one marked `.fail`, is a failed read. So is the Nth read
+  // of comment-nodes.json when `comment-nodes.json.fail-at` holds N, which is how a read
+  // that fails part-way through a long list of comments is staged. It is logged as
   // `api graphql issue:<N>`, `pullRequest:<N>` or `nodes`, and a mutation is noted as a
   // write.
   fs.writeFileSync(
@@ -248,6 +250,13 @@ case "$noun $verb" in
       if [[ ! -f "$answer" || -e "$answer.fail" ]]; then
         echo "stub gh: no answer for $third" >&2
         exit 1
+      fi
+      if [[ "$third" == nodes && -f "$answer.fail-at" ]]; then
+        printf 'read\\n' >> "$dir/nodes-reads.log"
+        if [[ "$(wc -l < "$dir/nodes-reads.log" | tr -d ' ')" == "$(<"$answer.fail-at")" ]]; then
+          echo "stub gh: HTTP 502 on read $(<"$answer.fail-at") of $third" >&2
+          exit 1
+        fi
       fi
       if [[ "$third" == nodes ]]; then
         # A test that wants an answer no map of comments gives (an error document) wrote
