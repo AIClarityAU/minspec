@@ -119,6 +119,8 @@ export interface DrainFixture {
   reading: Reading | null;
   /** What the meter reads once the dispatch of that issue has finished. */
   readingAfterIssue?: Record<number, Reading>;
+  /** What the meter reads once the remediation of that pull request has finished. */
+  readingAfterPr?: Record<number, Reading>;
   /**
    * What the meter reads once the ranker has run: after the cycle's own gate has
    * admitted it, before the first dispatch.
@@ -368,7 +370,7 @@ exit ${STATUS_DECLINED}
   stub('triage.sh', `echo "$1" >> "${dir}/triaged"\necho "triaged #$1"\nexit 0\n`);
   stub(
     'remediate.sh',
-    `echo "$1" >> "${dir}/remediated"\necho "remediated PR #$1"\n[[ -f "${dir}/says-pr.$1" ]] && cat "${dir}/says-pr.$1"\nexit 0\n`,
+    `echo "$1" >> "${dir}/remediated"\necho "remediated PR #$1"\n[[ -f "${dir}/after-pr.$1.sh" ]] && bash "${dir}/after-pr.$1.sh"\n[[ -f "${dir}/says-pr.$1" ]] && cat "${dir}/says-pr.$1"\nexit 0\n`,
   );
   // The ranker's stdout IS the order, so the hook must stay off it. `tac` reverses the
   // numeric order it is handed, which is what makes rank and issue number disagree.
@@ -380,6 +382,9 @@ exit ${STATUS_DECLINED}
 
   for (const [issue, reading] of Object.entries(f.readingAfterIssue ?? {})) {
     fs.writeFileSync(path.join(dir, `after-issue.${issue}.sh`), writeReadingBash(reading, quota));
+  }
+  for (const [pr, reading] of Object.entries(f.readingAfterPr ?? {})) {
+    fs.writeFileSync(path.join(dir, `after-pr.${pr}.sh`), writeReadingBash(reading, quota));
   }
   for (const [issue, secs] of Object.entries(f.issueSecs ?? {})) {
     fs.writeFileSync(path.join(dir, `secs-issue.${issue}`), `${secs}\n`);
