@@ -14,6 +14,10 @@ in the comment of 2026-10-09 on #2380.) Neither side was told. This unit is that
 statement, made to both sides:
 
   self   (UserPromptSubmit) - "THIS session has no panel": its own input has no writer.
+                              The first such prompt is advice, printed, never blocked,
+                              so the session can act on it (#2651 calls this its ONE
+                              handover turn). Every later prompt while the input still
+                              has no writer is refused outright - see mode_self.
   start  (SessionStart)     - "these sessions in this folder lost their panel": the ones
                               still running headless, the ones that ended in the last
                               few minutes without being re-attached, and any schedule
@@ -136,6 +140,51 @@ def parse_envelope(chunks):
 
 def config_dir():
     return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+
+
+# ----------------------------------------------------------------- handover state (#2651)
+
+def handover_state_dir():
+    """Where the ONE-handover-turn marker lives: beside the registry, not inside it, so
+    registry() (which parses every *.json entry in sessions/ as a registry record) never
+    has to recognise or skip this unit's own file."""
+    return os.path.join(config_dir(), "session-panel-state")
+
+
+def handover_marker_path(session_id):
+    return os.path.join(handover_state_dir(), session_id + ".warned")
+
+
+def handover_already_used(session_id):
+    """True once THIS session has already had its one no-panel prompt advised. A write
+    failure below (read-only HOME, no disk) means this always reads False, which is the
+    fail-open choice for a worse outcome: a session that cannot be blocked for lack of
+    a marker still gets the advisory every turn, which is what happened before #2651;
+    treating a write failure as 'already used' would instead block on the very first
+    headless turn, which is the one turn this exists to GUARANTEE runs unblocked."""
+    try:
+        return os.path.isfile(handover_marker_path(session_id))
+    except OSError:
+        return False
+
+
+def mark_handover_used(session_id):
+    try:
+        os.makedirs(handover_state_dir(), exist_ok=True)
+        with open(handover_marker_path(session_id), "w") as f:
+            f.write(str(time.time()))
+    except OSError:
+        pass
+
+
+def clear_handover_used(session_id):
+    """Called once this session is seen attached again: a loss AFTER that reattachment
+    is a new loss and earns its own single handover turn, rather than an immediate
+    block from a marker a previous, already-handled loss left behind."""
+    try:
+        os.remove(handover_marker_path(session_id))
+    except OSError:
+        pass
 
 
 # ------------------------------------------------------------------------ processes
@@ -447,19 +496,19 @@ def schedule_lines(path, verb):
 
 # ----------------------------------------------------------------------------- self
 
-def mode_self(hook):
-    entries = registry()
-    pid = own_process(hook.get("session_id"), entries)
-    if pid is None or not is_stream_driven(pid) or probe(pid) != "headless":
-        return
-    mine = next((e for e in entries if e.get("pid") == pid and alive(e)), None)
-    folder = hook.get("cwd") or (mine or {}).get("cwd")
+def live_peers(pid, folder, entries):
+    """Other live, attached, stream-driven sessions in the same folder: who this
+    session could hand over to."""
     peers = []
     for entry in entries:
         if entry["pid"] == pid or entry.get("cwd") != folder or not alive(entry):
             continue
         if is_stream_driven(entry["pid"]) and probe(entry["pid"]) == "attached":
             peers.append(entry)
+    return peers
+
+
+def handover_lines(peers):
     out = [
         "⚠️  THIS SESSION HAS NO PANEL (%s). Its input stream has no writer: a window reload" % ISSUE,
         "    or an editor restart replaced its panel with a new, blank session. Nobody can read",
@@ -477,8 +526,59 @@ def mode_self(hook):
         "    2. Cancel every schedule you hold: CronList, then CronDelete each id. A schedule",
         "       left armed here keeps firing with nobody watching.",
         "    3. Stop. This process exits by itself once it is idle.",
+        "    THIS IS THE ONLY TURN THAT RUNS. Every later prompt is BLOCKED (#2651) while",
+        "    this input still has no writer - there is no second chance to act instead of",
+        "    handing over.",
     ]
-    print("\n".join(out))
+    return out
+
+
+def blocked_lines():
+    return [
+        "⛔ BLOCKED (%s, #2651): this session already used its one no-panel handover turn," % ISSUE,
+        "    and its input still has no writer. Nothing runs here - the earlier prompt told",
+        "    you to hand over; that was the only turn allowed. This process exits by itself",
+        "    once it is idle.",
+    ]
+
+
+def mode_self(hook):
+    """UserPromptSubmit. Returns the process exit code: 0 (nothing to say, or the one
+    advisory turn ran) or 2, which the caller must turn into a BLOCKING decision (a
+    prompt hook can refuse a turn; see scope-check.sh).
+
+    Why a turn is blocked at all (#2651, second diagnosis of #2380). The advisory this
+    prints is text in a prompt, and text does not stop a session from acting on later
+    prompts: at the 2026-10-09 07:58Z reload it reached the orphaned supervisor 3.5
+    minutes late, after a full tick as a second supervisor that held a schedule for six
+    minutes. So the first headless prompt - the one that can still act on the advice -
+    is never blocked, and is the ONLY one that is not: every prompt after it, for as
+    long as this session's input still has no writer, is refused outright. One marker
+    file per session id (handover_marker_path) is what tells the second prompt from the
+    first; "attached" clears it (see clear_handover_used), so a session that is
+    reattached and later loses its panel again earns a fresh single turn rather than an
+    immediate block from a stale marker.
+    """
+    sid = hook.get("session_id")
+    sid_known = isinstance(sid, str) and bool(UUID.match(sid))
+    entries = registry()
+    pid = own_process(sid, entries)
+    if pid is None or not is_stream_driven(pid):
+        return 0
+    state = probe(pid)
+    if state != "headless":
+        if state == "attached" and sid_known:
+            clear_handover_used(sid)
+        return 0
+    if sid_known and handover_already_used(sid):
+        print("\n".join(blocked_lines()))
+        return 2
+    if sid_known:
+        mark_handover_used(sid)
+    mine = next((e for e in entries if e.get("pid") == pid and alive(e)), None)
+    folder = hook.get("cwd") or (mine or {}).get("cwd")
+    print("\n".join(handover_lines(live_peers(pid, folder, entries))))
+    return 0
 
 
 # ---------------------------------------------------------------------------- start
@@ -607,7 +707,13 @@ def main():
         return 0
     try:
         hook = read_hook_input()
-        (mode_start if mode == "start" else mode_self)(hook)
+        if mode == "start":
+            mode_start(hook)
+            return 0
+        # mode == "self": its return value (0 or 2) IS the block decision (#2651) - the
+        # caller (scope-check.sh) must propagate exit 2 as its own exit, never swallow it
+        # into the "check did not run" path that every other non-zero exit here means.
+        return mode_self(hook)
     except Exception as error:  # noqa: BLE001 - a hook must never wedge a session
         print(
             "⚠️  Lost-panel check failed (%s) - a session that lost its panel is NOT being reported (%s)."
