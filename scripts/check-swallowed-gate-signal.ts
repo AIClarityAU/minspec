@@ -8,6 +8,14 @@
  * when this check was first run. That is the constitution's own "enforce, don't trust
  * the model" case — a rule the model must remember is a rule that drifts.
  *
+ * Scans two kinds of source: every `.sh` under `--dir` (default `scripts`), and the
+ * `scripts` object of the root `package.json` plus every workspace's (#2671) — the
+ * `prepare` lifecycle script is npm's own equivalent of a shell statement, and
+ * `git config core.hooksPath .githooks || true && npm run build ...` was exactly
+ * this defect, sitting one layer outside what the `.sh`-only scan could ever see.
+ * See findPackageJsonScriptSwallows in lib/swallowed-gate-signal.ts for how a
+ * package.json script's `&&` chain stands in for the shell form's control flow.
+ *
  *   npx tsx scripts/check-swallowed-gate-signal.ts [--dir scripts]
  *
  * Exit 0 = every swallowed capture that decides something is annotated.
@@ -33,10 +41,11 @@
  * file is IO only: walk, read, hand the text over, print, set the exit code.
  */
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 import {
+  findPackageJsonScriptSwallows,
   findSwallowedGateSignals,
   formatSwallowedSignal,
   unannotated,
@@ -68,17 +77,63 @@ function shellScripts(dir: string): string[] {
   });
 }
 
+/**
+ * The root `package.json` plus every workspace's, resolved from the root's own
+ * `workspaces` globs (currently just `packages/*`) rather than hardcoded or walked
+ * from a full tree scan — the monorepo's own declared member list is the one
+ * source of truth for "what is a workspace here" (#2671, extending the DR-066
+ * clause 1 lint past `.sh` files, which could not see a swallow written inside a
+ * `package.json` script string at all).
+ *
+ * Deliberately only `*` (one path segment) globs — the only shape `workspaces`
+ * uses today — rather than a general glob engine; a future deeper pattern that
+ * this misses is a gap to close then, not a reason to pull in a dependency now.
+ */
+function packageJsonFiles(root: string): string[] {
+  const rootPkgPath = join(root, 'package.json');
+  let rootPkg: { workspaces?: string[] };
+  try {
+    rootPkg = JSON.parse(readFileSync(rootPkgPath, 'utf8'));
+  } catch (error) {
+    throw new GateError(`cannot read/parse ${rootPkgPath}: ${(error as Error).message}`);
+  }
+
+  const files = [rootPkgPath];
+  for (const glob of rootPkg.workspaces ?? []) {
+    if (!glob.endsWith('/*')) continue;
+    const parentRel = glob.slice(0, -2);
+    const parentAbs = join(root, parentRel);
+    let entries: string[];
+    try {
+      entries = readdirSync(parentAbs);
+    } catch (error) {
+      throw new GateError(`cannot read workspace directory ${parentAbs}: ${(error as Error).message}`);
+    }
+    for (const entry of entries) {
+      const candidate = join(parentAbs, entry, 'package.json');
+      if (statSync(join(parentAbs, entry)).isDirectory() && existsSync(candidate)) {
+        files.push(candidate);
+      }
+    }
+  }
+  return files;
+}
+
 function main(): number {
   const dir = join(ROOT, argDir());
   const scripts = shellScripts(dir);
+  const pkgFiles = packageJsonFiles(ROOT);
 
   // A scan that found no scripts has not established anything. Treating it as a pass is
   // the exact failure this check exists to forbid.
   if (scripts.length === 0) {
     throw new GateError(`no shell scripts found under ${argDir()} — refusing to report a pass`);
   }
+  if (pkgFiles.length === 0) {
+    throw new GateError('no package.json files resolved — refusing to report a pass');
+  }
 
-  const findings: SwallowedSignal[] = scripts.flatMap((path) => {
+  const shellFindings: SwallowedSignal[] = scripts.flatMap((path) => {
     let source: string;
     try {
       source = readFileSync(path, 'utf8');
@@ -87,6 +142,20 @@ function main(): number {
     }
     return findSwallowedGateSignals(relative(ROOT, path), source);
   });
+
+  const pkgFindings: SwallowedSignal[] = pkgFiles.flatMap((path) => {
+    let source: string;
+    let parsed: { scripts?: Record<string, string> };
+    try {
+      source = readFileSync(path, 'utf8');
+      parsed = JSON.parse(source);
+    } catch (error) {
+      throw new GateError(`cannot read/parse ${path}: ${(error as Error).message}`);
+    }
+    return findPackageJsonScriptSwallows(relative(ROOT, path), parsed.scripts ?? {}, source);
+  });
+
+  const findings = [...shellFindings, ...pkgFindings];
 
   const failures = unannotated(findings);
   const known = findings.filter((f) => f.knownIssue !== undefined);
@@ -108,8 +177,8 @@ function main(): number {
   }
 
   console.log(
-    `DR-066 clause 1: clean — ${scripts.length} scripts scanned, ` +
-      `${known.length} known and tracked, 0 unannotated.`,
+    `DR-066 clause 1: clean — ${scripts.length} shell script(s) + ${pkgFiles.length} ` +
+      `package.json file(s) scanned, ${known.length} known and tracked, 0 unannotated.`,
   );
   return 0;
 }
