@@ -2172,6 +2172,17 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
         fi
       fi
 
+      # #1779 perf: the other four merge-conjunction terms, named ONCE so the
+      # autonomy verdict below can be gated on them without spelling the
+      # five-term conjunction twice in this file (two half-copies of one
+      # predicate is this repo's recurring drift failure — #1401, #1758).
+      OTHER_GATES_GREEN="no"
+      if [[ "$ELIGIBLE" == "true" && -n "$PR_NUM" \
+            && "$AUTOMERGE_MODE" == "consequence-hybrid" \
+            && "$READY_STATE" == "success" ]]; then
+        OTHER_GATES_GREEN="yes"
+      fi
+
       # DR-086 AUTONOMY CONJUNCT (#1614). This arm never called
       # `paths_have_approvable_doc` at all, so the machinery hold that
       # MACHINERY_PATH_RE was added to double-witness (#1264) had its second
@@ -2186,22 +2197,26 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       # node_modules / no tsx / non-zero exit / unparseable stdout) — every one
       # leaves AUTONOMY_PROCEED at "no". Only a verdict that positively says
       # proceed sets it to "yes".
+      #
+      # Computed ONLY when OTHER_GATES_GREEN — the conjunction it feeds cannot
+      # pass otherwise, so running it unconditionally paid a `gh pr diff`
+      # round-trip plus a `tsx` process start on every dispatch, even while
+      # `autonomy` resolves to `ask` and denies unconditionally (#1779).
+      # Correctness is unaffected: AUTONOMY_PROCEED still starts at "no" on
+      # every path, including the skipped one.
       AUTONOMY_VERDICT=""
       AUTONOMY_PROCEED="no"
       SPEC024_CHANGED=""
-      if [[ -n "$PR_NUM" ]]; then
+      if [[ "$OTHER_GATES_GREEN" == "yes" ]]; then
         SPEC024_CHANGED=$(gh pr diff "$PR_NUM" --repo "$REPO" --name-only 2>/dev/null || true)  # swallow-ok: an empty list is the STRONGEST stop class, not an absent one — autonomy_may_merge returns proceed:false on empty input (verified via the --may-merge seam), so AUTONOMY_PROCEED stays no and the merge is refused
-      fi
-      if AUTONOMY_VERDICT=$(autonomy_may_merge \
-            "merge PR #${PR_NUM:-none} via the SPEC-024 consequence-hybrid gate" \
-            "$SPEC024_CHANGED"); then
-        AUTONOMY_PROCEED="yes"
+        if AUTONOMY_VERDICT=$(autonomy_may_merge \
+              "merge PR #${PR_NUM:-none} via the SPEC-024 consequence-hybrid gate" \
+              "$SPEC024_CHANGED"); then
+          AUTONOMY_PROCEED="yes"
+        fi
       fi
 
-      if [[ "$ELIGIBLE" == "true" && -n "$PR_NUM" \
-            && "$AUTOMERGE_MODE" == "consequence-hybrid" \
-            && "$READY_STATE" == "success" \
-            && "$AUTONOMY_PROCEED" == "yes" ]]; then
+      if [[ "$OTHER_GATES_GREEN" == "yes" && "$AUTONOMY_PROCEED" == "yes" ]]; then
         # FR-6: low-blast, all signals green, opted-in, AND the independent
         # reviewer greenlit (ready-to-merge=success) → merge with no human eyes.
         echo "Auto-merge ELIGIBLE for PR #$PR_NUM ($BLAST-blast, ready-to-merge=success): $GATE_REASON"
