@@ -234,6 +234,18 @@ fi
 # invariant is about what any CHILD sees — a capability probe is a child. `--help`
 # makes no API call, so nothing here needs a credential; handing it one only widens
 # the exposure.
+#
+# That `--help` needs no login was MEASURED, because this gate fails closed and the
+# line before this one left the subscription login in the probe's environment (by
+# inheritance, not because the probe used it). On 2026-10-10, with the CLI version
+# MinSpec's own review workflow pinned (2.1.201, installed from npm) and with 2.1.283:
+# started with an environment of
+# PATH and HOME and nothing else, HOME an empty directory, so no login file and no
+# login variable, `claude -p --help` exits 0, lists `--json-schema`, and writes no
+# file. The line below was then run as written, through the launch program, by a
+# launcher holding both model logins, and it found the option. NOT measured: this
+# script as CI runs it. The review workflow runs the BASE branch's copy of this file,
+# so a change to this line first runs in CI on the pull request after it merges.
 if [[ -z "$VERDICT_SCHEMA_JSON" ]] || ! bash "$AGENT_LAUNCH_ENV" claude -p --help 2>/dev/null | grep -q -- '--json-schema'; then
   echo "review-branch.sh: CLI lacks --json-schema (or the guard schema is unreadable) — refusing to review; gate fails closed (DR-079)" >&2
   exit 0
