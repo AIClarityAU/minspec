@@ -69,7 +69,15 @@ function runTriage(verdictBlock: string, opts: { failBatchRemove?: boolean } = {
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
 
-  const issueJson = JSON.stringify({ title: TITLE, body: BODY, labels: [{ name: 'inbox' }] });
+  // `author` is what `gh issue view --json author,...` returns, and triage asks for it:
+  // an issue is triaged only when its author is on the list in
+  // scripts/lib/dispatch-author-gate.sh (dispatch-author-gate.test.ts covers the gate).
+  const issueJson = JSON.stringify({
+    author: { login: 'harvest316' },
+    title: TITLE,
+    body: BODY,
+    labels: [{ name: 'inbox' }],
+  });
   fs.writeFileSync(path.join(dir, 'issue.json'), issueJson);
   fs.writeFileSync(path.join(dir, 'agent-out.txt'), verdictBlock);
 
@@ -105,10 +113,12 @@ exit 0
 `,
   );
   // Stub `claude`: the triage agent is credential- and tool-free by design, so its
-  // only contribution is the verdict text.
+  // only contribution is the verdict text. The path is written into the stub, not read
+  // from $STUB_DIR: the agent is started with an environment built from an allowlist
+  // (scripts/lib/agent-launch-env.sh), so a helper variable set here does not reach it.
   fs.writeFileSync(
     path.join(bin, 'claude'),
-    `#!/usr/bin/env bash\ncat "$STUB_DIR/agent-out.txt"\nexit 0\n`,
+    `#!/usr/bin/env bash\ncat "${path.join(dir, 'agent-out.txt')}"\nexit 0\n`,
   );
   fs.chmodSync(path.join(bin, 'gh'), 0o755);
   fs.chmodSync(path.join(bin, 'claude'), 0o755);

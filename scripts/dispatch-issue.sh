@@ -589,13 +589,31 @@ if [[ "${MINSPEC_FRESHNESS_CHECKED:-}" != "1" ]]; then
   export MINSPEC_FRESHNESS_CHECKED=1
 fi
 
+# ── The two things every agent this script starts goes through (#1203) ────────
+# Sourced HERE, at the head of the dispatch path, and not with the libraries at the top:
+# everything above this line is argument handling and the pure seams (`--check-*`,
+# `--may-merge`, ...), which exit before they reach it and never fetch an issue. A
+# missing library still stops the run, loudly, before an issue is read: the source is
+# deliberately not guarded by an `[[ -f ]]` test.
+#
+#   dispatch-author-gate.sh   WHOSE issue may be dispatched, and whose comments an agent
+#                             may be shown. One list, shared with triage-inbox.sh.
+#   agent-launch-env.sh       WHAT an agent is started with: an environment built from a
+#                             list of names. It is a program, run on each launch line as
+#                             `bash "$AGENT_LAUNCH_ENV" claude ...`, so a launch that
+#                             names a missing or empty path starts nothing.
+# shellcheck source=scripts/lib/dispatch-author-gate.sh
+source "${SCRIPT_DIR}/lib/dispatch-author-gate.sh"
+AGENT_LAUNCH_ENV="${SCRIPT_DIR}/lib/agent-launch-env.sh"
+
 echo "Fetching issue #$ISSUE..."
 # Fetch `state` + `comments` alongside labels: this view IS the point-in-time
 # re-validation for the #406 staleness re-check AND the #983 verdict-record check
 # below. The verdict record lives in the triage comment (GitHub-side: shared,
 # auditable, and surviving a fresh clone — no local state file to strand), so the
-# comments are gate INPUT, not decoration.
-ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,labels,state,comments)
+# comments are gate INPUT, not decoration. `author` is what the author gate further
+# down reads: until it was added here, nothing on this path knew who wrote the issue.
+ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json author,body,title,labels,state,comments)
 ISSUE_BODY=$(echo "$ISSUE_JSON" | jq -r '"# " + .title + "\n\n" + .body')
 ISSUE_TITLE=$(echo "$ISSUE_JSON" | jq -r '.title')
 ISSUE_LABELS=$(echo "$ISSUE_JSON" | jq -r '.labels[].name')
@@ -707,6 +725,44 @@ if [[ "$READY_OK" -ne 1 ]]; then
   # and is reported as one.
   exit_declined
 fi
+
+# ── Author gate: who wrote this issue? ───────────────────────────────────────
+# The gate above establishes that the issue is open, still labelled, and backed by a
+# fresh verdict record from a trusted COMMENT author. That author is the bot that
+# triaged it, so the record proves triage ran. It says nothing about whose text triage
+# ran on, and until this block nothing here did: the issue's author was not fetched.
+#
+# An issue is dispatched only when its author is on the list in
+# scripts/lib/dispatch-author-gate.sh. Not "a collaborator" and not "has write access":
+# see that file for why, and for why the list has no switch.
+#
+# WHERE IT SITS. After the readiness gate, so an issue that is already refused keeps its
+# own reason in the words it always had. Before the claim, so a refusal here has started
+# nothing: no claim, no label, no worktree, no agent. triage-inbox.sh asks the same
+# question before it triages, so an issue normally never gets a ready label to bring it
+# this far. This is the same answer given again at the last moment before a launch,
+# because a label can be applied by hand and the readiness gate would then let it by.
+#
+# DEFAULT DENY. AUTHOR_OK starts at 0 and one thing sets it: dispatch_author_check
+# answering yes. A login that is not on the list, an author that cannot be read, and a
+# check that could not run all leave it at 0.
+#
+# A refusal is "refused before starting" to a caller that asked (#2641, exit_declined),
+# so it uses no slot of the drain's queue limit, and exit 0 to one that did not. Nothing
+# is written to the issue: its author is visible on it, which makes this one of the
+# self-evident refusals, like a closed issue. The drain offers it again each cycle and
+# says so (NOTHING DISPATCHED, when that leaves nothing started) until its ready label
+# is removed or it is filed again by a listed author.
+AUTHOR_OK=0
+AUTHOR_REASON=""
+if AUTHOR_REASON="$(dispatch_author_check "$ISSUE_JSON")"; then
+  AUTHOR_OK=1
+fi
+if [[ "$AUTHOR_OK" -ne 1 ]]; then
+  echo "Refusing #$ISSUE — ${AUTHOR_REASON:-its author could not be checked}. Nothing was started: no claim, no label, no worktree and no agent. Remove its ready label, or file it again under an account on the list (scripts/lib/dispatch-author-gate.sh)."
+  exit_declined
+fi
+echo "Author: ${AUTHOR_REASON} — on the dispatch author list."
 
 # ── Which MODE did the gate authorise? (#1169 / DR-076) ──────────────────────
 # The gate's success output is not decoration: `ready` is a full build, `ready-specify`
@@ -824,7 +880,7 @@ if [[ "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
     exit_declined
   fi
   echo "Claimed #$ISSUE (session $(lease_self_sid)) — proceeding to build."
-  # D10/FR-12 — renewal is PARENT-side (the agent is credential-free, INV-5) and driven
+  # D10/FR-12 — renewal is PARENT-side (the agent is not handed this script's token, INV-5) and driven
   # by a wall clock rather than by build progress, so a long, quiet build never expires
   # its own live claim. The EXIT trap tears the ticker down and retracts every claim
   # this session holds, so a crash or ^C can never strand a live-LOOKING claim that
@@ -1068,12 +1124,25 @@ echo "Running headless agent (log: $LOG)..."
 
 # Scoped tool allow-list. NOTE: this is defense-in-depth, NOT a sandbox — an
 # agent that runs the project's own build/test IS executing arbitrary code by
-# definition (test files, npm scripts it can edit). The real control is that the
-# agent holds NO credentials it can abuse: no gh, no git push/remote/config, no
-# network tools. The dispatcher (parent) does all credentialed/network ops after
-# the agent exits. Interpreters that are trivial escapes (node -e, npx, cat of
-# arbitrary paths) are removed; Read covers worktree files.
-#   - npm: fixed subcommands only (still runs scripts, but agent has nothing to exfil)
+# definition (test files, npm scripts it can edit). So the list below limits what
+# the MODEL may ask for, not what then runs. Two things carry the weight instead,
+# and both are code:
+#   1. WHOSE text the agent reads. The author gate above refuses any issue whose
+#      author is not on the list, before the claim.
+#   2. WHAT the agent is started with. Every launch below goes through
+#      agent-launch-env.sh, which builds its environment from a list of names. The
+#      token this script writes with is installed by `export` (lib/gh-bot.sh) and is
+#      not on that list, nor is anything else named like a credential.
+#      dispatch-env-allowlist.test.ts reads the environment a launched agent was
+#      actually given; this comment used to say the agent "holds NO credentials",
+#      and nothing had ever looked.
+# What neither does: the agent is still a process of this script's user, so what it
+# runs can ask for whatever that user can. That needs a boundary between the two
+# (another user, a container), and is not closed here.
+# The dispatcher (parent) does all credentialed/network ops after the agent exits.
+# Interpreters that are trivial escapes (node -e, npx, cat of arbitrary paths) are
+# removed; Read covers worktree files.
+#   - npm: fixed subcommands only (still runs scripts)
 #   - git: local history ops only — NO push/remote/config/clone/fetch/pull
 ALLOWED_TOOLS="Read,Edit,Write,Glob,Grep,Bash(npm test),Bash(npm run validate),Bash(npm run lint),Bash(npm run build),Bash(npm ci),Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
 
@@ -1356,7 +1425,9 @@ run_reviewer_stage() {
 
 # ── EGRESS GUARD (#358) ───────────────────────────────────────────────────────
 # The dev agent ran `claude -p` over an UNTRUSTED issue body (prompt-injection
-# surface). It holds NO credentials (no gh/push/remote/network), but this PARENT
+# surface). It is not handed this script's token and its tool list has no
+# gh/push/remote/network (the note on ALLOWED_TOOLS says what that does and does not
+# establish), but this PARENT
 # then PUBLISHES its output: it pushes the committed diff, opens a PR, and posts
 # `.agent-summary.md` / derives `.review-signals.json` onto the issue. So a
 # prompt-injected agent's exfil channel is: read a secret from a file it can Read,
@@ -1529,8 +1600,9 @@ shepherd_rebase() {
 }
 
 # A FRESH, non-exhausted fix agent in the WARM worktree (D4) — no re-clone, no rebuild.
-# Credential-free, same allow-list as the build agent (INV-5): it edits and commits
-# locally; THIS parent performs every credentialed op.
+# Started exactly as the build agent is (INV-5): the same tool allow-list, and the same
+# environment built from a list of names, so it is not handed this script's token. It
+# edits and commits locally; THIS parent performs every credentialed op.
 shepherd_fix() {
   local pr_num="$1" action="$2" feedback fix_prompt before_sha after_sha
 
@@ -1540,8 +1612,8 @@ shepherd_fix() {
     --body "$(printf 'Creator-shepherd automated attempt (`%s`) — the session that opened this PR is fixing it in its warm worktree (SPEC-044 D4). %s' "$action" "$SHEPHERD_ATTEMPT_MARKER")" 2>/dev/null || true
 
   # The PR's failure signal. UNTRUSTED: a prompt-injected diff can steer a reviewer
-  # into echoing attacker text, so it is handed to the agent as DATA, and the agent
-  # holds no credentials it could be steered into abusing.
+  # into echoing attacker text, so it is handed to the agent as DATA, and the agent is
+  # not handed this script's token (see the note on ALLOWED_TOOLS).
   #
   # #1135 — this read used to take the last comment containing REVIEW_VERDICT_BEGIN from
   # ANY author. This repo is PUBLIC, so any GitHub user can comment on a PR: a stranger
@@ -1550,14 +1622,24 @@ shepherd_fix() {
   # the constitution's own rule is to enforce rather than trust — so the attacker's text
   # is now kept away from the agent entirely, rather than merely labelled.
   #
-  # Trust anchor is `--trusted-comment-bodies`, the SAME tested seam the verdict-record
-  # readers use — not a new one. #1135 proposed a bot-only allowlist instead; that was
-  # measured and rejected, because the local `review_branch` path posts under a
-  # COLLABORATOR account and bot-only would have silently discarded its feedback.
+  # TWO filters, and a comment must pass both.
   #
-  # The tally behind that (509 bot / 56 collaborator, of 565) is a point-in-time
-  # measurement a reader cannot check from this diff, so here is how to re-run it —
-  # a claim that cannot be re-derived is not evidence:
+  # `dispatch_trusted_comments` is the author list this script and triage share
+  # (lib/dispatch-author-gate.sh): the pipeline's own App and the founder. A comment from
+  # anyone else is DROPPED, and the run says how many and from whom. Dropped rather than
+  # refusing the fix: refusing would let anyone who can comment on the pull request stop
+  # its shepherd, and on a public repository that is anyone.
+  #
+  # `--trusted-comment-bodies` is the tested seam the verdict-record readers use, and it
+  # stays. On its own it admits the bot and anyone whose association is OWNER, MEMBER or
+  # COLLABORATOR, and that last part is what the first filter narrows: an association is
+  # something an account can be given later, for another reason, and being given it does
+  # not make that account's text a thing to start an agent on.
+  #
+  # #1135 weighed a bot-ONLY list and rejected it, because the local `review_branch` path
+  # posts under the founder's own account and bot-only would have silently discarded that
+  # feedback (56 of 565 verdict comments when it was counted). The list keeps the founder
+  # for exactly that reason, so those 56 still arrive. To count again:
   #
   #   gh api graphql -f query='{repository(owner:"AIClarityAU",name:"minspec"){
   #     pullRequests(first:50,states:[OPEN,CLOSED,MERGED]){nodes{
@@ -1565,14 +1647,15 @@ shepherd_fix() {
   #     | jq -r '..|objects|select(.body?|strings|contains("REVIEW_VERDICT_BEGIN"))
   #              |.author.login' | sort | uniq -c
   #
-  # The ratio is not load-bearing either way: what matters is that BOTH authors occur,
-  # which any non-zero collaborator count establishes.
+  # Any login in that count other than the App's and the founder's is one whose verdicts
+  # the fix agent no longer sees.
   #
   # Residual, deliberately not chased here: a TRUSTED author could quote an older verdict
   # and it would win "last". Unlike the verdict-record case (#1113) the consequence is
-  # stale feedback to a credential-free agent, not a gate bypass, and REVIEW_VERDICT
-  # carries no timestamp to rank by. Noted rather than silently accepted.
+  # stale feedback to the fix agent, not a gate bypass, and REVIEW_VERDICT carries no
+  # timestamp to rank by. Noted rather than silently accepted.
   feedback=$(gh pr view "$pr_num" --repo "$REPO" --json comments 2>/dev/null \
+               | dispatch_trusted_comments "pull request #${pr_num}" \
                | "${SCRIPT_DIR}/dispatch-ready-check.sh" --trusted-comment-bodies 2>/dev/null \
                | awk '/REVIEW_VERDICT_BEGIN/ { buf = ""; inb = 1 }
                       inb                    { buf = buf $0 "\n" }
@@ -1583,7 +1666,7 @@ shepherd_fix() {
 
   before_sha=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null || echo "")
   echo "  Dispatching a fresh fix agent into the warm worktree (no re-clone)..."
-  (cd "$WORKTREE" && "${AGENT_ENV_SCRUB[@]}" claude -p "$fix_prompt" \
+  (cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$fix_prompt" \
        "${AGENT_CONTEXT_ARGS[@]}" \
        "${SYS_PROMPT_ARGS[@]}" \
        --model "$RUN_MODEL" \
@@ -1816,6 +1899,18 @@ RUN_MODEL="$MODEL"
 RUN_PROMPT="$PROMPT"
 ESCALATE_RETRIED=0
 
+# What the agent is about to be started with, said once per dispatch and by NAME only.
+# An allowlist fails quietly in one direction: a variable a build turns out to need is
+# simply not there, and the build behaves differently for no visible reason. This line
+# is the visible reason. It also shows the launcher's own token among the names that
+# are held back, on every run, which is the property the list is there for.
+#
+# A report, not a gate: the gate is the launch line below, which goes through the same
+# program and starts nothing if the list is unusable. So a failure to describe is said
+# and the build goes on to that line.
+bash "$AGENT_LAUNCH_ENV" --report \
+  || echo "WARNING: could not describe the agent environment for #$ISSUE (see the line above). The launch below goes through the same allowlist and starts nothing if it is unusable." >&2
+
 while true; do
 echo "Model: $RUN_MODEL (role: $ROLE)"
 
@@ -1844,7 +1939,13 @@ fi
 # Headless run inside the worktree. `claude -p` is the only automatable launch
 # primitive (cron/loop-able). It exits 0 even when the agent self-escalates, so
 # detect ESCALATE: in the output rather than relying on exit code.
-if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude -p "$RUN_PROMPT" \
+#
+# `bash "$AGENT_LAUNCH_ENV"` is what gives the agent its environment: the names on the
+# allowlist and nothing else. It replaces itself with `claude`, so the build ceiling in
+# front of it still bounds, and can still kill, the agent itself. It replaces
+# "${AGENT_ENV_SCRUB[@]}", which removed one name and passed on the rest; the name that
+# removed (the autocompact override, #1203) is not on the list, so it is still dropped.
+if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude -p "$RUN_PROMPT" \
       "${AGENT_CONTEXT_ARGS[@]}" \
       "${SYS_PROMPT_ARGS[@]}" \
       --model "$RUN_MODEL" \

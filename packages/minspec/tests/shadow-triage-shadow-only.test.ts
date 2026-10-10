@@ -156,12 +156,16 @@ exit 0
 
   // Every argument is logged on its own line with newlines escaped, so a multi-line
   // `--body` cannot be mistaken for separate arguments when asserting.
+  //
+  // The issue it serves has an `author` on the list in
+  // scripts/lib/dispatch-author-gate.sh: triage refuses any other before either agent
+  // runs, and these cases are about what happens when both do.
   fs.writeFileSync(
     path.join(binDir, 'gh'),
     `#!/usr/bin/env bash
 { printf '=== %s %s\\n' "\${1:-}" "\${2:-}"; for a in "\$@"; do printf 'ARG %s\\n' "\${a//$'\\n'/\\\\n}"; done; } >> "${ghLog}"
 if [[ "\${1:-}" == "issue" && "\${2:-}" == "view" ]]; then
-  echo '{"body":"Some issue body.","title":"A fixture issue","labels":[{"name":"inbox"}]}'
+  echo '{"author":{"login":"harvest316"},"body":"Some issue body.","title":"A fixture issue","labels":[{"name":"inbox"}]}'
 elif [[ "\${1:-}" == "repo" && "\${2:-}" == "view" ]]; then
   echo '${visibility}'
 fi
