@@ -87,7 +87,7 @@ const COMMIT_ANYWAY_ACTION = 'Commit here anyway';
  * persists the coverage choice into it; CI/vitest read it) and the epic registry's
  * marker-bounded `docs/epics/INDEX.md` (writeEpicIndex, at the DEFAULT `epicsDir`
  * a fresh init uses; a custom `epicsDir` is rarer and the existsSync filter simply
- * skips the miss) — are listed here EXPLICITLY (as files), so they ride the
+ * skips the miss — a known limit, #2684) — are listed here EXPLICITLY (as files), so they ride the
  * scaffold commit without sweeping a directory. Omitting them left MinSpec-written,
  * non-gitignored files untracked after "Commit them" (#610).
  *
