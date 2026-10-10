@@ -115,6 +115,12 @@ _gh_bot_fingerprint() {
 _gh_bot_adopt() {
   local tok="${1-}" changed=0
   [[ "$tok" != "${GH_TOKEN:-}" ]] && changed=1
+  # EXPORTED, on purpose: the `gh` and `git push` this script goes on to run are child
+  # processes and must carry it, and so must the scripts the drain starts. The other
+  # side of that is that EVERY process this shell starts from here on inherits it. An
+  # agent is such a process, and must not: dispatch-issue.sh and triage-inbox.sh start
+  # theirs through lib/agent-context.sh, which builds the agent's environment from a
+  # list of names that this one (and the stamp below) can never be on.
   export GH_TOKEN="$tok"
   _GH_BOT_OWNED=1
   # We minted it, so there is no third-party identity to probe — skip the `gh api user`

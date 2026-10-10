@@ -129,7 +129,12 @@ describe('reviewer credential isolation — the subscription path never rides PA
       ANTHROPIC_API_KEY: 'sk-ant-should-not-reach-the-child',
     });
     expect(seen.reviewerCalls, 'run_reviewer must actually have been reached').toBe(1);
-    expect(seen.apiKey).toBe('');
+    // ABSENT, not merely empty (#1203). This used to assert '' because the launch set
+    // the key to an empty string; the reviewer is now started through
+    // lib/agent-context.sh, which builds its environment from a list of names, and
+    // the key is not a name the subscription start asks for. The stub prints UNSET for a
+    // variable that is not there at all, which is the stronger of the two.
+    expect(seen.apiKey).toBe('UNSET');
     expect(seen.apiKey).not.toContain('sk-ant');
   });
 
@@ -154,7 +159,8 @@ describe('reviewer credential isolation — the subscription path never rides PA
       ANTHROPIC_API_KEY: 'sk-ant-should-not-reach-the-child',
     });
     expect(seen.reviewerCalls, 'run_reviewer must actually have been reached').toBe(1);
-    expect(seen.apiKey).toBe('');
+    // Absent, not merely empty: see the first test.
+    expect(seen.apiKey).toBe('UNSET');
   });
 
   it('the assertions above observe run_reviewer, never the preflight probe (anti-vacuity)', () => {

@@ -147,6 +147,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/gh-bot.sh
 source "${SCRIPT_DIR}/lib/gh-bot.sh"
 gh_bot_init
+# launcher_worktree_git, for sync_shared_checkouts: git in a checkout an agent may have
+# been in, by the repository's own record of it (#1203).
+# shellcheck source=scripts/lib/agent-worktree.sh
+source "${SCRIPT_DIR}/lib/agent-worktree.sh"
 # Env-overridable for the same reason as MINSPEC_DRAIN_PRIMARY_ROOT below: the
 # #1208 concurrency harness points it at a hermetic stub so the fan-out can be
 # proven to actually overlap without launching real build agents.
@@ -658,14 +662,20 @@ sync_shared_checkouts() {
       [[ -n "$root" && -d "$root" ]] || continue
       # never touch the drain's own detached run-dir (hard-reset elsewhere)
       [[ "$(readlink -m -- "$root" 2>/dev/null)" == "$(readlink -m -- "$DRAIN_RUN_DIR" 2>/dev/null)" ]] && continue
-      [[ "$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$db" ]] || continue   # G1
-      [[ -z "$(git -C "$root" status --porcelain 2>/dev/null)" ]] || continue                   # G2
+      # Every checkout the repository lists is visited, and some are worktrees an agent
+      # was given. So git is never asked through "$root"'s own `.git` file, which says
+      # whatever was last written to it: launcher_worktree_git takes the git directory
+      # from THIS repository's record of the worktree and the hooks from this tree
+      # (lib/agent-worktree.sh, #1203). A root with no such record is skipped.
+      launcher_worktree_git_dir "$PRIMARY_ROOT" "$root" >/dev/null || continue
+      [[ "$(launcher_worktree_git "$PRIMARY_ROOT" "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$db" ]] || continue   # G1
+      [[ -z "$(launcher_worktree_git "$PRIMARY_ROOT" "$root" status --porcelain 2>/dev/null)" ]] || continue                   # G2
       checkout_occupied "$root" && continue                                                     # G3 (occupied ⇒ skip)
-      head_sha="$(git -C "$root" rev-parse HEAD 2>/dev/null)" || continue
+      head_sha="$(launcher_worktree_git "$PRIMARY_ROOT" "$root" rev-parse HEAD 2>/dev/null)" || continue
       [[ "$head_sha" == "$origin_sha" ]] && continue          # already current
-      base="$(git -C "$root" merge-base HEAD "$origin_ref" 2>/dev/null)" || continue
+      base="$(launcher_worktree_git "$PRIMARY_ROOT" "$root" merge-base HEAD "$origin_ref" 2>/dev/null)" || continue
       [[ "$base" == "$head_sha" ]] || continue                # G4: diverged (local commits) ⇒ skip, never reset
-      git -C "$root" merge --ff-only "$origin_ref" -q 2>/dev/null \
+      launcher_worktree_git "$PRIMARY_ROOT" "$root" merge --ff-only "$origin_ref" -q 2>/dev/null \
         && echo "[drain] fast-forwarded DORMANT checkout $root → ${origin_ref} (${origin_sha:0:7})." \
         || echo "[drain] WARNING: ff of $root refused by git — left as-is (fetch-only)." >&2
     done || true   # never let the loop pipeline's exit status trip `set -e`

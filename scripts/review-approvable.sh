@@ -158,13 +158,21 @@ fi
 # The probe is skipped when the test seam is active: the seam replaces `claude` outright,
 # so probing the real CLI would gate a code path the seam never reaches.
 #
-# ANTHROPIC_API_KEY is scrubbed for this probe for the same reason run_reviewer's
-# subscription branch scrubs it (#1402): the failover must be reachable ONLY through the
-# explicit `run_reviewer payg` call, never by ambient environment, and that invariant is
-# about what any CHILD sees — a capability probe is a child. `--help` makes no API call,
-# so nothing here needs a credential. The OAuth token is deliberately left in place.
+# ── What the reviewer is started with ─────────────────────────────────────────
+# Every start of the CLI below goes through "$AGENT_LAUNCH_ENV": lib/agent-context.sh,
+# sourced above, run as a program. It builds the child's environment from a list of
+# names: the reviewer has Read, so whatever its process holds it can read, and the
+# caller's GitHub token is not on that list. That file assigns the variable itself, to
+# its own absolute path, so a value from the environment never survives to a launch.
+# (The REVIEW_APPROVABLE_REVIEWER_CMD seam below replaces the CLI with a command of the
+# caller's own choosing and is not such a start.)
+
+# The probe is handed NO login at all (#1402): the failover must be reachable ONLY
+# through the explicit `run_reviewer payg` call, never by ambient environment, and that
+# invariant is about what any CHILD sees — a capability probe is a child. `--help` makes
+# no API call, so nothing here needs a credential.
 if [[ -z "${REVIEW_APPROVABLE_REVIEWER_CMD:-}" ]]; then
-  if [[ -z "$VERDICT_SCHEMA_JSON" ]] || ! ANTHROPIC_API_KEY='' claude -p --help 2>/dev/null | grep -q -- '--json-schema'; then
+  if [[ -z "$VERDICT_SCHEMA_JSON" ]] || ! bash "$AGENT_LAUNCH_ENV" claude -p --help 2>/dev/null | grep -q -- '--json-schema'; then
     echo "review-approvable.sh: CLI lacks --json-schema (or the guard schema is unreadable) — refusing to review; gate fails closed (DR-079)" >&2
     exit 0
   fi
@@ -198,18 +206,22 @@ run_reviewer() {
   if [[ -n "${REVIEW_APPROVABLE_REVIEWER_CMD:-}" ]]; then
     AGENT_OUT=$( bash -c "$REVIEW_APPROVABLE_REVIEWER_CMD" <"$promptfile" 2>"$errfile" ) || rc=$?
   elif [[ "${1:-subscription}" == "payg" ]]; then
-    AGENT_OUT=$( CLAUDE_CODE_OAUTH_TOKEN='' ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
-      "${AGENT_ENV_SCRUB[@]}" claude -p --system-prompt-file "$ROLE_FILE" \
+    # `--model-login ANTHROPIC_API_KEY`: the one login this launch is handed, by name,
+    # because the failover is a pay-as-you-go call and that key is what pays for it.
+    # The subscription token is not named, so it is not in the child at all.
+    AGENT_OUT=$( bash "$AGENT_LAUNCH_ENV" --model-login ANTHROPIC_API_KEY claude -p --system-prompt-file "$ROLE_FILE" \
       "${AGENT_CONTEXT_ARGS[@]}" \
       --allowedTools "Read,Glob,Grep" --model opus \
       --output-format json --json-schema "$VERDICT_SCHEMA_JSON" <"$promptfile" 2>"$errfile" ) || rc=$?
   else
-    # Scrubbed for the same reason as the payg branch's CLAUDE_CODE_OAUTH_TOKEN:
-    # an ambient ANTHROPIC_API_KEY outranks the subscription token inside
-    # `claude -p`, so leaving it set turns this path into an unintended (and
-    # possibly unfunded) PAYG call. See review-branch.sh's run_reviewer.
-    AGENT_OUT=$( ANTHROPIC_API_KEY='' \
-      "${AGENT_ENV_SCRUB[@]}" claude -p --system-prompt-file "$ROLE_FILE" \
+    # `--model-login CLAUDE_CODE_OAUTH_TOKEN`: the one login this launch is handed, by
+    # name, for a caller whose subscription login is that variable and not a file
+    # under HOME. ANTHROPIC_API_KEY is not named, so it is not in the child at all,
+    # for the same reason the payg branch leaves the token out: an ambient
+    # ANTHROPIC_API_KEY outranks the subscription token inside `claude -p`, so leaving
+    # it there turns this path into an unintended (and possibly unfunded) PAYG call.
+    # See review-branch.sh's run_reviewer.
+    AGENT_OUT=$( bash "$AGENT_LAUNCH_ENV" --model-login CLAUDE_CODE_OAUTH_TOKEN claude -p --system-prompt-file "$ROLE_FILE" \
       "${AGENT_CONTEXT_ARGS[@]}" \
       --allowedTools "Read,Glob,Grep" --model opus \
       --output-format json --json-schema "$VERDICT_SCHEMA_JSON" <"$promptfile" 2>"$errfile" ) || rc=$?
