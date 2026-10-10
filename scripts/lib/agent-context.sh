@@ -217,13 +217,19 @@ fi
 
 set -euo pipefail
 
-# Telling an exported variable from one bash made up for itself needs bash 4.4. An older
-# bash cannot build the environment correctly, so it builds none: this stops here, in
-# words, and never falls back to starting the command with everything inherited.
-if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
-  echo "agent-context.sh: needs bash 4.4 or newer, and this is ${BASH_VERSION}. Nothing was started." >&2
+# Written for bash 3.2 and newer, because the reviewers that run this ship to machines
+# whose only bash is 3.2 (it is what macOS has as /bin/bash). So nothing below uses a
+# construct 3.2 lacks: no ${name^^}, no associative array, no [[ -v ]], no ${name@a},
+# and no array expanded bare where it could be empty under `set -u`. An older bash than
+# that cannot be trusted to build the environment correctly, so it builds none: this
+# stops here, in words, and never falls back to starting the command with everything
+# inherited. agent-launch-sites.test.ts holds the file to that list of constructs.
+if (( BASH_VERSINFO[0] < 3 || (BASH_VERSINFO[0] == 3 && BASH_VERSINFO[1] < 2) )); then
+  echo "agent-context.sh: needs bash 3.2 or newer, and this is ${BASH_VERSION}. Nothing was started." >&2
   exit 1
 fi
+# Names are compared exactly below, whatever option this shell was started with.
+shopt -u nocasematch
 
 # The model's own login, by name. `--model-login` takes one of these and nothing else.
 #   ANTHROPIC_API_KEY         a pay-as-you-go key
@@ -299,22 +305,26 @@ _agent_env_die() {
 # Is this the name of something no agent may be handed? Case is ignored: the rule is
 # about what a name says it holds.
 _agent_env_credential_shaped() {
-  local name="${1^^}"
-  case "$name" in
-    GH_TOKEN|GITHUB_TOKEN|*_TOKEN_STAMP) return 0 ;;
-    *_API_KEY|*_TOKEN|*_SECRET) return 0 ;;
+  local shaped=1
+  shopt -s nocasematch
+  case "${1-}" in
+    GH_TOKEN|GITHUB_TOKEN|*_TOKEN_STAMP) shaped=0 ;;
+    *_API_KEY|*_TOKEN|*_SECRET) shaped=0 ;;
   esac
-  return 1
+  shopt -u nocasematch
+  return "$shaped"
 }
 
 # Is this the name of something of GitHub's? No launch is handed one of these under any
 # option: the launcher does every GitHub write itself, after the agent has exited.
 _agent_env_githubs() {
-  local name="${1^^}"
-  case "$name" in
-    GH_*|GITHUB_*|*_TOKEN_STAMP|*GH_BOT*|*GH_APP*) return 0 ;;
+  local github=1
+  shopt -s nocasematch
+  case "${1-}" in
+    GH_*|GITHUB_*|*_TOKEN_STAMP|*GH_BOT*|*GH_APP*) github=0 ;;
   esac
-  return 1
+  shopt -u nocasematch
+  return "$github"
 }
 
 # Both lists are checked before either is used, every time.
@@ -348,16 +358,25 @@ _agent_env_model_login() {
 # AGENT_ENV_PASSING: the listed names this process was itself handed, in list order,
 # then the model logins this launch asked for by name ($@).
 # "Handed" means exported: a variable bash made up for itself is not the launcher's.
+# `compgen -e` is the list of exported names, and it is asked rather than each variable's
+# attributes because that is what bash 3.2 can answer. A bash built without it cannot say
+# what it was handed, so it starts nothing.
 _agent_env_passing() {
-  local name
+  local name exported
   local -a listed=("${AGENT_ENV_ALLOW[@]}")
   if [[ "${MINSPEC_AGENT_ENV_SCRUB:-1}" == "0" ]]; then
     listed+=(CLAUDE_AUTOCOMPACT_PCT_OVERRIDE)
   fi
-  listed+=("$@")
+  for name in ${1+"$@"}; do
+    listed+=("$name")
+  done
+  type compgen >/dev/null 2>&1 \
+    || _agent_env_die "this bash has no compgen, so it cannot tell which variables it was handed. Nothing was started."
+  # One name to a line, with a line break either side so every name is matched whole.
+  exported=$'\n'"$(compgen -e)"$'\n'
   AGENT_ENV_PASSING=()
   for name in "${listed[@]}"; do
-    if [[ -v "$name" && "${!name@a}" == *x* ]]; then
+    if [[ "$exported" == *$'\n'"$name"$'\n'* ]]; then
       AGENT_ENV_PASSING+=("$name")
     fi
   done
@@ -365,9 +384,10 @@ _agent_env_passing() {
 
 _agent_env_report() {
   local name passing="" withheld="" shown=0 more=0
-  local -A passes=()
-  for name in "${AGENT_ENV_PASSING[@]}"; do
-    passes["$name"]=1
+  # The names that pass, each with a space either side, to be looked up whole.
+  local passes=" "
+  for name in ${AGENT_ENV_PASSING[@]+"${AGENT_ENV_PASSING[@]}"}; do
+    passes+="${name} "
     passing+=" ${name}"
   done
   if [[ "${MINSPEC_AGENT_ENV_SCRUB:-1}" == "0" ]]; then
@@ -380,7 +400,7 @@ _agent_env_report() {
   while IFS= read -r name; do
     # `_` and SHLVL are the shell's own bookkeeping, in every process there is.
     [[ -n "$name" && "$name" != "_" && "$name" != "SHLVL" ]] || continue
-    [[ -z "${passes[$name]:-}" ]] || continue
+    [[ "$passes" != *" ${name} "* ]] || continue
     if (( shown < 60 )); then
       withheld+=" ${name}"
       shown=$(( shown + 1 ))
@@ -430,7 +450,7 @@ esac
 
 _agent_env_passing ${model_logins[@]+"${model_logins[@]}"}
 pairs=()
-for name in "${AGENT_ENV_PASSING[@]}"; do
+for name in ${AGENT_ENV_PASSING[@]+"${AGENT_ENV_PASSING[@]}"}; do
   pairs+=("${name}=${!name}")
 done
-exec env -i "${pairs[@]}" "$@"
+exec env -i ${pairs[@]+"${pairs[@]}"} "$@"

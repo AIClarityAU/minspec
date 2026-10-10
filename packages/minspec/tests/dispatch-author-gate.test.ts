@@ -38,6 +38,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
+import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
 import { cleanupDrains, runOnce } from './helpers/drain-harness';
@@ -46,9 +47,11 @@ import {
   APP,
   AUTHOR_GATE_LIB,
   COLLABORATOR,
+  DISPATCH_ISSUE,
   FOUNDER,
   ISSUE_BODY_MARKER,
   MEMBER,
+  READY_CHECK,
   STRANGER,
   TRUSTED,
   bot,
@@ -58,9 +61,11 @@ import {
   dispatchSandbox,
   dispatchStatus,
   provenanceAnswer,
+  readyRecordComment,
   reviewVerdict,
   runDispatch,
   runFixAgent,
+  runRemediate,
   runTriage,
   serveQueues,
   user,
@@ -68,6 +73,7 @@ import {
   type CommentFixture,
   type FixAgentOptions,
   type IssueFixture,
+  type RemediateOptions,
 } from './helpers/agent-launch-harness';
 
 // Module scope, never a hook: vitest resolves timeouts before beforeAll runs (#1399).
@@ -605,7 +611,12 @@ describe('T0: the real scripts/dispatch-issue.sh dispatches only an issue whose 
     const textReads = r.issueViewFields.filter((fields) => /(^|,)(title|body)(,|$)/.test(fields));
     expect(textReads, r.issueViewFields.join(' | ')).toEqual(['body,title,labels,state,comments']);
     expect(r.issueViewFields[0]).toBe(textReads[0]);
-    expect(r.ghCalls.filter((c) => c.startsWith('api graphql '))).toEqual(['api graphql issue:4242']);
+    // One read of who wrote the issue's text. The reads logged as `nodes` ask which
+    // ACCOUNT wrote the issue's comments, by id, for the verdict record: the text of a
+    // comment is compared with what was already read, and none is taken from them.
+    const graphql = r.ghCalls.filter((c) => c.startsWith('api graphql '));
+    expect(graphql.filter((c) => c !== 'api graphql nodes')).toEqual(['api graphql issue:4242']);
+    expect(graphql).toContain('api graphql nodes');
     expect(r.ghCalls.indexOf('issue view 4242')).toBeLessThan(r.ghCalls.indexOf('api graphql issue:4242'));
   });
 });
@@ -769,6 +780,69 @@ describe('T0: comment text reaches a prompt only from a listed account, and only
     expect(r.stderr).not.toContain('could not read');
     expect(r.stderr).not.toContain('were read');
   });
+
+  // remediate-pr.sh hands ITS agent the last comment on the pull request that reads like
+  // a review: one whose text matches `ai-review|AI review|REVIEW_VERDICT`. It took that
+  // comment from whoever had written one, and anyone can comment on a public repository.
+  const REVIEW_FAILED = { statusCheckRollup: [{ name: 'ai-review', status: 'COMPLETED', conclusion: 'FAILURE' }] };
+  const remediate = (comments: CommentFixture[], more: Partial<RemediateOptions> = {}) =>
+    runRemediate({ pr: REVIEW_FAILED, comments, ...more });
+
+  it('control: the remediation agent is given the last review comment from a listed account', () => {
+    const r = remediate([FOUNDERS, BOTS]);
+    expect(r.out).toContain('agent-remediate-review');
+    expect(r.launches).toHaveLength(1);
+    expect(r.launches[0].prompt).toContain('<untrusted_review_findings>');
+    expect(r.launches[0].prompt).toContain('BOT-FINDING');
+    expect(remediate([BOTS, FOUNDERS]).launches[0].prompt).toContain('FOUNDER-FINDING');
+  });
+
+  it.each([
+    { name: 'a stranger', late: STRANGERS, marker: 'STRANGER-FINDING', says: "'some-stranger' (User 900000001)" },
+    { name: 'a collaborator who is not on the list', late: COLLABS, marker: 'COLLABORATOR-FINDING', says: "'outside-collab' (User 900000002)" },
+    { name: 'a member who is not on the list', late: MEMBERS, marker: 'MEMBER-FINDING', says: "'new-member' (User 900000003)" },
+    { name: "a person holding the App's login", late: NAMESAKES, marker: 'NAMESAKE-FINDING', says: "'minspec-sdd' (User 900000010)" },
+    { name: 'the founder, in a comment a collaborator has edited', late: EDITED, marker: 'EDITED-IN-FINDING', says: "'harvest316' (User 4125483), in a comment that an account not on the list has edited" },
+  ])('a later review comment from $name never reaches the remediation agent, and the sweep says so', ({ late, marker, says }) => {
+    const r = remediate([BOTS, late]);
+    expect(r.launches).toHaveLength(1);
+    const prompt = r.launches[0].prompt;
+    expect(prompt).not.toContain(marker);
+    // Dropped, not refused: the agent still gets the findings it is entitled to.
+    expect(prompt).toContain('BOT-FINDING');
+    expect(r.stderr).toMatch(/dropped 1 of 2 comment\(s\) on pull request #\d+/);
+    expect(r.stderr).toContain(says);
+  });
+
+  it('a stranger\'s comment that only mentions a review, with no verdict in it, does not reach the remediation agent either', () => {
+    // The pattern is three alternatives. Each is tried, in a comment that is nothing else.
+    for (const words of ['ai-review says: STRANGER-TEXT', 'AI review: STRANGER-TEXT', 'REVIEW_VERDICT STRANGER-TEXT']) {
+      const r = remediate([BOTS, { author: STRANGER, association: 'NONE', body: words }]);
+      expect(r.launches, words).toHaveLength(1);
+      expect(r.launches[0].prompt, words).not.toContain('STRANGER-TEXT');
+      expect(r.launches[0].prompt, words).toContain('BOT-FINDING');
+    }
+  });
+
+  it('with only unlisted commenters, the remediation agent is told there are no findings and is given none', () => {
+    const r = remediate([COLLABS, STRANGERS, NAMESAKES]);
+    expect(r.launches).toHaveLength(1);
+    expect(r.launches[0].prompt).not.toMatch(/COLLABORATOR-FINDING|STRANGER-FINDING|NAMESAKE-FINDING|REVIEW_VERDICT_BEGIN/);
+    expect(r.launches[0].prompt).toContain('(no findings comment found');
+    expect(r.stderr).toMatch(/dropped 3 of 3 comment\(s\)/);
+  });
+
+  it('when the read of who wrote the comments fails, no comment text reaches the remediation agent, and the sweep says so', () => {
+    // `gh pr view` would still return these comments, with a login beside each. That is
+    // not who wrote them, so nothing is taken from it.
+    const r = remediate([BOTS, FOUNDERS], {
+      prepare: (f) => fs.writeFileSync(path.join(f.dir, 'pr-comments.json.fail'), ''),
+    });
+    expect(r.launches).toHaveLength(1);
+    expect(r.launches[0].prompt).not.toMatch(/BOT-FINDING|FOUNDER-FINDING|REVIEW_VERDICT_BEGIN/);
+    expect(r.launches[0].prompt).toContain('(no findings comment found');
+    expect(r.stderr).toMatch(/could not read the comments on pull request #\d+, so no comment text is given to the agent/);
+  });
 });
 
 describe('scripts/lib/dispatch-author-gate.sh: filtering a list of comments', () => {
@@ -792,7 +866,14 @@ describe('scripts/lib/dispatch-author-gate.sh: filtering a list of comments', ()
     expect(bodies(r.stdout)).toEqual(['one', 'four']);
     const kept = (JSON.parse(r.stdout) as { comments: Record<string, unknown>[] }).comments;
     // Exactly what dispatch-ready-check.sh --trusted-comment-bodies reads, and no more.
-    expect(kept[0]).toEqual({ author: { login: 'minspec-sdd' }, authorAssociation: 'CONTRIBUTOR', body: 'one', createdAt: '2026-10-01T00:00:00Z' });
+    // The account goes with the login: that filter trusts the App by its account, and a
+    // comment handed on with a login alone would not be the App's as far as it can tell.
+    expect(kept[0]).toEqual({
+      author: { login: 'minspec-sdd', __typename: 'Bot', databaseId: 299695933 },
+      authorAssociation: 'CONTRIBUTOR',
+      body: 'one',
+      createdAt: '2026-10-01T00:00:00Z',
+    });
     expect(r.stderr).toMatch(/dropped 5 of 7 comment\(s\) on pull request #77 whose text is not wholly from the dispatch author list/);
     for (const who of ["'drive-by' (User 900000004)", "'outside-collab'", "'github-actions' (Bot 41898282)", "'minspec-sdd' (User 900000010)", "'harvest316' (Bot 900000011)"]) {
       expect(r.stderr).toContain(who);
@@ -887,5 +968,195 @@ describe('scripts/lib/dispatch-author-gate.sh: filtering a list of comments', ()
     expect(r.stderr).not.toContain('Autocompact is thrashing');
     expect(r.stderr).toContain('Autocompactisthrashingline');
     expect(r.stderr.trim().split('\n')).toHaveLength(1);
+  });
+});
+
+// ── The verdict record: whose comment carries one ────────────────────────────
+//
+// dispatch-ready-check.sh --trusted-comment-bodies is what every reader of a verdict
+// record goes through. It kept a comment whose LOGIN was the App's. `gh issue view`
+// prints the App under the bare login `minspec-sdd`, and a person can hold that login as
+// their own account, so it kept that person's comments too.
+
+describe('T0: a verdict record counts only from a comment the gate\'s own ACCOUNT wrote', () => {
+  const NAMESAKE = user('minspec-sdd', 900000010);
+  /** An issue that is ready in every way but one: its only record is in this comment. */
+  const recordFrom = (author: unknown, association = 'NONE'): IssueFixture => ({
+    author: FOUNDER,
+    ready: false,
+    comments: [{ author, association, body: readyRecordComment() }],
+  });
+
+  it('control: the record the App wrote makes the issue dispatchable', () => {
+    const r = runDispatch({ issue: recordFrom(APP, 'CONTRIBUTOR'), ask: true });
+    expect(r.launches, r.out).toHaveLength(1);
+    expect(r.status, r.out).toBe(dispatchStatus('DISPATCH_RC_STARTED'));
+    // Which account wrote the comment was asked of GitHub, by the comment's id.
+    expect(r.ghCalls).toContain('api graphql nodes');
+  });
+
+  it.each([
+    ['with no association', 'NONE'],
+    // What a namesake has after one merged pull request, and what the App itself has.
+    ['shown as a contributor, as the App is', 'CONTRIBUTOR'],
+  ])('the same record from a person holding the App\'s login, %s, does not', (_name, association) => {
+    const r = runDispatch({ issue: recordFrom(NAMESAKE, association), ask: true });
+    expect(r.out).toMatch(/not-ready \[no-verdict\]/);
+    expect(r.launches).toEqual([]);
+    expect(r.worktreeMade).toBe(false);
+    expect(r.status, r.out).toBe(DECLINED);
+  });
+
+  it('the readers that hand the filter a document of their own ask GitHub for the account, not only the login', () => {
+    // Their comments come from a query of their own and carry no id to ask about
+    // afterwards, so the account has to be in what they ask for.
+    const scripts = path.dirname(path.dirname(AUTHOR_GATE_LIB));
+    for (const script of ['retriage-unrecorded.sh', 'backfill-hold-labels.sh']) {
+      const queries = fs.readFileSync(path.join(scripts, script), 'utf-8').split('\n').filter((l) => /^Q='query\(/.test(l));
+      expect(queries, script).toHaveLength(1);
+      expect(queries[0], script).toContain('comments(first:100){nodes{author{__typename login ... on User{databaseId} ... on Bot{databaseId}} authorAssociation body}');
+      expect(queries[0], script).not.toContain('author{login}');
+    }
+  });
+
+  it('when which account wrote the comments cannot be read, no record is taken and the run says why', () => {
+    const r = runDispatch({ issue: { author: FOUNDER, commentAuthorsFail: true }, ask: true });
+    expect(r.out).toMatch(/not-ready \[no-verdict\]/);
+    expect(r.stderr).toContain('could not read who wrote the comments this gate was given, so none of them is taken on its login');
+    expect(r.launches).toEqual([]);
+    expect(r.status, r.out).toBe(DECLINED);
+  });
+});
+
+describe('scripts/dispatch-ready-check.sh --trusted-comment-bodies: comments that arrive with a login and an id', () => {
+  // The stub GitHub of the launch harness, holding one issue's comments. The filter is
+  // run on its own, on a document as `gh issue view --json comments` prints it.
+  const NAMESAKE = user('minspec-sdd', 900000010);
+  const served: CommentFixture[] = [
+    { author: APP, association: 'CONTRIBUTOR', body: 'APP-COMMENT' },
+    { author: NAMESAKE, association: 'NONE', body: 'NAMESAKE-COMMENT' },
+    { author: FOUNDER, association: 'OWNER', body: 'OWNER-COMMENT' },
+    { author: STRANGER, association: 'NONE', body: 'STRANGER-COMMENT' },
+    { author: null, association: 'NONE', body: 'GHOST-COMMENT' },
+  ];
+  const id = (i: number) => `IC_fixture_${DISPATCH_ISSUE}_${i}`;
+  /** The comment at `i`, as the view prints it. */
+  const viewed = (i: number, more: Record<string, unknown> = {}) => ({
+    id: id(i),
+    author: { login: typeof served[i].author === 'object' && served[i].author ? (served[i].author as Actor).login : 'ghost' },
+    authorAssociation: served[i].association,
+    body: served[i].body,
+    ...more,
+  });
+  function run(comments: unknown[], opts: { anonymous?: boolean; prepare?: (dir: string) => void } = {}) {
+    const sb = dispatchSandbox({ [DISPATCH_ISSUE]: { author: FOUNDER, ready: false, comments: served } });
+    opts.prepare?.(sb.dir);
+    const r = spawnSync('bash', [READY_CHECK, '--trusted-comment-bodies'], {
+      encoding: 'utf-8',
+      input: JSON.stringify({ comments }),
+      env: opts.anonymous ? { PATH: sb.env.PATH, HOME: sb.env.HOME } : sb.env,
+    });
+    const askedLog = path.join(sb.dir, 'nodes-asked.log');
+    return {
+      status: r.status,
+      stdout: r.stdout,
+      stderr: r.stderr,
+      reads: sb.recorded().ghCalls.filter((c) => c === 'api graphql nodes'),
+      /** The list of ids in each question that was put, as it was written. */
+      asked: fs.existsSync(askedLog) ? fs.readFileSync(askedLog, 'utf-8').split('\n').filter(Boolean) : [],
+    };
+  }
+  const nodesFile = (dir: string) => path.join(dir, 'comment-nodes.json');
+  const rewrite = (dir: string, change: (nodes: Record<string, { body: string; author: unknown } | null>) => void) => {
+    const nodes = JSON.parse(fs.readFileSync(nodesFile(dir), 'utf-8'));
+    change(nodes);
+    fs.writeFileSync(nodesFile(dir), JSON.stringify(nodes));
+  };
+
+  it('keeps the App\'s comment and the owner\'s, and drops the namesake\'s, the stranger\'s and the deleted account\'s', () => {
+    const r = run([viewed(0), viewed(1), viewed(2), viewed(3), viewed(4)]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.trim().split('\n')).toEqual(['APP-COMMENT', 'OWNER-COMMENT']);
+    // One read, for the four comments the association did not already settle.
+    expect(r.reads).toHaveLength(1);
+  });
+
+  it('makes no read of GitHub when every comment is settled without one', () => {
+    const typed = { ...viewed(0), author: APP };
+    const r = run([typed, viewed(2)]);
+    expect(r.stdout.trim().split('\n')).toEqual(['APP-COMMENT', 'OWNER-COMMENT']);
+    expect(r.reads).toEqual([]);
+  });
+
+  it('does not ask about a comment whose id is not one GitHub could have issued, and does not keep it', () => {
+    // The ids are written into the question as text, so one that is not an id must
+    // never get there.
+    const bad = 'IC_x"]) { viewer { login } } #';
+    const r = run([viewed(0, { id: bad }), viewed(2)]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stdout.trim().split('\n')).toEqual(['OWNER-COMMENT']);
+    expect(r.reads).toEqual([]);
+    // Beside a comment that IS asked about, it is still no part of the question.
+    const beside = run([viewed(0, { id: bad }), viewed(3)]);
+    expect(beside.status, beside.stderr).toBe(0);
+    expect(beside.stdout.trim()).toBe('');
+    expect(beside.asked).toEqual([JSON.stringify([id(3)])]);
+  });
+
+  // All or nothing. The owner's comment is in every one of these documents and would be
+  // kept on its own: a caller takes the NEWEST record among what it is handed, so a
+  // filter that could not place the App's comments must not hand over the rest.
+  it.each([
+    ['the read fails', (dir: string) => fs.writeFileSync(`${nodesFile(dir)}.fail`, '')],
+    ['GitHub\'s text for an id is not the text that was read', (dir: string) => rewrite(dir, (n) => { n[id(0)]!.body = 'APP-COMMENT, as edited since'; })],
+    ['GitHub does not have one of the ids', (dir: string) => rewrite(dir, (n) => { delete n[id(0)]; })],
+    ['GitHub\'s answer for an id is not a comment', (dir: string) => rewrite(dir, (n) => { (n[id(0)] as unknown as Record<string, unknown>).__typename = 'Issue'; })],
+    // What GitHub really sends for an id it cannot resolve: the comments it could find,
+    // and an error beside them.
+    ['GitHub\'s answer carries an error', (dir: string) => {
+      const nodes = JSON.parse(fs.readFileSync(nodesFile(dir), 'utf-8'));
+      fs.writeFileSync(path.join(dir, 'comment-nodes.raw.json'), JSON.stringify({ data: { nodes: [nodes[id(0)], nodes[id(2)]] }, errors: [{ message: 'Could not resolve to a node' }] }));
+    }],
+    ['GitHub\'s answer is not JSON', (dir: string) => fs.writeFileSync(path.join(dir, 'comment-nodes.raw.json'), 'not json')],
+    ['GitHub sends two answers', (dir: string) => {
+      const nodes = JSON.parse(fs.readFileSync(nodesFile(dir), 'utf-8'));
+      const one = JSON.stringify({ data: { nodes: [nodes[id(0)], nodes[id(2)]] } });
+      fs.writeFileSync(path.join(dir, 'comment-nodes.raw.json'), `${one}${one}`);
+    }],
+  ])('when %s, it prints nothing, fails, and says so', (_name, prepare) => {
+    const r = run([viewed(0), viewed(2)], { prepare });
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toMatch(/dispatch-author-gate: .*so none of them is taken on its login\./);
+  });
+
+  it('when there is no credential to ask with, it prints nothing, fails, and says so', () => {
+    // The stub GitHub answers this read to nobody anonymous, as the real one does. The
+    // environment is the sandbox's with the pipeline's source of a token taken away.
+    const control = run([viewed(0), viewed(2)]);
+    expect(control.status, control.stderr).toBe(0);
+    const r = run([viewed(0), viewed(2)], { anonymous: true });
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toContain('none of them is taken on its login');
+  });
+
+  it('asks about more than a hundred comments in more than one read, and keeps every one the App wrote', () => {
+    const many: CommentFixture[] = Array.from({ length: 130 }, (_, i) => ({ author: i === 77 ? NAMESAKE : APP, association: 'CONTRIBUTOR', body: `COMMENT-${i}` }));
+    const sb = dispatchSandbox({ [DISPATCH_ISSUE]: { author: FOUNDER, ready: false, comments: many } });
+    const r = spawnSync('bash', [READY_CHECK, '--trusted-comment-bodies'], {
+      encoding: 'utf-8',
+      input: JSON.stringify({
+        comments: many.map((c, i) => ({ id: id(i), author: { login: 'minspec-sdd' }, authorAssociation: c.association, body: c.body })),
+      }),
+      env: sb.env,
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const kept = r.stdout.trim().split('\n');
+    expect(kept).toHaveLength(129);
+    expect(kept).not.toContain('COMMENT-77');
+    expect(kept[0]).toBe('COMMENT-0');
+    expect(kept[128]).toBe('COMMENT-129');
+    expect(sb.recorded().ghCalls.filter((c) => c === 'api graphql nodes')).toHaveLength(2);
   });
 });

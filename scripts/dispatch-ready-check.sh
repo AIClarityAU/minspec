@@ -44,7 +44,8 @@
 #
 # Two things now stand where that reasoning did:
 #   1. `--trusted-comment-bodies` — records are read only from comments whose AUTHOR
-#      could legitimately write one (this gate's App, or OWNER/MEMBER/COLLABORATOR).
+#      could legitimately write one (this gate's App, told by its ACCOUNT and never by
+#      its login, or OWNER/MEMBER/COLLABORATOR).
 #   2. `--newest-record` — selection is by the record's own `verdictAt`, not by
 #      position, because comment authorship is NOT record authorship: trusted writers
 #      republish text they did not author (a maintainer quoting a past verdict; the
@@ -192,26 +193,17 @@ RECORD_SCHEMA_HUMAN="minspec-human-approval/1"
 # same authority, not a new one: nothing here lets an approval reach `human`, `info`
 # or `unknown`, which stay absolute.
 APPROVABLE_HOLDS="tier specify"
-# The App login whose comments carry the gate's own verdict records. Defined ONCE,
-# here, because every reader must agree on it. Its authorAssociation is CONTRIBUTOR,
-# so association alone would reject the very writer every record comes from.
-#
-# ── The login form DEPENDS ON WHICH API YOU CALL (measured 2026-07-31) ────────
-#   gh issue view --json comments   (GraphQL)  → "minspec-sdd"        ← bare
-#   gh pr view    --json comments   (GraphQL)  → "minspec-sdd"        ← bare
-#   gh api repos/../issues/N/comments (REST)   → "minspec-sdd[bot]"   ← bracketed
-# Today all three readers use the GraphQL shape, so the bare form is what arrives. But
-# nothing at the call site makes that visible, REST is a perfectly reasonable thing to
-# switch to (`--paginate` alone is a good reason, and this repo already uses REST for
-# the timeline), and getting it wrong fails in the WORST direction: the filter would
-# silently drop every bot-authored record and the gate would refuse to dispatch
-# anything, with no error to explain why. So the comparison normalises BOTH sides —
-# lowercased, with a trailing `[bot]` stripped — and accepts either spelling.
+# WHOSE comments carry the gate's own verdict records is not written here any more. It
+# was a login (`minspec-sdd`), and a login is a spelling: it differs by API (bare from
+# `gh issue view`, `minspec-sdd[bot]` from REST), and a person can hold the bare one as
+# their own account. The App is on the list in lib/dispatch-author-gate.sh by the kind
+# and number of its account, and `--trusted-comment-bodies` below asks that list. Its
+# authorAssociation is CONTRIBUTOR, so association alone would reject the very writer
+# every record comes from, which is why the list is asked at all.
 #
 # NOT `is_bot_identity`: that matches ANY `*[bot]` login, which would trust
 # `github-actions[bot]`, `dependabot[bot]` and every future App installed on the repo
 # to author verdict records. Only THIS gate's App may.
-RECORD_BOT_LOGIN="minspec-sdd"
 RECORD_MARKER="<!-- minspec-verdict-record -->"
 RECORD_BEGIN="MINSPEC_VERDICT_BEGIN"
 RECORD_END="MINSPEC_VERDICT_END"
@@ -423,23 +415,69 @@ fi
 # and a build.
 #
 # Trust is by AUTHOR, which a comment body cannot alter about itself:
-#   • the gate's own bot login (passed in — App identities read as CONTRIBUTOR, so
-#     association alone would reject the very writer the records come from); or
+#   • an ACCOUNT on the list in lib/dispatch-author-gate.sh, which is where this gate's
+#     own App is (App identities read as CONTRIBUTOR, so association alone would reject
+#     the very writer the records come from); or
 #   • an authorAssociation of OWNER / MEMBER / COLLABORATOR.
 # Everything else — CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR, NONE, absent — is dropped.
-# Input: `gh issue view --json comments` output on stdin. Output: the joined bodies,
-# oldest→newest, exactly the shape the reader already expects.
+#
+# AN ACCOUNT, NOT A LOGIN. This arm used to compare `author.login` with the App's name,
+# `minspec-sdd`. A login is a spelling: `gh issue view` prints the App's comments under
+# that name, and a person can register the same name as their own account, at which
+# point a rule written on the spelling trusts both. So the arm is `listed`, the one
+# function every other reader of "who wrote this" uses: the account's kind and number
+# (`Bot:299695933`), which whoever registers an account does not get to choose.
+#
+# `gh issue view --json comments` does not say which account wrote a comment, only its
+# login. So a comment that arrives with no account on it, and that the association arm
+# does not already keep, is looked up by its own id (dispatch_identify_comments), and
+# GitHub's text for that id must be the text that arrived. That lookup is the one thing
+# here that is not pure: it is a read of GitHub, made only for such comments, and a
+# document whose comments all carry their account (what the GraphQL readers pass in)
+# makes none. When it fails this prints NOTHING and says why on stderr: the caller picks
+# the newest record among what it is given, so some of the comments would be worse than
+# none.
+#
+# The association arm is as it was (#1105 has what it leaves open).
+#
+# Input: a `comments` list on stdin, as `gh issue view --json comments` prints one.
+# Output: the joined bodies, oldest→newest, exactly the shape the reader already expects.
 if [[ "${1:-}" == "--trusted-comment-bodies" ]]; then
   shift
-  t_bot="${1-$RECORD_BOT_LOGIN}"
-  [[ -n "$t_bot" ]] || t_bot="$RECORD_BOT_LOGIN"
-  jq -r --arg bot "$t_bot" '
-    # Normalise a login so the bare and `[bot]`-suffixed spellings of the SAME App
-    # compare equal, and case can never matter. Applied to both sides.
-    def botnorm: ascii_downcase | sub("\\[bot\\]$"; "");
+  if (( $# > 0 )); then
+    # It took a login to trust. Nothing is trusted on a login now, so one that is still
+    # passed is refused out loud rather than ignored: the caller believes it matters.
+    echo "dispatch-ready-check: --trusted-comment-bodies takes no argument. It used to take a login to trust, and a login does not say which account wrote a comment (lib/dispatch-author-gate.sh has the list)." >&2
+    exit 1
+  fi
+  t_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # shellcheck source=scripts/lib/dispatch-author-gate.sh
+  source "${t_dir}/lib/dispatch-author-gate.sh" || exit 1
+  t_listed="$(_dispatch_trusted_identities_json 2>/dev/null)" || t_listed=""
+  [[ -n "$t_listed" ]] || { echo "dispatch-ready-check: the list of trusted accounts could not be built, so no comment is trusted." >&2; exit 1; }
+  t_doc="$(cat)"
+  # Is there a comment only a lookup could admit? One the association arm does not
+  # keep, with no account on it, and an id to ask about (an id made of anything but the
+  # characters an id has is never asked about, and its comment is simply not kept).
+  # Unparseable input is "no" here and is refused by the filter below, which prints
+  # nothing.
+  if printf '%s' "$t_doc" | jq -e '
+        [ (.comments // [])[]
+          | select(type == "object")
+          | select(((.authorAssociation // "") as $a | $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR") | not)
+          | select((.author | type) != "object" or (.author.__typename | type) != "string")
+          | select((.id | type) == "string" and (.id | test("^[A-Za-z0-9_=-]{1,128}$"))) ] | length > 0' >/dev/null 2>&1; then
+    # The read needs a credential, and takes the pipeline's own the way every other
+    # read of who wrote something does (lib/gh-bot.sh).
+    # shellcheck source=scripts/lib/gh-bot.sh
+    source "${t_dir}/lib/gh-bot.sh" || exit 1
+    gh_bot_init
+    t_doc="$(printf '%s' "$t_doc" | dispatch_identify_comments "the comments this gate was given")" || exit 1
+  fi
+  printf '%s' "$t_doc" | jq -r --argjson listed "$t_listed" "$(_dispatch_gate_jq_defs)"'
     [ (.comments // [])[]
       | select(
-          ($bot != "" and (((.author.login // "") | botnorm) == ($bot | botnorm)))
+          (.author | listed)
           or ((.authorAssociation // "") as $a
               | $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR")
         )

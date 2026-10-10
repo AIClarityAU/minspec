@@ -90,6 +90,12 @@ REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/lib/agent-context.sh"
+# How this script touches the worktree it checks a pull request's branch out into. That
+# branch was written by an agent, and another agent is then started in it, so nothing in
+# the worktree is run as this script: git is given the worktree's own git directory and
+# THIS tree's hooks outright. The file's header has the reasoning and the limits.
+# shellcheck source=scripts/lib/agent-worktree.sh
+source "${SCRIPT_DIR}/lib/agent-worktree.sh"
 # Agent writes carry the BOT's identity, never the human's (#1355). This arms a
 # `gh` wrapper; acquiring the token is LAZY, so reads pass through untouched and
 # only the first WRITE mints — aborting there, loudly, if it cannot.
@@ -438,6 +444,9 @@ fi
 # Shared, tested units — reused, never re-implemented.
 # shellcheck source=lib/agent-egress.sh
 source "${SCRIPT_DIR}/lib/agent-egress.sh"
+# Whose pull-request comments may be handed to an agent: dispatch_pr_trusted_comments.
+# shellcheck source=lib/dispatch-author-gate.sh
+source "${SCRIPT_DIR}/lib/dispatch-author-gate.sh"
 
 # The ONLY place a marker is ever written to a PR. It sanitises the body (so nothing
 # interpolated into it can carry or forge a marker) and appends the marker on its own
@@ -723,36 +732,46 @@ git fetch origin "$BRANCH" -q 2>/dev/null || {
 }
 WORKTREE="${WORKTREE_BASE}/pr-${PR}"
 if [[ -d "$WORKTREE" ]]; then
-  git worktree remove "$WORKTREE" --force 2>/dev/null || true
+  launcher_git worktree remove "$WORKTREE" --force 2>/dev/null || true
 fi
 mkdir -p "$WORKTREE_BASE"
 # Detached checkout at the remote branch tip: we add commits on top and push them
 # back to the branch as a fast-forward (never a force-push over the PR author).
-git worktree add --detach "$WORKTREE" "origin/${BRANCH}" 2>/dev/null || {
+# launcher_git, because a checkout runs a hook, and the hooks a relative `core.hooksPath`
+# finds are the ones in the tree being checked out: here, the pull request's.
+launcher_git worktree add --detach "$WORKTREE" "origin/${BRANCH}" 2>/dev/null || {
   echo "ERROR: could not create worktree for $BRANCH — skipping." >&2; exit 0
+}
+# Remember which git directory is this worktree's own, before anything else happens in
+# it. Every git operation on the worktree below names that directory and this tree's
+# hooks (lib/agent-worktree.sh). One that cannot be pinned is left alone, and said so.
+agent_worktree_pin "$WORKTREE" || {
+  echo "ERROR: could not pin the worktree for $BRANCH — skipping." >&2
+  launcher_git worktree remove "$WORKTREE" --force 2>/dev/null || true
+  exit 0
 }
 # The egress base: the branch tip BEFORE our remediation, so the guard scans ONLY
 # the new commits the agent adds (the pre-existing branch history already passed
 # the guard at its original dispatch, or is human-authored and out of our channel).
-PRE_SHA=$(git -C "$WORKTREE" rev-parse HEAD)
+PRE_SHA=$(agent_worktree_git rev-parse HEAD)
 
-cleanup() { git worktree remove "$WORKTREE" --force 2>/dev/null || true; }
+cleanup() { launcher_git worktree remove "$WORKTREE" --force 2>/dev/null || true; }
 
 # ── rebase-only: mechanical merge of origin/main, no agent ─────────────────────
 if [[ "$ACTION" == "rebase-only" ]]; then
   echo "  Merging origin/main into $BRANCH (mechanical, no agent)..."
   # Merge (not rebase) so we never rewrite the PR branch's published history.
-  if git -C "$WORKTREE" -c user.email="claude@harvest316.com" -c user.name="minspec-sdd[bot]" \
+  if agent_worktree_git -c user.email="claude@harvest316.com" -c user.name="minspec-sdd[bot]" \
        merge origin/main --no-edit 2>&1; then
-    if [[ "$(git -C "$WORKTREE" rev-parse HEAD)" == "$PRE_SHA" ]]; then
+    if [[ "$(agent_worktree_git rev-parse HEAD)" == "$PRE_SHA" ]]; then
       echo "  Already up to date — nothing to push."
-    elif git -C "$WORKTREE" push origin "HEAD:${BRANCH}" 2>&1; then
+    elif agent_worktree_git push origin "HEAD:${BRANCH}" 2>&1; then
       echo "  Pushed merge of main into $BRANCH (PR #$PR refreshed)."
     else
       echo "  WARNING: push failed for $BRANCH — left for a human." >&2
     fi
   else
-    git -C "$WORKTREE" merge --abort 2>/dev/null || true
+    agent_worktree_git merge --abort 2>/dev/null || true
     echo "  Merge hit conflicts — aborting and leaving for a human (surfaced)."
     post_marked_comment "$ATTEMPT_MARKER" 'Auto-remediation tried to merge `origin/main` to bring this branch up to date, but hit conflicts. Left for a human to resolve.'
   fi
@@ -764,11 +783,20 @@ fi
 # Assemble the UNTRUSTED remediation context per class.
 CONTEXT=""
 if [[ "$ACTION" == "agent-remediate-review" ]]; then
-  # The reviewer's most recent ai-review:changes findings (bot-authored comment).
-  # Untrusted data (a prompt-injected diff could have steered the reviewer's echo),
-  # so it is fenced as data, never instructions.
-  FINDINGS=$(gh pr view "$PR" --repo "$REPO" --json comments \
-    --jq '[.comments[] | select(.body | test("ai-review|AI review|REVIEW_VERDICT"))] | last | .body // ""' 2>/dev/null || true)  # swallow-ok: the next line substitutes an explicit placeholder for empty, so no branch reads the ambiguity
+  # The reviewer's most recent ai-review:changes findings.
+  #
+  # WHOSE comment it is gets decided before what it says. Anyone can comment on a pull
+  # request in a public repository, and a comment only has to contain the words below to
+  # be picked, so the choice is made among the comments dispatch_pr_trusted_comments
+  # keeps: written by an account on the list in lib/dispatch-author-gate.sh (the App and
+  # the founder, by account type and id, never by a login), and edited by nobody else.
+  # When that read fails it says why on stderr and nothing is kept, so the agent gets
+  # the placeholder below and no comment at all.
+  #
+  # Still untrusted data (a prompt-injected diff could have steered the reviewer's
+  # echo), so it is fenced as data, never instructions.
+  FINDINGS=$(dispatch_pr_trusted_comments "$REPO" "$PR" \
+    | jq -r '[.comments[] | select(.body | test("ai-review|AI review|REVIEW_VERDICT"))] | last | .body // ""' || true)  # swallow-ok: the next line substitutes an explicit placeholder for empty, so no branch reads the ambiguity, and the failed read has already said why on stderr
   [[ -z "$FINDINGS" ]] && FINDINGS="(no findings comment found — re-read the diff for correctness/security/simplification issues and address anything the independent reviewer would flag.)"
   CONTEXT=$(printf 'The independent AI reviewer requested changes on this PR. Address the findings below, then ensure the full local gate is green.\n\n<untrusted_review_findings>\n%s\n</untrusted_review_findings>' "$FINDINGS")
 else
@@ -865,14 +893,16 @@ while true; do
     fi
 
     # Did the agent actually add a commit? A no-op run has nothing to push.
-    if [[ "$(git -C "$WORKTREE" rev-parse HEAD)" == "$PRE_SHA" ]]; then
+    if [[ "$(agent_worktree_git rev-parse HEAD)" == "$PRE_SHA" ]]; then
       echo "  Agent made no new commit — nothing to push (no change)."
       cleanup; exit 0
     fi
 
     # EGRESS GUARD (#358) — scan ONLY the new commits (base = PRE_SHA) before any
     # push. Fail-closed: on any hit, publish nothing and surface for a human.
-    if ! MATCHES=$(agent_egress_scan "$WORKTREE" "$PRE_SHA" "${WORKTREE}/.agent-summary.md"); then
+    # The scan reads the new commits with git, so it is called with git pointed at the
+    # worktree's pinned git directory: the history scanned is the history pushed.
+    if ! MATCHES=$(agent_worktree_function agent_egress_scan "$WORKTREE" "$PRE_SHA" "${WORKTREE}/.agent-summary.md"); then
       echo "  🛑 egress guard BLOCKED remediation push for PR #$PR:" >&2
       printf '%s\n' "$MATCHES" >&2
       gh label create "agent-quarantined" --repo "$REPO" --color b60205 \
@@ -886,8 +916,8 @@ while true; do
     fi
 
     # Clean → push the new commits (fast-forward on the PR branch) and comment.
-    if git -C "$WORKTREE" push origin "HEAD:${BRANCH}" 2>&1; then
-      SHA=$(git -C "$WORKTREE" rev-parse --short HEAD)
+    if agent_worktree_git push origin "HEAD:${BRANCH}" 2>&1; then
+      SHA=$(agent_worktree_git rev-parse --short HEAD)
       SUMMARY=""
       [[ -f "${WORKTREE}/.agent-summary.md" ]] && SUMMARY=$(cat "${WORKTREE}/.agent-summary.md")
       [[ -z "$SUMMARY" ]] && SUMMARY="(no summary written)"

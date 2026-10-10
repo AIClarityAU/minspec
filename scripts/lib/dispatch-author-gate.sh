@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # scripts/lib/dispatch-author-gate.sh - whose text may start an agent.
 #
-# One definition, sourced by scripts/triage-inbox.sh and scripts/dispatch-issue.sh. An
-# issue is triaged or dispatched only when everyone who WROTE ITS TEXT is on the list
-# below: who opened it, everyone who has edited its body, and everyone who has changed
-# its title. Comment text reaches an agent's prompt only from a commenter who is, and
-# only when everyone who has edited that comment is too.
+# One definition, sourced by scripts/triage-inbox.sh, scripts/dispatch-issue.sh and
+# scripts/remediate-pr.sh. An issue is triaged or dispatched only when everyone who WROTE
+# ITS TEXT is on the list below: who opened it, everyone who has edited its body, and
+# everyone who has changed its title. Comment text reaches an agent's prompt only from a
+# commenter who is, and only when everyone who has edited that comment is too.
+#
+# It is also where every other reader learns WHICH ACCOUNT wrote a comment.
+# scripts/dispatch-ready-check.sh reads the triage verdict record from comments, and it
+# recognises the gate's own App with `listed` and the list below; a comment that reaches
+# it with only a login is looked up here first (dispatch_identify_comments).
 #
 # ── Why this exists ───────────────────────────────────────────────────────────
 # Neither launcher asked GitHub who wrote the issue: the field was not in either
@@ -370,7 +375,11 @@ GQL
 #
 #   stdin   GitHub's answer to dispatch_pr_comments_query.
 #   stdout  {"comments":[...]} in the shape `gh pr view --json comments` gives, holding
-#           only the comments whose text was written by listed accounts, in order.
+#           only the comments whose text was written by listed accounts, in order. Each
+#           author carries the account's kind and number beside its login, which that
+#           command does not give: a reader further on (the record filter,
+#           dispatch-ready-check.sh --trusted-comment-bodies) decides by them, and a
+#           login alone tells it nothing.
 #   stderr  one line when anything was dropped: how many, on <what>, and whose; and one
 #           when GitHub held more comments than the newest hundred that were read.
 #   <what>  names the thing for those lines, e.g. "pull request #77". Caller's own words.
@@ -421,7 +430,8 @@ dispatch_trusted_comments() {
           then error("not a list of comments") else . end
         | [ $c.nodes[] | select(kept | not) | who ] as $out
         | { doc: { comments: [ $c.nodes[] | select(kept)
-                               | { author: { login: .author.login }, authorAssociation, body, createdAt } ] },
+                               | { author: { login: .author.login, __typename: .author.__typename, databaseId: .author.databaseId },
+                                   authorAssociation, body, createdAt } ] },
             total: $c.totalCount,
             read: ($c.nodes | length),
             dropped: ($out | length),
@@ -461,4 +471,84 @@ dispatch_pr_trusted_comments() {
     fi
   fi
   printf '%s' "$answer" | dispatch_trusted_comments "pull request #${pr}"
+}
+
+# dispatch_identify_comments [<what>]: put the ACCOUNT on comments that arrived with only
+# a login.
+#
+#   stdin   a document with a `comments` list, as `gh issue view --json comments` and
+#           `gh pr view --json comments` print one. Each comment there has a login and no
+#           account, and it has the comment's own id.
+#   stdout  the same document. Every comment that had no account now has the one GitHub
+#           says wrote the comment with that id: `author.__typename` and
+#           `author.databaseId`, the two fields `listed` reads. A comment that already
+#           had an account, or has no usable id to ask about, is passed on as it came.
+#   status  1, with one line on stderr and NOTHING on stdout, when the document cannot
+#           be read, when the read of GitHub fails, or when GitHub's answer does not
+#           cover every comment that was asked about with the same text the document
+#           has. All or nothing: a caller picks the NEWEST record among the comments it
+#           trusts, so handing it some of them could make an older one the newest.
+#   <what>  names the thing for that line. Caller's own words.
+#
+# It decides nothing about trust. It answers "which account", and the caller's rule,
+# written with `listed`, answers the rest.
+#
+# WHY A LOGIN IS NOT ENOUGH. `gh issue view` shows the App's comments under the login
+# `minspec-sdd`. That is the App's name, and nothing stops a person registering it as
+# theirs: the two are different accounts with one spelling, and a rule written on the
+# spelling trusts both. The kind and the number cannot be chosen by whoever registers.
+#
+# The ids go into the query as text, so each is held to the characters an id has before
+# it is used. One that is anything else is not asked about, and its comment stays as it
+# came: without an account.
+dispatch_identify_comments() {
+  local what="${1:-these comments}" doc ids batch list query answer found='{}' out
+  doc="$(cat)"
+  if ! ids="$(printf '%s' "$doc" | jq -r '
+        if type != "object" then error("not a document") else . end
+        | [ (.comments // [])[]
+            | select(type == "object" and ((.author | type) != "object" or (.author.__typename | type) != "string"))
+            | .id | select(type == "string" and test("^[A-Za-z0-9_=-]{1,128}$")) ]
+        | unique | .[]' 2>/dev/null)"; then
+    echo "dispatch-author-gate: could not read ${what}, so who wrote them was not looked up." >&2
+    return 1
+  fi
+  while [[ -n "$ids" ]]; do
+    batch="$(printf '%s\n' "$ids" | head -n 100)"
+    ids="$(printf '%s\n' "$ids" | tail -n +101)"
+    # The ids as a JSON list, which is also how GraphQL writes a list of strings.
+    list="$(printf '%s\n' "$batch" | jq -R . | jq -s -c .)"
+    query="query { nodes(ids: ${list}) { __typename ... on IssueComment { id body author { $(_dispatch_actor_fields) } } } }"
+    if ! answer="$(_dispatch_graphql_read -f query="$query")"; then
+      echo "dispatch-author-gate: could not read who wrote ${what}, so none of them is taken on its login." >&2
+      return 1
+    fi
+    if ! found="$(jq -c -n --argjson found "$found" --slurpfile answers <(printf '%s' "$answer") '
+          if ($answers | length) != 1 then error("not one document") else $answers[0] end
+          | if type != "object" or (has("errors") and .errors != null and .errors != [])
+               or ((try .data.nodes catch null) | type) != "array"
+            then error("not an answer") else . end
+          | reduce (.data.nodes[] | select(type == "object" and .__typename == "IssueComment" and (.id | type) == "string")) as $n
+              ($found; .[$n.id] = { body: $n.body, author: $n.author })' 2>/dev/null)" || [[ -z "$found" ]]; then
+      echo "dispatch-author-gate: GitHub's answer about who wrote ${what} could not be read, so none of them is taken on its login." >&2
+      return 1
+    fi
+  done
+  if ! out="$(printf '%s' "$doc" | jq -c --argjson found "$found" '
+        def bare: type == "object" and ((.author | type) != "object" or (.author.__typename | type) != "string");
+        def askable: (.id | type) == "string" and (.id | test("^[A-Za-z0-9_=-]{1,128}$"));
+        .comments = [ (.comments // [])[]
+          | if bare and askable
+            then ($found[.id]) as $f
+                 | if $f == null or ($f.body | type) != "string" or $f.body != .body
+                   then error("not covered")
+                   else .author = (if ($f.author | type) == "object"
+                                   then { login: $f.author.login, __typename: $f.author.__typename, databaseId: $f.author.databaseId }
+                                   else null end)
+                   end
+            else . end ]' 2>/dev/null)" || [[ -z "$out" ]]; then
+    echo "dispatch-author-gate: GitHub's answer does not cover every one of ${what} with the text that was read, so none of them is taken on its login." >&2
+    return 1
+  fi
+  printf '%s\n' "$out"
 }

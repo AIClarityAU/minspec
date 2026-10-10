@@ -427,6 +427,46 @@ describe('scripts/lib/agent-context.sh: --model-login hands over one known login
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // What a name says it holds does not depend on its case. (The program used to upper-case
+  // the name to ask; on a bash that cannot do that it matches without regard to case.)
+  it.each([
+    ['AGENT_ENV_ALLOW', 'FIXTURE_API_KEY', /FIXTURE_API_KEY is on the list, and it is named like a credential/],
+    ['AGENT_ENV_ALLOW', 'fixture_api_key', /fixture_api_key is on the list, and it is named like a credential/],
+    ['AGENT_ENV_ALLOW', 'Fixture_Token', /Fixture_Token is on the list, and it is named like a credential/],
+    ['AGENT_ENV_ALLOW', 'gh_token', /gh_token is on the list, and it is named like a credential/],
+    ['AGENT_MODEL_LOGINS', 'github_app_key', /github_app_key is among the model logins, and it is GitHub's/],
+    ['AGENT_MODEL_LOGINS', 'my_gh_bot_login', /my_gh_bot_login is among the model logins, and it is GitHub's/],
+  ] as [string, string, RegExp][])('a copy whose %s has gained %s refuses to start anything, whatever case the name is in', (list, name, says) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'launch-mutated-case-'));
+    try {
+      const src = fs.readFileSync(LIB, 'utf-8');
+      const mutated = src.replace(new RegExp(`^${list}=\\(\\n`, 'm'), `${list}=(\n  ${name}\n`);
+      expect(mutated, 'the edit must land, or this test tests nothing').not.toBe(src);
+      const copy = path.join(dir, 'agent-context.sh');
+      fs.writeFileSync(copy, mutated);
+      const r = through([], HOLDING, copy);
+      expect(r.status).toBe(1);
+      expect(r.started).toBe(false);
+      expect(r.stderr).toMatch(says);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('and the names it hands over are still matched exactly afterwards', () => {
+    // Reading a name's shape without regard to case must not leave the shell matching
+    // everything that way. `http_proxy` is listed and held here; HTTP_PROXY is listed and
+    // is NOT held, and must not appear because its lower-case twin does.
+    const r = through([], { http_proxy: 'fixture' });
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.names).toContain('http_proxy');
+    expect(r.names).not.toContain('HTTP_PROXY');
+    // And a model login asked for in the wrong case is not one.
+    const asked = through(['--model-login', 'anthropic_api_key'], HOLDING);
+    expect(asked.status).toBe(1);
+    expect(asked.started).toBe(false);
+  });
 });
 
 // ── The enumerating gate ─────────────────────────────────────────────────────
@@ -682,5 +722,360 @@ describe('T0: no start of the CLI anywhere under scripts/ goes round the allowli
   it('the array the helper replaced is gone, so no launcher can go back to it', () => {
     const users = files.filter((file) => codeLines(read(file), file).some((l) => /AGENT_ENV_SCRUB\b/.test(l.text.replace(/MINSPEC_AGENT_ENV_SCRUB/g, ''))));
     expect(users).toEqual([]);
+  });
+});
+
+// ── The enumerating gate, second half: what a launcher runs in an agent's worktree ──
+//
+// The gate above is about what an AGENT is started with. This one is about the launcher
+// itself, afterwards: a launcher that makes a worktree for an agent goes back into it to
+// push, rebase, run the checks and ask for a review, and whatever it executes there runs
+// with the launcher's own environment (lib/agent-worktree.sh has the reasoning, and
+// agent-worktree-trust.test.ts plants a canary at each place and reads what it saw).
+//
+// The canary tests prove the sites that exist. This holds the NEXT one to the same rule:
+// in a launcher that makes a worktree and starts an agent, every line of code that names
+// the worktree must be one of a closed list of shapes, each of which either runs nothing
+// there or runs it through the pinned git or the environment allowlist. A new line in a
+// new shape fails here until it is one of them.
+//
+// WHAT IT CANNOT SEE, so that it is not over-trusted. It reads text. It finds a worktree
+// by the variable that holds its path and by the names given to files inside it, so it
+// does not follow the path into a function defined in another file, through a variable
+// assigned from a command, or into a program that is told the path and changes to it by
+// itself. Those are what the canary runs are for.
+
+/** The variable a launcher keeps its agent worktree's path in, not a longer name. */
+const WORKTREE_VAR = /\$\{?WORKTREE\}?(?![A-Za-z0-9_])/;
+const BARE_GIT = /(?<![A-Za-z0-9_-])git(?=\s)/;
+const LAUNCHER_FNS = '(?:launcher_git|agent_worktree_pin|agent_worktree_git|agent_worktree_function|agent_worktree_trusted)';
+const ALLOWLISTED = 'bash "\\$AGENT_LAUNCH_ENV" ';
+
+/** Could this text start another command? A separator, a pipe, a substitution. */
+const RUNS_MORE = /[;&|`]|\$\(/;
+/** The text with everything inside single quotes taken out: words, not commands. */
+const unquoted = (t: string) => t.replace(/'[^']*'/g, "''");
+
+/**
+ * The shapes a line that names the worktree may have. Each claims the WHOLE line: what
+ * comes after the part it recognises must be one of the endings written into it, so a
+ * second command cannot ride on the end of an accepted one.
+ */
+const WORKTREE_SHAPES: { name: string; is: (t: string) => boolean }[] = [
+  { name: 'asks whether it exists', is: (t) => /^if \[\[ -d "\$WORKTREE" \]\]; then$/.test(t) },
+  // Words only: the path is printed, in a message or in a prompt.
+  { name: 'says where it is', is: (t) => /^echo "[^"`]*"(?: >&2)?$/.test(t) && !/\$\(/.test(t) },
+  { name: 'tells the agent where it is', is: (t) => t === 'Worktree: ${WORKTREE}' },
+  {
+    name: 'says where it is, in a comment it posts',
+    is: (t) => {
+      const head = /^(?:gh issue comment "\$ISSUE" --repo "\$REPO" +--body|post_marked_comment "\$ATTEMPT_MARKER") "\$\(printf ''/;
+      const rest = unquoted(t).replace(head, '');
+      // After the one `printf`, only its arguments: variables, and nothing that runs.
+      return head.test(unquoted(t)) && /^(?: +"\$\{?[A-Za-z_]+\}?")*\)"(?: 2>\/dev\/null \|\| true)?$/.test(rest);
+    },
+  },
+  { name: 'names a file in it', is: (t) => /^[A-Z_]+="\$\{WORKTREE\}\/\.[a-z-]+\.(log|md|json)"$/.test(t) },
+  {
+    name: "reads the agent's summary",
+    is: (t) => t === '[[ -f "${WORKTREE}/.agent-summary.md" ]] && SUMMARY=$(cat "${WORKTREE}/.agent-summary.md")',
+  },
+  {
+    name: 'git, or a program of its own, with the git directory and the hooks pinned',
+    is: (t) => {
+      const body = t
+        .replace(/^(?:if ! [A-Z_]+=\$\(|cleanup\(\) \{ )/, '')
+        .replace(/(?:\); then| 2>\/dev\/null \|\| (?:true|\{|true; \})| \|\| \{)$/, '');
+      return new RegExp(`^${LAUNCHER_FNS} `).test(body) && !RUNS_MORE.test(body) && !BARE_GIT.test(body);
+    },
+  },
+  {
+    name: "starts the agent, or the worktree's own check, through the allowlist",
+    is: (t) => {
+      const head = new RegExp(
+        `^(?:if )?\\( ?cd "\\$WORKTREE" && (?:"\\$\\{BUILD_TIMEOUT_ARGS\\[@\\]\\}" |timeout --kill-after=30s "\\$\\{budget\\}s" )?${ALLOWLISTED}`,
+      );
+      // What is started, and its arguments, up to where its output goes.
+      const rest = t.replace(head, '').replace(/(?: 2>&1 \| tee(?: -a)? "\$LOG"\)(?:; then| \|\| true)| >\/dev\/null 2>&1 \); then)$/, '');
+      return head.test(t) && rest !== t.replace(head, '') && !RUNS_MORE.test(rest);
+    },
+  },
+  {
+    name: 'tells its own gate, run by its own tsx from its own tree through the allowlist, where it is',
+    is: (t) => {
+      const head = new RegExp(
+        `^DECISION=\\$\\(cd "\\$REPO_ROOT" && ${ALLOWLISTED} *"\\$\\{REPO_ROOT\\}/node_modules/\\.bin/tsx" "\\$\\{SCRIPT_DIR\\}/auto-merge-gate\\.ts" +--worktree "\\$WORKTREE" `,
+      );
+      // Its arguments, then the fail-safe answer for a gate that could not be run.
+      const rest = unquoted(t).replace(head, '').replace(/ 2>>"\$LOG" +\|\| echo ''\)$/, '');
+      return head.test(t) && rest !== unquoted(t).replace(head, '') && !RUNS_MORE.test(rest);
+    },
+  },
+];
+
+const shapeOf = (text: string) => WORKTREE_SHAPES.find((s) => s.is(text.trim()))?.name;
+
+/** Shell files whose code makes a worktree AND starts the CLI: the launchers this is about. */
+function worktreeLaunchers(): string[] {
+  return codeFiles()
+    .filter((f) => /\.sh$/.test(f))
+    .filter((f) => {
+      const text = fs.readFileSync(path.join(SCRIPTS, f), 'utf-8');
+      const lines = codeLines(text, f);
+      return lines.some((l) => /\bworktree add\b/.test(l.text)) && classify(f, text).starts.length > 0;
+    })
+    .sort();
+}
+
+describe('T0: a launcher runs nothing as itself out of a worktree it gave an agent', () => {
+  const launchers = worktreeLaunchers();
+  const linesOf = (f: string) => codeLines(fs.readFileSync(path.join(SCRIPTS, f), 'utf-8'), f);
+
+  it('the launchers that make a worktree and start an agent are the ones the canary tests run', () => {
+    // A third one is found here by itself, and is held to every rule below. This list is
+    // the reminder that it also needs a canary run of its own (agent-worktree-trust.test.ts).
+    expect(launchers).toEqual(['dispatch-issue.sh', 'remediate-pr.sh']);
+  });
+
+  it('the shapes themselves: what a line that names the worktree may look like, and what it may not', () => {
+    for (const ok of [
+      'launcher_git -C "$REPO_ROOT" worktree remove "$WORKTREE" --force 2>/dev/null || true',
+      'launcher_git -C "$REPO_ROOT" worktree add -b "$BRANCH" "$WORKTREE" origin/main',
+      'agent_worktree_pin "$WORKTREE"',
+      'if ! MATCHES=$(agent_worktree_function agent_egress_scan "$WORKTREE" "$PRE_SHA" "${WORKTREE}/.agent-summary.md"); then',
+      '(cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$fix_prompt" --model "$RUN_MODEL" 2>&1 | tee -a "$LOG") || true',
+      'if ( cd "$WORKTREE" && timeout --kill-after=30s "${budget}s" bash "$AGENT_LAUNCH_ENV" "$@" >/dev/null 2>&1 ); then',
+      'echo "Worktree left at: $WORKTREE"',
+      'LOG="${WORKTREE}/.agent.log"',
+    ]) {
+      expect(shapeOf(ok), ok).toBeDefined();
+    }
+    for (const bad of [
+      // git that reads the worktree's own .git file and runs the worktree's own hooks.
+      'git -C "$WORKTREE" push -u origin "$BRANCH"',
+      'if git -C "$WORKTREE" diff --name-only "${base}...HEAD" | grep -q x; then',
+      'SHA=$(git -C "$WORKTREE" rev-parse --short HEAD)',
+      'launcher_git worktree add "$WORKTREE" x && git -C "$WORKTREE" status',
+      'git worktree add --detach "$WORKTREE" "origin/${BRANCH}"',
+      // The worktree's own code, with the launcher's environment.
+      '( cd "$WORKTREE" && timeout --kill-after=30s "${budget}s" "$@" >/dev/null 2>&1 )',
+      '(cd "$WORKTREE" && npm test)',
+      'DECISION=$(cd "$WORKTREE" && npx tsx "${SCRIPT_DIR}/auto-merge-gate.ts" --worktree "$WORKTREE" --base "$AUTOMERGE_BASE"',
+      'rev_out=$( cd "$WORKTREE" && "$reviewer" "$base" HEAD --role reviewer 2>>"$LOG" ) || true',
+      'bash "${WORKTREE}/scripts/check.sh"',
+      'npm --prefix "$WORKTREE" test',
+      '"${WORKTREE}/node_modules/.bin/tsx" x.ts',
+      'agent_egress_scan "$WORKTREE" "origin/main" "${WORKTREE}/.agent-summary.md"',
+      'agent_worktree_git status && cd "$WORKTREE" && ./run',
+      'echo "$(cd "$WORKTREE" && ./run)"',
+      'TOOL="${WORKTREE}/bin/tool"',
+      // An accepted shape with a second command riding on the end of it.
+      'agent_worktree_pin "$WORKTREE"; bash "${WORKTREE}/x.sh"',
+      'launcher_git -C "$REPO_ROOT" worktree add -b "$BRANCH" "$WORKTREE" origin/main && "${WORKTREE}/run"',
+      '(cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$p" 2>&1 | tee -a "$LOG") || true; (cd "$WORKTREE" && ./run)',
+      '(cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$p"; ./run) || true',
+      'echo "left at $WORKTREE"; (cd "$WORKTREE" && ./run)',
+      'echo "left at $WORKTREE" | bash',
+    ]) {
+      expect(shapeOf(bad), bad).toBeUndefined();
+    }
+  });
+
+  it('every line that names the worktree is one of those shapes', () => {
+    const unexplained = launchers.flatMap((f) =>
+      linesOf(f)
+        .filter((l) => WORKTREE_VAR.test(l.text) && !/^\s*WORKTREE=/.test(l.text))
+        .filter((l) => shapeOf(l.text) === undefined)
+        .map((l) => `${f}:${l.line}: ${l.text.trim().slice(0, 140)}`),
+    );
+    expect(unexplained).toEqual([]);
+  });
+
+  it('the scan is not vacuous: each launcher has lines of the shapes that matter', () => {
+    for (const f of launchers) {
+      const shapes = new Set(linesOf(f).filter((l) => WORKTREE_VAR.test(l.text)).map((l) => shapeOf(l.text)));
+      expect([...shapes], f).toContain('git, or a program of its own, with the git directory and the hooks pinned');
+      expect([...shapes], f).toContain("starts the agent, or the worktree's own check, through the allowlist");
+    }
+  });
+
+  it('each makes its worktree with its own hooks, pins it before any agent is started, and never asks git for it any other way', () => {
+    for (const f of launchers) {
+      const lines = linesOf(f);
+      const adds = lines.filter((l) => /\bworktree add\b/.test(l.text));
+      expect(adds.length, f).toBeGreaterThan(0);
+      for (const l of adds) expect(l.text.trim(), `${f}:${l.line}`).toMatch(/^launcher_git /);
+      const pin = lines.find((l) => /^\s*agent_worktree_pin "\$WORKTREE"/.test(l.text));
+      expect(pin, `${f} never pins its worktree`).toBeDefined();
+      const firstAdd = adds[0].line;
+      const firstStart = Math.min(...classify(f, fs.readFileSync(path.join(SCRIPTS, f), 'utf-8')).starts.filter((s) => s.line > firstAdd).map((s) => s.line));
+      expect(pin!.line, f).toBeGreaterThan(firstAdd);
+      expect(pin!.line, f).toBeLessThan(firstStart);
+      // Sourced unguarded, from its own directory: a missing library stops the run.
+      expect(lines.some((l) => l.text === 'source "${SCRIPT_DIR}/lib/agent-worktree.sh"'), f).toBe(true);
+    }
+  });
+
+  it('none of them looks a tool up from wherever it happens to be', () => {
+    // `npx <tool>` runs the copy in the directory it is run from before any other.
+    for (const f of launchers) {
+      const found = linesOf(f).filter((l) => /(?:^|[\s;&|(])npx\s/.test(l.text)).map((l) => `${f}:${l.line}`);
+      expect(found, f).toEqual([]);
+    }
+  });
+
+  it('a file in the worktree is read as data and never run', () => {
+    // The names a launcher gives to files inside the worktree (its log, the agent's
+    // summary, the signals) are found from the lines that assign them.
+    for (const f of launchers) {
+      const lines = linesOf(f);
+      const names = lines.flatMap((l) => l.text.trim().match(/^([A-Z_]+)="\$\{WORKTREE\}\//)?.[1] ?? []);
+      expect(names.length, f).toBeGreaterThan(0);
+      const runner = new RegExp(`(?<![A-Za-z0-9_-])(?:bash|sh|source|\\.|eval|exec|node|python3?|tsx|npm|env)\\s+(?:-\\S+\\s+)*"?\\$\\{?(?:${names.join('|')})\\}?(?![A-Za-z0-9_])`);
+      const asCommand = new RegExp(`(?:^|[;&|(]|\\$\\()\\s*"?\\$\\{?(?:${names.join('|')})\\}?(?![A-Za-z0-9_])`);
+      const run = lines.filter((l) => runner.test(l.text) || asCommand.test(l.text)).map((l) => `${f}:${l.line}: ${l.text.trim().slice(0, 100)}`);
+      expect(run, f).toEqual([]);
+    }
+  });
+
+  it('a script that visits every checkout the repository lists asks git about them only through its own records', () => {
+    // The drain keeps dormant checkouts current, and the list it walks includes the
+    // worktrees agents were given. `git -C <that checkout>` reads the checkout's own
+    // `.git` file. So the only directories such a script may hand to `git -C` are its
+    // own, and every other checkout is reached with launcher_worktree_git.
+    const walkers = codeFiles()
+      .filter((f) => /\.sh$/.test(f))
+      .filter((f) => linesOf(f).some((l) => /\bworktree list\b/.test(l.text)));
+    expect(walkers).toEqual(['drain-inbox.sh']);
+    for (const f of walkers) {
+      const lines = linesOf(f);
+      const targets = new Set(
+        lines.flatMap((l) => [...l.text.matchAll(/(?<![A-Za-z0-9_-])git -C "\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?"/g)].map((m) => m[1])),
+      );
+      expect([...targets].sort(), f).toEqual(['DRAIN_RUN_DIR', 'PRIMARY_ROOT', 'SCRIPT_DIR']);
+      expect(lines.some((l) => /launcher_worktree_git "\$PRIMARY_ROOT" "\$root" /.test(l.text)), f).toBe(true);
+      expect(lines.some((l) => l.text === 'source "${SCRIPT_DIR}/lib/agent-worktree.sh"'), f).toBe(true);
+    }
+  });
+});
+
+// ── bash 3.2 ─────────────────────────────────────────────────────────────────
+//
+// The reviewers are copied into adopters' repositories (scripts/gen-ci-templates.mjs),
+// and some of those run on a machine whose only bash is 3.2. The launch program is run
+// by every one of them, so it must not be the thing that stops a reviewer there. It did
+// for a while: it asked which variables were exported with `${name@a}` and refused any
+// bash older than 4.4.
+//
+// This is a tripwire for the constructs, by name. It is not a bash 3.2: whether a file
+// PARSES there is something only that shell can say (review-branch.sh, review-decide.sh
+// and the launch program do; review-pr.sh and review-approvable.sh did not before this
+// work either, at a `$( ... )` its parser cannot close). A real 3.2 was run by hand
+// when this was written, and is not on the machines that run this suite.
+
+const LAUNCH_PROGRAM = path.join(SCRIPTS, 'lib', 'agent-context.sh');
+
+/** Each construct bash 3.2 does not have, and how it reads in a script. */
+const NOT_IN_BASH_32: [string, RegExp][] = [
+  ['case modification, ${name^^} or ${name,,}', /\$\{!?(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*])(?:\[[^\]]*\])?(?:\^\^?|,,?)[^}]*\}/],
+  ['parameter transformation, ${name@a}', /\$\{[^}]*[A-Za-z0-9_\]]@[A-Za-z]\}/],
+  ['an associative array or a nameref', /\b(?:declare|local|typeset)\s+-[A-Za-z]*[An]/],
+  ['[[ -v name ]]', /\[\[\s+(?:!\s+)?-v\s/],
+  ['mapfile, readarray or coproc', /(?:^|[\s;&|(])(?:mapfile|readarray|coproc)\s/],
+  ['|& or &>>', /\|&|&>>/],
+  [';;& or ;& in a case', /;;&|;&(?!&)/],
+  ['wait -n', /\bwait\s+-n\b/],
+  ['a negative array index', /\$\{[A-Za-z_][A-Za-z0-9_]*\[-[0-9]+\]\}/],
+  ['a shell option newer than 3.2', /\bshopt\s+-[su]\s+(?:globstar|lastpipe|inherit_errexit|autocd|checkjobs|dirspell|compat\d+)\b/],
+  ['printf %(fmt)T', /printf\s+(?:-v\s+\S+\s+)?['"][^'"]*%\([^)]*\)T/],
+];
+
+describe('T0: what runs on an adopter\'s bash 3.2 uses nothing bash 3.2 lacks', () => {
+  // The launch program, and the shipped scripts that do parse under 3.2.
+  const HELD = ['lib/agent-context.sh', 'review-branch.sh', 'review-decide.sh'];
+
+  it('the predicate itself: it sees each construct, and not the forms 3.2 does have', () => {
+    for (const bad of [
+      'local name="${1^^}"',
+      'x="${login,,}"',
+      'if [[ -v "$name" && "${!name@a}" == *x* ]]; then',
+      'local -A passes=()',
+      'declare -n ref=x',
+      'mapfile -t lines < file',
+      'cmd |& tee log',
+      'echo "${arr[-1]}"',
+      'shopt -s globstar',
+    ]) {
+      expect(NOT_IN_BASH_32.some(([, re]) => re.test(bad)), bad).toBe(true);
+    }
+    for (const fine of [
+      'exec env -i ${pairs[@]+"${pairs[@]}"} "$@"',
+      'for name in ${1+"$@"}; do',
+      'local -a listed=("${AGENT_ENV_ALLOW[@]}")',
+      'pairs+=("${name}=${!name}")',
+      'shopt -s nocasematch',
+      "exported=$'\\n'\"$(compgen -e)\"$'\\n'",
+      '[[ "$a" =~ ^[0-9]+$ ]] && x="${BASH_REMATCH[0]}"',
+      'cmd 2>&1 | tee -a "$LOG"',
+      'echo "${1:-}" "${x%%/*}" "${x#*/}" "${#arr[@]}"',
+    ]) {
+      expect(NOT_IN_BASH_32.filter(([, re]) => re.test(fine)).map(([n]) => n), fine).toEqual([]);
+    }
+  });
+
+  it.each(HELD)('%s uses none of them', (file) => {
+    const found = codeLines(fs.readFileSync(path.join(SCRIPTS, file), 'utf-8'), file).flatMap((l) =>
+      NOT_IN_BASH_32.filter(([, re]) => re.test(l.text)).map(([name]) => `${file}:${l.line}: ${name}: ${l.text.trim().slice(0, 100)}`),
+    );
+    expect(found).toEqual([]);
+  });
+
+  it('the launch program refuses only a bash older than 3.2, and says which it needs', () => {
+    const text = fs.readFileSync(LAUNCH_PROGRAM, 'utf-8');
+    expect(text).toContain('BASH_VERSINFO[0] < 3 || (BASH_VERSINFO[0] == 3 && BASH_VERSINFO[1] < 2)');
+    expect(text).toMatch(/needs bash 3\.2 or newer/);
+    expect(codeLines(text, 'lib/agent-context.sh').filter((l) => /BASH_VERSINFO\[0\] < 4|needs bash 4/.test(l.text))).toEqual([]);
+  });
+
+  it('the launch program expands no array that can be empty without the guard bash 3.2 needs', () => {
+    // Under `set -u`, bash before 4.4 calls "${arr[@]}" of an EMPTY array an unbound
+    // variable. The two arrays that can be empty here (nothing listed is exported;
+    // nothing to hand over) are expanded as ${arr[@]+"${arr[@]}"}.
+    const lines = codeLines(fs.readFileSync(LAUNCH_PROGRAM, 'utf-8'), 'lib/agent-context.sh');
+    const bare = (name: string) => new RegExp(`(?<!\\+)"\\$\\{${name}\\[@\\]\\}"`);
+    for (const name of ['AGENT_ENV_PASSING', 'pairs']) {
+      expect(lines.filter((l) => bare(name).test(l.text)).map((l) => `${l.line}: ${l.text.trim()}`), name).toEqual([]);
+      expect(lines.some((l) => l.text.includes(`\${${name}[@]+"\${${name}[@]}"}`)), name).toBe(true);
+    }
+  });
+
+  it('the launch program still starts its command when it was handed an empty environment', () => {
+    // As near to the empty case as a shell gets: bash exports a few names of its own on
+    // the way up, and nothing else is there to hand over.
+    const r = spawnSync('bash', ['-c', 'exec env -i "$BASH" "$1" /usr/bin/env', 'bash', LAUNCH_PROGRAM], {
+      encoding: 'utf-8',
+      env: { PATH: process.env.PATH ?? '' },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const names = r.stdout.split('\n').filter(Boolean).map((l) => l.replace(/=.*/, ''));
+    // Nothing bash made up for itself on the way (a default PATH, a TERM, a SHELL) is
+    // among them: those are the shell's, and were never handed to the launcher.
+    for (const n of names) expect(['PWD', 'OLDPWD', 'SHLVL', '_'], n).toContain(n);
+  });
+
+  it('a variable that only resembles a listed name does not make the listed one appear', () => {
+    // HTTP_PROXY and TZ are on the list and are NOT in this environment. `http_proxy` is
+    // (it is listed in its own right, and differs only by case), and so is a name that
+    // merely contains `TZ`. Names are matched whole and exactly.
+    const r = spawnSync('bash', ['-c', 'exec env -i http_proxy=fixture MY_TZ_OFFSET=1 "$BASH" "$1" /usr/bin/env', 'bash', LAUNCH_PROGRAM], {
+      encoding: 'utf-8',
+      env: { PATH: process.env.PATH ?? '' },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const names = r.stdout.split('\n').filter(Boolean).map((l) => l.replace(/=.*/, ''));
+    expect(names).toContain('http_proxy');
+    expect(names).not.toContain('HTTP_PROXY');
+    expect(names).not.toContain('TZ');
+    expect(names).not.toContain('MY_TZ_OFFSET');
   });
 });

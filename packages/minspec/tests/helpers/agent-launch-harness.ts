@@ -144,6 +144,8 @@ function writeStubs(dir: string, agentOut: string): string {
   // With no prompt after `-p` the real CLI reads its prompt from stdin, and so does this:
   // the reviewers hand their prompt over that way. launch-fail.N, when a test wrote one,
   // makes start N fail with that text on stderr, which is how a quota outage is staged.
+  // agent-act.sh, when a test wrote one, is what the agent does in its worktree (see
+  // agent-worktree-harness.ts).
   fs.writeFileSync(
     path.join(bin, 'claude'),
     `#!/usr/bin/env bash
@@ -177,6 +179,11 @@ if [[ -e "$dir/launch-fail.$n" ]]; then
   printf '%s\\n' "$(<"$dir/launch-fail.$n")" >&2
   exit 1
 fi
+# What the agent DID while it ran, when a test wrote one: agent-act.sh is run where the
+# agent was started, with the environment the agent was given and the start number.
+if [[ -x "$dir/agent-act.sh" ]]; then
+  "$dir/agent-act.sh" "$n" >> "$dir/agent-act.log" 2>&1 || echo "agent-act.sh failed: $?" >> "$dir/agent-act.log"
+fi
 printf '%s\\n' "$(<"$dir/agent-out.txt")"
 exit 0
 `,
@@ -188,11 +195,14 @@ exit 0
   // issue so they can be listed back. Anything it was not taught is empty and succeeds.
   //
   // `api graphql` is the read the author gate makes: who wrote an issue's text
-  // (provenance.<N>.json) and who wrote a pull request's comments (pr-comments.json). It
-  // is answered the way GitHub answers it: not at all without a credential, which is what
+  // (provenance.<N>.json), who wrote a pull request's comments (pr-comments.json), and
+  // which account wrote the comments with given ids (comment-nodes.json, a map from id to
+  // the comment as GitHub holds it; an id it does not have comes back null). It is
+  // answered the way GitHub answers it: not at all without a credential, which is what
   // makes a launcher that forgot to present one refuse here as it would for real. A
   // fixture that is missing, or one marked `.fail`, is a failed read. It is logged as
-  // `api graphql issue:<N>` or `pullRequest:<N>`, and a mutation is noted as a write.
+  // `api graphql issue:<N>`, `pullRequest:<N>` or `nodes`, and a mutation is noted as a
+  // write.
   fs.writeFileSync(
     path.join(bin, 'gh'),
     `#!/usr/bin/env bash
@@ -213,6 +223,7 @@ done
 answer=""
 if [[ "$noun $verb" == "api graphql" ]]; then
   case "$query" in
+    *"nodes(ids:"*) third="nodes"; answer="$dir/comment-nodes.json" ;;
     *"pullRequest("*) third="pullRequest:$number"; answer="$dir/pr-comments.json" ;;
     *"issue("*) third="issue:$number"; answer="$dir/provenance.$number.json" ;;
     *) third="unrecognised" ;;
@@ -237,6 +248,15 @@ case "$noun $verb" in
       if [[ ! -f "$answer" || -e "$answer.fail" ]]; then
         echo "stub gh: no answer for $third" >&2
         exit 1
+      fi
+      if [[ "$third" == nodes ]]; then
+        # A test that wants an answer no map of comments gives (an error document) wrote
+        # it out whole.
+        if [[ -f "$dir/comment-nodes.raw.json" ]]; then emit < "$dir/comment-nodes.raw.json"; exit 0; fi
+        ids="$(printf '%s' "$query" | sed -E 's/.*nodes\\(ids: *(\\[[^]]*\\]).*/\\1/')"
+        printf '%s\\n' "$ids" >> "$dir/nodes-asked.log"
+        jq -c --argjson ids "$ids" '. as $all | {data: {nodes: [$ids[] | $all[.] // null]}}' "$answer" | emit
+        exit 0
       fi
       emit < "$answer"
     fi ;;
@@ -396,6 +416,8 @@ export interface IssueFixture {
   comments?: CommentFixture[];
   /** Attach the verdict record that makes the issue dispatchable. Default true. */
   ready?: boolean;
+  /** The read of which account wrote the issue's comments fails. */
+  commentAuthorsFail?: boolean;
 }
 
 const TITLE = 'Typo in a log line';
@@ -462,11 +484,48 @@ export function commentsAnswer(comments: CommentFixture[], total?: number): stri
   });
 }
 
-/** Put one issue on the stub GitHub: what `gh issue view` returns, and who wrote it. */
+/**
+ * Put one issue on the stub GitHub: what `gh issue view` returns, who wrote it, and which
+ * account wrote each of its comments (asked for by the comment's id).
+ */
 function serveIssue(dir: string, n: string, f: IssueFixture, forDispatch: boolean): void {
-  fs.writeFileSync(path.join(dir, `issue.${n}.json`), issueJson(f, forDispatch));
+  const comments = issueComments(f, forDispatch, n);
+  fs.writeFileSync(path.join(dir, `issue.${n}.json`), issueJson(f, forDispatch, comments));
   fs.writeFileSync(path.join(dir, `provenance.${n}.json`), provenanceAnswer(f, Number(n)));
   if (f.provenanceFails) fs.writeFileSync(path.join(dir, `provenance.${n}.json.fail`), '');
+  const file = path.join(dir, 'comment-nodes.json');
+  const nodes: Record<string, unknown> = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf-8')) : {};
+  for (const c of comments) nodes[c.id] = { __typename: 'IssueComment', id: c.id, body: c.body, author: c.author };
+  fs.writeFileSync(file, JSON.stringify(nodes));
+  if (f.commentAuthorsFail) fs.writeFileSync(`${file}.fail`, '');
+}
+
+interface ServedComment {
+  id: string;
+  /** The account, as GitHub answers when asked who wrote the comment with this id. */
+  author: unknown;
+  association: string;
+  body: string;
+}
+
+/** The verdict record that makes this issue's text dispatchable, as a comment body. */
+export function readyRecordComment(f: IssueFixture = {}): string {
+  return `**Triage:** agent-ready\n\n${verdictRecord(f.title ?? TITLE, f.body ?? BODY)}`;
+}
+
+/** An issue's comments, oldest first, each with the id `gh issue view` gives it. */
+function issueComments(f: IssueFixture, forDispatch: boolean, n: string): ServedComment[] {
+  const comments: ServedComment[] = (f.comments ?? []).map((c, i) => ({
+    id: `IC_fixture_${n}_${i}`,
+    author: c.author,
+    association: c.association ?? 'NONE',
+    body: c.body,
+  }));
+  if (forDispatch && f.ready !== false) {
+    // The readiness gate's own App wrote the record.
+    comments.unshift({ id: `IC_fixture_${n}_record`, author: APP, association: 'CONTRIBUTOR', body: readyRecordComment(f) });
+  }
+  return comments;
 }
 
 /** The verdict record triage would have written for this text, from the real renderer. */
@@ -477,22 +536,18 @@ function verdictRecord(title: string, body: string): string {
   });
 }
 
-function issueJson(f: IssueFixture, forDispatch: boolean): string {
+function issueJson(f: IssueFixture, forDispatch: boolean, served: ServedComment[]): string {
   const title = f.title ?? TITLE;
   const body = f.body ?? BODY;
-  const comments = (f.comments ?? []).map((c) => ({
+  // As `gh issue view --json comments` prints them: an id, a login, an association. The
+  // App appears under its bare login (`minspec-sdd`), and nothing here says which account
+  // a login belongs to.
+  const comments = served.map((c) => ({
+    id: c.id,
     author: { login: loginOf(c.author) },
-    authorAssociation: c.association ?? 'NONE',
+    authorAssociation: c.association,
     body: c.body,
   }));
-  if (forDispatch && f.ready !== false) {
-    // The readiness gate's own App, in the spelling `gh issue view --json comments` gives it.
-    comments.unshift({
-      author: { login: 'minspec-sdd' },
-      authorAssociation: 'CONTRIBUTOR',
-      body: `**Triage:** agent-ready\n\n${verdictRecord(title, body)}`,
-    });
-  }
   // Everything `gh issue view` could be asked for. The stub returns only the fields a
   // launcher names in `--json`, as the real one does, so `author` reaches a launcher that
   // asks for it and no other. It is the login-only rendering that command has: an App is
@@ -777,18 +832,15 @@ export function runFixAgent(opts: FixAgentOptions): FixAgentRun {
       })),
     }),
   );
+  // A linked worktree of a repository beside it, which is what the dispatcher gives an
+  // agent: its git directory is outside it, under the repository's own.
+  const repo = path.join(dir, 'repo');
   const worktree = path.join(dir, 'worktree');
-  fs.mkdirSync(worktree);
-  const gitEnv = {
-    ...process.env,
-    HOME: dir,
-    GIT_AUTHOR_NAME: 'fixture',
-    GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
-    GIT_COMMITTER_NAME: 'fixture',
-    GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
-  };
-  execFileSync('git', ['-C', worktree, 'init', '-q', '-b', 'main'], { env: gitEnv, stdio: 'pipe' });
-  execFileSync('git', ['-C', worktree, 'commit', '-q', '--allow-empty', '-m', 'fixture'], { env: gitEnv, stdio: 'pipe' });
+  fs.mkdirSync(repo);
+  const gitEnv = fixtureGitEnv(dir);
+  execFileSync('git', ['-C', repo, 'init', '-q', '-b', 'main'], { env: gitEnv, stdio: 'pipe' });
+  execFileSync('git', ['-C', repo, 'commit', '-q', '--allow-empty', '-m', 'fixture'], { env: gitEnv, stdio: 'pipe' });
+  execFileSync('git', ['-C', repo, 'worktree', 'add', '-q', '-b', 'agent/issue-4242', worktree], { env: gitEnv, stdio: 'pipe' });
 
   const script = [
     'set -euo pipefail',
@@ -803,6 +855,9 @@ export function runFixAgent(opts: FixAgentOptions): FixAgentRun {
     'SHEPHERD_ATTEMPT_MARKER="<!-- minspec-auto-remediation -->"',
     ...setup,
     'gh_bot_init',
+    // The script pins its worktree straight after making it. This driver made the
+    // worktree, so it does the pinning, when the script under test knows how to.
+    'if declare -F agent_worktree_pin >/dev/null; then agent_worktree_pin "$WORKTREE"; fi',
     'shepherd_publish() { echo PUBLISHED; }',
     fn,
     // The function's own status is reported, never discarded: a stub brings back no
@@ -1005,6 +1060,39 @@ let remediations = 0;
 export interface RemediateRun extends Run {
   /** Where the agent's worktree was made (and removed again when the sweep ended). */
   worktree: string;
+  /** The pull request's branch, and the bare repository it was pushed to. */
+  branch: string;
+  origin: string;
+}
+
+/** What a test can reach while the fixture is built, before the launcher is started. */
+export interface RemediateFixture {
+  /** The stubs' directory: what they serve is read from here and what they see is written here. */
+  dir: string;
+  /** The repository the launcher runs from, and the bare one it pushes to. */
+  repo: string;
+  origin: string;
+  /** A clone, checked out on the pull request's branch and not yet pushed. */
+  seed: string;
+  branch: string;
+  /** Where the launcher will make the agent's worktree. */
+  worktree: string;
+  git(...args: string[]): string;
+}
+
+export interface RemediateOptions extends SiteOptions {
+  /** Fields that replace the pull request's own, as `gh pr view` serves them. */
+  pr?: Record<string, unknown>;
+  /**
+   * The pull request's comments, oldest first. They are served both ways a launcher
+   * could read them: with the account that wrote each, and as `gh pr view` gives them,
+   * which is a login and nothing else.
+   */
+  comments?: CommentFixture[];
+  /** What the stub agent prints. Default: an escalation, which ends the sweep before any push. */
+  agentOut?: string;
+  /** Change the fixture before the branch is pushed and the launcher is started. */
+  prepare?(fixture: RemediateFixture): void;
 }
 
 /**
@@ -1016,15 +1104,15 @@ export interface RemediateRun extends Run {
  * hands a command everything: the agent's worktree is a checkout of that branch, so the
  * copy an agent could have edited is sitting right where a relative path would find it.
  */
-export function runRemediate(opts: SiteOptions = {}): RemediateRun {
+export function runRemediate(opts: RemediateOptions = {}): RemediateRun {
   const dir = scratch('launch-remediate-');
-  const bin = writeStubs(dir, 'ESCALATE: fixture stop, nothing to fix');
+  const bin = writeStubs(dir, opts.agentOut ?? 'ESCALATE: fixture stop, nothing to fix');
   const repo = path.join(dir, 'repo');
   const seed = path.join(dir, 'seed');
   const origin = path.join(dir, 'origin.git');
   const branch = 'fix/launch-site-fixture';
   const gitEnv = fixtureGitEnv(dir);
-  const git = (...args: string[]) => execFileSync('git', args, { env: gitEnv, stdio: 'pipe' });
+  const git = (...args: string[]) => execFileSync('git', args, { env: gitEnv, encoding: 'utf-8', stdio: 'pipe' });
   git('init', '-q', '--bare', '-b', 'main', origin);
   fs.mkdirSync(repo);
   git('-C', repo, 'init', '-q', '-b', 'main');
@@ -1035,19 +1123,22 @@ export function runRemediate(opts: SiteOptions = {}): RemediateRun {
   git('-C', repo, 'push', '-q', 'origin', 'main');
   fs.symlinkSync(SCRIPTS, path.join(repo, 'scripts'));
 
+  // The worktree's path is fixed by the script (/tmp/minspec-remediate/pr-<N>), so the
+  // number is one no real pull request has and no other run of this harness shares.
+  const pr = String(990_000_000 + (process.pid % 100_000) * 100 + (remediations++ % 100));
+  const worktree = `/tmp/minspec-remediate/pr-${pr}`;
+  created.push(worktree);
+
   git('clone', '-q', origin, seed);
   git('-C', seed, 'checkout', '-q', '-b', branch);
   fs.mkdirSync(path.join(seed, 'scripts', 'lib'), { recursive: true });
   fs.writeFileSync(path.join(seed, 'scripts', 'lib', 'agent-context.sh'), PASS_THROUGH_HELPER, { mode: 0o755 });
   git('-C', seed, 'add', 'scripts/lib/agent-context.sh');
   git('-C', seed, 'commit', '-q', '-m', 'fixture: the branch under remediation');
+  opts.prepare?.({ dir, repo, origin, seed, branch, worktree, git });
   git('-C', seed, 'push', '-q', 'origin', branch);
 
-  // The worktree's path is fixed by the script (/tmp/minspec-remediate/pr-<N>), so the
-  // number is one no real pull request has and no other run of this harness shares.
-  const pr = String(990_000_000 + (process.pid % 100_000) * 100 + (remediations++ % 100));
-  const worktree = `/tmp/minspec-remediate/pr-${pr}`;
-  created.push(worktree);
+  if (opts.comments) fs.writeFileSync(path.join(dir, 'pr-comments.json'), commentsAnswer(opts.comments));
   fs.writeFileSync(
     path.join(dir, 'pr.json'),
     JSON.stringify({
@@ -1063,7 +1154,12 @@ export function runRemediate(opts: SiteOptions = {}): RemediateRun {
       title: 'fixture: a failing check',
       author: { login: 'app/minspec-sdd' },
       statusCheckRollup: [{ name: 'test', status: 'COMPLETED', conclusion: 'FAILURE' }],
-      comments: [],
+      comments: (opts.comments ?? []).map((c) => ({
+        author: { login: loginOf(c.author) },
+        authorAssociation: c.association ?? 'NONE',
+        body: c.body,
+      })),
+      ...opts.pr,
     }),
   );
   const r = spawnSync('bash', [path.join(repo, 'scripts', 'remediate-pr.sh'), pr, '--repo', 'AIClarityAU/minspec'], {
@@ -1072,7 +1168,7 @@ export function runRemediate(opts: SiteOptions = {}): RemediateRun {
     // One launch: an escalation is not retried on a second model.
     env: hermeticEnv(dir, bin, { MINSPEC_ESCALATE_RETRY_OFF: '1', ...opts.env }),
   });
-  return { ...collect(dir, r), worktree };
+  return { ...collect(dir, r), worktree, branch, origin };
 }
 
 /**
