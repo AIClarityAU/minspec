@@ -1117,12 +1117,33 @@ sweep_open_prs() {
     # refresh: the sweep's own enumeration is a read, and remediate-pr.sh is a child
     # that inherits this token.
     gh_bot_warm_read
-    local open_prs pr rcap rout
+    local open_prs pr rcap rout sweep_quota_verdict
     open_prs=$(gh pr list --repo "$REPO" --state open --json number,isDraft \
       --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
     if [[ -n "$open_prs" ]]; then
       echo "[drain] sweeping $(echo "$open_prs" | wc -l | tr -d ' ') open PR(s) for fixable problems..."
       for pr in $open_prs; do
+        # Admission control per REMEDIATION, not just per cycle (#2587) — the same
+        # shape admit_next_dispatch gives dispatch (#2573), reused here rather than
+        # called directly: that function is defined INSIDE run_cycle, only once
+        # execution reaches its dispatch section, and this sweep has a second call
+        # site (line ~1444) that can run before that point in a cycle's FIRST call.
+        # A long PR list makes this loop run for hours exactly as the dispatch loop
+        # does, and remediate-pr.sh launches an agent for any PR it classifies as
+        # fixable (scripts/remediate-pr.sh:814) — so a cycle admitted under the cap
+        # can cross it mid-sweep and keep launching until the list ends.
+        #
+        # Asked before EVERY PR, including ones remediate-pr.sh is about to skip
+        # without spending an agent on them at all (a clean PR, one only behind
+        # `main`). remediate-pr.sh is the one thing that knows which PRs those are
+        # — it decides after its own fetch — and reproducing that classification
+        # here, just to skip the gate ask for a non-agent PR, is left as a possible
+        # follow-up (see the issue this fixes) rather than folded into this loop.
+        if ! sweep_quota_verdict=$(quota_gate); then
+          echo "[drain] $sweep_quota_verdict — holding the rest of the PR sweep for the window."
+          QUOTA_PAUSE_CAUSE="gate"
+          return 42
+        fi
         # Same quota discipline as dispatch: remediation may launch claude, which
         # exits 0 even under a usage limit — the signal is in the OUTPUT. Capture
         # + classify; a quota hit pauses the whole cycle (loop backs off). Only the
