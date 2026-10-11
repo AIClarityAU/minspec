@@ -7,7 +7,7 @@ product: minspec
 epic: EPIC-003  # SDD Core Methodology - the harness files are how the methodology reaches the agent; this adds a second agent they reach
 aspects: [harness, scaffold, agents-md, slash-commands, hooks, zcode, agent-agnostic, tier-0, offline, no-silent-gate, blast-radius]
 depends_on: [SPEC-001, SPEC-043, DR-073, DR-074]  # SPEC-001 owns harness generation (FR-4) and agent-agnostic integration (FR-6); SPEC-043 the refresh manifest new harness files must join; DR-073 the contract for writing beside a foreign tool's files; DR-074 the blast-radius rule
-relates_to: [SPEC-063, SPEC-096, DR-037, DR-054, DR-084, "#14", "#37", "#531", "#1996", "#2682"]
+relates_to: [SPEC-063, SPEC-096, DR-037, DR-054, DR-084, "#14", "#37", "#531", "#1996", "#2682", "#2702", "#2703"]
 # Ownership declared in Specify, before approval mints a hash (SPEC-038). All four files
 # are NEW and are needed under every answer to the open questions below: the one module
 # that says which agents a project targets and what each cannot carry, and the three
@@ -366,7 +366,8 @@ Today the only hook MinSpec ships is the session title, which ZCode has no field
 The one route that stays inside the project is a ZCode plugin kept in the repository,
 which you would add and enable once per machine.
 
-- **Option A - accept it, show it, build no plugin now (rec).** *Cost:* when the
+- **Option A - accept it, show it, build no plugin now (rec).** The plugin question
+  is parked as #2702 (a repository-local ZCode plugin to carry hooks). *Cost:* when the
   write-time spec gate (#37) ships for Claude Code, a ZCode session will not have it
   until a plugin exists; the commit-time and merge-time checks still apply.
 - **Option B - build the plugin now.** *Cost:* a second packaging format and a
@@ -379,7 +380,8 @@ unattended agents are written around `claude -p` (`scripts/lib/agent-context.sh:
 ZCode's one-prompt mode is described only in its repository, differs in its switches,
 and defaults to its least restricted permission mode.
 
-- **Option A - not now; decide after one measured trial, as its own spec (rec).**
+- **Option A - not now; decide after one measured trial, as its own spec (rec).** The
+  trial is parked as #2703 (measure ZCode's one-prompt mode).
   *Cost:* no relief on Claude quota from Z.ai's plan for the unattended fleet this
   month.
 - **Option B - specify it now.** *Cost:* the scripts' login, permission and
@@ -415,9 +417,10 @@ and defaults to its least restricted permission mode.
 ## Out of Scope
 
 - MinSpec's interface inside ZCode (#531).
-- A ZCode plugin, marketplace entry, skills, subagents or tool servers (OQ-3).
-- Moving the AI review check or the epic backfill AI pass off the `claude` program.
-- The dev-time agent scripts (OQ-4).
+- A ZCode plugin, marketplace entry, skills, subagents or tool servers (OQ-3, #2702).
+- Moving the AI review check or the epic backfill AI pass off the `claude` program
+  (#2703).
+- The dev-time agent scripts (OQ-4, #2703).
 - Improvements for Cursor, Codex, Gemini or other agents beyond what a fuller
   `AGENTS.md` gives them for free.
 - Removing `CLAUDE.md` or `.claude/` from any project (OQ-2).
@@ -446,3 +449,5 @@ A larger `AGENTS.md` in every adopter's repository under OQ-1 Option A.
 - Request: founder, 2026-10-12, quoted above.
 - Builds on: SPEC-001 FR-4 and FR-6; SPEC-043; DR-073; DR-074.
 - Related open work: #14, #37, #531, #1996, #2682.
+- Follow-ups filed from this spec: #2702 (ZCode plugin for hooks), #2703 (measure
+  ZCode's one-prompt mode).
