@@ -2027,8 +2027,24 @@ _quota_try_refresh() {
   vals=$(_quota_read 2>/dev/null) || return 0
   read -r _ _ o _ wr <<<"$vals"
   [[ "${1:-}" == "force" ]] || (( now - o > QUOTA_REFRESH_MIN_AGE )) || (( wr > 0 && wr <= now )) || return 0
-  if ! timeout "$QUOTA_REFRESH_TIMEOUT" bash -c "$QUOTA_REFRESH_CMD" >/dev/null 2>&1; then
-    echo "[drain] quota refresh failed (\`$QUOTA_REFRESH_CMD\`) — the reading stands as-is and the gate still fails closed on it." >&2
+  # The producer's output is CAPTURED, never discarded and never sent to stdout (INV-R1):
+  # the real producer reports every failure as exit 0 plus one line of text (#2699), so
+  # exit status alone cannot see a failed refresh. The outcome it exists for is a fresher
+  # reading, so judge that too and quote the producer's last line when it did not arrive.
+  local cap rc=0 reason n o2 vals2
+  cap=$(mktemp 2>/dev/null) || cap=/dev/null
+  timeout "$QUOTA_REFRESH_TIMEOUT" bash -c "$QUOTA_REFRESH_CMD" >"$cap" 2>&1 || rc=$?
+  reason=$(tail -n 1 "$cap" 2>/dev/null | tr -d '\000-\037\177' | cut -c1-300)
+  [[ "$cap" == /dev/null ]] || rm -f "$cap"
+  if (( rc != 0 )); then
+    echo "[drain] quota refresh failed (exit $rc, \`$QUOTA_REFRESH_CMD\`${reason:+: $reason}) — the reading stands as-is and the gate still fails closed on it." >&2
+    return 0
+  fi
+  n=$(date +%s)
+  o2=0
+  if vals2=$(_quota_read 2>/dev/null); then read -r _ _ o2 _ <<<"$vals2"; fi
+  if (( n - o2 > QUOTA_STALE_SEC )); then
+    echo "[drain] quota refresh ran and the reading is still stale: ${reason:-(the producer printed nothing)} (\`$QUOTA_REFRESH_CMD\`, $QUOTA_FILE is $(( n - o2 ))s old, limit ${QUOTA_STALE_SEC}s) — the gate still fails closed on it." >&2
   fi
 }
 

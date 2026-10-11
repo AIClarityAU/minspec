@@ -166,6 +166,34 @@ describe('INV-R2 — a broken producer never admits', () => {
   });
 });
 
+describe('#2699 — a refresh that exits 0 and writes nothing is visible', () => {
+  it('names the producer reason when the reading is still stale after an exit-0 refresh', () => {
+    const p = path.join(tmpDir, 'failopen.sh');
+    fs.writeFileSync(
+      p,
+      `#!/usr/bin/env bash\necho "quota refresh failed (oauth token expired) - consumers keep failing open"\nexit 0\n`,
+    );
+    fs.chmodSync(p, 0o755);
+    write({ used_percentage: 1, resets_at: nowSec() + 3600, observed_at: nowSec() - 5000 });
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: `bash ${p}` });
+    expect(r.code).toBe(42);
+    expect(r.out).toMatch(/^defer:stale/);
+    expect(r.out).not.toContain('oauth token expired');
+    expect(r.err).toContain('refresh ran and the reading is still stale');
+    expect(r.err).toContain('oauth token expired');
+  });
+
+  it('a non-zero exit also carries the producer reason', () => {
+    const p = path.join(tmpDir, 'bad.sh');
+    fs.writeFileSync(p, `#!/usr/bin/env bash\necho "HTTP 503"\nexit 3\n`);
+    fs.chmodSync(p, 0o755);
+    write({ used_percentage: 1, resets_at: nowSec() + 3600, observed_at: nowSec() - 5000 });
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: `bash ${p}` });
+    expect(r.err).toContain('quota refresh failed (exit 3');
+    expect(r.err).toContain('HTTP 503');
+  });
+});
+
 describe('the seam actually works — a stale reading is refreshed and admits', () => {
   it('stale reading + working producer → ADMITS, where before it held forever', () => {
     write({ used_percentage: 1, resets_at: nowSec() + 3600, observed_at: nowSec() - 5000 });
