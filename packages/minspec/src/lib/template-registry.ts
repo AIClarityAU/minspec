@@ -547,10 +547,11 @@ month of dangling references.
 The check runs through the best validator actually present: a Node validator if one is
 already installed, else the bundled \`python3\` script, else a pure-shell fallback. Each tier
 is used only if it can run and falls through otherwise, so a missing runtime degrades the
-check instead of bricking the commit. Know the limit of the lower tiers: the \`python3\` and
-shell tiers match paths under \`specs/\` literally, so if \`{{specsDir}}/\` differs from that,
-only the Node tier sees your specs and a clean commit is not evidence the frontmatter is
-valid.
+check instead of bricking the commit. Know the limit of what's actually shipped: the
+\`python3\` and shell tiers match paths under \`specs/\` literally, and the Node validator
+(\`@aiclarity/minspec-validator\`) is not yet published, so it is never the one that runs. If
+\`{{specsDir}}/\` differs from \`specs/\`, no tier that exists today sees your specs, and a
+clean commit is not evidence the frontmatter is valid.
 
 ### Decision frontmatter
 
