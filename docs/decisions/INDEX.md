@@ -818,4 +818,12 @@ The founder asked on 2026-10-05 for the published MinSpec version to be kept cur
 <!-- dr-summary:DR-104 auto=554666865cf7 -->
 main requires a pull request to be up to date before it merges, and the staleness guard (#359) voids ai-review:pass on any push. An update from main is a push, so the whole four-voter panel re-runs on a change it has already passed (#1688). This record decides that a pass is carried across a push when the text the voters would be given is byte-identical and the reviewer is unchanged, and it records what that costs: on a carried commit…
 <!-- /dr-summary:DR-104 -->
+
+## [DR-105 — An agent's environment is built from a list of names, and an issue reaches one only when listed accounts wrote all of it - the trust boundary for dispatch under scripts/](DR-105.md)
+
+*Status: proposed · Date: 2026-10-10*
+
+<!-- dr-summary:DR-105 auto=7c01ad0c26da -->
+scripts/ holds the dev-time automation that starts headless agents: issue dispatch, triage, the review scripts, pull request remediation and the tooling radar. DR-008 (dispatch security) decided, for that automation, that credentials are kept out of the agent's reach, and that unattended runs are for issues whose text is trusted. Neither was held by code. This record decides how far each is now held, and names what is not.
+<!-- /dr-summary:DR-105 -->
 <!-- minspec:dr-index:end -->
