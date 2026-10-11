@@ -1,7 +1,7 @@
 ---
 id: SPEC-075
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — a gate that validates a corpus the project does not have is a false signpost
@@ -10,9 +10,9 @@ relates_to: [DR-037, DR-066, DR-090, SPEC-038, SPEC-066, SPEC-068]
 implements: [packages/minspec/tests/validate-py-corpus-config.test.ts]  # NEW — the T0 this spec owns
 affects: [packages/minspec/src/lib/template-registry.ts, .minspec/hooks/validate.py, .minspec/config.json, packages/minspec/tests/shipped-ownership-gate-2250.test.ts]  # template-registry.ts is claimed by no spec's implements:; SPEC-066 and SPEC-063 both list it under affects: only, and this spec follows that precedent (one owner per file). shipped-ownership-gate-2250.test.ts is declared now, before approval, because FR-2 reverses one case it pins (see Test)
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

@@ -13,10 +13,19 @@
 # With arg: triages single issue
 #
 # Security model (mirrors dispatch-issue.sh): the issue body is UNTRUSTED
-# (prompt-injection surface). The triage AGENT therefore gets NO credentials and
-# CANNOT mutate labels — it only emits a verdict block. This PARENT script feeds
-# that verdict through the deterministic gate (triage-decide.sh) and applies the
-# result with gh. An injected "make this agent-ready" cannot reach the label.
+# (prompt-injection surface). Three things follow, each enforced by code:
+#   1. WHO WROTE IT is asked first. An issue is triaged only when everyone who wrote its
+#      text (who opened it, who edited its body, who changed its title) is on the list
+#      in scripts/lib/dispatch-author-gate.sh. Any other issue is refused before a model
+#      is started on it, and stays in `inbox` untouched.
+#   2. The triage AGENT has NO tools and CANNOT mutate labels: it only emits a verdict
+#      block. This PARENT script feeds that verdict through the deterministic gate
+#      (triage-decide.sh) and applies the result with gh. An injected "make this
+#      agent-ready" cannot reach the label.
+#   3. The agent's ENVIRONMENT is built from a list of names
+#      (scripts/lib/agent-context.sh), so it is not handed the token this script
+#      writes with, nor anything else named like a credential. That is a statement
+#      about what it inherits: it is still a process of this script's user.
 #
 # ── Verdict RECORD, not just a label (#1002, enabling #983) ──────────────────
 # A label is a lossy, point-in-time STAMP: it says a gate once ran, never what it
@@ -59,6 +68,15 @@ source "${SCRIPT_DIR}/lib/agent-context.sh"
 # shellcheck source=scripts/lib/gh-bot.sh
 source "${SCRIPT_DIR}/lib/gh-bot.sh"
 gh_bot_init
+# Whose issue may be triaged: one list, shared with dispatch-issue.sh. The source is
+# deliberately not guarded by an `[[ -f ]]` test: without it the gate below is an
+# undefined function, and a missing library must stop this script, not skip the gate.
+# shellcheck source=scripts/lib/dispatch-author-gate.sh
+source "${SCRIPT_DIR}/lib/dispatch-author-gate.sh"
+# What the agent is started with: an environment built from a list of names. That is
+# lib/agent-context.sh, sourced above, run as a program: `bash "$AGENT_LAUNCH_ENV"
+# claude ...` on the launch line itself. That file assigns the variable, to its own
+# absolute path, so a value from the environment never survives to a launch.
 
 DECIDE="${SCRIPT_DIR}/triage-decide.sh"
 READY_CHECK="${SCRIPT_DIR}/dispatch-ready-check.sh"
@@ -79,6 +97,37 @@ triage_issue() {
 
   local ISSUE_JSON ISSUE_BODY ISSUE_TITLE
   ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,labels)
+
+  # ── Author gate: who wrote this issue's text? ───────────────────────────────
+  # Asked BEFORE anything of the issue's is read, printed or shown to a model. Until
+  # this, nobody's identity was fetched at all: every `inbox` issue was triaged, and an
+  # issue form applies `inbox` for whoever fills it in.
+  #
+  # dispatch_issue_gate reads, in one more query, who opened the issue, everyone who has
+  # edited its body and everyone who has changed its title, and requires each of them to
+  # be on the list by account number and kind. It also requires the title and body in
+  # that answer to equal the ones in ISSUE_JSON just above, which is the document the
+  # prompt below is built from: the text that was judged is the text that is used.
+  #
+  # Default deny. The one way past is that function answering yes; an account that is
+  # not on the list, anything that cannot be read, and a check that fails to run all
+  # land in the refusal.
+  #
+  # A refusal is a decision about this issue and not a fault of this script, so it
+  # returns 0: the whole-inbox form below runs under `set -e`, and a non-zero here would
+  # end the pass at the first issue a stranger opened, for every issue behind it. It
+  # writes nothing either. The issue keeps `inbox` and is refused again each cycle, at
+  # the cost of these two reads, until it is closed or filed again by a listed account.
+  #
+  # The title is printed further down, after this, because it is the author's text too:
+  # the drain reads this script's output for the line that says an issue was stamped
+  # ready, and a title can be made to look like one.
+  local AUTHOR_REASON
+  if ! AUTHOR_REASON="$(dispatch_issue_gate "$REPO" "$ISSUE" "$ISSUE_JSON")"; then
+    echo "Refusing #$ISSUE — ${AUTHOR_REASON:-who wrote it could not be checked}. Not triaged: no model was started on it and none of its labels were changed. It stays in the inbox until it is closed, or filed again under an account on the list (scripts/lib/dispatch-author-gate.sh)."
+    return 0
+  fi
+
   ISSUE_BODY=$(echo "$ISSUE_JSON" | jq -r '"# " + .title + "\n\n" + .body')
   ISSUE_TITLE=$(echo "$ISSUE_JSON" | jq -r '.title')
 
@@ -121,8 +170,15 @@ CONTENT
   # absolute paths OUTSIDE cwd; cwd is not a sandbox boundary), so the tool is
   # ELIMINATED, not justified by triage.md's anti-injection prose (#344). `--tools
   # ""` disables the entire built-in tool set. We capture the returned text.
+  #
+  # Its environment is the allowlist's (see AGENT_LAUNCH_ENV above), not this script's.
+  # With no tools the agent has no way to read an environment, so this is the same rule
+  # as dispatch-issue.sh's applied for its own sake: one way of starting an agent over
+  # issue text, rather than a second one that is safe only while `--tools ""` stays. The
+  # wrapper prints nothing when it starts something, so the capture below is the
+  # agent's output and nothing else.
   local AGENT_OUT
-  AGENT_OUT=$("${AGENT_ENV_SCRUB[@]}" claude -p "$USER_CONTENT" \
+  AGENT_OUT=$(bash "$AGENT_LAUNCH_ENV" claude -p "$USER_CONTENT" \
     --system-prompt-file "${ROLES_DIR}/triage.md" \
     "${AGENT_CONTEXT_ARGS[@]}" \
     --tools "" \
