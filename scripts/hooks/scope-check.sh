@@ -1,14 +1,38 @@
 #!/usr/bin/env bash
 # scope-check.sh — non-blocking UserPromptSubmit context injection
 #
-# Two responsibilities:
-#   1. Remind if no session scope is declared.
-#   2. Flag scope-expansion trigger verbs in the prompt (Triage Rule 2).
+# Three responsibilities:
+#   1. Tell a session that has lost its panel (#2380) — before anything can exit early.
+#   2. Remind if no session scope is declared.
+#   3. Flag scope-expansion trigger verbs in the prompt (Triage Rule 2).
 
 SCOPE_FILE=".claude/.session-scope"
 
 # Read stdin once — harness provides JSON envelope with the prompt.
 INPUT=$(cat 2>/dev/null || true)
+
+# --- No panel (#2380) ---
+# A session whose panel was replaced at a window reload keeps running, and keeps
+# receiving prompts (messages from other sessions, finished background tasks), with
+# nobody reading it. On 2026-10-09 one ran that way for 29 minutes and this hook fired
+# in it 13 times, the first 24 seconds after the reload. This is where it can be told.
+# FIRST, because the branch below exits when no scope file exists, which is most
+# sessions. Never fatal; a unit that stopped running says so rather than reading as
+# "this session has a panel", and says WHY: its error stream is captured, not
+# discarded, and the last line of it is printed. (-W ignore keeps an interpreter
+# warning, which is not a failure, out of every prompt.)
+_PANEL="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/session-panel.py"
+_PANEL_OUT="$(printf '%s' "$INPUT" | python3 -W ignore "$_PANEL" self 2>&1)"
+_PANEL_RC=$?
+if [ "$_PANEL_RC" -ne 0 ]; then
+  echo "[MinSpec] No-panel check did not run (exit $_PANEL_RC: $_PANEL) — this session would not be told it lost its panel (#2380)."
+  _PANEL_WHY="$(printf '%s\n' "$_PANEL_OUT" | grep -v '^[[:space:]]*$' | tail -n 1 | LC_ALL=C tr -cd '[:print:]' | cut -c1-200)"
+  if [ -n "$_PANEL_WHY" ]; then
+    echo "    Why: $_PANEL_WHY"
+  fi
+elif [ -n "$_PANEL_OUT" ]; then
+  printf '%s\n' "$_PANEL_OUT"
+fi
 PROMPT=$(printf '%s' "$INPUT" | python3 -c "import json,sys
 try:
     print(json.load(sys.stdin).get('prompt',''), end='')
