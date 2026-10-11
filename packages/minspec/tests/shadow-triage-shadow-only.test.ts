@@ -26,6 +26,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { GH_BOT_STUB_ENV } from './helpers/gh-bot-env';
+import { provenanceAnswer } from './helpers/agent-launch-harness';
 
 // These specs drive real bash → claude/gh stub → triage-decide.sh → jq chains. Under
 // container scheduling contention a single invocation can queue past the 5s default
@@ -156,12 +157,21 @@ exit 0
 
   // Every argument is logged on its own line with newlines escaped, so a multi-line
   // `--body` cannot be mistaken for separate arguments when asserting.
+  //
+  // Triage asks GitHub, in a read of its own, who wrote the issue's text, and refuses
+  // unless every one of them is on the list in scripts/lib/dispatch-author-gate.sh. The
+  // issue served here was opened by the founder and never edited, so that read passes:
+  // these cases are about what happens when both agents run.
+  const provenance = path.join(dir, 'provenance.json');
+  fs.writeFileSync(provenance, provenanceAnswer({ title: 'A fixture issue', body: 'Some issue body.' }));
   fs.writeFileSync(
     path.join(binDir, 'gh'),
     `#!/usr/bin/env bash
 { printf '=== %s %s\\n' "\${1:-}" "\${2:-}"; for a in "\$@"; do printf 'ARG %s\\n' "\${a//$'\\n'/\\\\n}"; done; } >> "${ghLog}"
 if [[ "\${1:-}" == "issue" && "\${2:-}" == "view" ]]; then
   echo '{"body":"Some issue body.","title":"A fixture issue","labels":[{"name":"inbox"}]}'
+elif [[ "\${1:-}" == "api" && "\${2:-}" == "graphql" ]]; then
+  cat "${provenance}"
 elif [[ "\${1:-}" == "repo" && "\${2:-}" == "view" ]]; then
   echo '${visibility}'
 fi
