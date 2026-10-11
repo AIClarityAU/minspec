@@ -52,7 +52,10 @@ echo
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 CUR="null"; PLANNED=0; SKIPPED_NORECORD=0; ALREADY=0; NOHOLD=0; TOTAL=0
 
-Q='query($c:String){repository(owner:"AIClarityAU",name:"minspec"){issues(first:50,after:$c,states:OPEN){pageInfo{hasNextPage endCursor}nodes{number labels(first:30){nodes{name}} comments(first:100){nodes{author{login} authorAssociation body}}}}}}'
+# Each comment's author is asked for by ACCOUNT (kind and number), not only by login:
+# `--trusted-comment-bodies` trusts the gate's App by its account, and a comment that
+# arrives with a login alone is not the App's as far as it can tell.
+Q='query($c:String){repository(owner:"AIClarityAU",name:"minspec"){issues(first:50,after:$c,states:OPEN){pageInfo{hasNextPage endCursor}nodes{number labels(first:30){nodes{name}} comments(first:100){nodes{author{__typename login ... on User{databaseId} ... on Bot{databaseId}} authorAssociation body}}}}}}'
 
 while :; do
   OUT="$(gh_bot_graphql_read -f query="$Q" -F c="$CUR" 2>/dev/null)" || { echo "ERROR: GraphQL page failed — stopping (partial run, nothing silently skipped)." >&2; exit 1; }

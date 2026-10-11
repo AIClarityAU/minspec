@@ -24,6 +24,14 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
+
+// Module scope: nothing in this file may depend on drain or quota knobs in the surrounding
+// environment, so it runs with hostile ones planted there (#2574, helpers/drain-env.ts).
+// Also closes #2583: before this, drain-concurrency.test.ts inherited `process.env` wholesale
+// into its real `--once` cycles, so an ambient MINSPEC_DRAIN_QUEUE_LIMIT silently capped the
+// "width 4 genuinely overlaps four real dispatches" case to fewer than 4.
+useHostileAmbientDrainKnobs();
 
 function findRepoRoot(): string {
   let dir = __dirname;
@@ -42,12 +50,11 @@ const DRAIN = path.join(findRepoRoot(), 'scripts', 'drain-inbox.sh');
  * machine running the suite happens to export. The suite is routinely run INSIDE
  * a live drain (the dispatcher re-runs it as the merge gate), and that drain
  * exports its own MINSPEC_DRAIN_CONCURRENCY — so inheriting it made "defaults to
- * 1" assert the operator's setting instead of the script's default (#2369).
+ * 1" assert the operator's setting instead of the script's default (#2369). Scrubs
+ * every MINSPEC_DRAIN_ and MINSPEC_QUOTA_ knob, not just that one (#2583).
  */
 function baseEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  delete env.MINSPEC_DRAIN_CONCURRENCY;
-  return env;
+  return drainBaseEnv();
 }
 
 function sh(args: string[], env: NodeJS.ProcessEnv = {}): string {
@@ -182,23 +189,34 @@ exit 0
   // ensure_fresh_run_dir would `git reset --hard origin/main` that tree mid-flight.
   // The explicit SELF_REFRESH=0 here is belt-and-braces: it disables ensure_fresh_run_dir
   // outright regardless of how DRAIN_RUN_DIR's fallback is implemented.
+  //
+  // All of the above previously worked only because they were set as `VAR=val` prefixes
+  // INSIDE the `bash -c` command string — execFileSync was given no `env:` at all, so it
+  // inherited `process.env` wholesale, and every knob NOT named above (MINSPEC_DRAIN_
+  // QUEUE_LIMIT chief among them, per #2583) leaked straight through into the real
+  // `--once` cycle. Building the env explicitly from drainBaseEnv(), the same base the
+  // other drain-*.test.ts files use, makes the result depend only on what this harness
+  // sets, never on what happens to be exported around the test run.
   /** Run one real `--once` cycle at the given width and wait for the disowned loop. */
   function runCycle(h: Harness, width: string): { elapsedMs: number; log: string } {
     const t0 = Date.now();
+    const env: NodeJS.ProcessEnv = {
+      ...drainBaseEnv(),
+      PATH: `${h.bin}:${process.env.PATH}`,
+      MINSPEC_DRAIN_DISPATCH: path.join(h.bin, 'dispatch.sh'),
+      MINSPEC_DRAIN_CONCURRENCY: width,
+      MINSPEC_DRAIN_RUN_DIR: '',
+      MINSPEC_DRAIN_SELF_REFRESH: '0',
+      MINSPEC_DRAIN_REMEDIATE_PRS: '0',
+      MINSPEC_DRAIN_PRIMARY_ROOT: path.join(h.dir, 'root'),
+      MINSPEC_DRAIN_LOG: h.log(width),
+      MINSPEC_DRAIN_LOCK: path.join(h.dir, 'lock'),
+      MINSPEC_QUOTA_FILE: h.quota,
+    };
     const out = execFileSync('bash', ['-c', `
-      pid=$(PATH="${h.bin}:$PATH" \
-        MINSPEC_DRAIN_DISPATCH="${path.join(h.bin, 'dispatch.sh')}" \
-        MINSPEC_DRAIN_CONCURRENCY="${width}" \
-        MINSPEC_DRAIN_RUN_DIR="" \
-        MINSPEC_DRAIN_SELF_REFRESH=0 \
-        MINSPEC_DRAIN_REMEDIATE_PRS=0 \
-        MINSPEC_DRAIN_PRIMARY_ROOT="${path.join(h.dir, 'root')}" \
-        MINSPEC_DRAIN_LOG="${h.log(width)}" \
-        MINSPEC_DRAIN_LOCK="${path.join(h.dir, 'lock')}" \
-        MINSPEC_QUOTA_FILE="${h.quota}" \
-        bash "${DRAIN}" --once 2>&1 | grep -oP 'PID \\K[0-9]+')
+      pid=$(bash "${DRAIN}" --once 2>&1 | grep -oP 'PID \\K[0-9]+')
       while kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
-    `], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+    `], { encoding: 'utf-8', env, stdio: ['ignore', 'pipe', 'ignore'] });
     void out;
     return { elapsedMs: Date.now() - t0, log: fs.readFileSync(h.log(width), 'utf-8') };
   }
