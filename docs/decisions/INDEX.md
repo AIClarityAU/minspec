@@ -821,7 +821,7 @@ main requires a pull request to be up to date before it merges, and the stalenes
 
 ## [DR-105 — An agent's environment is built from a list of names, and an issue reaches one only when listed accounts wrote all of it - the trust boundary for dispatch under scripts/](DR-105.md)
 
-*Status: proposed · Date: 2026-10-10*
+*Status: accepted · Date: 2026-10-10*
 
 <!-- dr-summary:DR-105 auto=7c01ad0c26da -->
 scripts/ holds the dev-time automation that starts headless agents: issue dispatch, triage, the review scripts, pull request remediation and the tooling radar. DR-008 (dispatch security) decided, for that automation, that credentials are kept out of the agent's reach, and that unattended runs are for issues whose text is trusted. Neither was held by code. This record decides how far each is now held, and names what is not.
