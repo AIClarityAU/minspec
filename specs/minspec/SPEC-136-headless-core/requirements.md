@@ -12,14 +12,15 @@ relates_to: [SPEC-076, SPEC-038, DR-015, DR-050, DR-056, DR-066, DR-081, DR-084,
 # are NEW and are needed under every answer to the open questions below: the one table of
 # operations, the two ways in (command line, tool server), and the five tests that pin
 # the editor-free property, the sameness of the two ways in, the read-only rule, the
-# boundary and the rule for an approval made in the VM.
+# boundary and the rule that an approval made in the VM stays in its project.
 implements: [packages/core/src/operations.ts, packages/core/src/cli.ts, packages/core/src/tool-server.ts, packages/core/tests/no-editor-import.test.ts, packages/core/tests/operations-parity.test.ts, packages/core/tests/read-only.test.ts, packages/core/tests/boundary.test.ts, packages/core/tests/vm-approval.test.ts]
 # Modified, not owned. The validate workflow template already names a validator package
 # in its third branch; `scaffold.ts` holds the hook-activation step this spec exposes;
 # `package.json` gains the workspace. `template-registry.ts` is review machinery, so that
-# change needs a human merge. `approval-integrity.ts` is the existing check on approval
-# records, which gains the confirmation rule of FR-22.
-affects: [packages/minspec/src/lib/template-registry.ts, packages/minspec/src/lib/scaffold.ts, scripts/approval-integrity.ts, package.json]
+# change needs a human merge. `approval-integrity.ts` is no longer changed: an approval
+# made in the VM counts only inside its ZCode project (BND-4, FR-22), so no check on
+# approval records is added.
+affects: [packages/minspec/src/lib/template-registry.ts, packages/minspec/src/lib/scaffold.ts, package.json]
 phases:
   specify: done
   clarify: pending
@@ -37,16 +38,19 @@ cannot reach ZCode through shared folders. This spec builds the piece every rout
 named needs first: MinSpec's checks as one small program that runs with no editor, as a
 command and as a local tool server. The ZCode plugin, written next as its own spec,
 wraps it. You can approve a spec inside ZCode in one step, and work there proceeds at
-once; it lands on main only after one approving tap from you on GitHub, outside the VM.
-Cost: a second published surface, and that tap. Left out: the plugin, panels. Riskiest
-assumption: no login of yours on GitHub exists inside the VM.
+once, but that approval counts only inside that ZCode project: the host never reads,
+trusts or builds on it, and never builds a ZCode project. Cost: a second published
+surface, and inside a ZCode project nothing proves an approval was yours. Left out: the
+plugin, panels. Riskiest assumption: ZCode's GitHub link can be limited to ZCode projects
+only (unmeasured).
 
 > **SPECIFICATION ONLY.** Nothing is built by the session that wrote this. A human reads
 > it, answers the one question left under
 > **[Open questions for the founder](#open-questions-for-the-founder)**, and approves it
 > through the normal spec-approval gate before any design or code. Four of the five
 > earlier questions are answered and recorded there; the fifth was reversed by the
-> founder and is rewritten as section F.
+> founder and is rewritten as section F. What an approval made in ZCode is worth on the
+> host is OQ-1, with a recommendation the founder may still overrule.
 
 **Where this came from.** The founder, 2026-10-12, verbatim: "also make a spec to adapt
 minspec to zcode in the next week." and "zcode is by z.ai". Then, 2026-10-13, after
@@ -63,6 +67,21 @@ reading the first draft, verbatim:
 except for where approvals are made.  i should be able to approve specs for the current
 project in zcode.  unrelated: i don't expect COS to see inside zcode." ("COS" is the
 supervising chief-of-staff loop on the host.)
+
+**Further facts from the founder, 2026-10-13, verbatim** (these replace the earlier
+assumption that no login of his exists in the VM):
+
+> regardless of whether its in codium, zcode or whatever, i don't want to be ever
+> presented with an approval request that hasn't been AI-reviewed, oh, but it's the other
+> way round, Alt-A > PR > ai-review, which is just as good. isn't that the same for zcode?
+
+> i dont plan on opening the zcode projects in codium, and they're blocked from your
+> sight, actually, eg: ~/code/Lovefest is a zcode project.
+
+> you know i'm gonna rubber-stamp the specs anyway after the first few look good
+
+> i already linked github into zcode but i should at least limit the oauth to certain
+> projects.
 
 **What changed from the first draft.** The first draft had MinSpec stay in the editor
 and meet ZCode through files in the project. That is the thing now ruled out. Its four
@@ -104,15 +123,16 @@ Actions and behind any agent, without the host ever reading what the VM wrote.
 - **BND-3 - The VM is not the gate.** A check that runs inside the VM is help for the
   agent working there. Whatever is being kept out of the host can switch it off. The
   checks that decide a merge run on GitHub.
-- **BND-4 - An approval may be made in the VM; it reaches the host only confirmed.**
-  An approval made inside the VM takes effect inside the VM at once. It crosses only as
-  a commit, in a pull request pushed by the VM's own GitHub identity. It reaches main,
-  and so the host, only after a check on GitHub has recomputed its hash over the
-  committed bytes and found an approving review of that exact commit, made by a listed
-  human account. Nothing on the host treats an approval that is not on main as an
-  approval. (Founder, 2026-10-13: "i should be able to approve specs for the current
-  project in zcode." This replaces the earlier wording, which barred any approval in
-  the VM.)
+- **BND-4 - An approval made in the VM counts only inside that ZCode project.** An
+  approval made inside the VM takes effect inside that project at once. The host never
+  reads, trusts or builds on an approval that originated in the VM, and never builds a
+  ZCode project. The VM's GitHub grant is limited to ZCode projects, never MinSpec and
+  never any repository a host builder acts on, so an approval made in the VM has no path
+  into a repository the host trusts. (Founder, 2026-10-13: "i should be able to approve
+  specs for the current project in zcode." This replaces the earlier wording, which
+  barred any approval in the VM, and the wording after it, which let an approval cross
+  to main after an outside review. The outside review is kept as a rejected-for-now
+  alternative, OQ-1.)
 - **BND-5 - No supervision reaches in.** Nothing on the host watches, lists, messages
   or steers sessions inside the VM, and nothing MinSpec runs in the VM reports to the
   host. The host learns of VM work only from GitHub. (Founder, 2026-10-13: "i don't
@@ -263,8 +283,10 @@ would need the project files, which are in the VM.
 - **Core.** The new package: MinSpec's existing checks, callable with no editor.
 - **Operation.** One thing the core does: validate, hash, status, next, activate,
   approve.
-- **Confirmation.** An approving review on GitHub, by a listed human account, of the
-  exact commit that carries an approval record.
+- **ZCode project.** A project opened in ZCode inside the VM and never opened on the
+  host (for example `~/code/Lovefest`). The host does not read it and does not build it.
+- **Host-built repository.** Any repository the host's builders, sessions or checks act
+  on, MinSpec itself included.
 - **Tool server.** A local program an agent talks to over standard input and output
   using the Model Context Protocol (MCP).
 - **Shell.** A per-product wrapper around the core: the VS Code extension today, the
@@ -363,55 +385,70 @@ agent has a shell. No rule in this section pretends otherwise.
 - **FR-19 - One step in the VM.** The core's `approve` operation records an approval
   for a spec in the project it is run in, by calling the function the extension calls
   (`approval.ts:523`), with every refusal that function already makes. Inside the VM
-  that approval is effective at once: the next phase may start there.
+  that approval is effective at once, in that ZCode project only: the next phase may
+  start there.
 - **FR-20 - A person's entry point, not a tool.** `approve` MUST NOT appear in the
   tool server's list of tools the model can call. It is reachable from the command
   line and, in the second spec, from a button the model cannot press. This stops an
   agent approving by accident or by habit. It does not stop a session that sets out to:
   that session has a shell.
-- **FR-21 - Crosses as a commit, from the VM's own identity.** An approval made in the
-  VM leaves it only as a commit pushed to GitHub by an identity that belongs to the VM
-  and to nothing on the host. The VM MUST NOT hold any credential able to act as the
-  founder on GitHub.
-- **FR-22 - Confirmed before it lands.** A check on GitHub MUST fail any pull request
-  that adds or changes an approval record unless both hold: the record's hash equals
-  the hash recomputed over the committed bytes of the spec; and an approving review of
-  that pull request's current head commit exists, made by an account on the project's
-  list of human approvers. A push after the review voids it. The check MUST fail, not
-  skip, when it cannot read the reviews (constitution invariant 2).
-- **FR-23 - It is a gate only when required.** The check of FR-22 gates nothing until
-  it is a required check on `main`. Making it required is a change to the branch
-  rules that only the founder can make. Until then every MinSpec surface that mentions
-  it MUST call it advisory.
-- **FR-24 - Main holds only confirmed approvals, so the host changes nothing.** Host
-  tooling keeps reading approval records from the checkout as it does today. It MUST
-  NOT read an approval from a branch, a pull request or any place other than what the
-  host pulled from main.
+- **FR-21 - The VM's GitHub grant excludes every host-built repository.** The grant the
+  VM holds on GitHub MUST be limited to ZCode projects. It MUST NOT reach MinSpec or any
+  repository a host builder acts on. His GitHub login is already linked in ZCode
+  (founder, 2026-10-13), so the earlier rule "no credential able to act as the founder
+  inside the VM" is false and is withdrawn; this limit replaces it. Whether ZCode's
+  GitHub link can be limited per repository is **unmeasured** (measurement 8). If it
+  cannot be, the limit of this requirement cannot be met by configuration and the
+  recommendation of OQ-1 falls back to its outside-review alternative; what else to do
+  then is open (OQ-2).
+- **FR-22 - The host never trusts a VM approval and never builds a ZCode project.**
+  Host tooling MUST NOT read, count or build on an approval record that originated in the
+  VM, and no host builder, session or check may act on a ZCode project. The protection is
+  the separation itself, not a mark on the record: a mark written inside the VM would be
+  written by whatever the VM runs (see the rejected per-side record kind). No check is
+  added to `scripts/approval-integrity.ts`. The earlier design (a check that failed a
+  pull request adding an approval record without an outside review) is dropped here; it
+  also collided with that script's existing refusal of a pull request that both
+  introduces and approves a spec (`scripts/approval-integrity.ts:185-191`).
+- **FR-23 - AI review before he is asked, or straight after.** In ZCode he MUST NOT be
+  presented with an approval request for a spec that has not been AI-reviewed, OR the
+  pull request that carries the approval MUST be AI-reviewed straight after (he accepts
+  either order; on the host the order is review first, then the ask, then a small
+  approval pull request: `docs/decisions/DR-081.md:109-114`, `DR-063.md:50`). Whether
+  ZCode-project repositories run the AI review at all is **unmeasured** (measurement 11).
+  If they do not, this requirement cannot be met there, and that is reported, not hidden.
+- **FR-24 - The host reads approvals from main only, so the host changes nothing.**
+  Host tooling keeps reading approval records from the checkout as it does today. It MUST
+  NOT read an approval from a branch, a pull request, a ZCode project or any place other
+  than what the host pulled from main.
 - **FR-25 - No reporting to the host.** The core in the VM MUST NOT write session,
   presence, heartbeat or queue records, and MUST NOT open any channel to the host
   (BND-5).
 
-**What this guarantees.** For an approval on main that came from the VM: someone
-signed in to a listed human account, outside the VM, approved a pull request whose
-exact bytes contained that record, and the record matches the spec's bytes.
+**What this guarantees.** Host-built repositories never carry an approval that was made
+in the VM, provided the VM's GitHub grant excludes them (FR-21) and the host builds no
+ZCode project (FR-22). The guarantee rests on that separation and on nothing else.
 
-**What it does not guarantee.** That he read the spec: no mechanism proves attention,
-and one tap is as easy to give without reading as a merge. That the act inside ZCode
-was his: that is unknowable from outside the VM and is not relied on. Anything at all,
-if a GitHub login of his exists inside the VM. ZCode's built-in browser can import "cookies and local storage from
-your most recently used Chrome profile" and the agent can drive that browser (https://zcode.z.ai/en/docs/browser-use), so a signed-in browser
-in the VM would let the agent give the confirmation itself.
+**What it does not guarantee.** Anything inside a ZCode project. There, nothing proves an
+approval was his: the agent has a shell and can set the author address (FR-19 note), and
+his GitHub login is linked in the VM, so even an approving review from his account would
+prove nothing for any repository that login reaches. A session in a ZCode project can
+build on a spec it approved itself. That he read the spec: no mechanism proves attention,
+and he has said he will rubber-stamp specs once the first few look good. The protection
+is also gone the day the host starts building a ZCode project, or the VM's grant reaches
+a host-built repository. ZCode's built-in browser can import "cookies and local storage
+from your most recently used Chrome profile" and the agent can drive that browser
+(https://zcode.z.ai/en/docs/browser-use), so a signed-in browser in the VM acts as him
+wherever his login reaches.
 
 **What a compromised ZCode session could still do.** Approve its own spec and build it,
-inside the VM, on its own branches. What stops that reaching the host: the record
-cannot land on main without the outside review (FR-22, once required); the code cannot
-land without the existing merge checks; and the host reads approvals from main only
-(FR-24). What does not stop it: a founder who approves the pull request without
-looking.
+inside the VM, in ZCode projects. What stops that reaching the host: the VM's grant does
+not reach host-built repositories (FR-21); the host builds no ZCode project and trusts no
+VM approval (FR-22); and the host reads approvals from main only (FR-24). What does not
+stop it: a grant that turns out wider than intended (measurement 8).
 
-**His effort per approval.** One act in ZCode. Then, before that work can land, one
-approving review on GitHub from the host browser or a phone, on the pull request that
-carries the record. One review covers every record in that pull request.
+**His effort per approval.** One act in ZCode. Nothing further: no second tap, no hardware
+key, no outside review for approvals in ZCode projects.
 
 ## Costly to Refactor
 
@@ -443,16 +480,19 @@ carries the record. One review covers every record in that pull request.
 - [ ] **One approval path** - only `approve` changes approval state, and the test that
       guards this fails when a second such operation is added. (FR-7)
 - [ ] **Approve in ZCode, one step** - inside the VM one act records the approval and
-      the spec's next phase can start there at once, with nothing further asked. (FR-19)
+      the spec's next phase can start there at once, in that ZCode project, with nothing
+      further asked. (FR-19)
 - [ ] **Not callable by the model** - the tool server's list of tools has no `approve`.
       (FR-20)
-- [ ] **Unconfirmed cannot land** - a pull request from the VM's identity that carries
-      an approval record and has no approving review of its head commit by a listed
-      human account fails the check; a changed spec byte after the review fails it
-      again. (FR-22)
-- [ ] **Confirmed lands** - the same pull request passes once that review exists, and
-      the record on main then reads exactly as one made in the editor does. (FR-22,
+- [ ] **The VM cannot reach a host-built repository** - the VM's GitHub grant, as
+      measured, reaches ZCode projects only; a push from the VM to MinSpec is refused.
+      (FR-21)
+- [ ] **The host ignores a VM approval** - host tooling reads approval records only from
+      what it pulled from main, and no host builder acts on a ZCode project. (FR-22,
       FR-24)
+- [ ] **AI review is not skipped in ZCode** - he is not asked to approve a spec that has
+      not been AI-reviewed, or the approval's pull request is AI-reviewed straight after.
+      (FR-23)
 - [ ] **No reach in** - nothing the core writes in the VM is a session, presence or
       queue record. (FR-25, BND-5)
 - [ ] **Refuses the un-opted** - a folder without `.minspec/` gets a refusal and a
@@ -477,7 +517,7 @@ carries the record. One review covers every record in that pull request.
 - **INV-3 - Blast radius** (constitution invariant 3, DR-074). The core acts only on a
   project with `.minspec/` (FR-8) and touches nothing machine-wide (FR-17).
 - **INV-4 - The VM boundary** (BND-1 to BND-5 above). FR-10, FR-14, FR-18, FR-19 to
-  FR-25.
+  FR-25. An approval made in the VM stays in its project (BND-4, FR-22).
 - **INV-5 - Tier map** (DR-014). Code that starts a process stays out of
   `packages/shared`; the core is its own package.
 
@@ -503,25 +543,41 @@ i should be able to approve specs for the current project in zcode."
 - **A command line - answered: as recommended.** Allowed, machine-facing only (FR-12).
   The decision record is still owed before Plan.
 
-### OQ-1 - What must be true before an approval made in ZCode counts on main?
+### OQ-1 - What may the host take on trust from an approval made in ZCode?
 
-He said he should be able to approve in ZCode. He did not say what the host may then
-take on trust. The three levels differ in what a misbehaving ZCode session can get onto
-main and in what each approval costs him.
+He said he should be able to approve in ZCode, that he does not plan to open ZCode
+projects on the host, and that he will rubber-stamp specs after the first few look good.
+The options differ in what a misbehaving ZCode session can get into a host-built
+repository and in what each approval costs him. **This is a recommendation; the founder
+has been told and may still overrule it.**
 
-- **Option A - one tap on GitHub, outside the VM, before it lands (rec; section F as
-  written).** The approval works in ZCode at once. *Cost:* one approving review per
-  pull request that carries approvals, from the host browser or a phone; a one-time
-  change by you to make the check required; a GitHub identity for the VM that is not
-  yours; and the tap proves a signed-in person, not a careful one.
-- **Option B - nothing more: the hash and the author address are checked, as on the
-  host today.** *Cost:* no extra effort, and a ZCode session that sets its own author
-  address can approve its own spec and have it land on main, where the host's
-  unattended builders treat an approved spec as work to start.
-- **Option C - a hardware key touched inside the VM to sign each approval.** *Cost:* a
-  touch per approval and a key passed through to the VM. It looks stronger than A and
-  is weaker in the way that matters: the screen showing what you are signing belongs to
-  the VM, so a touch proves you were present, not what you approved.
+- **Option A - the approval counts only inside that ZCode project; the host never trusts
+  or builds it (rec; section F as written).** No extra tap, no hardware key, no outside
+  review. *Cost:* inside a ZCode project nothing proves an approval was his, and a
+  session there can build on a spec it approved itself; the protection depends on the
+  VM's GitHub grant excluding every host-built repository (FR-21, unmeasured), and is
+  gone the day the host starts building a ZCode project.
+- **Option B - one approving review on GitHub, outside the VM, before an approval lands
+  on main (the earlier recommendation).** *Cost:* one approving review per pull request
+  that carries approvals; a one-time change by him to make a check required; a GitHub
+  identity for the VM that is not his; and, with his login linked in the VM, the review
+  proves nothing for any repository that login reaches. Given that he will rubber-stamp,
+  the tap adds little. Kept as the fallback if the grant cannot be limited (OQ-2).
+- **Option C - nothing more: the hash and the author address are checked, as on the host
+  today.** *Cost:* no extra effort, and a ZCode session that sets its own author address
+  can approve its own spec and have it land on main, where the host's unattended builders
+  treat an approved spec as work to start. Only safe together with Option A's separation.
+- **Option D - a hardware key touched inside the VM to sign each approval.** *Cost:* a
+  touch per approval and a key passed through to the VM. It looks stronger than B and is
+  weaker in the way that matters: the screen showing what he is signing belongs to the
+  VM, so a touch proves he was present, not what he approved.
+
+### OQ-2 - What if ZCode's GitHub link cannot be limited to chosen projects?
+
+Unanswered, and not guessed here. If measurement 8 shows the link cannot be limited per
+repository, FR-21 cannot be met by configuration. The stated fallback is Option B of
+OQ-1; what else could keep the VM's grant away from host-built repositories is for the
+founder to say after the measurement.
 
 ## To measure inside the VM before Plan (only the founder can)
 
@@ -539,13 +595,15 @@ ZCode version.
    (Z.ai's pages disagree on plugin hooks in one case.)
 6. Does a commit made by ZCode's agent run the hooks that `core.hooksPath` points at?
 7. For the second spec: does a plugin page open as a side panel on this version?
-8. Is any GitHub login of yours present inside the VM: in ZCode's built-in browser
-   (including imported Chrome data), in `gh`, or in git's stored credentials? Section F
-   depends on the answer being no.
-9. Can you approve a pull request review from your phone or the host browser on a pull
-   request the VM's identity opened?
-10. Only if OQ-1 is answered C: does a hardware key passed through to the VM sign a git
+8. Which repositories can the GitHub login linked in ZCode reach, and can that link be
+   limited to chosen ZCode projects only (and so exclude MinSpec and every other
+   host-built repository)? If it cannot, say so: FR-21 depends on the answer.
+9. Only if OQ-1 is answered B: can you approve a pull request review from your phone or
+   the host browser on a pull request the VM's identity opened?
+10. Only if OQ-1 is answered D: does a hardware key passed through to the VM sign a git
     commit, with a touch each time?
+11. Do ZCode-project repositories run the AI review at all? If not, FR-23 cannot be met
+    there.
 
 ## Decision records
 
@@ -553,8 +611,9 @@ ZCode version.
   line. Not written here.
 - **DR-014** (shared-code boundary) is relied on, not amended.
 - **DR-056** (agent-proof approver identity) and **DR-081** (the approval-integrity
-  check, advisory first) are extended by FR-22 and FR-23. Whether that needs an
-  amendment to either is for the same decision record to say.
+  check, advisory first) are relied on, not amended: the VM boundary keeps VM approvals
+  out of the repositories they govern (BND-4, FR-22). If OQ-1 is answered B, they are
+  extended and a decision record must say how.
 - **The VM boundary itself** (BND-1 to BND-5) is a founder decision that outlives this
   spec and belongs in a decision record or the constitution. Not written here.
 
@@ -570,10 +629,15 @@ ZCode version.
    a text search. FR-1's test is the real measure.
 5. **A contract used before it is stable.** Mitigation: versioned results, first
    release marked unstable.
-6. **A login of the founder's inside the VM voids section F.** Measurement 8.
-7. **The confirmation check stays advisory.** Until it is required (FR-23) it reports
-   and stops nothing, which is the state the existing approval check is in today.
-8. **A tap is easy to give unread.** The design does not claim to fix that.
+6. **Inside a ZCode project nothing proves an approval was his.** His GitHub login is
+   already linked in the VM. A session there can build on a spec it approved itself, and
+   the protection is gone the day the host starts building a ZCode project. If ZCode's
+   GitHub link cannot be limited to ZCode projects (measurement 8), the VM's grant may
+   reach host-built repositories and the separation fails; OQ-2.
+7. **ZCode projects may not run the AI review.** Then he could be asked to approve an
+   unreviewed spec (FR-23). Measurement 11.
+8. **Approvals will be rubber-stamped.** He has said so. The design does not claim to fix
+   that, and this is why no outside tap is added for ZCode projects.
 9. **Node may be absent in the VM.** Then the core cannot run there and the plugin
    falls back to prose. Measurement 1.
 
@@ -587,8 +651,8 @@ ZCode version.
 - Moving any model step. The AI review stays where it is, on the subscription.
 - Having the dev-time agent scripts start ZCode (#2703).
 - Extending the machinery path set (#2708).
-- A deterministic witness for decision-record acceptance (#2153). The confirmation of
-  FR-22 could serve it later; this spec covers spec approvals only.
+- A deterministic witness for decision-record acceptance (#2153). This spec covers spec
+  approvals only.
 - Any supervision of the VM from the host (BND-5).
 - The button or command in ZCode that calls `approve` (#2702, the second spec).
 - Moving library files into `packages/shared` (#54 tracks the classifier move).
@@ -598,10 +662,9 @@ ZCode version.
 About eight new files and four changed ones; at most one new dependency (a protocol
 library for the tool server), none if Plan writes the small protocol by hand. One
 change to a review-machinery template, which needs a human merge. A decision record. A
-new contract to keep stable. About twenty minutes of measurement inside the VM. A GitHub
-identity for the VM, and one change to the branch rules, both by the founder. One
-approving review per pull request that carries approvals. No change to which model
-credential anything uses.
+new contract to keep stable. About twenty minutes of measurement inside the VM. A limit on
+the VM's GitHub grant, by the founder (measurement 8). No extra tap per approval. No
+change to which model credential anything uses.
 
 ## Alternatives considered and rejected
 
@@ -615,11 +678,17 @@ credential anything uses.
 - **Approvals made in the VM that bind only the VM's own work, with a separate record
   kind per side.** Rejected: the mark saying which side made a record would be written
   inside the VM, so a misbehaving session would simply write the other one. The same
-  effect is reached without a new record kind by letting only confirmed records reach
-  main (FR-22, FR-24).
+  effect is reached without a new record kind by keeping the VM out of host-built
+  repositories (FR-21, FR-22).
+- **An approval from the VM that lands on main only after an outside approving review.**
+  Not chosen as the recommendation (OQ-1 Option B): his login is linked in the VM, so the
+  review proves nothing for any repository that login reaches, and he will rubber-stamp it
+  anyway. Kept as the fallback if the grant cannot be limited.
+- **A hash check only, as on the host today.** Not chosen alone (OQ-1 Option C): a VM
+  session can set its own author address.
 - **A signed commit as the proof of a person.** Rejected as the main proof: a key on
   the VM's disk is within the agent's reach, and a hardware key proves presence, not
-  what was shown (OQ-1 Option C).
+  what was shown (OQ-1 Option D).
 - **GitHub's own web editor as the approval act.** Rejected: it is not "in ZCode", and
   done in ZCode's built-in browser it is an act the agent can perform.
 - **Porting the checks to Python for the VM**, since a Python validator already ships.
@@ -632,8 +701,9 @@ credential anything uses.
 The first four owned tests in the frontmatter cover FR-1 (no editor import), FR-2 and FR-11
 (parity of verdicts and of the two ways in), FR-6 and FR-7 (read-only, one approval path),
 and FR-4, FR-8, FR-10 and FR-17 (network off, refusal, no socket, stays in the
-project). The fifth covers FR-19, FR-20 and FR-25. FR-22 is a check that runs on GitHub; its
-tests belong beside `scripts/approval-integrity.ts`. FR-3's corpus comparison and
+project). The fifth covers FR-19, FR-20 and FR-25 (and the host-side half of FR-22, FR-24). FR-21 to FR-24 are properties of the VM's grant and of how the host is run, not of the
+core; their checks are the measurements below and a host-side test that approval records
+are read from main only. FR-23's ordering needs the measurement-11 answer first. FR-3's corpus comparison and
 FR-15's workflow behaviour need a place; Plan
 decides whether they join these files or the existing workflow tests.
 
