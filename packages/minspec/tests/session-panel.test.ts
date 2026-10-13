@@ -373,6 +373,20 @@ const cronDelete = (sid: string, toolId: string, jobId: string): object[] => [
     message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: `Cancelled job ${jobId}.` }] },
   },
 ];
+const cronList = (sid: string, toolId: string, result: string): object[] => [
+  {
+    type: 'assistant',
+    timestamp: iso(30_000),
+    sessionId: sid,
+    message: { role: 'assistant', content: [{ type: 'tool_use', id: toolId, name: 'CronList', input: {} }] },
+  },
+  {
+    type: 'user',
+    timestamp: iso(29_000),
+    sessionId: sid,
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: result }] },
+  },
+];
 const title = (sid: string, t: string): object => ({ type: 'custom-title', customTitle: t, sessionId: sid });
 const costState = (sid: string): object => ({ type: 'cost-state', sessionId: sid, startTime: Date.now() - 3_600_000, totalDuration: 3_590_000 });
 
@@ -772,6 +786,34 @@ suite('a schedule that died with its session is named (#2379)', () => {
     expect(out).toContain(LOSS);
     expect(out).not.toContain('/chief-of-staff');
     expect(out).not.toMatch(/died with it/);
+  });
+
+  it('drops a schedule a later empty CronList shows died with a process restart (#2712)', () => {
+    transcript(
+      OTHER,
+      [humanPrompt(OTHER), ...cronCreate(OTHER, 'toolu_1', 'ae8c3f26', '*/15 * * * *', '/chief-of-staff'), ...cronList(OTHER, 'toolu_2', 'No scheduled jobs.'), costState(OTHER)],
+      30,
+    );
+    const { out } = unit('start', startInput());
+    expect(out).toContain(LOSS);
+    expect(out).not.toContain('/chief-of-staff');
+  });
+
+  it('keeps a schedule created after the empty CronList (#2712)', () => {
+    transcript(
+      OTHER,
+      [
+        humanPrompt(OTHER),
+        ...cronCreate(OTHER, 'toolu_1', 'aaaaaaaa', '*/15 * * * *', '/old-loop'),
+        ...cronList(OTHER, 'toolu_2', 'No scheduled jobs.'),
+        ...cronCreate(OTHER, 'toolu_3', 'bbbbbbbb', '2,17,32,47 * * * *', '/chief-of-staff'),
+        costState(OTHER),
+      ],
+      30,
+    );
+    const { out } = unit('start', startInput());
+    expect(out).toContain('/chief-of-staff');
+    expect(out).not.toContain('/old-loop');
   });
 
   it('reports only the schedule still armed when one was replaced by another', () => {

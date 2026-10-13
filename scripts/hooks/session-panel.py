@@ -501,6 +501,9 @@ def tail_facts(path, size):
 
 
 JOB_ID = re.compile(r"\bjob ([0-9A-Za-z_-]{4,64})\b")
+# A CronList result that says nothing is scheduled. Plural "jobs" on purpose: the
+# CronDelete error "No scheduled job with id" must not read as an empty list.
+NO_JOBS = re.compile(r"\bno (?:scheduled |cron |active )?jobs\b", re.I)
 
 
 def result_text(block):
@@ -513,15 +516,17 @@ def result_text(block):
 def armed_schedules(path):
     """Schedules this session created and never cancelled: [(cron, prompt, job id)].
     Schedules are held in the process only, so this record in the transcript is the
-    one durable trace that a loop was armed."""
-    pending, created, cancelled = {}, {}, set()
+    one durable trace that a loop was armed. A process restart ends every schedule
+    without a cancel record, so a later CronList that reports no jobs cancels every
+    schedule created before it (#2712)."""
+    pending, created, cancelled, listing = {}, {}, set(), set()
     try:
         handle = open(path, "rb")
     except OSError:
         return []
     with handle:
         for line in handle:
-            if b"Cron" not in line and not pending:
+            if b"Cron" not in line and not pending and not listing:
                 continue
             try:
                 record = json.loads(line.decode("utf-8", "replace"))
@@ -538,8 +543,14 @@ def armed_schedules(path):
                     args = block.get("input") if isinstance(block.get("input"), dict) else {}
                     if block.get("name") == "CronCreate":
                         pending[block.get("id")] = (args.get("cron"), args.get("prompt"))
+                    elif block.get("name") == "CronList":
+                        listing.add(block.get("id"))
                     elif block.get("name") == "CronDelete" and isinstance(args.get("id"), str):
                         cancelled.add(args["id"])
+                elif block.get("type") == "tool_result" and block.get("tool_use_id") in listing:
+                    listing.discard(block["tool_use_id"])
+                    if not block.get("is_error") and NO_JOBS.search(result_text(block)):
+                        created.clear()
                 elif block.get("type") == "tool_result" and block.get("tool_use_id") in pending:
                     cron, prompt = pending.pop(block["tool_use_id"])
                     found = JOB_ID.search(result_text(block))
