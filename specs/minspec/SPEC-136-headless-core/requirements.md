@@ -45,12 +45,13 @@ plugin, panels. Riskiest assumption: ZCode's GitHub link can be limited to ZCode
 only (unmeasured).
 
 > **SPECIFICATION ONLY.** Nothing is built by the session that wrote this. A human reads
-> it, answers the one question left under
-> **[Open questions for the founder](#open-questions-for-the-founder)**, and approves it
-> through the normal spec-approval gate before any design or code. Four of the five
-> earlier questions are answered and recorded there; the fifth was reversed by the
-> founder and is rewritten as section F. What an approval made in ZCode is worth on the
-> host is OQ-1, with a recommendation the founder may still overrule.
+> it, and approves it through the normal spec-approval gate before any design or code.
+> Every question under
+> **[Open questions for the founder](#open-questions-for-the-founder)** is answered and
+> recorded there: four of the five earlier questions as recommended, the fifth reversed
+> by the founder and rewritten as section F, and what an approval made in ZCode is worth
+> on the host (OQ-1) and what to do if the GitHub link cannot be limited (OQ-2) on
+> 2026-10-13.
 
 **Where this came from.** The founder, 2026-10-12, verbatim: "also make a spec to adapt
 minspec to zcode in the next week." and "zcode is by z.ai". Then, 2026-10-13, after
@@ -126,7 +127,8 @@ Actions and behind any agent, without the host ever reading what the VM wrote.
 - **BND-4 - An approval made in the VM counts only inside that ZCode project.** An
   approval made inside the VM takes effect inside that project at once. The host never
   reads, trusts or builds on an approval that originated in the VM, and never builds a
-  ZCode project. The VM's GitHub grant is limited to ZCode projects, never MinSpec and
+  ZCode project. The VM's GitHub grant is a fine-grained personal access token that reaches
+  ZCode repositories only (stated by the founder, not measured), never MinSpec and
   never any repository a host builder acts on, so an approval made in the VM has no path
   into a repository the host trusts. (Founder, 2026-10-13: "i should be able to approve
   specs for the current project in zcode." This replaces the earlier wording, which
@@ -394,13 +396,15 @@ agent has a shell. No rule in this section pretends otherwise.
   that session has a shell.
 - **FR-21 - The VM's GitHub grant excludes every host-built repository.** The grant the
   VM holds on GitHub MUST be limited to ZCode projects. It MUST NOT reach MinSpec or any
-  repository a host builder acts on. His GitHub login is already linked in ZCode
-  (founder, 2026-10-13), so the earlier rule "no credential able to act as the founder
-  inside the VM" is false and is withdrawn; this limit replaces it. Whether ZCode's
-  GitHub link can be limited per repository is **unmeasured** (measurement 8). If it
-  cannot be, the limit of this requirement cannot be met by configuration and the
-  recommendation of OQ-1 falls back to its outside-review alternative; what else to do
-  then is open (OQ-2).
+  repository a host builder acts on. ZCode's GitHub access is a fine-grained personal
+  access token that reaches the founder's ZCode repositories only; the earlier OAuth
+  link is removed and he reports no other login of his in the VM (founder, 2026-10-13:
+  "i gave it a fine grained PAT instead." and "zcode repos only, oauth removed, no other
+  logins"). This is stated by the founder, **not measured** (measurement 8). The earlier
+  rule "no credential able to act as the founder inside the VM" is withdrawn; this limit
+  replaces it. If measurement 8 shows the token reaches more than ZCode repositories,
+  the limit of this requirement is not met and the recommendation of OQ-1 falls back to
+  its outside-review alternative.
 - **FR-22 - The host never trusts a VM approval and never builds a ZCode project.**
   Host tooling MUST NOT read, count or build on an approval record that originated in the
   VM, and no host builder, session or check may act on a ZCode project. The protection is
@@ -431,8 +435,8 @@ ZCode project (FR-22). The guarantee rests on that separation and on nothing els
 
 **What it does not guarantee.** Anything inside a ZCode project. There, nothing proves an
 approval was his: the agent has a shell and can set the author address (FR-19 note), and
-his GitHub login is linked in the VM, so even an approving review from his account would
-prove nothing for any repository that login reaches. A session in a ZCode project can
+the VM holds a GitHub token of his (limited to ZCode repositories), so even an approving
+review from his account would prove nothing for any repository that token reaches. A session in a ZCode project can
 build on a spec it approved itself. That he read the spec: no mechanism proves attention,
 and he has said he will rubber-stamp specs once the first few look good. The protection
 is also gone the day the host starts building a ZCode project, or the VM's grant reaches
@@ -545,7 +549,12 @@ i should be able to approve specs for the current project in zcode."
 
 ### OQ-1 - What may the host take on trust from an approval made in ZCode?
 
-He said he should be able to approve in ZCode, that he does not plan to open ZCode
+**Answered 2026-10-13: Option A.** The founder did not overrule the recommendation. His
+words, 2026-10-13: "zcode: do as recommended, except for where approvals are made. i
+should be able to approve specs for the current project in zcode." An approval made in
+ZCode counts only inside that ZCode project; the host never trusts or builds on one.
+
+The question as asked: he said he should be able to approve in ZCode, that he does not plan to open ZCode
 projects on the host, and that he will rubber-stamp specs after the first few look good.
 The options differ in what a misbehaving ZCode session can get into a host-built
 repository and in what each approval costs him. **This is a recommendation; the founder
@@ -560,8 +569,8 @@ has been told and may still overrule it.**
 - **Option B - one approving review on GitHub, outside the VM, before an approval lands
   on main (the earlier recommendation).** *Cost:* one approving review per pull request
   that carries approvals; a one-time change by him to make a check required; a GitHub
-  identity for the VM that is not his; and, with his login linked in the VM, the review
-  proves nothing for any repository that login reaches. Given that he will rubber-stamp,
+  identity for the VM that is not his; and, with his token held in the VM, the review
+  proves nothing for any repository that token reaches. Given that he will rubber-stamp,
   the tap adds little. Kept as the fallback if the grant cannot be limited (OQ-2).
 - **Option C - nothing more: the hash and the author address are checked, as on the host
   today.** *Cost:* no extra effort, and a ZCode session that sets its own author address
@@ -574,10 +583,13 @@ has been told and may still overrule it.**
 
 ### OQ-2 - What if ZCode's GitHub link cannot be limited to chosen projects?
 
-Unanswered, and not guessed here. If measurement 8 shows the link cannot be limited per
-repository, FR-21 cannot be met by configuration. The stated fallback is Option B of
-OQ-1; what else could keep the VM's grant away from host-built repositories is for the
-founder to say after the measurement.
+**Answered 2026-10-13: closed by the facts, not by a choice.** The founder, 2026-10-13:
+"i gave it a fine grained PAT instead." and "zcode repos only, oauth removed, no other
+logins". ZCode's GitHub access is now a fine-grained personal access token that reaches
+his ZCode repositories only, so the link can be limited and is. This is stated by the
+founder, **not measured**: no host session can see the VM. If measurement 8 shows the
+token reaches more than ZCode repositories, FR-21 is not met and the stated fallback is
+Option B of OQ-1.
 
 ## To measure inside the VM before Plan (only the founder can)
 
@@ -595,9 +607,10 @@ ZCode version.
    (Z.ai's pages disagree on plugin hooks in one case.)
 6. Does a commit made by ZCode's agent run the hooks that `core.hooksPath` points at?
 7. For the second spec: does a plugin page open as a side panel on this version?
-8. Which repositories can the GitHub login linked in ZCode reach, and can that link be
-   limited to chosen ZCode projects only (and so exclude MinSpec and every other
-   host-built repository)? If it cannot, say so: FR-21 depends on the answer.
+8. Which repositories can the fine-grained personal access token in ZCode reach? The
+   founder states ZCode repositories only (OAuth removed, no other logins); confirm that
+   it excludes MinSpec and every other host-built repository. FR-21 depends on the
+   answer.
 9. Only if OQ-1 is answered B: can you approve a pull request review from your phone or
    the host browser on a pull request the VM's identity opened?
 10. Only if OQ-1 is answered D: does a hardware key passed through to the VM sign a git
@@ -629,11 +642,11 @@ ZCode version.
    a text search. FR-1's test is the real measure.
 5. **A contract used before it is stable.** Mitigation: versioned results, first
    release marked unstable.
-6. **Inside a ZCode project nothing proves an approval was his.** His GitHub login is
-   already linked in the VM. A session there can build on a spec it approved itself, and
-   the protection is gone the day the host starts building a ZCode project. If ZCode's
-   GitHub link cannot be limited to ZCode projects (measurement 8), the VM's grant may
-   reach host-built repositories and the separation fails; OQ-2.
+6. **Inside a ZCode project nothing proves an approval was his.** A session there can
+   build on a spec it approved itself, and the protection is gone the day the host starts
+   building a ZCode project. The VM's GitHub grant is a fine-grained token he says
+   reaches ZCode repositories only (stated, not measured); if measurement 8 shows it
+   reaches host-built repositories, the separation fails; OQ-2.
 7. **ZCode projects may not run the AI review.** Then he could be asked to approve an
    unreviewed spec (FR-23). Measurement 11.
 8. **Approvals will be rubber-stamped.** He has said so. The design does not claim to fix
@@ -681,9 +694,8 @@ change to which model credential anything uses.
   effect is reached without a new record kind by keeping the VM out of host-built
   repositories (FR-21, FR-22).
 - **An approval from the VM that lands on main only after an outside approving review.**
-  Not chosen as the recommendation (OQ-1 Option B): his login is linked in the VM, so the
-  review proves nothing for any repository that login reaches, and he will rubber-stamp it
-  anyway. Kept as the fallback if the grant cannot be limited.
+  Not chosen as the recommendation (OQ-1 Option B): the review proves nothing for any
+  repository the VM's token reaches, and he will rubber-stamp it anyway. Kept as the fallback if the grant cannot be limited.
 - **A hash check only, as on the host today.** Not chosen alone (OQ-1 Option C): a VM
   session can set its own author address.
 - **A signed commit as the proof of a person.** Rejected as the main proof: a key on
