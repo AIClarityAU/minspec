@@ -85,7 +85,7 @@ const HELD: { name: string; names: string[] }[] = [
   { name: 'several credentials at once', names: ['GH_TOKEN', 'GITHUB_TOKEN', 'TAVILY_API_KEY', 'NPM_TOKEN', 'WEBHOOK_SECRET'] },
   {
     name: 'names no pattern describes',
-    names: ['MINSPEC_SHADOW_TRIAGE_KEY', 'AWS_ACCESS_KEY_ID', 'CLAUDE_AUTOCOMPACT_PCT_OVERRIDE', 'SSH_AUTH_SOCK'],
+    names: ['MINSPEC_ZAI_API_KEY', 'MINSPEC_SHADOW_TRIAGE_KEY', 'AWS_ACCESS_KEY_ID', 'CLAUDE_AUTOCOMPACT_PCT_OVERRIDE', 'SSH_AUTH_SOCK'],
   },
   { name: "both of the model's own logins", names: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'GH_TOKEN'] },
 ];

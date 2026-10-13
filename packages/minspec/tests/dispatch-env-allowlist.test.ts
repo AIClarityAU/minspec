@@ -89,6 +89,7 @@ const HELD = [
   {
     name: 'secrets and switches the pattern does not describe',
     held: [
+      'MINSPEC_ZAI_API_KEY',
       'MINSPEC_SHADOW_TRIAGE_KEY',
       'DB_PASSWORD',
       'SSH_AUTH_SOCK',
