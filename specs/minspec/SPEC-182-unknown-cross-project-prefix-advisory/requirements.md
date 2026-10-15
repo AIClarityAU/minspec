@@ -67,7 +67,7 @@ this spec detects only what `resolveRef` resolves today (see FR-9).
   a sibling-repo name if resolvable, else left for the human to type. Works fully offline.
 - **FR-7 (suggest, Tier-1 optional).** If and only if the user has already opted into a Tier-1
   model for suggestions (DR-004 / DR-050 consent model), a nicer prefix may replace the
-  prefill (`minspec -> MS` rather than `MI`). It is a suggestion in the same editable
+  prefill (for example `minspec -> MIN` rather than a clumsier mechanical truncation). It is a suggestion in the same editable
   input; the Tier-0 value is the fallback when Tier-1 is off, unavailable, or errors. No
   network call is made without that prior consent (constitution invariant 1).
 - **FR-8 (consent-gated write).** The row is appended to `.minspec/project-prefixes.md` only
@@ -93,7 +93,7 @@ this spec detects only what `resolveRef` resolves today (see FR-9).
 - **AC-1.** Given a spec containing `ZZ-SPEC-004` and no `ZZ` row, `validate` prints a warning
   that names `ZZ` and `.minspec/project-prefixes.md` and exits 0.
 - **AC-2.** Given the same text inside a fenced block or backticks, no warning.
-- **AC-3.** Given a known prefix (`MS`) and bare local refs (`SPEC-004`, `#500`), no warning.
+- **AC-3.** Given a known prefix (`MIN`, the committed minspec row) and bare local refs (`SPEC-004`, `#500`), no warning.
 - **AC-4.** Given no table file, zero per-token warnings and exit 0.
 - **AC-5.** Declining the toast writes nothing; accepting writes exactly one appended row and a
   re-run of `validate` no longer warns for that prefix.
