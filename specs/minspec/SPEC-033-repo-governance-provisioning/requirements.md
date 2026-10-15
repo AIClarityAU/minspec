@@ -59,7 +59,7 @@ relates_to: [SPEC-024, SPEC-030, SPEC-034]  # SPEC-024 auto-merge gate consumes 
 
 MinSpec's harness propagation already carries **one** CI gate into every managed repo:
 `.github/workflows/minspec-validate.yml`, registered as a managed-region template at
-[template-registry.ts:937](../../../packages/minspec/src/lib/template-registry.ts#L937).
+`template-registry.ts` (`MANAGED_REGION_TEMPLATES`, the `validate-workflow` entry — anchored by symbol, not line, since line numbers rot, #1252).
 Init scaffolds it; Refresh keeps it current; a template change fires the drift prompt.
 That is why `minspec-validate.yml` is present on `scrooge` and `sealbox` today.
 
@@ -87,7 +87,7 @@ Init/Refresh today gets the reviewer but no triage, no drain, and no auto-merge 
 the "full automated system" minspec itself runs is still monorepo-only. See FR-6/FR-7 below.
 
 **Root cause (mechanism + missing gate):** the propagation set
-(`MANAGED_REGION_TEMPLATES`, [template-registry.ts:936](../../../packages/minspec/src/lib/template-registry.ts#L936))
+(`MANAGED_REGION_TEMPLATES`, `template-registry.ts`, symbol-anchored)
 includes the validator gate but not the reviewer gate — so init/refresh scaffolds one and
 never the other. And there is **no governance-completeness check** that notices a
 MinSpec-managed repo is missing ai-review or an unprotected default branch. Same
@@ -99,7 +99,7 @@ finding: the gate checks the thing it happens to know about and is silent on the
 | Piece | Where | State |
 |---|---|---|
 | Managed-region scaffold + refresh (marker-delimited, preserve-outside, skip+warn on deleted markers) | `packages/minspec/src/lib/template-registry.ts` (`MANAGED_REGION_TEMPLATES`, `renderManagedFile`) + `merge-refresh.ts` | built (DR-037, #249) |
-| The exact propagation precedent | `template-registry.ts:937` — the `validate-workflow` entry | built — extend this list |
+| The exact propagation precedent | `template-registry.ts` `MANAGED_REGION_TEMPLATES` — the `validate-workflow` entry | built — extend this list |
 | Drift baseline → "templates updated, refresh?" prompt | `template-registry.ts` `computeTemplateBaseline` (loops `MANAGED_REGION_TEMPLATES`) | built — new entries auto-join |
 | ai-review workflow set (self-skips when secretless; `pull_request` not `_target`; base-ref trusted control plane; self-edit guard) | minspec `.github/workflows/{ai-review,ai-review-retry,ready-to-merge}.yml` | built (#342/#428/#480) |
 | Reviewer scripts + roles (no-tools `claude -p` over diff-as-untrusted-data; fail-closed decide) | minspec `scripts/{review-branch,review-decide}.sh`, `scripts/roles/{reviewer,security}.md`, `.github/scripts/ai-review-guard.js` | built |
@@ -179,7 +179,7 @@ finding: the gate checks the thing it happens to know about and is silent on the
   `github.repository` at runtime. Before these join the managed-region template set:
   parameterize `REPO` (resolve from `gh repo view --json nameWithOwner` / the runtime
   workflow context, never a literal string) and extend the `ci-stack-portability` test
-  pattern (`template-registry.ts:980`) to cover the new templates. Once parameterized, add
+  pattern (the `ci-stack-portability` test in `tests/`, anchored by name) to cover the new templates. Once parameterized, add
   the three scripts to the managed-region set alongside the dispatch-only roles they load
   (`dev`/`triage` — reconcile against `roles/architect.md`, which the ai-review stack already
   ships for its own panel use, #453). *Decision: same spec, not a new one (D-6).*
@@ -325,6 +325,14 @@ finding: the gate checks the thing it happens to know about and is silent on the
   gaps") + the opening "are we safe to turn on" both point to not spreading a known-holed
   live default. The flip of the scaffold default to `consequence-hybrid` becomes a one-line
   follow-up once those close. A per-repo override still wins in either direction (INV-9).
+- **D-11 — Re-decide the scaffold `autoMerge` default now that the D-7 precondition has
+  fired (2026-08-05 drift audit: #489/#490/#491/#466 all closed).** Options:
+  (a) **keep `pr-gate`** *(rec)* — deny-by-default; cost: every adopter must opt in to
+  auto-merge by hand, so SPEC-024/030 value is delayed for new repos;
+  (b) flip to `consequence-hybrid` (the original D-7 intent) — cost: spreads a live default to
+  repos before a human has re-confirmed the closed merge-holes actually hold in practice;
+  (c) flip only after a fixture proves the four fixes by outcome. AC-6 and FR-7 stay
+  `pr-gate` until this is answered.
 - **D-10 — Collapse the two init/refresh palette commands into one? → RESOLVED (2026-07-14,
   Paul Harvey, #703): yes — one state-detecting command (FR-9).** `initCommand` (first-run +
   onboarding) and `initRefreshCommand` (merge-preserving) do genuinely different things, but
@@ -346,8 +354,12 @@ finding: the gate checks the thing it happens to know about and is silent on the
 1. A **fresh repo** with only `.minspec/` scaffolded, after init/refresh, has the full
    ai-review file set committed and ai-review **triggers** on the next PR (skipping cleanly
    with the notice while secrets are absent). [INV-1, FR-1]
-2. `MinSpec: Check Repo Governance` on sealbox (pre-fix) reports *both* gaps
-   (missing ai-review, unprotected/under-required `main`) and offers the fix. [FR-2]
+2. `MinSpec: Check Repo Governance` against a **fixture repo** that has `.minspec/` but no
+   ai-review workflow and no ruleset/protection on its default branch reports *both* gaps
+   (missing ai-review, unprotected/under-required `main`) and offers the fix. (sealbox is no
+   longer such a repo — it now carries ai-review and a `required_status_checks` ruleset — so
+   the test uses a stubbed `rules/branches/main` response, not a live repo.) The same command
+   against sealbox reports no gaps. [FR-2]
 3. Accepting the fix scaffolds the files (half A) and either writes protection (D-2 opt-in)
    or prints the exact steps (default), plus the FR-4 prerequisite checklist. [FR-3, FR-4]
 4. Re-running the command is a clean no-op; a user edit outside the markers survives; a
