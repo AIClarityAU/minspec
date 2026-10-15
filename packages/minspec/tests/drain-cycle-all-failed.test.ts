@@ -28,6 +28,14 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
+
+// Module scope: nothing in this file may depend on drain or quota knobs in the surrounding
+// environment, so it runs with hostile ones planted there (#2574, helpers/drain-env.ts).
+// Closes #2583: runCycle below used to spawn with no `env:` at all, so its real `--once`
+// cycle inherited `process.env` wholesale — an ambient MINSPEC_DRAIN_QUEUE_LIMIT silently
+// capped the dispatch count the "reports CYCLE FAILED" tests count on.
+useHostileAmbientDrainKnobs();
 
 function findRepoRoot(): string {
   let dir = __dirname;
@@ -67,40 +75,31 @@ exit 0
   return { dir, bin, log: path.join(dir, 'log'), quota };
 }
 
-/**
- * Strip the whole `MINSPEC_DRAIN_*` / `MINSPEC_QUOTA_*` family from the child's
- * environment before overlaying this run's own explicit values. Without this,
- * `execFileSync` inherits the full ambient `process.env`, and any knob this
- * harness does not itself set — e.g. an agent-dispatch container's own
- * `MINSPEC_DRAIN_QUEUE_LIMIT` cost-safety default — leaks straight through and
- * silently caps "4 ready issues" down to however many the CONTAINER allows,
- * same mechanism `drain-concurrency.test.ts` (#1208) hit and generalized for
- * `MINSPEC_DRAIN_CONCURRENCY` under #2369 (#2575 remediation: that fix covered
- * only the one variable it was written for).
- */
-function baseEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  for (const k of Object.keys(env)) {
-    if (k.startsWith('MINSPEC_DRAIN_') || k.startsWith('MINSPEC_QUOTA_')) delete env[k];
-  }
-  return env;
-}
-
+// MINSPEC_DRAIN_RUN_DIR="" is paired with MINSPEC_DRAIN_SELF_REFRESH=0 — see
+// drain-concurrency.test.ts's runCycle for why (#2238/#2583): an unpaired "" could
+// silently resolve to the LIVE drain's run dir and get hard-reset mid-flight. The
+// env below is built explicitly from drainBaseEnv() rather than inherited from
+// `process.env`, so nothing this harness doesn't set (MINSPEC_DRAIN_QUEUE_LIMIT in
+// particular) can change how many dispatches a cycle actually runs (#2583).
 /** Run one real `--once` cycle at the given width and wait for the disowned loop. */
 function runCycle(h: Harness, width = '1'): string {
+  const env: NodeJS.ProcessEnv = {
+    ...drainBaseEnv(),
+    PATH: `${h.bin}:${process.env.PATH}`,
+    MINSPEC_DRAIN_DISPATCH: path.join(h.bin, 'dispatch.sh'),
+    MINSPEC_DRAIN_CONCURRENCY: width,
+    MINSPEC_DRAIN_RUN_DIR: '',
+    MINSPEC_DRAIN_SELF_REFRESH: '0',
+    MINSPEC_DRAIN_REMEDIATE_PRS: '0',
+    MINSPEC_DRAIN_PRIMARY_ROOT: path.join(h.dir, 'root'),
+    MINSPEC_DRAIN_LOG: h.log,
+    MINSPEC_DRAIN_LOCK: path.join(h.dir, 'lock'),
+    MINSPEC_QUOTA_FILE: h.quota,
+  };
   execFileSync('bash', ['-c', `
-    pid=$(PATH="${h.bin}:$PATH" \
-      MINSPEC_DRAIN_DISPATCH="${path.join(h.bin, 'dispatch.sh')}" \
-      MINSPEC_DRAIN_CONCURRENCY="${width}" \
-      MINSPEC_DRAIN_RUN_DIR="" \
-      MINSPEC_DRAIN_REMEDIATE_PRS=0 \
-      MINSPEC_DRAIN_PRIMARY_ROOT="${path.join(h.dir, 'root')}" \
-      MINSPEC_DRAIN_LOG="${h.log}" \
-      MINSPEC_DRAIN_LOCK="${path.join(h.dir, 'lock')}" \
-      MINSPEC_QUOTA_FILE="${h.quota}" \
-      bash "${DRAIN}" --once 2>&1 | grep -oP 'PID \\K[0-9]+')
+    pid=$(bash "${DRAIN}" --once 2>&1 | grep -oP 'PID \\K[0-9]+')
     while kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
-  `], { encoding: 'utf-8', env: baseEnv(), stdio: ['ignore', 'pipe', 'ignore'] });
+  `], { encoding: 'utf-8', env, stdio: ['ignore', 'pipe', 'ignore'] });
   return fs.readFileSync(h.log, 'utf-8');
 }
 
