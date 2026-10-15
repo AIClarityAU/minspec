@@ -69,9 +69,7 @@ any change to the label vocabulary or to gate behaviour. This is a pure refactor
 - **FR-7 Test updated, not weakened.** The enforcement test keeps its guard-binding checks and
   adds a rule: no *executable* producer line may contain a verdict literal (comments exempt).
   Because the check now implies FR-1, a regression that re-introduces a literal fails CI.
-- **FR-8 Constants complete.** `PENDING` is a guard constant (`guard.js:1893`); the build confirms it is in `module.exports` (the export list read on 2026-10-16 showed it only if present further down - to verify) so the test's hand-written `PENDING` string goes away.
-  absent from `module.exports` if not exported there; the build exports it, so the test's
-  hand-written `PENDING` string goes away.
+- **FR-8 Constants complete.** `PENDING` is a guard constant (`.github/scripts/ai-review-guard.js:1893`) and is already in `module.exports` (`:2019`), so the test's hand-written `PENDING` string goes away.
 
 ## Acceptance criteria
 
