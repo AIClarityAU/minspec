@@ -7,7 +7,7 @@ product: minspec
 epic: EPIC-003  # SDD Core Methodology - the same phase commands and checks, reachable from inside ZCode
 aspects: [zcode, plugin, hooks, slash-commands, tool-server, local-page, approval, vm-boundary, tier-0, offline, no-silent-gate, blast-radius]
 depends_on: [SPEC-136, DR-074, DR-004]  # SPEC-136 is the headless core this wraps and the VM boundary it inherits; DR-074 the blast-radius rule a user-wide plugin must obey; DR-004 the network tiers the loopback page must stay inside
-relates_to: [SPEC-001, SPEC-076, SPEC-038, DR-014, DR-073, DR-084, "#2702", "#2703", "#2704", "#37", "#531", "#2708"]
+relates_to: [SPEC-001, SPEC-076, SPEC-038, DR-014, DR-073, DR-084, "#2702", "#2703", "#2704", "#37", "#531", "#2708", "#2725", "#2726", "#2727"]
 # Ownership declared in Specify, before approval mints a hash (SPEC-038). Every path is
 # NEW and is needed under every answer to the open questions below: the one table the
 # plugin is generated from, the generator, the opt-in gate every entry point passes
@@ -740,3 +740,6 @@ checked by the VM trial, not by a test in this repository.
 - Waits for: #37 (write-time spec gate).
 - Related: #531 (MinSpec panels elsewhere), #2708 (files that execute on the pulling
   machine).
+- Follow-ups filed from this spec: #2725 (three SPEC-136 wording points: the panel, the
+  approve button, project config that runs code), #2726 (add these probes to the VM
+  trial in #2703 section E), #2727 (also scaffold phase commands to `.agents/commands/`).
