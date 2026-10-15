@@ -72,7 +72,7 @@ branch (already posts `ATTEMPT_MARKER`).
   as budget state handles the failure per FR-5; the one caller for which the comment is
   informational only (the capped notice, `:724`, itself gated by `cap_notice_decision`)
   may continue best-effort **provided** the `needs-human-review` label was already
-  applied before it (it is, `:721`).
+  applied before it (it is, `:716-718`).
 - **FR-5 (fail closed).** If a budget-charging marker cannot be written, the script
   labels the PR `needs-human-review`, prints a visible error on stderr naming the PR and
   the failed write, and stops. It does not proceed to the next side effect on that path.
