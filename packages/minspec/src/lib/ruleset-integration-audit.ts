@@ -88,28 +88,43 @@ export function extractRequiredCheckPins(rulesetDetail: unknown): RequiredCheckP
 }
 
 /**
- * Is a single parsed `commits/{sha}/check-runs` response DEMONSTRABLY SHORT —
- * fewer `check_runs` came back than the response's own `total_count` says exist
- * (#2639)? GitHub pages this endpoint at 30 by default; a caller that reads one
- * page without comparing it against `total_count` gets a silently truncated
- * list on any commit with more than that many check-runs, and a pin whose
- * disproving run sits past the cut is then reported `unobserved` (inconclusive)
- * instead of the `mismatch` it should be — the exact #560 bug shape passing
- * unreported.
+ * Page size requested for the `commits/{sha}/check-runs` read (#2639). A page
+ * this size or larger may have a next page. Shared with the audit script so the
+ * request and the short-page test cannot drift apart.
+ */
+export const CHECK_RUNS_PAGE_SIZE = 100;
+
+/**
+ * Is a single parsed `commits/{sha}/check-runs` response DEMONSTRABLY SHORT, or
+ * unable to be shown whole (#2639, #2665)? True in two cases:
+ *   1. fewer `check_runs` came back than the response's own `total_count` says
+ *      exist, or
+ *   2. the page is full (`>= CHECK_RUNS_PAGE_SIZE` runs) and `total_count` is
+ *      missing or not a non-negative integer, so there is no way to show that
+ *      no further page exists.
+ * GitHub pages this endpoint at 30 by default; a caller that reads one page
+ * without this check gets a silently truncated list on any commit with more
+ * check-runs than that, and a pin whose disproving run sits past the cut is then
+ * reported `unobserved` (inconclusive) instead of the `mismatch` it should be —
+ * the exact #560 bug shape passing unreported.
  *
- * Mirrors `wholeCheckRunListing` in `.github/scripts/ai-review-guard.js` for the
- * same endpoint: trust `total_count` only when it IS a count. A malformed
- * response (not an object, no `check_runs` array, non-numeric `total_count`) is
- * reported as NOT short here — `extractObservedCheckRuns` already treats those
- * as empty/skippable, and this function's only job is to flag the specific
- * "fewer runs than GitHub says exist" shape, not malformed input in general.
+ * Mirrors the short-count and full-page refusals of `wholeCheckRunListing` in
+ * `.github/scripts/ai-review-guard.js` for the same endpoint, except that a full
+ * page whose `total_count` is a valid integer matching the run count is NOT
+ * flagged here (that function refuses it; this one trusts a usable count).
+ *
+ * Not short (false): a partial page with no usable `total_count` (nothing says
+ * runs are missing), and malformed input (not an object, no `check_runs` array)
+ * — `extractObservedCheckRuns` already treats those as empty/skippable.
  */
 export function isShortCheckRunsPage(checkRunsResponse: unknown): boolean {
   if (typeof checkRunsResponse !== 'object' || checkRunsResponse === null) return false;
   const runs = (checkRunsResponse as { check_runs?: unknown }).check_runs;
   if (!Array.isArray(runs)) return false;
   const totalCount = (checkRunsResponse as { total_count?: unknown }).total_count;
-  if (!Number.isInteger(totalCount) || (totalCount as number) < 0) return false;
+  if (!Number.isInteger(totalCount) || (totalCount as number) < 0) {
+    return runs.length >= CHECK_RUNS_PAGE_SIZE;
+  }
   return runs.length < (totalCount as number);
 }
 

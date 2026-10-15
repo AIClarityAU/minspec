@@ -14,6 +14,7 @@ import {
   auditRequiredCheckPins,
   hasIntegrationIdMismatch,
   isShortCheckRunsPage,
+  CHECK_RUNS_PAGE_SIZE,
   type RequiredCheckPin,
   type ObservedCheckRun,
 } from '../src/lib/ruleset-integration-audit';
@@ -124,11 +125,25 @@ describe('isShortCheckRunsPage', () => {
     ['a string', 'nope'],
     ['check_runs missing', { total_count: 5 }],
     ['check_runs not an array', { total_count: 5, check_runs: 'nope' }],
-    ['total_count missing', { check_runs: [{ name: 'a' }] }],
-    ['total_count not a number', { total_count: 'nope', check_runs: [{ name: 'a' }] }],
-    ['total_count negative', { total_count: -1, check_runs: [] }],
+    ['total_count missing, partial page', { check_runs: [{ name: 'a' }] }],
+    ['total_count not a number, partial page', { total_count: 'nope', check_runs: [{ name: 'a' }] }],
+    ['total_count negative, partial page', { total_count: -1, check_runs: [] }],
   ])('tolerates malformed input, reporting not-short: %s', (_label, input) => {
     expect(isShortCheckRunsPage(input)).toBe(false);
+  });
+
+  it.each([
+    ['total_count missing', undefined],
+    ['total_count not a number', 'nope'],
+    ['total_count negative', -1],
+  ])('fails closed on a FULL page whose count is unusable: %s (#2665)', (_label, total) => {
+    // A page the size of the request may have a next page; with no usable
+    // total_count there is no way to show it is whole, so it counts as short.
+    const response: Record<string, unknown> = {
+      check_runs: new Array(CHECK_RUNS_PAGE_SIZE).fill({ name: 'x' }),
+    };
+    if (total !== undefined) response.total_count = total;
+    expect(isShortCheckRunsPage(response)).toBe(true);
   });
 });
 

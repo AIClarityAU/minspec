@@ -32,17 +32,18 @@ import {
   extractRequiredCheckPins,
   hasIntegrationIdMismatch,
   isShortCheckRunsPage,
+  CHECK_RUNS_PAGE_SIZE,
   type PinAuditFinding,
 } from '../packages/minspec/src/lib/ruleset-integration-audit';
 
 /**
- * Requested page size for the `commits/{sha}/check-runs` read (#2639). GitHub's
- * default is 30; asking for more makes a short page far less likely in
- * practice, but `isShortCheckRunsPage` below is what actually GUARANTEES a
- * truncated sample is never silently treated as "unobserved" — this is a
- * cheap first line of defense, not the fix.
+ * `CHECK_RUNS_PAGE_SIZE` (imported) is the page size requested for the
+ * `commits/{sha}/check-runs` read (#2639). GitHub's default is 30; asking for
+ * more makes a short page far less likely, but does not remove it.
+ * `isShortCheckRunsPage` is what flags a page that is demonstrably short (fewer
+ * runs than `total_count`) or full with no usable `total_count`; a full page
+ * whose `total_count` equals its run count is trusted as whole.
  */
-const CHECK_RUNS_PAGE_SIZE = 100;
 
 interface Args {
   owner: string;
