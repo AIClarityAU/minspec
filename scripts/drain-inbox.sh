@@ -170,7 +170,7 @@ REMEDIATE="${MINSPEC_DRAIN_REMEDIATE:-${SCRIPT_DIR}/remediate-pr.sh}"
 # pref beside the repo's common git dir (the primary checkout root), falling back to
 # this checkout's root when not in a git repo or the common dir is not a `.git`.
 _checkout_root="$(cd "${SCRIPT_DIR}/.." && pwd)"
-_common_dir="$(git -C "$_checkout_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"  # swallow-ok: not a git repo / old git → falls back to this checkout's root
+_common_dir="$(git -C "$SCRIPT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"  # swallow-ok: not a git repo / old git → falls back to this checkout's root
 if [[ -n "$_common_dir" && "$(basename "$_common_dir")" == ".git" ]]; then
   PREF_ROOT="$(dirname "$_common_dir")"
 else
