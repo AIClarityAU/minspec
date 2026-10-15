@@ -59,7 +59,7 @@ in-flight versus consumed state a consumer could use.
   entry so an adopter's repo ignores it too.
 - **FR-2 - Request record.** Each request is one JSON file holding at least: `specPath`
   (repo-relative POSIX), `upstreamHash` (the canonical `specHash` of the approved
-  document at enqueue time, the same function `recordApproval` uses, approval.ts:262),
+  document at enqueue time, `specHash` from `@aiclarity/shared`, the canonical hash `approveSpec` (aliased `recordApproval`) computes at approval.ts:583),
   `requestedAt` (ISO), `source` (producer name), and `schema` (integer version).
 - **FR-3 - One file per request, unique name.** The filename is derived from the spec id
   and a unique suffix (timestamp plus random), never from a shared key alone, so two
