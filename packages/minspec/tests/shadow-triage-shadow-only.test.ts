@@ -89,7 +89,7 @@ interface Harness {
  * fixture key and silently turn every assertion below into a vacuous pass against a
  * shadow step that never ran.
  */
-function makeHarness(opts: { key?: string; disabled?: boolean; private?: boolean } = {}): Harness {
+function makeHarness(opts: { key?: string; legacyKey?: string; disabled?: boolean; private?: boolean } = {}): Harness {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shadow-triage-'));
   const binDir = path.join(dir, 'bin');
   fs.mkdirSync(binDir);
@@ -196,7 +196,8 @@ exit 0
     // supplies a stubbed `gh` on PATH. Without it the script aborts before writing.
     ...GH_BOT_STUB_ENV,
   };
-  if (opts.key) env.MINSPEC_SHADOW_TRIAGE_KEY = opts.key;
+  if (opts.key) env.MINSPEC_ZAI_API_KEY = opts.key;
+  if (opts.legacyKey) env.MINSPEC_SHADOW_TRIAGE_KEY = opts.legacyKey;
   if (opts.disabled) env.MINSPEC_SHADOW_TRIAGE = '0';
 
   return { dir, binDir, ghLog, claudeCalls, curlCalls, shadowLog, env };
@@ -376,7 +377,7 @@ describe('shadow-triage — a contradicting shadow verdict changes NO outcome (#
 
 describe('shadow-triage — inert without a key, and real triage is untouched (#1338)', () => {
   it('no key → the shadow model is never called, no log is written, triage still succeeds', () => {
-    const h = makeHarness(); // no MINSPEC_SHADOW_TRIAGE_KEY
+    const h = makeHarness(); // no MINSPEC_ZAI_API_KEY
     const res = runTriage(h);
 
     expect(res.status).toBe(0);
@@ -396,6 +397,19 @@ describe('shadow-triage — inert without a key, and real triage is untouched (#
     // from "ran and agreed" — the same reason a report distinguishes n=0 from a pass.
     const h = makeHarness();
     expect(runTriage(h).stderr).toMatch(/shadow-triage: no z\.ai key configured/);
+  });
+
+  it('the pre-rename MINSPEC_SHADOW_TRIAGE_KEY still enables the step, with a visible deprecation notice (#2707)', () => {
+    const h = makeHarness({ legacyKey: 'zai-test-key' });
+    const res = runTriage(h);
+    expect(res.stderr).toMatch(/MINSPEC_SHADOW_TRIAGE_KEY is deprecated.*MINSPEC_ZAI_API_KEY/);
+    expect(res.stderr).not.toMatch(/no z\.ai key configured/);
+    expect(fs.existsSync(h.curlCalls)).toBe(true);
+  });
+
+  it('MINSPEC_ZAI_API_KEY set → no deprecation notice even if the old name is also present (#2707)', () => {
+    const h = makeHarness({ key: 'zai-test-key', legacyKey: 'zai-old-key' });
+    expect(runTriage(h).stderr).not.toMatch(/deprecated/);
   });
 
   it('MINSPEC_SHADOW_TRIAGE=0 hard-disables it even when a key is present', () => {
