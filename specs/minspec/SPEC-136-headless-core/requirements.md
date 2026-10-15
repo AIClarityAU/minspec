@@ -7,7 +7,7 @@ product: minspec
 epic: EPIC-003  # SDD Core Methodology - the checks are the methodology; this makes them reachable where no editor runs
 aspects: [headless, core, validator, tool-server, github-actions, zcode, vm-boundary, plugin, tier-0, offline, no-silent-gate, blast-radius]
 depends_on: [SPEC-001, DR-004, DR-014, DR-037, DR-074]  # SPEC-001 owns the checks being exposed; DR-004 the network tiers the core must stay inside; DR-014 the package map that says where process-spawning code may live; DR-037 the git hooks and the validator package it already names; DR-074 the blast-radius rule
-relates_to: [SPEC-076, SPEC-038, DR-015, DR-050, DR-056, DR-066, DR-081, DR-084, DR-087, "#2153", "#14", "#37", "#54", "#248", "#531", "#562", "#2263", "#2297", "#2702", "#2703", "#2708"]
+relates_to: [SPEC-076, SPEC-038, DR-015, DR-050, DR-056, DR-066, DR-081, DR-084, DR-087, "#2153", "#14", "#37", "#54", "#248", "#531", "#562", "#2263", "#2297", "#2702", "#2703", "#2708", "#2725", "#2728"]
 # Ownership declared in Specify, before approval mints a hash (SPEC-038). All eight files
 # are NEW and are needed under every answer to the open questions below: the one table of
 # operations, the two ways in (command line, tool server), and the five tests that pin
@@ -92,7 +92,7 @@ request.
 **This is the first of two specs.** The three routes he named all need the same thing
 underneath, so it is specified first, here. The second, **the ZCode plugin shell**
 (commands, skills, hooks, the tool-server wiring, optionally a panel), is tracked as
-#2702 and is not written yet.
+#2702 and is drafted as SPEC-139 (the plugin shell, #2728).
 
 **Id note.** `SPEC-136` was the highest claimed id plus one when first taken (read
 2026-10-11 20:40 UTC across `origin/main` at `41f41571`, the 43 open pull requests and
@@ -175,16 +175,24 @@ risk to BND-1.
   "A Git URL" or "A local marketplace file or directory"; an entry can also name an npm
   package (https://zcode.z.ai/en/docs/plugin). So a plugin can enter the VM from GitHub
   with no host folder involved.
-- **It can have a panel.** "A UI Plugin adds an interactive page to an ordinary plugin
-  ... The page communicates with the host through MCP Apps; the plugin's MCP server
-  manages application data." Pages "currently run in local workspaces in ZCode Desktop"
-  only (https://github.com/zai-org/ZCode/blob/main/UI_PLUGIN.en.md). This is in the
-  repository, not on the documentation site.
+- **A panel exists in ZCode Desktop only, and is not used.** "A UI Plugin adds an
+  interactive page to an ordinary plugin ... The page communicates with the host through
+  MCP Apps; the plugin's MCP server manages application data." Pages "currently run in
+  local workspaces in ZCode Desktop" only
+  (https://github.com/zai-org/ZCode/blob/main/UI_PLUGIN.en.md). This is in the
+  repository, not on the documentation site. ZCode's source has the matching manifest
+  field, typed `ui?: unknown` (`zai-org/ZCode` at `aac4755666d09fdcd70272fcf063c077a639015f`,
+  `apps/zcode-cli/packages/contracts/src/plugins/index.ts` lines 160-161, read
+  2026-10-15, not run). ZCode's own `/plugin-creator`, asked by the founder, replied that
+  the manifest has no UI component (#2702, 2026-10-13). Either way the founder chose a
+  local browser page instead ("the browser page workaround is fine"), so neither spec
+  uses a panel (SPEC-139, the plugin shell, #2728).
 - **Tool servers (MCP).** Supported as local `stdio` commands and as remote `HTTP` or
   `SSE` services. Configured per user in `~/.zcode/cli/config.json`, per project in
   `<project root>/.zcode/config.json`, or inside a plugin's `.mcp.json`; project
   servers "connect automatically at session start"
-  (https://zcode.z.ai/en/docs/mcp-services).
+  (https://zcode.z.ai/en/docs/mcp-services), with no trust step (source reading below,
+  risk 10).
 
 ## Context - where MinSpec's checks live, and how tied they are to the editor (measured)
 
@@ -391,7 +399,14 @@ agent has a shell. No rule in this section pretends otherwise.
   start there.
 - **FR-20 - A person's entry point, not a tool.** `approve` MUST NOT appear in the
   tool server's list of tools the model can call. It is reachable from the command
-  line and, in the second spec, from a button the model cannot press. This stops an
+  line and, in the second spec, from a command the person types, `/minspec-approve
+  SPEC-NNN`, read by a prompt hook before the model sees it (SPEC-139 FR-17, its
+  person-only approval route, and SPEC-139 OQ-2, how the person approves). Not from a
+  button: a plugin offers none outside the desktop-only panel this work does not use
+  (Context). Whether ZCode's prompt hook can stop a typed prompt and show the person the
+  result is unmeasured (SPEC-139 OQ-M4, its prompt-hook probe for the VM trial, #2703
+  section E); if it cannot, SPEC-139 (proposed, not yet approved) ships no approval
+  entry point in the plugin. This stops an
   agent approving by accident or by habit. It does not stop a session that sets out to:
   that session has a shell.
 - **FR-21 - The VM's GitHub grant excludes every host-built repository.** The grant the
@@ -606,7 +621,9 @@ ZCode version.
 5. Does a `PreToolUse` hook in a plugin added from a git address run and block a tool?
    (Z.ai's pages disagree on plugin hooks in one case.)
 6. Does a commit made by ZCode's agent run the hooks that `core.hooksPath` points at?
-7. For the second spec: does a plugin page open as a side panel on this version?
+7. Optional, and nothing waits on it: does a plugin page open as a side panel on this
+   version? Neither spec uses a panel (the founder chose a browser page, Context); the
+   answer only tells a later spec whether one could be added.
 8. Which repositories can the fine-grained personal access token in ZCode reach? The
    founder states ZCode repositories only (OAuth removed, no other logins); confirm that
    it excludes MinSpec and every other host-built repository. FR-21 depends on the
@@ -617,6 +634,12 @@ ZCode version.
     commit, with a touch each time?
 11. Do ZCode-project repositories run the AI review at all? If not, FR-23 cannot be met
     there.
+12. Optional, and nothing waits on it (risk 10): in a throwaway project in the VM, write
+    a `.zcode/config.json` whose `plugins.dirs` names a throwaway plugin folder with one
+    `SessionStart` hook that appends a line to a file in `/tmp` (the probe plugin of
+    SPEC-139 OQ-M1 will do). Open the project in the app and start a session. Was any
+    trust step shown, and did the line appear? Same for a tool server listed in that
+    file: did it connect with no prompt? Add it to the VM trial (#2703 section E).
 
 ## Decision records
 
@@ -653,11 +676,26 @@ ZCode version.
    that, and this is why no outside tap is added for ZCode projects.
 9. **Node may be absent in the VM.** Then the core cannot run there and the plugin
    falls back to prose. Measurement 1.
+10. **Any repository opened in ZCode can run code in the VM, with no prompt** (source
+    reading, not run). All at `zai-org/ZCode` commit
+    `aac4755666d09fdcd70272fcf063c077a639015f`, paths under `apps/zcode-cli/packages/`,
+    read 2026-10-15. A project's own `.zcode/config.json` can list `plugins.dirs`, which
+    are merged in (`adapters/src/config/config-merger.ts` lines 76-99) and loaded as
+    inline plugins enabled by default (`adapters/src/plugins/index.ts` lines 244-250).
+    Project tool servers are trusted by default and connect automatically
+    (`bootstrap/src/app/runtime-config.ts` line 110). Third-party plugin hooks always
+    run: `canRunPluginHooks` returns true, and its comment says the trust boundary of
+    "official plugins only" was given up (`adapters/src/plugins/index.ts` lines
+    371-376). So cloning a repository into the VM and opening it is enough to run code
+    there. This changes no requirement: it is one more reason the VM is not the gate
+    (BND-3), and why the host never builds a ZCode project (FR-22). Unmeasured:
+    measurement 12. SPEC-139 OQ-M1 (its plugin-hook probe) asks about a plugin added
+    through a marketplace, not one a project's config names, so it does not answer this.
 
 ## Out of Scope
 
-- The ZCode plugin shell: commands, skills, hooks, tool-server wiring, a panel (#2702,
-  the second spec).
+- The ZCode plugin shell: commands, skills, hooks, tool-server wiring, a local browser
+  page (#2702, the second spec, SPEC-139).
 - MinSpec's panels in any other product (#531).
 - Headless init and refresh of a project. The VM receives projects from GitHub already
   set up; `activate` is the only setup step exposed.
@@ -667,7 +705,8 @@ ZCode version.
 - A deterministic witness for decision-record acceptance (#2153). This spec covers spec
   approvals only.
 - Any supervision of the VM from the host (BND-5).
-- The button or command in ZCode that calls `approve` (#2702, the second spec).
+- The typed command in ZCode that calls `approve` (#2702, the second spec; SPEC-139
+  FR-17).
 - Moving library files into `packages/shared` (#54 tracks the classifier move).
 
 ## What this costs
@@ -724,7 +763,9 @@ decides whether they join these files or the existing workflow tests.
 - Request and answers: founder, 2026-10-12 and 2026-10-13 (twice), quoted above.
 - Builds on: SPEC-001 (the checks), SPEC-076 (the first headless reader), DR-014,
   DR-037 (which names the validator package), DR-074.
-- Second spec: #2702 (the ZCode plugin shell).
+- Second spec: #2702 (the ZCode plugin shell), drafted as SPEC-139 (#2728). Its source
+  reading changed three passages here: the panel, FR-20's entry point, and risk 10
+  (#2725, three wording points from that reading).
 - Follow-ups filed from this spec: #2703 (measure ZCode's one-prompt mode), #2708
   (files that execute on the pulling machine are not in the machinery set).
 - Related open work: #14, #37, #54, #248, #531, #562, #2263, #2297.
