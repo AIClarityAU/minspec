@@ -15,9 +15,10 @@ relates_to: [DR-066, DR-086, DR-100, SPEC-060, SPEC-085, "#2581", "#2718", "#257
 implements: [packages/minspec/src/lib/error-log.ts, packages/minspec/src/lib/error-redact.ts, packages/minspec/src/lib/issue-link.ts, packages/minspec/src/views/diagnostics-panel.ts, packages/minspec/tests/error-log.test.ts, packages/minspec/tests/error-redact.test.ts, packages/minspec/tests/diagnostics-panel.test.ts, packages/minspec/tests/error-capture-wiring.test.ts]
 # Modified, not owned. extension.ts gains the wrapper at its 44 registrations and the new
 # command; package.json the command, its keybinding and one dependency; the README its
-# diagnostics section. The other 18 files are the ones that call showErrorMessage today
-# and change only to route that call through the error log (FR-3).
-affects: [packages/minspec/src/extension.ts, packages/minspec/package.json, packages/minspec/README.md, packages/minspec/src/commands/adr.ts, packages/minspec/src/commands/approve-active.ts, packages/minspec/src/commands/approve.ts, packages/minspec/src/commands/backfill-epics.ts, packages/minspec/src/commands/backlog.ts, packages/minspec/src/commands/classify.ts, packages/minspec/src/commands/constitution.ts, packages/minspec/src/commands/epic.ts, packages/minspec/src/commands/example.ts, packages/minspec/src/commands/init.ts, packages/minspec/src/commands/migrate.ts, packages/minspec/src/commands/park.ts, packages/minspec/src/commands/session.ts, packages/minspec/src/commands/validate.ts, packages/minspec/src/lib/resolve-folder.ts, packages/minspec/src/views/codelens-provider.ts, packages/minspec/src/views/epic-dnd-controller.ts, packages/minspec/src/views/spec-panel.ts]
+# diagnostics section. The next 18 files call showErrorMessage today and change only to
+# route that call through the error log (FR-3). The last four hold console.error/warn
+# failure reports that FR-4 routes through the log (commit-on-approve.ts holds 19 of 28).
+affects: [packages/minspec/src/extension.ts, packages/minspec/package.json, packages/minspec/README.md, packages/minspec/src/commands/adr.ts, packages/minspec/src/commands/approve-active.ts, packages/minspec/src/commands/approve.ts, packages/minspec/src/commands/backfill-epics.ts, packages/minspec/src/commands/backlog.ts, packages/minspec/src/commands/classify.ts, packages/minspec/src/commands/constitution.ts, packages/minspec/src/commands/epic.ts, packages/minspec/src/commands/example.ts, packages/minspec/src/commands/init.ts, packages/minspec/src/commands/migrate.ts, packages/minspec/src/commands/park.ts, packages/minspec/src/commands/session.ts, packages/minspec/src/commands/validate.ts, packages/minspec/src/lib/resolve-folder.ts, packages/minspec/src/views/codelens-provider.ts, packages/minspec/src/views/epic-dnd-controller.ts, packages/minspec/src/views/spec-panel.ts, packages/minspec/src/commands/commit-on-approve.ts, packages/minspec/src/commands/push-docs-lane.ts, packages/minspec/src/lib/ownership-advance-guard.ts, packages/minspec/src/lib/ownership-ratchet.ts]
 phases:
   specify: done
   clarify: pending
@@ -66,7 +67,8 @@ filed separately as [#2718](https://github.com/AIClarityAU/minspec/issues/2718) 
 
 ## One-Sentence Scope
 
-Record every error MinSpec raises, redacted, in memory and in a MinSpec log channel, and
+Record every error from a MinSpec command, an error toast, a reported catch or activation,
+redacted, in memory and in a MinSpec log channel, and
 show them on a Show Diagnostics page that renders each one as text and as QR codes, the
 first of which opens a pre-filled GitHub issue on the phone that scans it, with no network
 action by the extension.
@@ -90,7 +92,7 @@ action by the extension.
   `err.message` only.
 - **A command that throws is not recorded by MinSpec.** All 44 commands are registered
   directly in one `context.subscriptions.push(...)` block in `activate()`
-  (`packages/minspec/src/extension.ts:369` onward; `registerCommand(` occurs 44 times in that file and in no
+  (`packages/minspec/src/extension.ts:370` onward; `registerCommand(` occurs 44 times in that file and in no
   other source file, and `package.json` contributes 44 commands). No handler is wrapped. A
   rejected handler reaches VS Code, which shows its own generic failure notification and
   writes the trace to the extension host log. I believe that is VS Code's behaviour; it is
@@ -106,8 +108,13 @@ action by the extension.
 - **The build is identifiable at runtime.** `buildSha()` and `buildLabel()`
   (`packages/minspec/src/lib/build-provenance.ts:35`, `:67`) return the commit the build was cut from, or
   `dev`, using `__MINSPEC_BUILD_SHA__` (`:32`), which `scripts/build-extension.sh`
-  injects at bundle time. The version is `package.json` `version` (`0.1.27`). There is
-  no build time.
+  injects at bundle time, with a `-dirty` suffix for an uncommitted tree. The version is
+  `package.json` `version` (`0.1.27`). There is no build time.
+- **Stack frames in a shipped build point into minified code.** `scripts/build-extension.sh`
+  passes `--minify` and no `--sourcemap` flag (`:50-57`), and
+  `packages/minspec/.vscodeignore:15` excludes `out/*.js.map` from the package. A frame
+  from the work PC therefore reads like `extension.js:2:184233` with mangled names, and
+  nothing today maps it back to source. FR-13 covers this.
 - **The issue destination is declared.** `package.json:18-20` sets `bugs.url` to
   `https://github.com/AIClarityAU/minspec/issues`.
 
@@ -123,8 +130,9 @@ action by the extension.
   plain-language section says it "does not authorise telemetry".
 - **The published listing** says the extension "opens no network connection of its own.
   It has no telemetry ... and nothing is sent to the people who make it"
-  (`packages/minspec/README.md:31`, repeated at `:354` and `:376`). 0.1.27 is published
-  with that text (DR-100).
+  (`packages/minspec/README.md:31`, repeated at `:354` and `:376`). I believe 0.1.27 was
+  published with that text under DR-100; that is unverified here, since DR-100 approves
+  the publish and records no published version.
 
 So an extension that sends its errors to us is a reversal of a published promise, not a
 feature toggle. A QR code the user scans with their own phone is not: the extension
@@ -156,16 +164,31 @@ in one scan and one tap, with nothing retyped.
 - **FR-2 - Every command is captured.** Each of the 44 command registrations MUST go
   through one wrapper in `error-log.ts` that records a thrown or rejected error with the
   command id as its source and then rethrows it unchanged, so VS Code's own handling and
-  every existing caller's behaviour are untouched. The wrapper MUST NOT show a toast of
-  its own (VS Code already shows one), and MUST NOT alter return values.
+  every existing caller's behaviour are untouched. For a synchronous handler it records
+  and rethrows synchronously and returns the handler's own return value. For a handler
+  that returns a thenable it returns a promise that resolves or rejects with the identical
+  value or reason. The wrapper MUST NOT show a toast of its own (VS Code already shows
+  one). A command run through `executeCommand` from another wrapped command (for example
+  `packages/minspec/src/extension.ts:672`, `packages/minspec/src/commands/approve-active.ts:254`)
+  produces one record per wrapped layer it passes through; the de-duplication in FR-1
+  does not merge them because their sources differ. That is intended: the outer record
+  shows which command led to the inner one. Errors raised in watcher, tree-provider and
+  CodeLens callbacks are not captured by this wrapper; they are captured only where they
+  reach an error toast (FR-3) or a reported catch (FR-4).
 
 - **FR-3 - Every error the user is shown is captured.** Every `showErrorMessage` call in
   `packages/minspec/src/` MUST go through one helper in `error-log.ts` that records the message (and the
   error, when the call site has one, so the stack is kept) and then shows the same toast.
-  The helper MUST add one action button, **Diagnostics**, to the toast, which opens the
-  Show Diagnostics page (FR-8). It is an extra button on a toast that already appears,
-  not a new prompt (constitution principle 4). Warnings (`showWarningMessage`) are not
-  recorded (DQ-2).
+  The helper MUST add one action button, **Diagnostics**, which opens the Show Diagnostics
+  page (FR-8), **only** to non-modal calls that pass no items of their own. Modal calls
+  (for example `packages/minspec/src/commands/approve.ts:288-290`, `:319`, `:353`) and calls
+  that pass items or read the returned choice MUST record the error but show exactly the
+  dialog they show today, so the set of values a caller can receive never changes. The
+  added button is an extra button on a toast that already appears, not a new prompt
+  (constitution principle 4). Refusals raised as `NotOptedInError` (shown at
+  `packages/minspec/src/extension.ts:1025` and `packages/minspec/src/commands/classify.ts:24`)
+  are expected outcomes, not faults, and are not recorded. Warnings
+  (`showWarningMessage`) are not recorded (DQ-2).
 
 - **FR-4 - Silent catches that drop a real failure are captured.** The `console.error` and
   `console.warn` calls in `packages/minspec/src/` that report a caught failure MUST also record it through
@@ -176,7 +199,13 @@ in one scan and one tap, with nothing retyped.
   and the Show Diagnostics command MUST be set up as the first statements of `activate()`,
   before anything that can throw. The rest of `activate()` MUST run inside a guard that
   records a thrown error with source `activation` and then rethrows it, so VS Code still
-  reports the failed activation and the Diagnostics page can still show why.
+  reports the failed activation and the Diagnostics page can still show why. The guard is
+  synchronous, so it does not see a promise `activate()` starts and does not await (for
+  example `packages/minspec/src/extension.ts:92`); each such promise that can reject MUST
+  carry its own `.catch` that records with source `activation` (Plan lists them).
+  Whether commands registered before a throw stay callable afterwards is VS Code's
+  behaviour; I believe they do, it is unverified here, and Plan verifies it with a test
+  in the extension host before relying on it.
 
 - **FR-6 - No process-wide hook.** MinSpec MUST NOT install `process.on('uncaughtException')`,
   `process.on('unhandledRejection')` or any other process-wide handler. The extension
@@ -188,19 +217,33 @@ in one scan and one tap, with nothing retyped.
 
 - **FR-7 - Redact before storing.** `packages/minspec/src/lib/error-redact.ts` MUST be applied to every
   message and stack before it is stored, so no unredacted text is held anywhere,
-  including the log channel. It MUST replace:
-  - the user's home directory with `~`, matched case-insensitively and with either path
-    separator on Windows (`C:\Users\name` and `C:/Users/name`);
+  including the log channel. Input MUST first be cut to a fixed maximum length (a
+  constant set in Plan), and every pattern MUST run in linear time, so redacting a huge
+  message cannot stall the extension host (INV-2). Rules apply in this order, and each
+  has its own case in `error-redact.test.ts`:
   - each open workspace folder's absolute path with `<workspace>` (or `<workspace:N>`
     for the Nth folder of a multi-root workspace), so employer repository paths do not
-    reach a public issue;
+    reach a public issue. This runs **before** the home rule: workspace folders usually
+    sit under the home folder, and the reverse order would leave `~/work/<repo>` behind;
+  - the user's home directory with `~`, in every form it reaches a message: either path
+    separator; either case of drive letter (`fsPath` yields `c:\`); the 8.3 short form
+    (`C:\Users\JOHNSM~1`); URI-encoded (`file:///c%3A/Users/name`); UNC and
+    `\\wsl$\` forms; and `/mnt/c/Users/<name>` when `vscode.env.remoteName` is `wsl`;
+  - the bare account name from `os.userInfo().username`, wherever it still appears, with
+    `<user>`;
+  - email addresses with `<email>`;
   - credential-shaped strings with `[redacted]`: GitHub tokens (`ghp_`, `gho_`, `ghs_`,
     `ghu_`, `ghr_`, `github_pat_`), `sk-` and `sk-ant-` keys, AWS access key ids
-    (`AKIA...`), `Bearer` and `token` header values, and the user-info part of any URL
+    (`AKIA...`), GitLab `glpat-` tokens, Slack `xoxb-`/`xoxp-`/`xoxa-` tokens, JWTs
+    (`eyJ...` three-part), `Bearer`, `Basic` and `token` authorization values (this covers
+    Azure DevOps personal access tokens), and the user-info part of any URL
     (`https://user:secret@host`).
 
-  Redaction is best effort. The user reading the text before Submit is the real control,
-  and the panel says so (FR-9).
+  Redaction never changes a stack frame's `line:column`, which FR-13 depends on.
+  Redaction is best effort. It does **not** remove remote URLs such as
+  `github.com/<employer>/<repo>`, branch names, spec ids or spec titles. The user reading
+  the text before Submit is the real control, and the panel says so and names those
+  kinds of text (FR-9).
 
 ### The Diagnostics page
 
@@ -210,9 +253,8 @@ in one scan and one tap, with nothing retyped.
     and architecture, and the remote name (`vscode.env.remoteName`, or `local`);
   - every recorded error, newest first, each with its time, source, count, message and
     stack, in a monospace font large enough to read in a phone photograph;
-  - a **Clear** button that empties the in-memory log after the page says how many
-    records it will clear (this is the only destructive act on the page, so one
-    confirmation is the once-for-always exception, not a pattern).
+  - a **Clear** button that empties the in-memory log immediately, with no confirmation.
+    The log channel keeps the text, so nothing is lost that a confirmation would protect.
 
   When there are no errors it MUST say so in words, never show an empty panel. The
   command MUST have a keybinding, chosen in Plan from free chords, and its title tooltip
@@ -221,36 +263,68 @@ in one scan and one tap, with nothing retyped.
 
 - **FR-9 - QR codes that file the issue from the phone.** For each record the page MUST
   render:
-  1. **An issue code.** A QR code whose content is a GitHub new-issue URL built from
-     `bugs.url` (`<bugs.url>/new?title=...&body=...`). The title is the source and the
-     message, cut to 120 characters. The body holds the header facts, the source, the
-     time, the count, the message, and as many stack frames as fit the code's byte
-     budget, followed by "continued in codes 2 to N" when the stack was cut. The URL
-     MUST be built by `packages/minspec/src/lib/issue-link.ts`, a pure function with no I/O.
-  2. **Continuation codes**, only when the stack did not fit: plain-text QR codes, each
-     headed `MinSpec diagnostics <record time> part k/N`, together carrying the whole
-     redacted record, so pasting them in order as an issue comment reconstructs it
-     exactly.
+  1. **An issue code** (not numbered). A QR code whose content is a GitHub new-issue URL
+     built from `bugs.url` (`<bugs.url>/new?title=...&body=...`). The title is the source
+     and the message, cut to 120 UTF-8 bytes at a character boundary before encoding. The
+     body holds the header facts, the source, the time, the count, the message, and as
+     many whole stack frames as fit, followed by `continued in parts 1 to M` when
+     anything was cut. If the header and message alone exceed the budget, the message is
+     cut at a UTF-8 boundary and marked `[cut - see parts 1 to M]`. The URL MUST be built
+     by `packages/minspec/src/lib/issue-link.ts`, a pure function with no I/O.
+  2. **Continuation codes** (parts 1 to M), only when something was cut. Each is one
+     header line, `MinSpec diagnostics <record time> part k/M`, then a payload of plain
+     text. Joining the payloads of parts 1 to M in order reproduces the whole redacted
+     record byte for byte.
 
-  The byte budget per code MUST be one constant, set in Plan by measuring which QR
-  version a mid-range phone reads reliably off a laptop screen at arm's length. Plan
-  records the measurement. The page MUST state, next to the codes, that scanning opens
-  a public GitHub issue form, that the text has had paths and credential-like strings
-  removed but should be read before submitting, and that nothing is sent unless Submit
-  is pressed on the phone.
+  The byte budget applies to the **final percent-encoded URL** for the issue code and to
+  the header plus payload for a continuation code, measured in bytes. `encodeURIComponent`
+  inflates newlines, spaces, `\`, `:` and non-ASCII text, so a budget counted in raw
+  characters would overflow. Measured on 2026-10-15 with `lean-qr` 2.7.4 for a realistic
+  record (a 479-byte URL with no stack frames, then +3 frames per row): error-correction
+  level M needs QR version 17 for the header and message alone, 23 with 3 frames, 29 with
+  6, and 34 with 10; level L needs 15, 20, 25 and 30. So the issue code carries the
+  header, the message and a handful of frames, and the continuation codes carry the
+  rest. The budget is one constant, set in Plan by measuring which version a mid-range
+  phone reads reliably off a laptop screen at arm's length; Plan records the
+  measurement. The number of continuation codes is capped at a second constant. Past
+  the cap the page says, in words, how many bytes were left out and that the full text
+  is in the `MinSpec` log channel. If encoding a code fails, its place shows
+  `QR code could not be drawn: <reason>` in text and the rest of the page still renders;
+  a failure never leaves a blank where a code should be (constitution invariant 2).
+
+  The page MUST state, next to the codes, that scanning opens a **public** GitHub issue
+  form, that home and workspace paths and credential-like strings have been removed but
+  remote URLs, branch names and spec titles have not, that the text should be read before
+  submitting, and that nothing is sent unless Submit is pressed on the phone. Plan MUST
+  check by hand that the GitHub mobile app, when installed, does not intercept the link
+  and drop its `body=` (unverified).
 
 - **FR-10 - The page makes no network request.** The webview MUST set a Content Security
-  Policy of `default-src 'none'`, with images allowed only from `data:` or the
-  extension's own resource root, and style and script allowed only by nonce. It MUST
-  load nothing from the network, render no clickable external link, and call no
-  `openExternal` (DQ-4). QR codes MUST be generated in the extension, not in the webview
-  from a remote library.
+  Policy of `default-src 'none'` and `localResourceRoots: []`, with style and script
+  allowed only by nonce. QR codes MUST be generated in the extension and inlined as
+  `<svg>`, so no `img-src` is needed. All record text MUST be HTML-escaped before it is
+  placed in the page, so an error message cannot inject markup that changes what the
+  user believes will be filed. The page MUST load nothing from the network, render no
+  clickable external link, and call no `openExternal` (DQ-4). The nonce-only style rule
+  is new for this repo: the existing spec panel allows `style-src 'unsafe-inline'`
+  (`packages/minspec/src/views/spec-panel-html.ts:151`), and Plan notes the difference
+  rather than copying it. In VS Code for the web or Codespaces, VS Code itself serves
+  every webview frame from its own CDN host, as it already does for the spec panel; that
+  is VS Code's request, not MinSpec's, and the README section says so.
 
 - **FR-11 - A log channel.** Each recorded error MUST also be written to one
   `LogOutputChannel` named `MinSpec` (`createOutputChannel('MinSpec', { log: true })`),
   created once at activation, so a developer machine with a clipboard can still read and
-  copy the full text. Writing to the channel is VS Code's logging, not a MinSpec file
-  write (DQ-3).
+  copy the full text. VS Code persists the channel to its own session log folder;
+  MinSpec opens no file (DQ-3).
+
+- **FR-13 - A frame from a shipped build can be mapped back to source.** The record MUST
+  keep every frame's file, `line:column` and name exactly as thrown (FR-7 never touches
+  them). A developer holding a record MUST be able to turn its frames into source
+  locations from the record's `buildLabel()` alone. Plan chooses how (DQ-6) and MUST
+  prove the chosen way on one real frame from a packaged build. A build whose label
+  ends `-dirty` cannot be reproduced from its commit, so the page MUST mark records from
+  such a build as `frames not mappable (dirty build)` rather than imply otherwise.
 
 ### Honest documentation
 
@@ -284,6 +358,18 @@ in one scan and one tap, with nothing retyped.
 - [ ] No `process.on(` exists in `packages/minspec/src`. (FR-6)
 - [ ] The README has the new section; its existing network sentences are unchanged.
       (FR-12)
+- [ ] Each catch site Plan keeps under FR-4 records through the error log, and
+      `error-capture-wiring.test.ts` lists them. (FR-4)
+- [ ] A modal error dialog with its own buttons looks and returns exactly as before, and
+      its error is still recorded. (FR-3, INV-2)
+- [ ] With no records the page says so in words; the command's tooltip shows its
+      keybinding; Clear empties the page at once. (FR-8)
+- [ ] A recorded error appears in the `MinSpec` log channel. (FR-11)
+- [ ] An HTML-shaped error message renders as text, not markup. (FR-10)
+- [ ] A record longer than the continuation cap shows the bytes-left-out line; a forced
+      encoder failure shows the could-not-be-drawn text. (FR-9)
+- [ ] One frame from a packaged, non-dirty build is mapped to its source file and line by
+      the FR-13 procedure. (FR-13)
 
 ## Invariants (must not break)
 
@@ -296,8 +382,8 @@ in one scan and one tap, with nothing retyped.
   the same toast, returns the same value. A failure inside the error log itself MUST NOT
   mask the original error: if recording throws, the original error still propagates.
 - **INV-3 - Blast radius (constitution invariant 3, DR-074).** No process-wide handler
-  (FR-6). No file written by MinSpec outside the project under the recommended DQ-3. No
-  setting written.
+  (FR-6). Under the recommended DQ-3 MinSpec opens no file at all; the only thing written
+  to disk is VS Code's own persistence of the log channel. No setting written.
 - **INV-4 - No nagging (constitution principles 2 and 4).** No new toast, modal or status
   bar item appears because an error was recorded. The only additions are one button on
   toasts that already appear, and a page the user opens.
@@ -309,7 +395,7 @@ in one scan and one tap, with nothing retyped.
 Each decision carries a recommendation and its cost. The requirements above assume the
 recommended option in every case.
 
-DQ-1 to DQ-5 each carry a **Recorded selection** line naming the option this document
+DQ-1 to DQ-6 each carry a **Recorded selection** line naming the option this document
 recommends. An agent session wrote those lines on 2026-10-15, and no human chose them.
 This repository runs with `"autonomy": "act"`, under which an agent proceeds on a stated
 recommendation and leaves the options it did not take on record (DR-086 §2 and §4).
@@ -352,15 +438,20 @@ approval: the lines propose, and approving this spec ratifies them. A question w
 
 **Recorded selection: Option A.**
 
-- **Option A - memory and the log channel only (rec).** No MinSpec file write anywhere.
-  *Cost:* reloading the window empties the Diagnostics page. The text is still in VS
-  Code's own log folder for that session (VS Code's behaviour, unverified here), but on
-  the work PC that folder cannot be carried off, so a fault must be scanned before
-  reloading.
-- **Option B - also a JSON-lines file in the extension's global storage.** *Cost:* a
-  MinSpec write outside the project. On Linux that folder is under `~/.config/`, which
-  constitution invariant 3 names as out of bounds for a per-project write. It also needs
-  rotation, a size cap and a clear rule.
+The dividing line is a file MinSpec opens itself against a file VS Code manages. Both
+options put text on disk somewhere under the user's profile: VS Code persists a
+`LogOutputChannel` to its own session log folder (on Linux under `~/.config/Code/logs/`;
+VS Code's behaviour, unverified here). Neither is "machine-wide config" in constitution
+invariant 3's sense, because both are VS Code-managed, per-extension storage that
+changes no other tool's behaviour.
+
+- **Option A - memory and the log channel only (rec).** MinSpec opens no file. *Cost:*
+  reloading the window empties the Diagnostics page. The text is still in VS Code's log
+  folder for that session, but on the work PC that folder cannot be carried off, so a
+  fault must be scanned before reloading.
+- **Option B - also a JSON-lines file in `context.globalStorageUri`.** *Cost:* a file
+  MinSpec opens, rotates and sizes itself, with its own cap, its own corruption handling
+  and its own clear rule, and redacted error text that outlives the session it came from.
 
 ### DQ-4 - May the page open the issue in this machine's browser too?
 
@@ -386,16 +477,37 @@ approval: the lines propose, and approving this spec ratifies them. A question w
   ruled out: it pulls in `pngjs`, `yargs` and `dijkstrajs`. Plan picks one, reads its
   source and records why. *Cost:* a fourth runtime dependency, the first added since
   `simple-git`, with the supply-chain exposure #659 describes. It is bundled by esbuild,
-  so nothing is fetched at runtime.
+  so nothing is fetched at runtime. `invariants.test.ts` scans `packages/minspec/src/`
+  only (`:290-306`), so a network call inside the dependency would pass INV-1 unseen;
+  Plan MUST add a test that scans the chosen dependency's shipped source, or the built
+  bundle, for the same `NETWORK_PATTERNS`.
 - **Option B - write an encoder in the repository (byte mode, one error-correction level,
   versions 1 to 40, about 400 to 600 lines).** *Cost:* an encoder bug makes codes that
   will not scan, or scan as wrong text, and the tests need a reference decoder to prove
   otherwise.
 
+### DQ-6 - How is a minified frame mapped back to source?
+
+**Recorded selection: Option A.**
+
+- **Option A - rebuild the map from the commit (rec).** A developer-side step checks out
+  the record's build commit, runs the same build with `--sourcemap` added, and maps the
+  frames. Plan MUST prove that adding `--sourcemap` changes nothing in `out/extension.js`
+  except the trailing map comment, so the map matches the shipped bundle. *Cost:* the
+  rebuild must use the same esbuild version and lockfile as the original build, so a
+  dependency bump between the build and the mapping silently breaks it unless the step
+  compares the rebuilt bundle with the shipped one (Plan adds that comparison; a mismatch
+  is reported, never mapped).
+- **Option B - keep the `.map` of every published build** as a release artifact.
+  *Cost:* a new retained artifact per release, touching the release path that #2591
+  (release workflow) is still settling.
+- **Option C - ship unminified.** *Cost:* a larger package, and every shipped build
+  changes for a debugging convenience.
+
 ## Why no new DR
 
-Under the recommended options the extension adds no network action, writes no file
-outside VS Code's own log channel, and adds one bundled dependency. The change can be
+Under the recommended options the extension adds no network action, opens no file of its
+own (VS Code persists the log channel), and adds one bundled dependency. The change can be
 undone in under a day, so the reversibility filter does not require a decision record. A
 record becomes necessary if DQ-1 resolves to Option B; the spec must not go to Plan on
 that option without one.
@@ -406,6 +518,9 @@ that option without one.
   [#2718](https://github.com/AIClarityAU/minspec/issues/2718).
 - **Errors from other extensions, VS Code itself, or the `gh`/`git`/`claude` tools' own
   output** beyond what MinSpec reports as its own error.
+- **Errors in watcher, tree-provider and CodeLens callbacks** that never reach an error
+  toast or a reported catch (FR-2). A later spec can widen capture once this one shows
+  what the common faults are.
 - **Rewording existing error messages** to say more (#2577 does this for the AI pass).
 - **A Windows CI job** (#2405) and confirming the Windows fixes (#2585).
 - **Usage analytics or any count of how often features are used.** This records failures
@@ -434,6 +549,10 @@ Recorded because this spec was written without a live conversation (DR-086 §4).
     Shown red on current code.
   - `error-redact.test.ts`: each redaction rule, including Windows paths and multi-root.
   - `diagnostics-panel.test.ts`: the CSP string, no external link, no `openExternal`.
+    HTML escaping of record text.
+  - A network-pattern scan of the chosen QR dependency's shipped source (DQ-5).
+  - The modal-dialog case: a modal `showErrorMessage` with its own items is recorded and
+    its buttons and return value are unchanged (FR-3, INV-2).
 - **T1:** `error-log.test.ts` for the record shape, the 50-record cap, de-duplication,
   non-`Error` values, rethrow-unchanged, and the INV-2 rule that a failing logger never
   masks the original error. `issue-link.ts` round-trip: continuation parts reassemble the
@@ -441,7 +560,8 @@ Recorded because this spec was written without a live conversation (DR-086 §4).
 - **T2:** an activation failure shows on the page (FR-5); the Diagnostics toast button
   opens it (FR-3).
 - **Manual, recorded in Plan:** the phone-scan measurement that sets the byte budget
-  (FR-9).
+  (FR-9); the GitHub mobile app check (FR-9); one frame from a packaged build mapped
+  through the FR-13 procedure.
 
 ## Traceability
 
