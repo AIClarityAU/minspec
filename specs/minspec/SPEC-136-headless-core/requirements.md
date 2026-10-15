@@ -1,7 +1,7 @@
 ---
 id: SPEC-136
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the checks are the methodology; this makes them reachable where no editor runs
@@ -23,8 +23,8 @@ implements: [packages/core/src/operations.ts, packages/core/src/cli.ts, packages
 affects: [packages/minspec/src/lib/template-registry.ts, packages/minspec/src/lib/scaffold.ts, package.json]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
