@@ -317,10 +317,10 @@ describe('#2597 review-branch.sh — per-voter usage line', () => {
 
   it('emits one usage line with the numeric fields and the model id', () => {
     const { stderr } = runWithStub({ stdout: REPLY });
-    const lines = stderr.split('\n').filter((l) => l.includes('usage model='));
+    const lines = stderr.split('\n').filter((l) => l.includes('review-branch.sh: usage '));
     expect(lines).toHaveLength(1);
     expect(lines[0]).toBe(
-      'review-branch.sh: usage model=claude-opus-4-1 in=11 cache_write=2222 ' +
+      'review-branch.sh: usage tier=subscription model=claude-opus-4-1 in=11 cache_write=2222 ' +
         'cache_read=33333 out=444 cost_usd=0.1234 turns=3 duration_ms=4567',
     );
   });
@@ -341,5 +341,34 @@ describe('#2597 review-branch.sh — per-voter usage line', () => {
     expect(stderr).not.toContain(MARKER);
     expect(stderr).toContain('model=unknown');
     expect(stderr).toContain('cost_usd=0 ');
+  });
+
+  it('ends the line, so a later stderr message on the quota path cannot glue onto it', () => {
+    // A finished envelope with no usable verdict plus a limit notice: the script logs
+    // the outage AFTER run_reviewer, which is where a missing newline used to splice
+    // `duration_ms=4567review-branch.sh: ...` into one unparseable line.
+    const { stdout, stderr } = runWithStub({
+      stdout: JSON.stringify({ ...JSON.parse(REPLY), structured_output: undefined }),
+      stderr: 'Claude AI usage limit reached.',
+      code: 1,
+    });
+    expect(stdout).toContain('REVIEW_UNAVAILABLE_BEGIN');
+    const lines = stderr.split('\n').filter((l) => l.includes('usage '));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const l of lines) expect(l).toMatch(/ duration_ms=\d+$/);
+  });
+
+  it('records which credential path produced the run', () => {
+    const { stderr } = runWithStub({ stdout: REPLY });
+    expect(stderr).toContain('review-branch.sh: usage tier=subscription model=');
+  });
+
+  it('lists every model a run used, not only the first', () => {
+    const multi = JSON.stringify({
+      ...JSON.parse(REPLY),
+      modelUsage: { 'claude-opus-4-1': {}, 'claude-haiku-4-5': {} },
+    });
+    const { stderr } = runWithStub({ stdout: multi });
+    expect(stderr).toContain('model=claude-opus-4-1+claude-haiku-4-5 ');
   });
 });
