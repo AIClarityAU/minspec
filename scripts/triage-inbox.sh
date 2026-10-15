@@ -332,7 +332,7 @@ CONTENT
   # Runs GLM (z.ai) on the SAME prompt and pushes its output through the SAME gate
   # binary, purely to record whether the two agree. It runs LAST, after every label
   # and the verdict record are already applied, so nothing above can wait on a
-  # third-party endpoint. INERT until MINSPEC_SHADOW_TRIAGE_KEY is set.
+  # third-party endpoint. INERT until MINSPEC_ZAI_API_KEY is set.
   #
   # The call site is the shadow-only guarantee, and it is three properties, not a
   # promise: stdout is discarded (so no verdict can be captured), the exit status is
