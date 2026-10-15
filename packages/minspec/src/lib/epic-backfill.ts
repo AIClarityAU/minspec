@@ -853,9 +853,18 @@ function runSealedClaude(
     // Still fails closed rather than asserting it, so a future `stdio` change
     // reports plainly instead of throwing past `classifyExecFailure`.
     if (child.stdin === null) {
+      child.kill();
       reject(Object.assign(new Error('could not open stdin to carry the prompt to `claude`'), { code: 'ENOSTDIN' }));
       return;
     }
+    // A `claude` that exits before draining stdin (an older CLI rejecting `--tools`
+    // during argument parsing, a managed-MCP refusal, a crash) breaks the pipe under
+    // the write, and Node raises that EPIPE as `error` on the stream. Unhandled it is
+    // an uncaught exception that takes the extension host down and breaks this
+    // function's "never throws" contract. The exit itself still reaches the callback
+    // above with its real code and stderr, which is what `classifyExecFailure` reads,
+    // so the broken pipe is swallowed here rather than reported as the failure.
+    child.stdin.on('error', () => {});
     child.stdin.end(withoutAtSigns(prompt));
   });
 }

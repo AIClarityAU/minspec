@@ -31,11 +31,11 @@ const mockExecFile = execFile as unknown as ReturnType<typeof vi.fn>;
  * object — and hand back a fake `ChildProcess` so the production code's
  * `child.stdin.end(prompt)` (#2575) has something to call.
  */
-function invoke(opts: unknown, cb: unknown, err: Error | null, stdout: string): { stdin: { end: () => void } } {
+function invoke(opts: unknown, cb: unknown, err: Error | null, stdout: string): { stdin: { end: () => void; on: () => void } } {
   const callback = (typeof opts === 'function' ? opts : cb) as (e: Error | null, out?: string, errOut?: string) => void;
   if (err) callback(err, '', '');
   else callback(null, stdout, '');
-  return { stdin: { end: () => {} } };
+  return { stdin: { end: () => {}, on: () => {} } };
 }
 
 /** True for the availability probe call (`claude --version`). */

@@ -34,7 +34,7 @@ vi.mock('child_process', () => ({
   execFile: vi.fn((_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
     if (typeof _opts === 'function') cb = _opts as Function;
     if (cb) cb(null, '', '');
-    return { stdin: { end: () => {} } };
+    return { stdin: { end: () => {}, on: () => {} } };
   }),
 }));
 
@@ -92,7 +92,7 @@ function mockExecSuccess(stdout: string): void {
     (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
       if (typeof _opts === 'function') cb = _opts as Function;
       if (cb) cb(null, stdout, '');
-      return { stdin: { end: () => {} } };
+      return { stdin: { end: () => {}, on: () => {} } };
     },
   );
 }
@@ -103,7 +103,7 @@ function mockExecFailure(msg = 'Command failed'): void {
     (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
       if (typeof _opts === 'function') cb = _opts as Function;
       if (cb) cb(new Error(msg), '', msg);
-      return { stdin: { end: () => {} } };
+      return { stdin: { end: () => {}, on: () => {} } };
     },
   );
 }
@@ -438,7 +438,7 @@ describe('proposeAI() — buildPrompt with registered epics', () => {
       (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
         if (typeof _opts === 'function') cb = _opts as Function;
         if (cb) cb(null, '', '');
-        return { stdin: { end: (data?: string) => { capturedPrompt = data ?? ''; } } };
+        return { stdin: { end: (data?: string) => { capturedPrompt = data ?? ''; }, on: () => {} } };
       },
     );
 

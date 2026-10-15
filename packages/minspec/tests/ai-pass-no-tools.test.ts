@@ -92,7 +92,7 @@ interface StartOptions {
 
 /** A fake `ChildProcess`: just enough to receive the prompt the way the real one does. */
 interface FakeChild {
-  readonly stdin: { end(data?: string): void };
+  readonly stdin: { end(data?: string): void; on(event: string, listener: (e: Error) => void): unknown };
 }
 
 /** One prompt-carrying start of `claude`, with the state of its directory AT CALL TIME. */
@@ -158,7 +158,7 @@ function installClaude(reply: Reply): Start[] {
       if (err) callback(err, '', (err as unknown as { stderr?: string }).stderr ?? '');
       else callback(null, stdout, '');
     });
-    return { stdin: { end: (data?: string) => { stdinData = data; } } };
+    return { stdin: { end: (data?: string) => { stdinData = data; }, on: () => undefined } };
   });
   return starts;
 }
@@ -500,6 +500,39 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       expect(starts).toHaveLength(1);
       expect(starts[0].cwdExistedAtCall).toBe(true);
       expect(fs.existsSync(starts[0].options.cwd as string)).toBe(false);
+    });
+
+    it('T3: a claude that exits without reading stdin is a handled failure, not an uncaught EPIPE (#2575)', async () => {
+      // Writing the prompt to a child that has already exited emits `error` (EPIPE) on
+      // its stdin. With no listener Node raises it as an uncaught exception, which
+      // would crash the extension host and break proposeAI's "never throws" contract.
+      const { EventEmitter } = await import('events');
+      const uncaught: Error[] = [];
+      const onUncaught = (e: Error): void => { uncaught.push(e); };
+      process.on('uncaughtException', onUncaught);
+      try {
+        mockExecFile.mockImplementation((_cmd: string, args: string[], opts: unknown, cb: unknown) => {
+          const callback = (typeof opts === 'function' ? opts : cb) as ExecCallback;
+          if (args.includes('--version')) { callback(null, '2.1.283 (Claude Code)\n', ''); return undefined; }
+          const stdin = new EventEmitter() as EventEmitter & { end(data?: string): void };
+          stdin.end = () => {
+            // The pipe breaks after the write, then the process reports its early exit.
+            setImmediate(() => {
+              stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE', syscall: 'write' }));
+              callback(exitCode1("error: unknown option '--tools'\n"), '', "error: unknown option '--tools'\n");
+            });
+          };
+          return { stdin };
+        });
+
+        const result = await proposeAI(project);
+        await new Promise(r => setImmediate(r));
+
+        expect(uncaught).toEqual([]);
+        expect(result.failure).toBeDefined();
+      } finally {
+        process.off('uncaughtException', onUncaught);
+      }
     });
 
     it('T3: after a cancel - there while the call runs, gone once it is cancelled', async () => {

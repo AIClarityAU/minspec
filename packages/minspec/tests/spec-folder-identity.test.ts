@@ -38,11 +38,11 @@ const mockExecFile = execFile as unknown as ReturnType<typeof vi.fn>;
  * object — and hand back a fake `ChildProcess` so the production code's
  * `child.stdin.end(prompt)` (#2575) has something to call.
  */
-function invoke(opts: unknown, cb: unknown, err: Error | null, stdout: string): { stdin: { end: () => void } } {
+function invoke(opts: unknown, cb: unknown, err: Error | null, stdout: string): { stdin: { end: () => void; on: () => void } } {
   const callback = (typeof opts === 'function' ? opts : cb) as (e: Error | null, out?: string, errOut?: string) => void;
   if (err) callback(err, '', '');
   else callback(null, stdout, '');
-  return { stdin: { end: () => {} } };
+  return { stdin: { end: () => {}, on: () => {} } };
 }
 const isVersion = (args: unknown): boolean => Array.isArray(args) && args.includes('--version');
 
@@ -186,7 +186,7 @@ describe('#1573 — a split-layout spec is one artifact', () => {
       if (isVersion(args)) return invoke(opts, cb, null, 'claude 2.1.0\n');
       const callback = (typeof opts === 'function' ? opts : cb) as (e: Error | null, out?: string, errOut?: string) => void;
       callback(null, '{"epics":[],"mappings":[]}', '');
-      return { stdin: { end: (data?: string) => { prompt = data ?? ''; } } };
+      return { stdin: { end: (data?: string) => { prompt = data ?? ''; }, on: () => {} } };
     });
 
     await proposeAI(tmp);
