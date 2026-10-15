@@ -692,7 +692,9 @@ function withoutAtSigns(text: string): string {
  *
  * A `claude` that does not know one of these switches exits at once, and that
  * is reported (`claude-incompatible`). It is never tried again without them.
- * Exported with `aiPassEnv` so that the call can be reproduced by hand exactly.
+ * Exported with `aiPassEnv` so that the call can be reproduced by hand: these
+ * arguments and that environment, with the prompt piped to the command's stdin.
+ * A start that omits the stdin write runs `claude -p` with no prompt at all.
  */
 export function aiPassArgs(): string[] {
   return [
