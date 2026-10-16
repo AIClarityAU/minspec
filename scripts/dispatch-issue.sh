@@ -927,6 +927,9 @@ fi
 # authority). Kill-switch MINSPEC_CLAIM_OFF=1 restores the pre-SPEC-044 marker flip.
 BRANCH="agent/issue-${ISSUE}"
 export MINSPEC_LEASE_REPO="$REPO"
+# #2817: marks every agent this dispatch launches, so its session-start hook does
+# not start a nested drain (default settings) once the parent's singleton lock is free.
+export MINSPEC_DRAIN_AGENT=1
 export MINSPEC_LEASE_WORKTREE_BASE="$WORKTREE_BASE"   # keep the lib's claim-unique path under this dispatcher's base
 if [[ "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
   # D11/FR-11 same-host flock — a real same-host CAS, auto-released on process death.
