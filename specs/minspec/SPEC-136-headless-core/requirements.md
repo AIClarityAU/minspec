@@ -1,7 +1,7 @@
 ---
 id: SPEC-136
 type: requirements
-status: planning
+status: specifying
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the checks are the methodology; this makes them reachable where no editor runs
@@ -348,6 +348,14 @@ would need the project files, which are in the VM.
 - **FR-12 - Not a user command.** The command line is for hooks, workflows and agents.
   No MinSpec document, prompt or shipped rule may tell a person to type it in place of a
   Command Palette entry (answered 2026-10-13).
+- **FR-26 - The tool server declares what each tool does to the project (added
+  2026-10-16, #2736 point 4).** The tool server MUST declare `validate`, `hash`, `status`
+  and `next` as read-only and not destructive, and MUST declare `activate`, which writes
+  git configuration (FR-6), as destructive. The declarations come from the same table as
+  the operations (FR-11), so a tool cannot be offered without one. A test MUST fail when
+  a listed tool has no declaration, or when a tool FR-6 lets write is declared read-only.
+  This is what lets an agent host that restricts a planning mode to read-only tools, such
+  as ZCode's `plan` mode, allow the four checks and still stop `activate`.
 
 ### D. Getting it into the VM and onto GitHub
 
@@ -504,6 +512,9 @@ key, no outside review for approvals in ZCode projects.
 - [ ] **Two ways, one set** - the command line and the tool server offer exactly the
       same operations. (FR-11)
 - [ ] **No port** - the tool server binds no socket. (FR-10, BND-2)
+- [ ] **Tools say what they do** - the tool server's list declares `validate`, `hash`,
+      `status` and `next` read-only and `activate` destructive, and no listed tool lacks
+      a declaration. (FR-26)
 - [ ] **Fails loudly** - a spec that cannot be read makes `validate` exit non-zero with
       the file named. (FR-9)
 - [ ] **Usable in the VM** - inside the VM, with nothing shared from the host, the core
