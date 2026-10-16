@@ -49,12 +49,12 @@ at all - warn-first, instead of only checking that the path exists.
   `registry.fileExists(path)` and nothing else. The line number is carried on the `Reference`
   (`line`) but **never read** by `resolve`: a citation of `approval.ts:228-235` passes as long
   as `approval.ts` exists, whatever is at line 228. That is the whole gap.
-- `reference-checker.ts:134,153` dedupes file references with the key `file:${path}`. A spec
+- `reference-checker.ts:148,154` dedupes file references with the key `file:${path}`. A spec
   that cites `approval.ts` five times at five lines yields **one** reference, the first. Any
   line-level check built on `extractReferences` as it stands would silently skip every
   citation after the first to the same file - the exact shape of check that reports clean while
   covering a fraction (the "success message is a claim" failure).
-- The path regexes (`FILE_HASH_RE`, `FILE_COLON_RE`, `reference-checker.ts:78-85`) require a
+- The path regexes (`FILE_HASH_RE`, `FILE_COLON_RE`, `reference-checker.ts:87-94`) require a
   slash-containing, extension-bearing path, so a bare `approval.ts:235` (no directory) is not
   recognised as a citation at all.
 
@@ -137,7 +137,7 @@ should exist at all.
 many citations were extracted, how many were *checkable* (path resolved and, for FR-3, a
 symbol paired), and how many were skipped and why. A pass that cannot run (unreadable corpus,
 unparsable file) says so as a warning that it validated nothing, and never reports green by
-catching and ignoring - the bare `catch {}` in Rule 9 (`validate-frontmatter.ts:439-441`) is
+catching and ignoring - the bare `catch {}` in Rule 9 (`validate-frontmatter.ts:443-445`) is
 exactly the shape this must **not** copy. A zero-extracted-citations result on a corpus known
 to contain citations is itself reported.
 
