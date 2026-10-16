@@ -1,7 +1,7 @@
 ---
 id: SPEC-136
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the checks are the methodology; this makes them reachable where no editor runs
