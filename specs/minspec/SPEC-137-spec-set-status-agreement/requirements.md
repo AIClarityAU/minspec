@@ -7,7 +7,7 @@ product: minspec
 epic: EPIC-003  # SDD Core Methodology - a cross-file agreement check on the spec-set is part of the methodology's validator
 aspects: [validator, status, signpost, spec-set, no-silent-gate]
 depends_on: [SPEC-001]
-relates_to: [SPEC-040, SPEC-041, SPEC-042, SPEC-043, SPEC-044, SPEC-046, DR-003, "#972", "#971", "#918"]
+relates_to: [SPEC-040, SPEC-041, SPEC-042, SPEC-043, SPEC-044, SPEC-046, DR-003, SPEC-059, "#277", "#972", "#971", "#918"]
 ---
 
 # SPEC-137: One status per spec-set - sibling docs must not lag requirements.md
@@ -45,9 +45,21 @@ design is also a lag by FR-2's ordering.
 
 **Mechanism:** status is hand-authored per file; only one file is written on approval.
 **Missing gate:** `spec-validator.ts` checks each file's frontmatter presence and validity
-(`status` is a required field per file, `spec-validator.ts:540`) but nothing asserts that two
-files that must agree do agree - the validator-asymmetry class (validates what exists, never
-that paired things match).
+(`status` is a required field per file, `spec-validator.ts:540`). One adjacent cross-file check
+already exists: `validateStatusMonotonicity` (#277, `spec-validator.ts:1467-1583`) asserts the
+parent requirements status is >= its design/tasks children, using the same `LIFECYCLE_RANK`
+order as FR-2. It does NOT cover this defect, for two measurable reasons:
+
+- **Different input.** #277 compares DERIVED status (`deriveStatus`, `spec-validator.ts:1478-1479`
+  comment: "never the literal `status:` line"), deliberately so a stale mirror cannot produce a
+  false warning. This defect IS the stale literal: a reader opening `design.md` sees the
+  literal line, and derived status is blind to it.
+- **Opposite direction.** #277 flags parent BEHIND child. SPEC-137 flags sibling BEHIND parent
+  (the shape every approval creates). The two are mirror images and do not overlap.
+
+SPEC-059 (`status.mirror-drift`, literal vs derived status for ONE file) is also adjacent; it
+checks a single file against its own derivation, not one file against its siblings. The Plan
+phase must confirm no overlap by reading both rules, not by assumption.
 
 ## Functional requirements
 
@@ -68,7 +80,10 @@ that paired things match).
   and after, not by assumption.
 - **FR-5 Same lens everywhere.** The check lives in the one validator module that both the
   extension's validate command and the headless/CI path import, so no consumer sees a different
-  answer.
+  answer. It is a separate rule from #277's `status.cross-artifact.regression`, named for what
+  it reads: it compares LITERAL `status:` lines (the signpost), where #277 compares derived
+  status. The rule's doc comment must state this split so the two models of "status" are
+  never conflated.
 
 ## Acceptance criteria
 
@@ -111,10 +126,16 @@ Recommendation is A now; B can follow as its own spec once the audit exists.
 the issue concerns lag. Cost: a skewed set going the other way passes. Option B: require exact
 equality. Cost: any phase where a sibling is genuinely drafted ahead warns.
 
-**DQ-3 Severity.** Option A (rec): error, because the defect is a false signpost and the
-backfill (FR-4) lands with the rule. Cost: any in-flight branch whose set lags fails until it
-bumps the sibling. Option B: warning first, error later. Cost: the soft gate can be ignored,
-which is the failure the issue describes.
+**DQ-3 Severity.** The sibling #277 check is deliberately a WARNING because a transient
+mid-authoring lag is legitimate. The case here is likewise normal mid-authoring: approving
+`requirements.md` writes only that file, so the lag appears at every approval until the
+siblings are bumped, and an error would red-gate that branch.
+- Option A (rec): warning, matching #277, with FR-4's backfill so `main` starts clean. Cost:
+  a warning can be ignored, which is the failure the issue describes; mitigated by the
+  backfill leaving zero standing warnings, so any new one is visible signal. Escalation to
+  error is a follow-up once the approve command bumps siblings automatically (Out of scope).
+- Option B: error now. Cost: every approval, and any in-flight branch whose set lags, fails
+  until the sibling is hand-bumped.
 
 ## Out of scope
 
