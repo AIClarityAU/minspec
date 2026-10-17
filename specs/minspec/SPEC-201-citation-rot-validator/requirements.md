@@ -28,9 +28,11 @@ phases:
 Materializes **[#1252](https://github.com/AIClarityAU/minspec/issues/1252)** - *"validate
 file:line citations in specs/DRs - four artifacts cite rotted line numbers."*
 
-**Id note.** Highest spec id found on `origin/main` plus every local ref when written was
-number 200, so this is `SPEC-201`. Open pull requests are invisible from this checkout; if the
-id collides at review time, renumber (`scripts/spec-id-collision.ts` reports the next free one).
+**Id note.** The highest spec directory on this checkout is `SPEC-136`; `SPEC-201` was chosen
+as a deliberately high id and is not derived from a measured maximum. Open pull requests are
+invisible from this checkout, and no spec-id collision script exists (only
+`scripts/check-dr-id-collision.ts`, DR-only), so the id is unchecked against in-flight work. If it
+collides or a lower id is preferred, renumber at the approval gate.
 
 ## One-Sentence Scope
 
@@ -45,7 +47,7 @@ at all - warn-first, instead of only checking that the path exists.
 
 - `scripts/validate-frontmatter.ts:415-441` (Rule 9, non-fatal, #161) runs
   `checkReferences` over every spec and DR and **warns** per violation.
-- `packages/minspec/src/lib/reference-checker.ts:176-186` resolves a `file` reference with
+- `packages/minspec/src/lib/reference-checker.ts:181-189` resolves a `file` reference with
   `registry.fileExists(path)` and nothing else. The line number is carried on the `Reference`
   (`line`) but **never read** by `resolve`: a citation of `approval.ts:228-235` passes as long
   as `approval.ts` exists, whatever is at line 228. That is the whole gap.
@@ -120,7 +122,7 @@ dead-path and dead-symbol move together. No new resolution logic.
 
 **FR-7 - Warn-first ratchet.** Severity is a config dial, `citationRot: 'warn' | 'error'`,
 absent => `warn`, mirroring `ownershipDeclaration` / `implementEvidence`
-(`packages/minspec/src/lib/config.ts:46-68`). FR-3 is `warn` under both settings. The flip to
+(`packages/minspec/src/lib/config.ts:46-69`). FR-3 is `warn` under both settings. The flip to
 `error` is a separate, later change gated on the corpus being clean (FR-9); this spec ships the
 dial at `warn`.
 
