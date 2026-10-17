@@ -104,7 +104,7 @@ async function pickSpec(
  * unset/blank, preserving the pre-DR-056 behaviour for repos whose git identity is
  * already the human's. Tier-0/offline: `gitConfigEmail` reads local git config only.
  */
-function resolveApproverEmail(rootDir: string): string {
+export function resolveApproverEmail(rootDir: string): string {
   const configured = (
     vscode.workspace.getConfiguration('minspec').get<string>('approverEmail') ?? ''
   ).trim();
@@ -124,7 +124,7 @@ const ALWAYS = 'Always';
  * asked for; what changed in #1319 is what MinSpec itself WRITES (see
  * {@link enableAdvancePhaseOnApprove}).
  */
-function advancePhaseOnApproveEnabled(rootDir: string): boolean {
+export function advancePhaseOnApproveEnabled(rootDir: string): boolean {
   const setting = vscode.workspace
     .getConfiguration('minspec')
     .get<boolean>('advancePhaseOnApprove', false);
