@@ -786,4 +786,44 @@ When one of the four ai-review voters dies on a session limit, the panel fails c
 <!-- dr-summary:DR-098 auto=88bcb5af582d -->
 MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull request carrying the docs-lane label, but never created the label, and gh pr create refuses to open a pull request naming a label the repository lacks. So where the label was missing, every approval fell to a manual Open PR step and a manual merge (#2243). Creating the label is a new kind of forge write, and it narrows a statement MinSpec ships to every adopter.
 <!-- /dr-summary:DR-098 -->
+
+## [DR-099 — Code-quality checks in the pre-commit harness split by class - correctness checks block and ship in v1, metric checks warn by default and are deferred to v2](DR-099.md)
+
+*Status: accepted · Date: 2026-10-01*
+
+<!-- dr-summary:DR-099 auto=893eb78b4e47 -->
+#1555 asks for a code-quality stage in the scaffolded pre-commit gate, and this record sets its rule by class. Correctness checks (shellcheck, actionlint, the TypeScript typecheck) block: three new ways for a commit to be refused, argued here against the advisory default earlier records state, and SPEC-080 ships them in v1. Metric checks (duplication, complexity, circular dependencies, dead code) warn by default until a project opts one into blocking, and are deferred to a v2 tracked as #2463.
+<!-- /dr-summary:DR-099 -->
+
+## [DR-100 — Publish MinSpec to the VS Code Marketplace as an early preview - a bounded exception to the phase order, for one stated reason and behind stated preconditions](DR-100.md)
+
+*Status: accepted · Date: 2026-10-01*
+
+<!-- dr-summary:DR-100 auto=2c0bfd94dcb0 -->
+The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, and asked on 2026-10-01 for the extension to be published just before the visualiser work, about a week out. The constitution puts a Marketplace publish in Phase 2 and says Phase 2 work may not displace unfinished Phase 1 work, so publishing now needs a recorded exception, with its scope and preconditions stated.
+<!-- /dr-summary:DR-100 -->
+
+## [DR-103 — New MinSpec versions reach the Marketplace through a release workflow that holds no stored credential - automatic to the pre-release channel, the founder's approval for everyone else](DR-103.md)
+
+*Status: accepted · Date: 2026-10-07*
+
+<!-- dr-summary:DR-103 auto=46c85ea2201e -->
+The founder asked on 2026-10-05 for the published MinSpec version to be kept current, and on 2026-10-07 offered to give agents the Marketplace token. This record decides how new versions reach the VS Code Marketplace from now on: through a release workflow that signs in with no stored credential, publishes to the pre-release channel by itself, and needs the founder's approval before it publishes to everyone.
+<!-- /dr-summary:DR-103 -->
+
+## [DR-104 — An ai-review pass is carried across a push that changes nothing the voters are given - the whole-panel reuse DR-097 recorded as refused, now taken on a larger measurement](DR-104.md)
+
+*Status: accepted · Date: 2026-10-09*
+
+<!-- dr-summary:DR-104 auto=554666865cf7 -->
+main requires a pull request to be up to date before it merges, and the staleness guard (#359) voids ai-review:pass on any push. An update from main is a push, so the whole four-voter panel re-runs on a change it has already passed (#1688). This record decides that a pass is carried across a push when the text the voters would be given is byte-identical and the reviewer is unchanged, and it records what that costs: on a carried commit…
+<!-- /dr-summary:DR-104 -->
+
+## [DR-105 — An agent's environment is built from a list of names, and an issue reaches one only when listed accounts wrote all of it - the trust boundary for dispatch under scripts/](DR-105.md)
+
+*Status: accepted · Date: 2026-10-10*
+
+<!-- dr-summary:DR-105 auto=7c01ad0c26da -->
+scripts/ holds the dev-time automation that starts headless agents: issue dispatch, triage, the review scripts, pull request remediation and the tooling radar. DR-008 (dispatch security) decided, for that automation, that credentials are kept out of the agent's reach, and that unattended runs are for issues whose text is trusted. Neither was held by code. This record decides how far each is now held, and names what is not.
+<!-- /dr-summary:DR-105 -->
 <!-- minspec:dr-index:end -->

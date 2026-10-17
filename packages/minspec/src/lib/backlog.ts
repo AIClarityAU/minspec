@@ -181,9 +181,118 @@ interface GhIssueJson {
   updatedAt: string;
 }
 
+/*
+ * Patterns for describeGhFailure(), matched against lower-cased text.
+ *
+ * Each entry is a PHRASE `gh` (or the Go runtime under it) prints for that
+ * condition, or an errno token — never an ordinary word (#2459). A failure's
+ * text routinely names things the user chose: `Could not resolve to a
+ * Repository with the name 'acme/auth-service'` is a missing repository, yet
+ * the bare substring `auth` filed it under "run `gh auth login`", a bare `403`
+ * filed an organisation's SAML wall under "rate limit exceeded", and bare
+ * `timeout` / `network` did the same for repositories so named. Advice to fix
+ * something that is not broken is worse than no advice, so a wording these
+ * lists do not know falls through to the generic arm, which shows gh's own
+ * text. HTTP statuses are matched as `HTTP 401`, not as digits, so issue
+ * number 1401 is not a status.
+ */
+const GH_NOT_INSTALLED = [/command not found/, /not recognized as an internal/];
+
+/**
+ * Signed out, or holding a token GitHub rejects. `gh auth login` is the advice
+ * gh itself prints in every signed-out message this repo has captured; a
+ * permission problem (SAML, a missing scope) prints `gh auth refresh` or
+ * nothing, and is deliberately not matched — signing in again does not fix it.
+ */
+const GH_SIGNED_OUT = [
+  /\bgh auth login\b/,
+  /\bnot logged in/,
+  /\bhttp 401\b/,
+  /\bbad credentials\b/,
+  /\bauthentication (?:required|failed)\b/,
+];
+
+/** Primary and secondary limits both say "rate limit"; a 403 alone does not. */
+const GH_RATE_LIMITED = [/\brate limit/];
+
+const GH_TIMED_OUT = [
+  /\btimed out\b/,
+  /\bi\/o timeout\b/,
+  /\btimeout exceeded\b/,
+  /\bdeadline exceeded\b/,
+  /\betimedout\b/,
+];
+
+const GH_NETWORK_DOWN = [
+  /\benotfound\b/,
+  /\beconnrefused\b/,
+  /\bgetaddrinfo\b/,
+  /\bnetwork is unreachable\b/,
+];
+
+function matchesAny(text: string, patterns: readonly RegExp[]): boolean {
+  return patterns.some(pattern => pattern.test(text));
+}
+
+/**
+ * Classify a `gh` CLI failure into a short, human-readable reason.
+ *
+ * fetchIssues() used to swallow every failure here — not installed, logged
+ * out, offline, rate-limited, a timeout, even malformed JSON — into the SAME
+ * empty array used for "zero open issues" (#2247). Every caller then rendered
+ * something like "No open issues found": an unreadable source read as a
+ * meaningful empty one, the absent-witness-read-as-meaningful shape the
+ * constitution's invariant 2 warns against for gates, and just as misleading
+ * here even though this isn't a merge gate. Classifying and re-throwing lets
+ * callers show "unavailable (reason)" instead of a false zero.
+ *
+ * The reason is chosen from gh's text by the pattern lists above; see the
+ * note on them for why each entry is a phrase rather than a word (#2459).
+ */
+function describeGhFailure(err: unknown): string {
+  if (err instanceof SyntaxError) {
+    return 'gh returned output that could not be parsed as JSON';
+  }
+
+  const message = err instanceof Error ? err.message : String(err);
+  const code = (err as { code?: string | number } | undefined)?.code;
+  const killed = (err as { killed?: boolean } | undefined)?.killed;
+  const stderr = (err as { stderr?: unknown } | undefined)?.stderr;
+
+  // Classify on what gh SAID. execFile's message is "Command failed: <the full
+  // command line>\n<stderr>", so it also carries every argument the caller
+  // passed — a `--label` would otherwise be matched as if gh had printed it.
+  // The message is the fallback for errors with no stderr (a spawn failure).
+  const said = typeof stderr === 'string' && stderr.trim() !== '' ? stderr : message;
+  const lower = said.toLowerCase();
+
+  if (code === 'ENOENT' || matchesAny(lower, GH_NOT_INSTALLED)) {
+    return 'GitHub CLI (gh) is not installed';
+  }
+  if (matchesAny(lower, GH_SIGNED_OUT)) {
+    return 'GitHub CLI (gh) is not authenticated — run `gh auth login`';
+  }
+  if (matchesAny(lower, GH_RATE_LIMITED)) {
+    return 'GitHub API rate limit exceeded — try again later';
+  }
+  if (killed || matchesAny(lower, GH_TIMED_OUT)) {
+    return 'gh command timed out — check network connectivity';
+  }
+  if (matchesAny(lower, GH_NETWORK_DOWN)) {
+    return 'network unreachable — check internet connectivity';
+  }
+  return `gh issue list failed: ${message}`;
+}
+
 /**
  * Fetch issues from GitHub using `gh` CLI.
  * Filters to open issues by default.
+ *
+ * Rejects (never resolves with `[]`) when `gh` fails for any reason — not
+ * installed, logged out, offline, rate-limited, timed out, or unparsable
+ * output — so callers can distinguish "couldn't check" from "checked, found
+ * none" (#2247). The rejection's message is a short, user-facing reason from
+ * {@link describeGhFailure}.
  */
 export async function fetchIssues(
   rootDir: string,
@@ -216,8 +325,8 @@ export async function fetchIssues(
 
     const issues: GhIssueJson[] = JSON.parse(stdout);
     return issues.map(mapGhIssue);
-  } catch {
-    return [];
+  } catch (err) {
+    throw new Error(describeGhFailure(err));
   }
 }
 

@@ -15,7 +15,7 @@ import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 
 // #1099 — this suite drives real `git` child processes per assertion (setupRepo +
 // runPushDocs both shell out). Under container scheduling contention a single `git`
@@ -115,6 +115,31 @@ function runPushDocs(primary: string, root: string, args: string[]): string {
   return out;
 }
 
+/**
+ * Same as {@link runPushDocs}, but also captures stderr on BOTH success and failure — the
+ * #2158 governance-transition warning is printed there (constitution invariant 2: a
+ * refusal must be visible, and stderr is where `push-docs.sh` already puts every other
+ * loud refusal in this file). `execFileSync` only hands back stderr on a non-zero exit,
+ * which is wrong here: the script exits 0 on this path (it still opens the PR, just
+ * un-labelled) — `spawnSync` returns both streams regardless of exit code.
+ */
+function runPushDocsCaptureAll(
+  primary: string,
+  root: string,
+  args: string[],
+): { status: number; stdout: string; stderr: string } {
+  const binDir = path.join(root, 'bin');
+  const callsLog = path.join(root, 'gh-calls.log');
+  fs.writeFileSync(callsLog, '');
+  installFakeGh(binDir, callsLog);
+  const res = spawnSync('bash', [PUSH_DOCS_SH, ...args], {
+    cwd: primary,
+    encoding: 'utf-8',
+    env: { ...process.env, ...GIT_ENV, PATH: `${binDir}:${process.env.PATH}` },
+  });
+  return { status: res.status ?? 1, stdout: res.stdout ?? '', stderr: res.stderr ?? '' };
+}
+
 describe('push-docs.sh — delete-only lane push (#798)', () => {
   it('a removed doc is git rm-ed in the lane worktree and actually pushed', () => {
     const { root, origin, primary } = setupRepo({ 'docs/decisions/DR-100.md': 'seed\n' });
@@ -160,5 +185,97 @@ describe('push-docs.sh — mixed add+delete lane push (#798)', () => {
     const branch = branchFromGhLog(callsLog);
     expect(() => git(origin, 'show', `${branch}:docs/decisions/DR-100.md`)).toThrow();
     expect(git(origin, 'show', `${branch}:docs/decisions/DR-101.md`)).toBe('updated');
+  });
+});
+
+/**
+ * push-docs.sh — governance status-transition gate (#2158).
+ *
+ * Root cause: the script knew the lane's docs-corpus precondition (CORPUS above) but not
+ * its second one — no changed `status:` line under docs/decisions/ or specs/ (#1847) — so
+ * it applied `docs-lane` unconditionally and opened PRs the lane's own workflow job was
+ * guaranteed to refuse with `exit 1`. These tests run the REAL script end to end (same
+ * harness as the #798 suite above: a bare `origin` + `primary` clone, `gh` stubbed) and
+ * inspect the logged `gh pr create` argv for `--label docs-lane` — present on an ordinary
+ * docs change, ABSENT the moment a governance `status:` line is touched.
+ */
+describe('push-docs.sh — governance status-transition gate (#2158)', () => {
+  it('withholds the docs-lane label when a spec status line changes (the shape that produced the false red)', () => {
+    const { root, primary } = setupRepo({
+      'specs/minspec/SPEC-100-x/requirements.md': '---\nid: SPEC-100\nstatus: specifying\n---\n',
+    });
+    const callsLog = path.join(root, 'gh-calls.log');
+    fs.writeFileSync(
+      path.join(primary, 'specs/minspec/SPEC-100-x/requirements.md'),
+      '---\nid: SPEC-100\nstatus: approved\n---\n',
+    );
+
+    const result = runPushDocsCaptureAll(primary, root, ['-m', 'docs: approve SPEC-100']);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toMatch(/push-docs: opened/);
+    expect(result.stderr).toMatch(/NOT labelling docs-lane/);
+    expect(result.stderr).toMatch(/specs\/minspec\/SPEC-100-x\/requirements\.md/);
+    expect(result.stderr).toMatch(/human act/);
+
+    const log = fs.readFileSync(callsLog, 'utf-8');
+    expect(log).not.toMatch(/--label\ndocs-lane/);
+  });
+
+  it('withholds the label on a DR acceptance (status: proposed -> accepted)', () => {
+    const { root, primary } = setupRepo({ 'docs/decisions/DR-101.md': '---\nstatus: proposed\n---\nbody\n' });
+    const callsLog = path.join(root, 'gh-calls.log');
+    fs.writeFileSync(path.join(primary, 'docs/decisions/DR-101.md'), '---\nstatus: accepted\n---\nbody\n');
+
+    const out = runPushDocs(primary, root, ['-m', 'docs: accept DR-101']);
+    expect(out).toMatch(/push-docs: opened/);
+
+    const log = fs.readFileSync(callsLog, 'utf-8');
+    expect(log).not.toMatch(/--label\ndocs-lane/);
+  });
+
+  it('KEEPS the label on a DR typo fix — the lane arms on that, so the producer must not be coarser', () => {
+    const { root, primary } = setupRepo({
+      'docs/decisions/DR-102.md': '---\nstatus: accepted\n---\na speling mistake\n',
+    });
+    const callsLog = path.join(root, 'gh-calls.log');
+    fs.writeFileSync(
+      path.join(primary, 'docs/decisions/DR-102.md'),
+      '---\nstatus: accepted\n---\na spelling mistake\n',
+    );
+
+    const out = runPushDocs(primary, root, ['-m', 'docs: fix typo in DR-102']);
+    expect(out).toMatch(/push-docs: opened/);
+    expect(out).not.toMatch(/NOT labelling docs-lane/);
+
+    const log = fs.readFileSync(callsLog, 'utf-8');
+    expect(log).toMatch(/--label\ndocs-lane/);
+  });
+
+  it('KEEPS the label on an ordinary docs-only change with no governance path at all', () => {
+    const { root, primary } = setupRepo({ 'CLAUDE.md': 'old status: fine\n' });
+    const callsLog = path.join(root, 'gh-calls.log');
+    fs.writeFileSync(path.join(primary, 'CLAUDE.md'), 'new status: fine\n');
+
+    const out = runPushDocs(primary, root, ['-m', 'docs: tweak CLAUDE.md']);
+    expect(out).toMatch(/push-docs: opened/);
+
+    const log = fs.readFileSync(callsLog, 'utf-8');
+    expect(log).toMatch(/--label\ndocs-lane/);
+  });
+
+  it('the un-labelled PR body names the file and explains it needs a human merge', () => {
+    const { root, primary } = setupRepo({
+      'specs/minspec/SPEC-103-x/requirements.md': '---\nid: SPEC-103\nstatus: specifying\n---\n',
+    });
+    const callsLog = path.join(root, 'gh-calls.log');
+    fs.writeFileSync(
+      path.join(primary, 'specs/minspec/SPEC-103-x/requirements.md'),
+      '---\nid: SPEC-103\nstatus: approved\n---\n',
+    );
+
+    runPushDocs(primary, root, ['-m', 'docs: approve SPEC-103']);
+    const log = fs.readFileSync(callsLog, 'utf-8');
+    expect(log).toContain('specs/minspec/SPEC-103-x/requirements.md');
+    expect(log).toMatch(/human (act|merge)/);
   });
 });

@@ -24,19 +24,12 @@
  *      extension no longer keeps (this is the half that guards a removal,
  *      e.g. #2205 / SPEC-086).
  *
- * Known, documented exceptions to direction 1 (NOT a gap, and not something
+ * Known, documented exception to direction 1 (NOT a gap, and not something
  * this test should ask to be "fixed" by adding a row):
  *   - Commands/menu entries whose `commandPalette` `when` is literally
  *     "false" are intentionally hidden from the palette (context-menu-only
  *     commands), so the README correctly does not list them as commands a
  *     user finds via the palette.
- *   - `minspec.exportTraceability` (command) and `minspec.scroogellmNudge.enabled`
- *     / `minspec.conformance.enabled` (settings) exist in the manifest today
- *     but are ScroogeLLM-upsell surfaces that #2205 / SPEC-086 removes. #2393
- *     deliberately left them out of the README so SPEC-086's own reintroduction
- *     gate (`no-scroogellm-upsell.test.ts`, not yet built) never has to fight a
- *     README mention. Once SPEC-086 lands, these entries disappear from the
- *     manifest and this allowlist becomes a no-op; it can be deleted then.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -74,13 +67,6 @@ interface PackageManifest {
     menus?: { commandPalette?: MenuEntry[] };
   };
 }
-
-// ScroogeLLM-upsell surfaces #2205 / SPEC-086 removes. See file header.
-const PENDING_REMOVAL_COMMANDS = new Set(['minspec.exportTraceability']);
-const PENDING_REMOVAL_SETTINGS = new Set([
-  'minspec.scroogellmNudge.enabled',
-  'minspec.conformance.enabled',
-]);
 
 function readManifest(): PackageManifest {
   const raw = fs.readFileSync(PACKAGE_JSON_PATH, 'utf-8');
@@ -124,7 +110,7 @@ describe('README command/setting/shortcut tables match package.json (#2395)', ()
   describe('direction 1: every manifest entry the README is expected to document, is documented', () => {
     const requiredCommands = pkg.contributes.commands.filter(
       (cmd) =>
-        !hiddenCommandIds.has(cmd.command) && !PENDING_REMOVAL_COMMANDS.has(cmd.command),
+        !hiddenCommandIds.has(cmd.command),
     );
 
     it.each(requiredCommands.map((cmd) => [cmd.command, cmd.title] as const))(
@@ -134,9 +120,7 @@ describe('README command/setting/shortcut tables match package.json (#2395)', ()
       },
     );
 
-    const requiredSettingKeys = Object.keys(pkg.contributes.configuration.properties).filter(
-      (key) => !PENDING_REMOVAL_SETTINGS.has(key),
-    );
+    const requiredSettingKeys = Object.keys(pkg.contributes.configuration.properties);
 
     it.each(requiredSettingKeys.map((key) => [key] as const))(
       'setting %s is named in the README',
@@ -154,21 +138,6 @@ describe('README command/setting/shortcut tables match package.json (#2395)', ()
         expect(forms.some((form) => readme.includes(form))).toBe(true);
       },
     );
-
-    // Sanity check on the allowlist itself: if SPEC-086 lands and removes
-    // these, the allowlist becomes inert (filters nothing) rather than wrong.
-    // If one of them is renamed instead of removed, this fails loudly so the
-    // allowlist gets updated rather than silently stop covering anything.
-    it('the pending-removal allowlist still names entries that exist in the manifest today', () => {
-      const commandIds = new Set(pkg.contributes.commands.map((c) => c.command));
-      for (const id of PENDING_REMOVAL_COMMANDS) {
-        expect(commandIds.has(id)).toBe(true);
-      }
-      const settingKeys = new Set(Object.keys(pkg.contributes.configuration.properties));
-      for (const key of PENDING_REMOVAL_SETTINGS) {
-        expect(settingKeys.has(key)).toBe(true);
-      }
-    });
   });
 
   describe('direction 2: every manifest-shaped reference the README makes, resolves to a real manifest entry', () => {

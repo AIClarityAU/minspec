@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { listSpecs, type SpecSummary } from '../lib/spec-catalog';
@@ -61,6 +62,10 @@ export async function validateSpecCommand(node?: SpecNodeLike): Promise<void> {
       // #439: sibling shard files (design.md/tasks.md/…) in this spec's directory,
       // so a diverging shard id is flagged as an error.
       siblingShardFiles: readShardIdFiles(path.dirname(spec.filePath)),
+      // #1751: implement.claimed-without-evidence — repo-relative existence check,
+      // resolved here (not inside spec-validator.ts, which is filesystem-free by
+      // design) against THIS workspace root.
+      pathExists: (relPath) => fs.existsSync(path.join(rootDir, relPath)),
     });
   } catch (err) {
     vscode.window.showErrorMessage(
