@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-136-headless-core/requirements.md",
-  "specHash": "686518ffb8ed59ae52ce295f3c02b421df99589bd21f68cc11222d94d4a170fd",
-  "approvedAt": "2026-10-15T21:21:55.739Z",
+  "specHash": "39c89189c9d5d7e7332acf9585bb192aa826f5f58cd57130f5a6056cd386826a",
+  "approvedAt": "2026-10-16T08:34:30.857Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T4",
   "migrated": false,
-  "baselineBlob": "b885fd291f1df60aa590fbaa99429d7393d21cc3"
+  "baselineBlob": "f78a2df054dc1c67a76d9a13c504e5f74a4b9229"
 }
