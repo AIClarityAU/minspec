@@ -12,7 +12,7 @@ implements: [scripts/dispatch-issue.sh, scripts/lib/issue-lease.sh]
 # MinSpec — Dispatch skips an issue that already has an open or merged fix (Requirements)
 
 > Materializes **[#726](https://github.com/AIClarityAU/minspec/issues/726)**. No DR is minted:
-> every choice below is a same-day-reversible change to dispatch scripts (DR-359 ADR filter).
+> every choice below is a same-day-reversible change to dispatch scripts (the ADR filter in the parent mmo-platform register, DR-359 there, not a local DR).
 > Rests on SPEC-044 (check-then-claim lease) and DR-066 (no silent gate).
 
 ## One-Sentence Scope
