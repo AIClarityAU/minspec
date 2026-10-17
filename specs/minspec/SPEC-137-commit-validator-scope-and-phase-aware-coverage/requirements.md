@@ -7,7 +7,8 @@ product: minspec
 epic: EPIC-002  # Signpost Integrity - an always-on warning is a false signpost that buries the real failure
 aspects: [validator, gate, pre-commit, signal-to-noise, no-silent-gate]
 relates_to: [SPEC-075, DR-003]
-implements: none  # specify-only; the owning files are declared at Plan
+implements: none
+implements_reason: creates no new source file. Both changes edit modules that already exist and are shared with other specs (packages/minspec/src/lib/spec-validator.ts, scripts/validate-frontmatter.ts, .githooks/pre-commit). Declaring them under implements: or affects: would freeze those files for every other session until this spec is approved (DR-047 blast radius), so the files this spec modifies are named in the Problem and Decision 2(a) sections instead.
 phases:
   specify: in-progress
   clarify: pending
