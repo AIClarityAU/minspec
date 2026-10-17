@@ -1,11 +1,15 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { execFile } from 'child_process';
+import { randomBytes } from 'crypto';
 import { promisify } from 'util';
 import { loadConfig, resolveAndValidate } from './config';
 import { listAdrs } from './adr-manager';
 import { parseSpec } from './spec';
 import { slugify } from './spec-manager';
+import { readDocumentText } from './text-io';
+import { ensureDirectory } from './opt-in';
 import {
   listEpics,
   createEpic,
@@ -25,6 +29,11 @@ const execFileAsync = promisify(execFile);
  * Nothing here writes frontmatter until `applyBackfill` is called with an
  * approved proposal (HITL — DR-012 ethos). No `http`/`fetch`; the only network
  * touch is the locally-installed `claude` binary owning its own connection.
+ *
+ * That binary is handed a prompt in one place only, `proposeAI`, and the prompt
+ * carries text read from project files. So it is started sealed: no tools, no
+ * MCP servers, nothing it attaches on its own, in an empty directory made for
+ * the call (#2570). See "The sealed `claude` start" below.
  */
 
 // ─── Contract ─────────────────────────────────────────────────────────────────
@@ -106,6 +115,8 @@ export interface ApplyResult {
 export type AiFailureReason =
   | 'nothing-to-assign'
   | 'claude-absent'
+  | 'claude-incompatible'
+  | 'no-work-dir'
   | 'timeout'
   | 'cancelled'
   | 'exit'
@@ -223,7 +234,9 @@ function collectSpecs(rootDir: string): ArtifactRef[] {
       } else if (e.isFile() && e.name.endsWith('.md')) {
         let content: string;
         try {
-          content = fs.readFileSync(full, 'utf-8');
+          // Prepared (SPEC-095): the `product:` read and the digest below assume LF. On a
+          // CRLF spec the digest was the frontmatter text and the product was not read.
+          content = readDocumentText(full);
         } catch {
           continue;
         }
@@ -316,7 +329,7 @@ function collectAdrs(rootDir: string): ArtifactRef[] {
   return listAdrs(rootDir).map(a => {
     let digest = '';
     try {
-      digest = firstParagraph(fs.readFileSync(a.filePath, 'utf-8'));
+      digest = firstParagraph(readDocumentText(a.filePath)); // prepared (SPEC-095)
     } catch {
       // best-effort
     }
@@ -589,15 +602,290 @@ export function normalizeAiProposal(
   return { epics: kept, mappings, source: 'ai' };
 }
 
+// ─── The sealed `claude` start (#2570) ────────────────────────────────────────
+//
+// The prompt carries text read from project files: every spec and decision title,
+// and the first paragraph of each one with no epic. In a repository that takes
+// specs from other people that text is not trusted, and `claude -p` left at its
+// defaults is an agent with the user's whole tool set, not a text filter. What
+// follows exists so that such text can do nothing but be answered.
+//
+// Each line is a measurement, not a reading of the documentation: Claude Code
+// 2.1.283, started through `execFile` as below, random canary files, on a machine
+// with 6 MCP servers configured.
+//
+//   as it was started before   46 tools (32 built in, 14 from the MCP servers);
+//                              a canary was read
+//   + `--tools ""`             no built-in tool; the 14 MCP tools still loaded
+//   + `--strict-mcp-config`    0 tools, 0 MCP servers
+//   ...and still               a path written `@/abs/path` is attached by the
+//                              CLI ITSELF, no tool involved: three canaries
+//                              outside the directory came back
+//   no `@` in the prompt       the same three paths, nothing attached
+//   attachments switched off   the `@` left in, nothing attached
+//   an empty directory alone   stopped nothing once the user's own settings
+//                              allowed `Read`
+//
+// So no single measure seals the call. It takes the switches, the `@`, the
+// environment and the directory together, and tests/ai-pass-no-tools.test.ts pins
+// each one. tests/ai-pass-single-start.test.ts keeps this the only place a prompt
+// is handed to `claude`.
+
+/** What an `@` in a prompt becomes: still readable, no longer a reference. */
+const AT_SIGN_STAND_IN = '(at)';
+
 /**
- * Run the Tier-1 AI proposal via `claude -p`. Returns null on ANY failure
- * (binary absent, timeout, non-JSON, empty) — caller falls back to heuristic.
- * Never throws.
+ * `text` with every `@` replaced.
+ *
+ * Claude Code turns `@path` in a prompt into the contents of that file, in print
+ * mode too, and does it itself: with no tools loaded and from an empty directory
+ * an absolute `@/path` is still read and sent. Every form it recognises (`@path`,
+ * `@"a quoted path"`, `@agent-name`, `@server:resource`) begins with the
+ * character, so taking the character out rules them all out, without this file
+ * having to track which characters may come before one.
+ */
+function withoutAtSigns(text: string): string {
+  return text.replace(/@/g, AT_SIGN_STAND_IN);
+}
+
+/**
+ * The argument list for the one start of `claude` that carries a prompt. The
+ * prompt itself is never one of these: it goes to the child's stdin, written
+ * and closed by `runSealedClaude` below, never a command-line argument (#2575).
+ * Three things followed from putting it on the command line instead, all
+ * measured on Linux, Node 22.23, Claude Code 2.1.283 (2026-10-04):
+ *
+ *   a 3 s wait on every call     `execFile` leaves the child's stdin open with
+ *                                nobody writing to it; Claude Code waits on it
+ *                                before proceeding ("no stdin data received")
+ *   a 128 KiB ceiling            one argument of 131,072 characters or more
+ *                                throws `spawn E2BIG` before the process even
+ *                                starts, so a project a little under twice the
+ *                                179-artifact / 76,937-char prompt measured in
+ *                                #1570 could not run the pass at all
+ *   visible in the process list  the prompt carries spec and decision titles
+ *                                and first paragraphs, readable there by other
+ *                                users of the same machine while the call runs
+ *
+ * `-p` with no following prompt argument reads it from stdin instead (the
+ * CLI's own error text, when neither is given: "Input must be provided either
+ * through stdin or as a prompt argument when using --print"). That also
+ * removes the one thing the old order depended on: with no prompt on the
+ * command line, there is no positional argument for a list-taking switch such
+ * as `--tools` to swallow, so the switches below may come in any order.
+ *
+ *   --tools ""                 no built-in tool. The closed form: a tool added to
+ *                              Claude Code later is off as well, where a list of
+ *                              tools to deny would let it through
+ *   --strict-mcp-config        with no `--mcp-config`, no MCP server is loaded.
+ *                              Documented, not measured here: where an
+ *                              administrator has deployed a managed MCP file,
+ *                              Claude Code refuses this switch and exits. The
+ *                              pass then fails as an `exit`, the closed way
+ *   --no-session-persistence   no transcript is kept. With a new directory per
+ *                              call each one would be an orphan in the user's
+ *                              `~/.claude/projects`, holding the project's text
+ *
+ * Deliberately absent: `--bare` and `--setting-sources`. The first never reads
+ * OAuth or keychain credentials (its own help text) and the second can leave out
+ * the user's settings file, so either would cost some people the AI pass.
+ *
+ * A `claude` that does not know one of these switches exits at once, and that
+ * is reported (`claude-incompatible`). It is never tried again without them.
+ * Exported with `aiPassEnv` so that the call can be reproduced by hand: these
+ * arguments and that environment, with the prompt piped to the command's stdin.
+ * A start that omits the stdin write runs `claude -p` with no prompt at all.
+ */
+export function aiPassArgs(): string[] {
+  return [
+    '-p',
+    '--tools', '',
+    '--strict-mcp-config',
+    '--no-session-persistence',
+  ];
+}
+
+/**
+ * The environment for that start: the caller's own, so `claude` finds its
+ * credentials as usual, plus two switches it takes as environment variables.
+ *
+ *   CLAUDE_CODE_DISABLE_ATTACHMENTS   documented as "File mentions with `@`
+ *                                     syntax are sent as plain text instead of
+ *                                     being expanded into file content". The
+ *                                     second lock on `@path`, behind
+ *                                     `withoutAtSigns`, and the one that would
+ *                                     still hold if a later release recognised a
+ *                                     reference that does not start with `@`
+ *   CLAUDE_CODE_DISABLE_AUTO_MEMORY   no memory folder is created for the call's
+ *                                     directory under `~/.claude/projects`
+ *
+ * A release that does not know a variable ignores it, where it would refuse an
+ * unknown switch. So neither is relied on alone: the first backs up a property
+ * this file enforces itself, and the second only keeps the call from leaving a
+ * folder behind.
+ */
+export function aiPassEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return {
+    ...base,
+    CLAUDE_CODE_DISABLE_ATTACHMENTS: '1',
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
+  };
+}
+
+/**
+ * Make the directory one call runs in: new, empty, and closed to everyone else.
+ * Throws when any step fails, and the caller then starts nothing.
+ *
+ * It is made with `ensureDirectory`, not `mkdtemp`, because SPEC-096 routes every
+ * directory the extension creates through that one operation and pins the few
+ * direct calls that remain (FR-4, tests/opt-in-writer-inventory.test.ts). What
+ * `mkdtemp` would have given is rebuilt here, in this order:
+ *
+ *   an unguessable name   128 random bits, so nobody can have made it first
+ *   mode 0700             set straight after the create, whatever the umask.
+ *                         Measured under umask 000: 777 as created, 700 after
+ *   still empty           checked once the mode is set. From then on nobody else
+ *                         can put a file in it, so empty now is empty when
+ *                         `claude` starts
+ *
+ * The last two are not tidiness. Claude Code runs the hooks of a settings file it
+ * finds in its starting directory, in print mode and without asking (measured).
+ * A directory another user could write to would be a way to run commands as this
+ * one.
+ */
+function makeWorkDir(): string {
+  const root = os.tmpdir();
+  // `ensureDirectory` makes missing parents too. A temp dir that is not there is
+  // a reason to stop, not something to create.
+  if (!fs.statSync(root).isDirectory()) {
+    throw Object.assign(new Error(`${root} is not a directory`), { code: 'ENOTDIR' });
+  }
+  const dir = path.join(root, `minspec-ai-pass-${randomBytes(16).toString('hex')}`);
+  ensureDirectory(dir);
+  try {
+    fs.chmodSync(dir, 0o700);
+    if (fs.readdirSync(dir).length > 0) {
+      throw Object.assign(new Error(`${dir} is not empty`), { code: 'ENOTEMPTY' });
+    }
+  } catch (err) {
+    // Take it back if it is still empty. If it is not, it is not this code's to empty.
+    try {
+      fs.rmdirSync(dir);
+    } catch {
+      // Left where it is.
+    }
+    throw err;
+  }
+  return dir;
+}
+
+/** How many times `removeWorkDir` tries a directory that is still in use. */
+const REMOVE_ATTEMPTS = 5;
+
+/**
+ * Remove the directory made for one call, and only while it is empty.
+ *
+ * `rmdir`, never a recursive delete. This runs on every way out of the call, so
+ * whatever `dir` is, the worst it can do is remove an empty directory. A
+ * recursive delete would turn any later mistake about WHICH directory the call
+ * ran in into the loss of everything under it: a fallback to the extension
+ * host's own directory, written that way, deletes it.
+ *
+ * Best-effort beyond that. The directory is empty, mode 0700 and in the OS temp
+ * dir, so one that outlives the call costs nothing, and a removal that fails
+ * must never turn a finished AI pass into a failed one. The retries are a
+ * precaution for Windows, where a directory cannot be removed while a process
+ * still has it as its working directory and a cancelled `claude` may not have
+ * gone yet. That path is reasoned, not measured: it has not been run on Windows.
+ */
+async function removeWorkDir(dir: string): Promise<void> {
+  for (let attempt = 1; attempt <= REMOVE_ATTEMPTS; attempt++) {
+    try {
+      await fs.promises.rmdir(dir);
+      return;
+    } catch (err) {
+      const code = (err as { code?: unknown } | null)?.code;
+      // Only "still in use" is worth waiting for. Anything else will not change:
+      // it is already gone, or it is not empty and so not this function's to empty.
+      if ((code !== 'EBUSY' && code !== 'EPERM') || attempt === REMOVE_ATTEMPTS) return;
+      await new Promise(resolve => setTimeout(resolve, 100 * attempt));
+    }
+  }
+}
+
+/**
+ * Start the sealed `claude` call and hand it the prompt on stdin, never as a
+ * command-line argument (#2575 — see `aiPassArgs` for why). `execFile`, not
+ * its promisified form: the promise `util.promisify` returns is undocumented
+ * plumbing for reaching the `ChildProcess` it wraps, and that reach is exactly
+ * what writing to stdin needs, so this does it directly instead.
+ *
+ * The write happens the same tick `execFile` returns, before anything about
+ * the call is awaited, so the pipe is never left open for Claude Code to wait
+ * on. `end`, not `write` then `end`: one call writes the prompt and closes the
+ * pipe, the signal that no more input is coming.
+ *
+ * `err.stdout`/`err.stderr` are attached here because the plain (non-promisified)
+ * callback does not carry them on the error the way `util.promisify`'s custom
+ * implementation for `execFile` does — and `classifyExecFailure` below reads
+ * `stderr` off a failure to name an incompatible `claude` by the switch it
+ * rejected.
+ */
+function runSealedClaude(
+  prompt: string,
+  cwd: string,
+  timeout: number,
+  signal: AbortSignal | undefined,
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      'claude',
+      aiPassArgs(),
+      { cwd, timeout, maxBuffer: 4 * 1024 * 1024, env: aiPassEnv(), signal },
+      (err, stdout, stderr) => {
+        if (err) {
+          reject(Object.assign(err, { stdout, stderr }));
+        } else {
+          resolve({ stdout: stdout ?? '', stderr: stderr ?? '' });
+        }
+      },
+    );
+    // `stdin` is typed nullable because `execFile` accepts a `stdio` override that
+    // can remove it; this call passes none, so Node always gives it a pipe here.
+    // Still fails closed rather than asserting it, so a future `stdio` change
+    // reports plainly instead of throwing past `classifyExecFailure`.
+    if (child.stdin === null) {
+      child.kill();
+      reject(Object.assign(new Error('could not open stdin to carry the prompt to `claude`'), { code: 'ENOSTDIN' }));
+      return;
+    }
+    // A `claude` that exits before draining stdin (an older CLI rejecting `--tools`
+    // during argument parsing, a managed-MCP refusal, a crash) breaks the pipe under
+    // the write, and Node raises that EPIPE as `error` on the stream. Unhandled it is
+    // an uncaught exception that takes the extension host down and breaks this
+    // function's "never throws" contract. The exit itself still reaches the callback
+    // above with its real code and stderr, which is what `classifyExecFailure` reads,
+    // so the broken pipe is swallowed here rather than reported as the failure.
+    child.stdin.on('error', () => {});
+    child.stdin.end(withoutAtSigns(prompt));
+  });
+}
+
+/**
+ * Run the Tier-1 AI proposal via `claude -p`. Never throws: every way it can
+ * come back empty (binary absent or incompatible, no working directory,
+ * timeout, cancel, non-JSON, unusable) is a named `AiFailure`, and the caller
+ * falls back to the heuristic.
  *
  * Probes `isClaudeAvailable()` before dispatch, mirroring the `isGhAvailable`
  * gate on the gh path (SPEC-011 FR-3 / Risk R1 / Failure-Mode 1). The probe is
  * the asserted precondition-check mechanism; the surrounding try/catch remains
  * the backstop for failures after a successful probe (timeout, non-JSON). (#141)
+ *
+ * The dispatch is the sealed start described above (#2570): `aiPassArgs` and
+ * `aiPassEnv`, in a directory made for this call and removed after it whatever
+ * the outcome. With no directory there is no call. The prompt itself travels on
+ * stdin, not in `aiPassArgs` (#2575) — see `runSealedClaude`.
  */
 export async function proposeAI(
   rootDir: string,
@@ -623,13 +911,26 @@ export async function proposeAI(
   const assigned = artifacts.filter(a => a.epic);
   const prompt = buildPrompt(pending, assigned, listEpics(rootDir));
   const timeout = aiTimeoutMs(pending.length);
+
+  // Somewhere with nothing in it: no file to read, and no instruction, settings
+  // or MCP file of whatever directory the extension host happens to run in.
+  let workDir: string;
   try {
-    const { stdout } = await execFileAsync('claude', ['-p', prompt], {
-      timeout,
-      maxBuffer: 4 * 1024 * 1024,
-      env: { ...process.env },
-      signal: opts.signal,
-    });
+    workDir = makeWorkDir();
+  } catch (err) {
+    // No directory, no call. Starting `claude` anywhere else is what #2570 removed.
+    const code = (err as { code?: unknown } | null)?.code;
+    return {
+      proposal: null,
+      failure: {
+        reason: 'no-work-dir',
+        detail: `could not create an empty working directory for \`claude\`${typeof code === 'string' ? ` (${code})` : ''}`,
+      },
+    };
+  }
+
+  try {
+    const { stdout } = await runSealedClaude(prompt, workDir, timeout, opts.signal);
     const json = extractJson(stdout);
     if (!json) {
       return { proposal: null, failure: { reason: 'non-json', detail: 'returned output that was not JSON' } };
@@ -649,7 +950,39 @@ export async function proposeAI(
     return { proposal };
   } catch (err) {
     return { proposal: null, failure: classifyExecFailure(err, timeout) };
+  } finally {
+    await removeWorkDir(workDir);
   }
+}
+
+/** Longest a line of `claude`'s own output may be before the detail grows unreadable. */
+const PRINTED_LINE_LIMIT = 200;
+
+/**
+ * `execFile` leaves the child's stdin pipe open with nobody writing to it — true of
+ * this call today, and the exact cause the pull request that carries the prompt on
+ * stdin instead (#2575) measured by hand: Claude Code 2.1.283 waits roughly 3s, then
+ * prints this line and carries on regardless. It is never why the pass failed, so it
+ * must never be the line `firstPrintedLine` surfaces.
+ */
+const STDIN_WAIT_RE = /no stdin data received/i;
+
+/**
+ * The first non-blank, non-stdin-wait line of what `claude` printed — stdout checked
+ * before stderr, since the "not logged in" refusal (#2577) lands on stdout — cut to a
+ * fixed length. `null` when there is nothing useful to show, including a failure with
+ * no process behind it at all (`classifyExecFailure`'s `E2BIG` case).
+ */
+function firstPrintedLine(e: { stdout?: unknown; stderr?: unknown }): string | null {
+  for (const stream of [e.stdout, e.stderr]) {
+    if (typeof stream !== 'string') continue;
+    for (const raw of stream.split('\n')) {
+      const line = raw.trim();
+      if (line === '' || STDIN_WAIT_RE.test(line)) continue;
+      return line.length > PRINTED_LINE_LIMIT ? `${line.slice(0, PRINTED_LINE_LIMIT)}…` : line;
+    }
+  }
+  return null;
 }
 
 /**
@@ -658,7 +991,14 @@ export async function proposeAI(
  * binary the old single message blamed (#1570).
  */
 function classifyExecFailure(err: unknown, timeout: number): AiFailure {
-  const e = (err ?? {}) as { killed?: boolean; signal?: string; code?: unknown; name?: string };
+  const e = (err ?? {}) as {
+    killed?: boolean;
+    signal?: string;
+    code?: unknown;
+    name?: string;
+    stdout?: unknown;
+    stderr?: unknown;
+  };
   if (e.name === 'AbortError' || e.code === 'ABORT_ERR') {
     return { reason: 'cancelled', detail: 'was cancelled' };
   }
@@ -668,10 +1008,37 @@ function classifyExecFailure(err: unknown, timeout: number): AiFailure {
   if (e.code === 'ENOENT') {
     return { reason: 'claude-absent', detail: 'could not run `claude` (Claude Code is not on PATH)' };
   }
-  if (typeof e.code === 'number') {
-    return { reason: 'exit', detail: `exited with code ${e.code}` };
+  // `execFile` throws this synchronously, before any process exists, once one argument
+  // crosses roughly 131,072 characters on Linux (measured on the pull request that
+  // removes this cause by moving the prompt off argv, #2575). Nothing was printed to
+  // explain it — there is no process to have printed anything — so it needs its own
+  // wording rather than the generic "failed to run" below, which would give the user
+  // nothing to act on (#2577).
+  if (e.code === 'E2BIG') {
+    return { reason: 'exit', detail: 'the prompt was too long for the process to start with' };
   }
-  return { reason: 'exit', detail: 'failed to run' };
+  // A release that does not know one of `aiPassArgs`'s switches refuses it before
+  // doing anything else: observed on 1.0.60 and 2.0.30, exit code 1 with
+  // "error: unknown option '--tools'" on stderr. Name the switch, because
+  // "exited with code 1" gives the user nothing to act on.
+  const unknownSwitch = typeof e.stderr === 'string' ? /unknown option '?(--[A-Za-z][\w-]*)/.exec(e.stderr) : null;
+  if (unknownSwitch) {
+    return {
+      reason: 'claude-incompatible',
+      detail: `cannot run with the installed Claude Code, which does not know \`${unknownSwitch[1]}\` (updating it usually fixes this)`,
+    };
+  }
+  // Whatever `claude` itself said, so a refusal explains itself instead of reading as a
+  // bare exit code (#2577). Covers cases this file never special-cases by name: not
+  // logged in ("Not logged in · Please run /login" on stdout, measured on Claude Code
+  // 2.1.283 with an empty config directory) and an administrator-deployed managed MCP
+  // file refusing `--strict-mcp-config` at startup (documented, not measured here — it
+  // needs a machine that has one).
+  const printed = firstPrintedLine(e);
+  if (typeof e.code === 'number') {
+    return { reason: 'exit', detail: printed ? `exited with code ${e.code} — ${printed}` : `exited with code ${e.code}` };
+  }
+  return { reason: 'exit', detail: printed ?? 'failed to run' };
 }
 
 /**

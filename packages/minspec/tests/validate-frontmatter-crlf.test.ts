@@ -109,4 +109,34 @@ describe('#2465 scripts/validate-frontmatter.ts — CRLF frontmatter and the epi
       expect(output).not.toContain('epic file(s) exist in docs/epics/');
     });
   }, 30000);
+
+  it('does not warn about the frontmatter-less docs/epics/INDEX.md (not an epic)', () => {
+    withTmpDir((tmpDir) => {
+      writeEpicCrlf(tmpDir, 'EPIC-001');
+      fs.writeFileSync(
+        path.join(tmpDir, 'docs', 'epics', 'INDEX.md'),
+        '<!-- minspec:epic-index:start -->\n| EPIC-001 |\n<!-- minspec:epic-index:end -->\n',
+        'utf-8',
+      );
+      writeSpec(tmpDir, 'SPEC-001', 'EPIC-001');
+      const { status, output } = runValidate(tmpDir);
+      expect(status).toBe(0);
+      expect(output).not.toContain('INDEX.md');
+      expect(output).not.toContain('could not be read');
+    });
+  }, 30000);
+
+  it('does not call a duplicate-id epic file unreadable', () => {
+    withTmpDir((tmpDir) => {
+      writeEpicCrlf(tmpDir, 'EPIC-001');
+      fs.writeFileSync(
+        path.join(tmpDir, 'docs', 'epics', 'EPIC-001-copy.md'),
+        '---\nid: EPIC-001\ntitle: Dup\n---\n',
+        'utf-8',
+      );
+      writeSpec(tmpDir, 'SPEC-001', 'EPIC-001');
+      const { output } = runValidate(tmpDir);
+      expect(output).not.toContain('could not be read');
+    });
+  }, 30000);
 });

@@ -421,4 +421,33 @@ describe('scripts/facts.ts — the read-only facts oracle CLI (#1050)', () => {
     expect(output).toContain('SPEC-100');
     expect(output).toContain('via implements:');
   });
+
+  // The block-list (`- item`) path of listField, distinct from the inline `[a, b]` form.
+  it('owns: reads a CRLF block-list implements:/affects: (#2465)', () => {
+    const root = tempRoot();
+    const spec = [
+      '---',
+      'id: SPEC-101',
+      'title: Block list',
+      'type: requirements',
+      'tier: T2',
+      'status: implementing',
+      'implements:',
+      '  - packages/demo/src/lib/blocky.ts',
+      'affects:',
+      '  - packages/demo/src/lib/blocky-helper.ts',
+      '---',
+      '',
+      '# Block list',
+      '',
+    ].join('\r\n');
+    writeSpecFile(root, 'specs/demo/SPEC-101/requirements.md', spec);
+
+    const impl = run(root, ['owns', 'packages/demo/src/lib/blocky.ts']);
+    expect(impl.status).toBe(0);
+    expect(impl.output).toContain('SPEC-101');
+    expect(impl.output).toContain('via implements:');
+    const aff = run(root, ['owns', 'packages/demo/src/lib/blocky-helper.ts']);
+    expect(aff.output).toContain('via affects:');
+  });
 });

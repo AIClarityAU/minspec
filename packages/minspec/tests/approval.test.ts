@@ -28,6 +28,9 @@ const SPEC_REL = 'specs/SPEC-007-thing.md';
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-approval-'));
+  // SPEC-096: an approval is recorded only in a folder that has opted in. The
+  // stores used to create `.minspec/` themselves; the fixture now says so.
+  fs.mkdirSync(path.join(tmp, '.minspec'));
   fs.mkdirSync(path.join(tmp, 'specs'));
   specPath = path.join(tmp, 'specs', 'SPEC-007-thing.md');
   fs.writeFileSync(specPath, '---\nid: SPEC-007\ntier: T3\nstatus: specifying\n---\n# Thing\n');

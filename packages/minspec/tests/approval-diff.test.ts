@@ -42,6 +42,9 @@ let tmp: string;
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-approval-diff-'));
+  // SPEC-096: an approval is recorded only in a folder that has opted in. The
+  // stores used to create `.minspec/` themselves; the fixture now says so.
+  fs.mkdirSync(path.join(tmp, '.minspec'));
   execFileSync('git', ['init', '-b', 'main'], { cwd: tmp, stdio: 'ignore' });
   execFileSync('git', ['config', 'user.email', 'test@minspec.test'], { cwd: tmp, stdio: 'ignore' });
   execFileSync('git', ['config', 'user.name', 'MinSpec Test'], { cwd: tmp, stdio: 'ignore' });
