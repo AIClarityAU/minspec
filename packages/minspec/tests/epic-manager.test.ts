@@ -211,6 +211,26 @@ describe('epic-manager', () => {
       // @ts-expect-error invalid status
       expect(() => setEpicStatus(s.filePath, 'bogus')).toThrow();
     });
+
+    // #2149 — the writer's status-line regex captured indent instead of
+    // anchoring to column 0, and was non-global, so it matched the FIRST
+    // `status:` line at ANY indent. A nested `status:` key sorting before
+    // the top-level one was rewritten instead, silently leaving the real
+    // status untouched. Anchoring to `^status:` fixes this regardless of
+    // key order.
+    it('rewrites the top-level status: line, not a nested status: key that sorts first', () => {
+      epicFile(
+        tmpDir,
+        'EPIC-001',
+        '---\nid: EPIC-001\nslug: a\ntitle: A\nreview:\n  status: needs-changes\nstatus: proposed\n---\n',
+      );
+      const fp = listEpics(tmpDir)[0].filePath;
+      setEpicStatus(fp, 'active');
+      const after = fs.readFileSync(fp, 'utf-8');
+      expect(after).toContain('\nstatus: active');
+      expect(after).toContain('  status: needs-changes');
+      expect(listEpics(tmpDir)[0].status).toBe('active');
+    });
   });
 
   // ─── setEpicOrder / reorderEpics / applyEpicReorder (DnD, #261) ─────────

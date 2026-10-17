@@ -52,6 +52,19 @@ vi.mock('../src/lib/adr-manager', () => ({
   ADR_STATUS_VALUES: ['proposed', 'accepted', 'deprecated', 'superseded'],
 }));
 
+// SPEC-041 Slice 1 (#1066): accepting a DR runs the human-approver gate and writes the
+// approval sidecar. The real gate (`assertHumanApprover`) is kept; only the git/fs edges
+// (identity capture, canonical hash, sidecar write) are stubbed.
+vi.mock('../src/lib/approval', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/approval')>()),
+  gitConfigEmail: vi.fn(() => 'human@example.com'),
+  canonicalSpecHash: vi.fn(() => 'hash-of-accepted-dr'),
+}));
+vi.mock('../src/lib/approval-store', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/approval-store')>()),
+  writeRecord: vi.fn(),
+}));
+
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
 import * as vscode from 'vscode';
@@ -62,6 +75,8 @@ import {
   setAdrStatusCommand,
   promptAdrOnT4Classification,
 } from '../src/commands/adr';
+import { gitConfigEmail } from '../src/lib/approval';
+import { writeRecord } from '../src/lib/approval-store';
 import {
   createAdr,
   findSimilarAdrs,
@@ -918,5 +933,72 @@ describe('promptAdrOnT4Classification() — validateInput callback', () => {
       'My T4 decision',
       { decisionsDir: 'custom/drs' },
     );
+  });
+});
+
+
+// =============================================================================
+// SPEC-041 Slice 1 (#1066) — accepting a DR is human-gated and leaves a sidecar
+// =============================================================================
+
+describe('applyStatus — acceptance provenance (SPEC-041 Slice 1)', () => {
+  const proposed = { id: 'DR-001', title: 'Use PG', status: 'proposed', date: '2026-05-27', filePath: DR1 };
+
+  it('writes the ApprovalRecord for an accepted DR after a human accept', async () => {
+    setActiveEditor(DR1);
+    vi.mocked(listAdrs).mockReturnValueOnce([proposed] as never);
+
+    await acceptAdrCommand(undefined);
+
+    expect(writeRecord).toHaveBeenCalledTimes(1);
+    const rec = vi.mocked(writeRecord).mock.calls[0][1];
+    expect(vi.mocked(writeRecord).mock.calls[0][0]).toBe(WS);
+    expect(rec).toMatchObject({
+      specPath: 'docs/decisions/DR-001.md',
+      specHash: 'hash-of-accepted-dr',
+      approvedBy: 'human@example.com',
+      migrated: false,
+    });
+    expect(typeof rec.approvedAt).toBe('string');
+  });
+
+  it('an agent identity throws BEFORE any write: DR untouched, no sidecar', async () => {
+    setActiveEditor(DR1);
+    vi.mocked(listAdrs).mockReturnValueOnce([proposed] as never);
+    vi.mocked(gitConfigEmail).mockReturnValueOnce('minspec-sdd[bot]@users.noreply.github.com');
+
+    await acceptAdrCommand(undefined);
+
+    expect(setAdrStatus).not.toHaveBeenCalled();
+    expect(regenerateDrIndex).not.toHaveBeenCalled();
+    expect(writeRecord).not.toHaveBeenCalled();
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+      expect.stringContaining('agent/bot identity'),
+    );
+  });
+
+  it('Set Status -> accepted is gated the same way (an agent identity cannot route around Accept)', async () => {
+    setActiveEditor(DR1);
+    vi.mocked(listAdrs).mockReturnValueOnce([proposed] as never);
+    vi.mocked(gitConfigEmail).mockReturnValueOnce('claude@harvest316.com');
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce({ value: 'accepted' } as never);
+
+    await setAdrStatusCommand(undefined);
+
+    expect(setAdrStatus).not.toHaveBeenCalled();
+    expect(writeRecord).not.toHaveBeenCalled();
+  });
+
+  it('a non-accepted status needs no approver and writes no record', async () => {
+    setActiveEditor(DR1);
+    vi.mocked(listAdrs).mockReturnValueOnce([proposed] as never);
+    vi.mocked(gitConfigEmail).mockReturnValue('minspec-sdd[bot]@users.noreply.github.com');
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce({ value: 'deprecated' } as never);
+
+    await setAdrStatusCommand(undefined);
+
+    expect(setAdrStatus).toHaveBeenCalledWith(DR1, 'deprecated');
+    expect(writeRecord).not.toHaveBeenCalled();
+    vi.mocked(gitConfigEmail).mockReturnValue('human@example.com');
   });
 });

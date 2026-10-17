@@ -139,6 +139,30 @@ describe('resolve_go_bin — a toolchain on PATH must not be invisible (#1506)',
     expect(r.stderr).toContain(legacy);
   });
 
+  it('picks the newest of several legacy toolchains by version, not glob collation (#1867)', () => {
+    const home = freshHome('legacy-multi');
+    // Ascending lexicographic (locale-collation) order of these three names is
+    // "go1.10" < "go1.11" < "go1.9" (strings compare left to right, and "1" < "9" at
+    // the fourth character decides go1.1x vs go1.9 before any more digits are read).
+    // An unsorted `for` over the glob walks that order and returns the FIRST
+    // executable hit — "go1.10" — which is not the newest of the three: go1.11 is.
+    // (Two candidates alone, go1.9 and go1.10, do not distinguish the bug from the
+    // fix here, since collation-first and version-newest happen to coincide for a
+    // single-digit-vs-double-digit pair; three are needed to expose the ordering
+    // defect.) Version-sort (`sort -rV`) must pick go1.11 regardless of collation.
+    const oldest = makeGoShim(path.join(home, '.local', 'opt', 'go1.9', 'bin'));
+    const collationFirst = makeGoShim(path.join(home, '.local', 'opt', 'go1.10', 'bin'));
+    const newest = makeGoShim(path.join(home, '.local', 'opt', 'go1.11', 'bin'));
+
+    const r = runScript({ home, pathDirs: [] });
+
+    expect(r.stderr).not.toContain('no Go toolchain found');
+    expect(r.invoked.length).toBeGreaterThan(0);
+    expect(r.invoked[0]).toBe(newest);
+    expect(r.invoked[0]).not.toBe(collationFirst);
+    expect(r.invoked[0]).not.toBe(oldest);
+  });
+
   it('fails closed, and names every location it tried, when nothing resolves', () => {
     const home = freshHome('nothing');
     const r = runScript({ home, pathDirs: [] });

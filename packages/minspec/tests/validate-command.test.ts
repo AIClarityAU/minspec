@@ -426,12 +426,15 @@ describe('validateSpecCommand', () => {
     // SPEC-022 (INV-4): the verdict + explicit terminal (undefined here, status is
     // not 'archived') are forwarded so the validator can assert the mirror.
     // #439: siblingShardFiles is also forwarded, so the validator can assert
-    // shard-id consistency.
+    // shard-id consistency. #1751: pathExists is also forwarded (a resolver
+    // closure, matched by shape rather than identity) so the validator can
+    // check implement.claimed-without-evidence.
     expect(validateSpec).toHaveBeenCalledWith(fakeParsed, fakeConfig, {
       knownEpicRefs: fakeEpics,
       approvalState: 'approved',
       explicitTerminal: undefined,
       siblingShardFiles: [],
+      pathExists: expect.any(Function),
     });
   });
 

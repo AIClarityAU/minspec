@@ -122,6 +122,16 @@ test('the CI guard derives its write vocabulary from this file, not a copy', () 
     'guard must not restate the vocabulary inline');
 });
 
+// gh_bot_die itself had no direct mention anywhere in this file — every other test
+// exercises it only indirectly, by asserting on the stderr message a CALLER (like
+// _gh_bot_ensure) produces via it. Found by the #2186 gate at the bottom of this
+// file, which is the exact "shipped with zero tests" shape the gate exists to catch.
+test('gh_bot_die prints its message to stderr and exits 1', () => {
+  const { status, out } = sh('gh_bot_die "boom"');
+  assert.equal(status, 1, 'must fail closed');
+  assert.match(out, /gh-bot: boom/);
+});
+
 // ── 3. credential handling ───────────────────────────────────────────────────
 
 test('sourcing and init are offline — no key needed, nothing fails', () => {
@@ -553,4 +563,45 @@ echo ghs_first
     "the broker's own diagnosis must reach the operator");
   assert.match(out, /TOKEN_SEEN=ghs_first/,
     'and the read still goes out on what we had, rather than being wiped');
+});
+
+// ── 7. gate: every public gh_bot_* function is named in this file (#2186) ────
+//
+// _gh_bot_read_auth and the public gh_bot_warm_read shipped in #2003 with ZERO
+// tests: neither symbol appeared in any test file, so "a read re-authenticates
+// once its own token has aged out" was asserted nowhere for a month, until
+// #2066 found it the hard way. Nothing else catches this class of gap:
+// check-gh-bot-attribution.sh gates the WRITE vocabulary (is a `gh` call a
+// write, does its script source the helper), not whether a function in the
+// helper has a test; and vitest.config.ts only covers `packages/*/src/**/*.ts`,
+// so a bash library's untested surface is invisible to every other automated
+// signal in this repo.
+//
+// Deliberately the WEAKER of the two options #2186 named: it proves a public
+// function is MENTIONED in this file, not that the assertion is meaningful —
+// a test that merely calls the function satisfies it. That closes "shipped
+// with zero tests", the failure that actually happened; it does not close
+// "shipped with a weak test" (#2186's own stated cost of this direction).
+// Private `_gh_bot_*` helpers are deliberately exempt (#2186's rejected
+// option 2): they are implementation detail, and gating them would make
+// renaming one break this test, which invites relaxing the gate rather than
+// writing the test it is meant to force.
+test('every public gh_bot_* function is named in this test file (#2186)', () => {
+  const lib = fs.readFileSync(LIB, 'utf8');
+  // Public functions only: top-level `name() {`, never indented and never
+  // starting with `_` (the private-helper convention this file already uses
+  // throughout, e.g. _gh_bot_mint, _gh_bot_ensure).
+  const defined = [...new Set(
+    [...lib.matchAll(/^(gh_bot_[a-zA-Z0-9_]*)\s*\(\)\s*\{/gm)].map((m) => m[1]),
+  )];
+  assert.ok(defined.length > 0,
+    'sanity: found zero public gh_bot_* definitions — the scan regex likely broke');
+
+  const self = fs.readFileSync(__filename, 'utf8');
+  const missing = defined.filter((name) => !new RegExp(`\\b${name}\\b`).test(self));
+
+  assert.deepEqual(missing, [],
+    `public function(s) defined in gh-bot.sh with NO mention anywhere in gh-bot.test.js: `
+    + `${missing.join(', ')} — this is the #2186 gap (#2003 shipped gh_bot_warm_read the `
+    + 'same way, undetected for a month until #2066).');
 });
