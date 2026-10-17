@@ -53,6 +53,15 @@ function reconcilerBlock(): string {
 let tmp: string;
 let kids: ChildProcess[] = [];
 
+// The liveness witness is `pgrep -f`, which reads the WHOLE machine's process table,
+// not this test's. Other test files run in parallel and launch the real dispatcher as
+// `dispatch-issue.sh 4242` (agent-launch-harness.ts DISPATCH_ISSUE), so a fixed number
+// here can read as "a dispatch is alive" and turn a no-live-dispatch test red, or green
+// for the wrong reason. A number derived from this worker's pid is one no other running
+// process can carry. ORPHAN_LIVE keeps ORPHAN as its prefix for the anchoring test.
+const ORPHAN = String(700000000 + process.pid);
+const ORPHAN_LIVE = `${ORPHAN}5`;
+
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'drain-reconcile-'));
 });
@@ -260,28 +269,29 @@ describe('#1306 — orphaned agent-running claims are released', () => {
   it('anchors on the issue number — a live 885 does not protect claim 88', () => {
     // The prefix hazard: an unanchored `pgrep -f "dispatch-issue.sh 88"` matches the
     // process for 885 and would leave issue 88's orphaned claim in place forever.
+    // Same shape with ORPHAN_LIVE / ORPHAN, numbers no parallel test dispatches.
     const fake = path.join(tmp, 'dispatch-issue.sh');
     fs.writeFileSync(fake, '#!/usr/bin/env bash\nsleep 30\n', { mode: 0o755 });
-    const kid = spawn('bash', [fake, '885'], { stdio: 'ignore' });
+    const kid = spawn('bash', [fake, ORPHAN_LIVE], { stdio: 'ignore' });
     kids.push(kid);
     execFileSync('bash', ['-c', 'sleep 0.4']);
 
-    const out = runReconciler('reconcile_stale_claims', { running: '88\n' }, [
+    const out = runReconciler('reconcile_stale_claims', { running: `${ORPHAN}\n` }, [
       [claimEvent('2020-01-01T00:00:00Z')], // ancient → stale
     ]);
-    expect(out).toContain('releasing orphaned agent-running on #88');
+    expect(out).toContain(`releasing orphaned agent-running on #${ORPHAN} `);
   });
 
   it('leaves a RECENT claim alone even with no live process (age witness)', () => {
     const nowIso = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
-    const out = runReconciler('reconcile_stale_claims', { running: '4242\n' }, [
+    const out = runReconciler('reconcile_stale_claims', { running: `${ORPHAN}\n` }, [
       [claimEvent(nowIso)],
     ]);
     expect(out).not.toContain('releasing orphaned');
   });
 
   it('fails toward no-op when the claim time is unreadable', () => {
-    const out = runReconciler('reconcile_stale_claims', { running: '4242\n' });
+    const out = runReconciler('reconcile_stale_claims', { running: `${ORPHAN}\n` });
     expect(out).toContain('leaving it alone');
     expect(ghCalls()).not.toContain('--remove-label agent-running');
   });
@@ -527,12 +537,12 @@ describe('#1352 (T3) — the liveness witness actually matches a live dispatch',
 
   it('reports DEAD for an issue with no dispatch running', () => {
     spawnFakeDispatch('885');
-    expect(dispatchAlive('774')).toBe(false);
+    expect(dispatchAlive(ORPHAN)).toBe(false);
   });
 
   it('stays anchored — a live 885 is not a live 88 (prefix hazard)', () => {
-    spawnFakeDispatch('885');
-    expect(dispatchAlive('88')).toBe(false);
+    spawnFakeDispatch(ORPHAN_LIVE);
+    expect(dispatchAlive(ORPHAN)).toBe(false);
   });
 });
 
