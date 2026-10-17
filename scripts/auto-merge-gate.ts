@@ -643,7 +643,12 @@ const BOUNDARY_ROOT_BASENAMES: ReadonlySet<string> = new Set([
  * gate that fires constantly gets routed around, and one people route around is
  * worse than none, because it still reads as protection.
  */
-const BOUNDARY_GOVERNANCE_PATHS: ReadonlySet<string> = new Set(['.minspec/config.json']);
+const BOUNDARY_GOVERNANCE_PATHS: ReadonlySet<string> = new Set([
+  '.minspec/config.json',
+  // DR-108: the delegation records. An agent may tighten or suspend a delegation
+  // but never widen one, so no edit to this file may auto-merge either.
+  '.minspec/delegations.json',
+]);
 
 /**
  * Package-manager / build-tool config matched by basename. `tsconfig*.json`
