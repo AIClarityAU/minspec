@@ -40,6 +40,10 @@ function findScriptsDir(): string {
 const scriptsDir = findScriptsDir();
 const dispatchPath = path.join(scriptsDir, 'dispatch-issue.sh');
 const libPath = path.join(scriptsDir, 'lib', 'agent-egress.sh');
+// The wrapper calls the scan with git pointed at the worktree's pinned git directory
+// (lib/agent-worktree.sh, #1203), so driving it needs that library and a pinned worktree,
+// as the script itself has by the time it runs.
+const worktreeLibPath = path.join(scriptsDir, 'lib', 'agent-worktree.sh');
 const dispatchSrc = fs.readFileSync(dispatchPath, 'utf-8');
 
 // Fixture "secret" shaped to match egress-scan.sh's sk-ant- pattern, used ONLY
@@ -81,23 +85,31 @@ describe('dispatch-issue.sh — sources the shared egress lib, does not reimplem
 
 // ─── Behavioural parity: run_egress_guard vs agent_egress_scan direct ──────
 
+let root: string;
 let dir: string;
 beforeEach(() => {
-  dir = fs.mkdtempSync(path.join(os.tmpdir(), 'egress-parity-'));
-  git('init', '-q');
-  git('config', 'user.email', 'test@example.com');
-  git('config', 'user.name', 'test');
-  git('config', 'commit.gpgsign', 'false');
-  fs.writeFileSync(path.join(dir, 'base.txt'), 'base\n');
-  git('add', 'base.txt');
-  git('commit', '-q', '-m', 'base');
-  const baseSha = git('rev-parse', 'HEAD').trim();
+  // `dir` is a LINKED worktree of a repository beside it, which is what the dispatcher
+  // gives an agent and the only kind it will pin: its git directory is outside it.
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'egress-parity-'));
+  const repo = path.join(root, 'repo');
+  dir = path.join(root, 'worktree');
+  fs.mkdirSync(repo);
+  const inRepo = (...args: string[]) => execFileSync('git', args, { cwd: repo, encoding: 'utf-8' });
+  inRepo('init', '-q', '-b', 'main');
+  inRepo('config', 'user.email', 'test@example.com');
+  inRepo('config', 'user.name', 'test');
+  inRepo('config', 'commit.gpgsign', 'false');
+  fs.writeFileSync(path.join(repo, 'base.txt'), 'base\n');
+  inRepo('add', 'base.txt');
+  inRepo('commit', '-q', '-m', 'base');
+  const baseSha = inRepo('rev-parse', 'HEAD').trim();
   // run_egress_guard hardcodes "origin/main" as the base ref — synthesize that
   // remote-tracking ref locally so the fixture repo doesn't need a real remote.
-  git('update-ref', 'refs/remotes/origin/main', baseSha);
+  inRepo('update-ref', 'refs/remotes/origin/main', baseSha);
+  inRepo('worktree', 'add', '-q', '-b', 'agent/issue-fixture', dir);
 });
 afterEach(() => {
-  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(root, { recursive: true, force: true });
 });
 
 function git(...args: string[]): string {
@@ -114,7 +126,7 @@ function commit(name: string, content: string, message: string) {
 function callGuard(kind: 'wrapper' | 'direct'): { blocked: boolean; out: string } {
   const body =
     kind === 'wrapper'
-      ? `${runEgressGuardFn}\nWORKTREE=${JSON.stringify(dir)}\nrun_egress_guard`
+      ? `source ${JSON.stringify(worktreeLibPath)}\n${runEgressGuardFn}\nWORKTREE=${JSON.stringify(dir)}\nagent_worktree_pin "$WORKTREE" || exit 97\nrun_egress_guard`
       : `WORKTREE=${JSON.stringify(dir)}\nagent_egress_scan "$WORKTREE" origin/main "${dir}/.agent-summary.md" "${dir}/.review-signals.json"`;
   const script = `source ${JSON.stringify(libPath)}\n${body}`;
   try {

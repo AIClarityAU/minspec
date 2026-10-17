@@ -64,6 +64,18 @@ vi.mock('../src/lib/adr-manager', () => ({
   ADR_STATUS_VALUES: ['proposed', 'accepted', 'deprecated', 'superseded'],
 }));
 
+// SPEC-041 Slice 1 (#1066): Accept ADR runs the human-approver gate and writes a sidecar.
+// Keep the real gate; stub the git/fs edges (see adr-command.test.ts).
+vi.mock('../src/lib/approval', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/approval')>()),
+  gitConfigEmail: vi.fn(() => 'human@example.com'),
+  canonicalSpecHash: vi.fn(() => 'hash-of-accepted-dr'),
+}));
+vi.mock('../src/lib/approval-store', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/approval-store')>()),
+  writeRecord: vi.fn(),
+}));
+
 vi.mock('../src/lib/active-spec', () => ({
   findActiveSpec: vi.fn(),
   summarizeActiveSpec: vi.fn(),
