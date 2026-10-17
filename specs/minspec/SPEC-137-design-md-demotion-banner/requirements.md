@@ -44,7 +44,8 @@ configurability.
 ## Functional requirements
 
 - **FR-1 Preference.** A per-repo setting `designMdLane` with values `authored | generated`.
-  Absent or unrecognised value reads as `authored`. Scope: this repository only (see
+  Only a cleanly absent key reads as `authored`; a present value that is not exactly
+  `authored` or `generated` is handled by FR-8 (fails toward review). Scope: this repository only (see
   Decision D-1 for where it is stored).
 - **FR-2 Banner shown.** The spec webview shows the demotion banner on a spec's `design.md`
   view iff the effective lane is `authored` and the repo is MinSpec-opted-in (`.minspec/`
@@ -60,12 +61,14 @@ configurability.
   assists it. (This is the DR-057 s4 safety property: a pref that can only add review.)
 - **FR-6 Provenance predicate.** The classifier that DR-057 s1 keys off the filename
   convention returns: `tasks.md` -> generated always; `design.md` -> generated iff
-  `designMdLane == generated`, else authored; every other approvable -> authored. The
-  predicate has no input other than the filename and this preference.
+  `designMdLane == generated`, authored iff the key is absent or `authored`; every other approvable -> authored. The
+  FR-8 override takes precedence: a present-but-malformed or unrecognised preference makes
+  `design.md` generated. The predicate has no input other than the filename and this
+  preference.
 - **FR-7 `tasks.md` not configurable.** No setting, banner, or flag can make `tasks.md`
   authored. A stored value naming it is ignored.
-- **FR-8 Fail toward review.** If the preference is present but unreadable (malformed
-  JSON, wrong type), the effective lane is `generated` and the webview says so visibly
+- **FR-8 Fail toward review.** If the preference is present but unreadable or invalid (malformed
+  JSON, wrong type, or an unrecognised value such as `authored ` or `generatd`), the effective lane is `generated` and the webview says so visibly
   (no silent downgrade, invariant 2). Only a cleanly absent key means `authored`.
 - **FR-9 Offline and local.** Reading and writing the preference make no network call
   (invariant 1) and the banner works with no GitHub credential.
@@ -84,8 +87,9 @@ configurability.
   actions, the effective lane never moves `generated` -> `authored`. (FR-5)
 - **AC-5** Predicate table test: (`tasks.md`, any value) -> generated; (`design.md`,
   `authored`/absent) -> authored; (`design.md`, `generated`) -> generated;
-  (`requirements.md`, any) -> authored. (FR-6, FR-7)
-- **AC-6** Malformed preference file: effective lane `generated`, visible notice shown,
+  (`design.md`, malformed/unreadable/unrecognised, e.g. `generatd`) -> generated;
+  (`requirements.md`, any) -> authored. (FR-6, FR-7, FR-8)
+- **AC-6** Malformed preference file or unrecognised value: effective lane `generated`, visible notice shown,
   banner not offered. (FR-8)
 - **AC-7** Repo without `.minspec/`: no banner and no write. (FR-10)
 - **AC-8** Existing `design.md` bytes unchanged after demotion. (FR-11)
