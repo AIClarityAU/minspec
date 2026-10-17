@@ -76,11 +76,33 @@ beforeAll(() => {
   SHELL_TIER_PATH = buildShellTierBinDir();
 });
 
+/**
+ * The GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n pins
+ * vitest.setup.ts puts on process.env to hold auto-maintenance off in every
+ * fixture repo (#1532). shellTierEnv() below builds its env from scratch
+ * rather than spreading process.env — the whole point is a PATH that cannot
+ * resolve python3 — so without this, those pins never reach the git calls in
+ * this file and a fixture repo's `git commit` can trigger a detached
+ * maintenance process that still has `.git/objects` open when a later
+ * `fs.rmSync` tries to remove it, surfacing as ENOTEMPTY (#2627).
+ */
+function gitConfigPinEnv(): NodeJS.ProcessEnv {
+  const pins: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (/^GIT_CONFIG_(COUNT|KEY_\d+|VALUE_\d+)$/.test(key) && value !== undefined) {
+      pins[key] = value;
+    }
+  }
+  return pins;
+}
+
 function shellTierEnv(): NodeJS.ProcessEnv {
   // Deliberately NOT spreading process.env.PATH: the whole point is a PATH
   // that cannot resolve python3 (or npx), even though both exist elsewhere on
-  // the real one. HOME is kept so git can find global config if any.
-  return { ...GIT_ENV, PATH: SHELL_TIER_PATH, HOME: process.env.HOME };
+  // the real one. HOME is kept so git can find global config if any. The
+  // GIT_CONFIG_* pins ARE carried over (see gitConfigPinEnv) so fixture repos
+  // here get the same auto-maintenance-off treatment as every other suite.
+  return { ...GIT_ENV, ...gitConfigPinEnv(), PATH: SHELL_TIER_PATH, HOME: process.env.HOME };
 }
 
 function git(cwd: string, ...args: string[]): string {
@@ -159,6 +181,26 @@ describe('#1908 preconditions — the fixture actually forces the shell tier', (
     // Sanity: python3 DOES exist on the real, ambient PATH — otherwise this
     // whole file would be proving nothing (nothing to force a fallback FROM).
     expect(() => execFileSync('python3', ['--version'], { env: process.env })).not.toThrow();
+  });
+
+  it('#2627 carries the auto-maintenance-off pins into the curated env, inside a real fixture', () => {
+    // Guards the fix for #2627: shellTierEnv() builds its env from scratch, so
+    // the GIT_CONFIG_* pins vitest.setup.ts puts on process.env (#1532) do not
+    // reach it for free — gitConfigPinEnv() must copy them over. Assert what
+    // git actually resolves INSIDE a fixture this file creates, under the
+    // exact env this file hands its own git calls, not a proxy for it.
+    const dir = mkRepo();
+    try {
+      repoIn(dir);
+      expect(
+        execFileSync('git', ['config', '--get', 'maintenance.auto'], { cwd: dir, encoding: 'utf-8', env: shellTierEnv() }).trim()
+      ).toBe('false');
+      expect(
+        execFileSync('git', ['config', '--get', 'gc.auto'], { cwd: dir, encoding: 'utf-8', env: shellTierEnv() }).trim()
+      ).toBe('0');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

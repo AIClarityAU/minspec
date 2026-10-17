@@ -127,21 +127,30 @@ Monorepo for two VS Code extensions + extension pack:
 
 ## Scrooge Model-Fit Advisory
 
-Watch whether the session's active **model / effort / thinking** matches what the current task
-needs. When they diverge in **either** direction, append a **single-line advisory** at the end of
-the response. An ongoing nag, not a gate: never pause the thread, never ask - surface and continue.
+Watch whether the session's active **model** matches what the current task needs. When they
+diverge in **either** direction, append a **single-line advisory** at the end of the response,
+but only about the **next** session. An ongoing nag, not a gate: never pause the thread, never
+ask - surface and continue.
 
+- **Never recommend a mid-session switch (#2734).** Changing model, effort or thinking inside a
+  running session invalidates the prompt cache; the token-saving research measured the next turn
+  at about 14.5 times a normal turn. A "switch now" nudge can cost more than it saves, so the
+  advisory is always framed as how to *start the next session*, never as `/model` or `/effort`
+  on this one. Cost of this rule: a hard task on a badly under-powered model is no longer
+  flagged for an immediate switch.
 - **Format — one *italic* line** (wrap it all in `*…*`) so it sets apart and reads low-weight:
-  `*💲 Scrooge: this <task> suits <model> · <effort> effort · <thinking> — you're on <current>. Switch: /model*`
-  Font size is fixed by the terminal, so italic is the only emphasis available here; a genuinely
-  smaller font belongs to the statusline/webview surface, not this nag.
-- **Only on a genuine mismatch.** Already well-matched → say nothing. One line, never a
-  paragraph; if unsure, stay silent rather than cry wolf.
+  `*💲 Scrooge: this <task> suits <model> — you're on <current>. Start the NEXT session on <model>.*`
+  Model fit only: no effort or thinking half. Font size is fixed by the terminal, so italic is
+  the only emphasis available here; a genuinely smaller font belongs to the statusline/webview
+  surface, not this nag.
+- **Only on a genuine mismatch, and only while the session is short.** Already well-matched →
+  say nothing. Session already long (a switch or restart would discard a warm cache) → say
+  nothing. One line, never a paragraph; if unsure, stay silent rather than cry wolf.
 - **Direction-neutral.** Recommend *down* (cheaper — the common case) or *up* (a hard task on a
   weak model) with equal willingness. Frugality is the default lean, not a floor.
 - **Advisory only — never a silent auto-switch.** The model cannot change its own session, and a
-  silently-swapped model makes the UI's model label lie (never-wrong invariant). Name the
-  keyboard path (`/model`); the human decides and acts.
+  silently-swapped model makes the UI's model label lie (never-wrong invariant). The human
+  decides and acts when they next start a session.
 - **Heuristic, not authority.** A cheap task-shape read, not a guarantee — a soft advisory
   layer. The deterministic, always-visible version is a Scrooge statusline (tracked in
   `AIClarityAU/scroogellm`); this CLAUDE.md nag does not replace it.
