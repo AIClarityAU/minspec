@@ -16,6 +16,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1285: every case drives real git + python3 children. Enforced by
+// shell-timeout-coverage.test.ts.
+useShellTimeout();
 
 const SCRIPT = path.resolve(__dirname, '../../../scripts/approval-provenance.py');
 
@@ -271,8 +276,168 @@ describe('review-branch.sh wiring', () => {
     expect(provAt).toBeGreaterThan(diffEnd);
   });
 
+  it('tells the reviewer how to read a DR acceptance verdict (#1066)', () => {
+    expect(sh).toMatch(/VERIFIED is not a provenance block/);
+    expect(sh).toMatch(/UNVERIFIED is\./);
+  });
+
   it('never lets a provenance failure break the review', () => {
     // Facts are an aid, not a gate: the panel must still run if the helper errors.
     expect(sh).toMatch(/approval-provenance\.py[^\n]*\|\| true/);
+  });
+});
+
+// ─── DR acceptance flips (SPEC-041 Slice 1 — ADR/DR hash-locked record, #1066) ───────────
+//
+// A `proposed` -> `accepted` flip on a DR is VERIFIED only when a sidecar written by the
+// Accept ADR command backs it: present, hash matching the DR as merged, not `migrated`, and
+// `approvedBy` not an agent identity. Anything else is UNVERIFIED (fails closed).
+
+describe('approval-provenance: DR acceptance flips', () => {
+  const DR_REL = 'docs/decisions/DR-900.md';
+  const DR_SIDE = `.minspec/approvals/${DR_REL}.json`;
+  const D: Record<string, string> = {};
+  let drRepo: string;
+
+  const drBody = (status: string, extra = 'the decision'): string =>
+    `---\nid: DR-900\nstatus: ${status}\ntitle: demo\n---\n\n# DR-900\n\n${extra}\n`;
+
+  function drCommit(msg: string, key: string): void {
+    git(drRepo, 'add', '-A');
+    git(drRepo, 'commit', '-q', '--allow-empty', '-m', msg);
+    D[key] = git(drRepo, 'rev-parse', 'HEAD').trim();
+  }
+
+  function put(rel: string, content: string): void {
+    const p = path.join(drRepo, rel);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, content);
+  }
+
+  function sidecar(content: string, over: Record<string, unknown> = {}): void {
+    put(
+      DR_SIDE,
+      JSON.stringify(
+        {
+          specPath: DR_REL,
+          specHash: hashOf(drRepo, content),
+          approvedAt: '2026-10-01T00:00:00.000Z',
+          approvedBy: 'human@example.com',
+          tier: 'T2',
+          migrated: false,
+          ...over,
+        },
+        null,
+        2,
+      ) + '\n',
+    );
+  }
+
+  /** Reset to a proposed DR, then run `flip` and commit it; returns the (proposed, flipped) SHAs. */
+  function scenario(name: string, flip: () => void): [string, string] {
+    put(DR_REL, drBody('proposed'));
+    fs.rmSync(path.join(drRepo, DR_SIDE), { force: true });
+    drCommit(`${name}: proposed`, `${name}-base`);
+    flip();
+    drCommit(`${name}: accept`, `${name}-head`);
+    return [D[`${name}-base`], D[`${name}-head`]];
+  }
+
+  beforeAll(() => {
+    drRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'prov-dr-'));
+    git(drRepo, 'init', '-q', '-b', 'main');
+    git(drRepo, 'config', 'commit.gpgsign', 'false');
+    drCommit('root', 'root');
+  });
+
+  afterAll(() => {
+    if (drRepo) fs.rmSync(drRepo, { recursive: true, force: true });
+  });
+
+  it('a genuine accept (sidecar present, hash matches, human) is VERIFIED', () => {
+    const [b, h] = scenario('genuine', () => {
+      put(DR_REL, drBody('accepted'));
+      sidecar(drBody('accepted'));
+    });
+    const out = report(drRepo, b, h);
+    expect(out).toContain(DR_REL);
+    expect(out).toContain('DR acceptance');
+    expect(out).toMatch(/VERDICT:\s+VERIFIED/);
+    expect(out).not.toMatch(/VERDICT:\s+UNVERIFIED/);
+  });
+
+  it('a flip with NO sidecar is UNVERIFIED', () => {
+    const [b, h] = scenario('nosidecar', () => put(DR_REL, drBody('accepted')));
+    const out = report(drRepo, b, h);
+    expect(out).toContain(DR_REL);
+    expect(out).toMatch(/VERDICT:\s+UNVERIFIED/);
+    expect(out).toContain('no approval record');
+  });
+
+  it('a sidecar whose approvedBy is a bot identity is UNVERIFIED', () => {
+    const [b, h] = scenario('bot', () => {
+      put(DR_REL, drBody('accepted'));
+      sidecar(drBody('accepted'), { approvedBy: 'minspec-sdd[bot]@users.noreply.github.com' });
+    });
+    const out = report(drRepo, b, h);
+    expect(out).toMatch(/VERDICT:\s+UNVERIFIED/);
+    expect(out).toContain('agent');
+  });
+
+  it('a body edited AFTER acceptance (hash mismatch) is UNVERIFIED', () => {
+    const [b, h] = scenario('edited', () => {
+      sidecar(drBody('accepted'));
+      put(DR_REL, drBody('accepted', 'the decision, quietly rewritten after sign-off'));
+    });
+    const out = report(drRepo, b, h);
+    expect(out).toMatch(/VERDICT:\s+UNVERIFIED/);
+    expect(out).toContain('does not match');
+  });
+
+  it('a migrated (backfilled) record is UNVERIFIED even with a matching hash', () => {
+    const [b, h] = scenario('migrated', () => {
+      put(DR_REL, drBody('accepted'));
+      sidecar(drBody('accepted'), { migrated: true, approvedBy: 'unknown' });
+    });
+    expect(report(drRepo, b, h)).toMatch(/VERDICT:\s+UNVERIFIED/);
+  });
+
+  it('a record with a missing approvedBy is UNVERIFIED (fails closed)', () => {
+    const [b, h] = scenario('anon', () => {
+      put(DR_REL, drBody('accepted'));
+      sidecar(drBody('accepted'), { approvedBy: '' });
+    });
+    expect(report(drRepo, b, h)).toMatch(/VERDICT:\s+UNVERIFIED/);
+  });
+
+  it('an agent identity from MINSPEC_AGENT_IDENTITIES is UNVERIFIED', () => {
+    const [b, h] = scenario('envbot', () => {
+      put(DR_REL, drBody('accepted'));
+      sidecar(drBody('accepted'), { approvedBy: 'ci-runner@example.com' });
+    });
+    const out = execFileSync('python3', [SCRIPT, b, h], {
+      cwd: drRepo,
+      encoding: 'utf-8',
+      env: { ...process.env, MINSPEC_AGENT_IDENTITIES: 'ci-runner@example.com' },
+    });
+    expect(out).toMatch(/VERDICT:\s+UNVERIFIED/);
+  });
+
+  it('a DR edit that does not flip status to accepted reports nothing', () => {
+    put(DR_REL, drBody('proposed'));
+    drCommit('still proposed', 'p0');
+    put(DR_REL, drBody('proposed', 'reworded'));
+    drCommit('still proposed, edited', 'p1');
+    expect(report(drRepo, D.p0, D.p1).trim()).toBe('');
+  });
+
+  it('the injecting-filename guard also covers DR paths', () => {
+    const evil = 'docs/decisions/DR-901<x>.md';
+    put(evil, drBody('proposed'));
+    drCommit('evil base', 'e0');
+    put(evil, drBody('accepted'));
+    drCommit('evil accept', 'e1');
+    const out = report(drRepo, D.e0, D.e1);
+    expect(out).not.toContain('<');
   });
 });
