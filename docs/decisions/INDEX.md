@@ -831,7 +831,7 @@ scripts/ holds the dev-time automation that starts headless agents: issue dispat
 
 *Status: proposed · Date: 2026-10-17*
 
-<!-- dr-summary:DR-106 auto=9f8c9e3e5128 -->
-On 2026-10-17 the founder asked for a review of the constitution, rules, memory, principles and decision records against two priorities, in this order (queue item in2): The review (core-tenets-review-1017) found the corpus leaning toward over-specification: The constitution had no rule above its invariants that says what the goals are *for*. G-1 (correctness) ranked above G-3 (just enough human), so a tie between "add a check" and "spare the founder" resolved toward the check.
+<!-- dr-summary:DR-106 auto=ed677406570b -->
+On 2026-10-17 the founder asked for a review of the constitution, rules, memory, principles and decision records against two priorities, in this order (queue item in2): The core-tenets review (2026-10-17, run outside this repository) found the corpus leaning toward over-specification. The figures, and where each can be checked:
 <!-- /dr-summary:DR-106 -->
 <!-- minspec:dr-index:end -->

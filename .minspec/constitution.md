@@ -2,7 +2,8 @@
 
 ## Core tenets
 
-Ranked. Every rule below must trace to one of them. (DR-106, proposed.)
+Ranked. Every rule below must trace to one of them. (DR-106. In force from the founder's
+merge of the pull request that added this section; the record's acceptance is separate.)
 
 1. **Make the founder's job smaller - minimise human involvement.** Founder attention is
    the scarcest resource. A human gate must name the error it catches that no machine
@@ -53,7 +54,7 @@ has a **stable ID** (`G-N`) that artifacts reference via `goal: G-N` frontmatter
 `epic:`, DR-013). The next-task resolver reads `goal-rank` as a deterministic tie-break
 within a severity class — never an LLM judgement (DR-039, DR-019).
 
-Re-ranked by DR-106 (proposed): G-3 rises to the top because it is core tenet 1, and
+Re-ranked by DR-106 (in force from the founder's merge, as above): G-3 rises to the top because it is core tenet 1, and
 G-1/G-2 become the means of core tenet 2 (preventing rework) rather than ends in
 themselves. The IDs are unchanged.
 
