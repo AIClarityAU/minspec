@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { parseSpec, writeSpec, updateSpecFrontmatter, readSpecFile, writeSpecFile, setSpecStatus } from '../src/lib/spec';
+import {
+  parseSpec,
+  writeSpec,
+  updateSpecFrontmatter,
+  readSpecFile,
+  writeSpecFile,
+  setSpecStatus,
+  specStatusProseWouldInvert,
+} from '../src/lib/spec';
 import type { ParsedSpec } from '../src/lib/spec';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -386,6 +394,58 @@ Body.
     expect(reparsed.frontmatter.type).toBe('requirements');
   });
 
+  // #2324: ticking a task checkbox in the spec panel, and `MinSpec: Migrate
+  // Layout`, both write via writeSpec() — and serializeFrontmatter only ever
+  // emitted the fixed field set SpecFrontmatter models, so SPEC-038 ownership
+  // fields (implements:/affects:/implements_reason:) and FR-13 edge fields
+  // (depends_on:/supersedes:/relates_to:) were silently dropped on every such
+  // round trip, undoing the ownership declaration the #2250 gate requires.
+  it('round-trips implements:/affects:/relates_to: and other unmodeled frontmatter fields', () => {
+    const input = `---
+id: SPEC-099
+title: X
+tier: T3
+status: planning
+depends_on: [SPEC-001]
+relates_to: [DR-001, DR-002]
+implements:
+  - packages/minspec/src/lib/foo.ts
+  - packages/minspec/src/lib/bar.ts
+implements_reason: >-
+  Folded scalar continuation line.
+affects:
+  - packages/minspec/src/lib/baz.ts
+created: 2026-06-05
+---
+
+# X
+
+## Specify
+
+Body.
+
+## Tasks
+
+- [ ] a task
+`;
+    const parsed = parseSpec(input);
+    const written = writeSpec(parsed);
+    expect(written).toContain('depends_on: [SPEC-001]');
+    expect(written).toContain('relates_to: [DR-001, DR-002]');
+    expect(written).toContain('implements:');
+    expect(written).toContain('  - packages/minspec/src/lib/foo.ts');
+    expect(written).toContain('  - packages/minspec/src/lib/bar.ts');
+    expect(written).toContain('implements_reason: >-');
+    expect(written).toContain('affects:');
+    expect(written).toContain('  - packages/minspec/src/lib/baz.ts');
+
+    // And a second round trip (mirrors toggling a task then re-reading) keeps them.
+    const reparsed = parseSpec(written);
+    const rewritten = writeSpec(reparsed);
+    expect(rewritten).toContain('implements:');
+    expect(rewritten).toContain('  - packages/minspec/src/lib/foo.ts');
+  });
+
   it('omits product/type lines when absent (single-product single-file spec)', () => {
     // EXAMPLE_SPEC carries neither field — the writer must not invent empty lines.
     const written = writeSpec(parseSpec(EXAMPLE_SPEC));
@@ -653,5 +713,84 @@ tier: T3
     // status token) is left exactly as authored — bodyStatusToken's conservative,
     // never-false-positive contract.
     expect(after).toContain('**Status:** Clarify complete — awaiting human *Approve Spec* before Plan');
+  });
+
+  // #2149 — the writer's status-line regex captured indent (`[ \t]*`) instead
+  // of anchoring to column 0, and was non-global, so it matched the FIRST
+  // `status:` line at ANY indent. A nested `status:` key placed before the
+  // top-level one was rewritten instead, leaving the real status untouched —
+  // a silent double failure (write doesn't take effect + unrelated key
+  // clobbered). Anchoring to `^status:` fixes this regardless of key order.
+  it('rewrites the top-level status: line, not a nested status: key that sorts first (#2149)', () => {
+    const nested = path.join(tmpDir, 'SPEC-102.md');
+    fs.writeFileSync(
+      nested,
+      `---
+id: SPEC-102
+review:
+  status: needs-changes
+status: specifying
+tier: T3
+---
+
+# Title
+`,
+    );
+    setSpecStatus(nested, 'implementing');
+    const after = fs.readFileSync(nested, 'utf-8');
+    // The top-level key flips...
+    expect(after).toContain('\nstatus: implementing');
+    // ...and the nested key is untouched, not clobbered.
+    expect(after).toContain('  status: needs-changes');
+    expect(parseSpec(after).frontmatter.status).toBe('implementing');
+  });
+
+  // #2180 — specs share the DR guard's vulnerable shape (#1833: a status line whose
+  // prose negates a status word inverts under a blind token swap) but had NO equivalent
+  // guard at all: `setBodyStatusToken` rewrote the leading `**Status:**` word
+  // unconditionally. `specStatusProseWouldInvert` closes that gap, and — like the DR
+  // guard — tests the claim's whole paragraph, not just the physical line the token
+  // sits on, so a negation on a wrapped continuation line is still caught.
+  describe('#2180 — a spec Status line whose prose negates a status word', () => {
+    const specWith = (statusLine: string) =>
+      `---\nid: SPEC-200\nstatus: specifying\ntier: T2\n---\n\n# Title\n\n${statusLine}\n\n## Context\n\nc\n`;
+
+    it('is detected on a single physical line', () => {
+      const doc = specWith(
+        '**Status:** Specifying, pending founder review this record is not yet implementing and must not be treated as in force.',
+      );
+      const r = specStatusProseWouldInvert(doc);
+      expect(r).not.toBeNull();
+      expect(r!.text).toContain('not yet implementing');
+    });
+
+    it('is detected when the negation lands on a WRAPPED CONTINUATION line', () => {
+      const doc = specWith(
+        '**Status:** Specifying, pending founder review this record is\nnot yet implementing and must not be treated as in force.',
+      );
+      const r = specStatusProseWouldInvert(doc);
+      expect(r).not.toBeNull();
+      expect(r!.text).toContain('not yet implementing');
+    });
+
+    it('benign history is not flagged — negation, not mere mention', () => {
+      const doc = specWith('**Status:** Implementing (Specifying complete 2026-06-23).');
+      expect(specStatusProseWouldInvert(doc)).toBeNull();
+    });
+
+    it('setSpecStatus REFUSES, and writes nothing at all', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spec2180-'));
+      const f = path.join(dir, 'SPEC-200.md');
+      const doc = specWith(
+        '**Status:** Specifying, pending founder review this record is\nnot yet implementing and must not be treated as in force.',
+      );
+      fs.writeFileSync(f, doc);
+      const before = fs.readFileSync(f, 'utf-8');
+      expect(() => setSpecStatus(f, 'implementing')).toThrow(/negates a status word/);
+      // The load-bearing half: refusing AFTER writing frontmatter would leave the file
+      // asserting two statuses — the very state this mechanism exists to prevent.
+      expect(fs.readFileSync(f, 'utf-8')).toBe(before);
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
   });
 });

@@ -280,6 +280,30 @@ describe('isUntrackedAtHead — detects a create that was never committed (#577)
 
     expect(await isUntrackedAtHead(tmp, drPath)).toBe(true);
   });
+
+  // #2402 — on Windows, `path.relative` yields backslashes, but git's `<rev>:<path>`
+  // object-name form names a tree entry and takes forward slashes only. A stub
+  // `GitRun` lets this reproduce on a POSIX runner: on POSIX `\` is an ordinary
+  // filename character (not a separator), so `path.relative` preserves it
+  // byte-for-byte in `rel` — the exact string a real Windows `path.relative` would
+  // have produced — and the fix (`toPosixRel`) is the same string transform either
+  // way (approval-store.ts:66-71).
+  it('sends a forward-slash HEAD:<path> even when path.relative yields backslashes (Windows)', async () => {
+    const rootDir = tmp;
+    const absPath = path.join(rootDir, 'docs\\decisions\\DR-005.md');
+    const calls: (readonly string[])[] = [];
+    const stubRun = (args: readonly string[]) => {
+      calls.push(args);
+      return Promise.resolve('');
+    };
+
+    await isUntrackedAtHead(rootDir, absPath, stubRun);
+
+    expect(calls).toHaveLength(1);
+    const headArg = calls[0][calls[0].length - 1];
+    expect(headArg).toBe('HEAD:docs/decisions/DR-005.md');
+    expect(headArg).not.toContain('\\');
+  });
 });
 
 /**

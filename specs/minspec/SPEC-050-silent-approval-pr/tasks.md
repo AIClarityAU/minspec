@@ -212,6 +212,45 @@ Covers **FR-1, FR-2, FR-3, FR-5, FR-6, FR-7, FR-8**, **INV-1, INV-2, INV-4**, an
 
 ---
 
+## #2243 follow-on - provision the missing lane label (DR-098) - DONE (#2259)
+
+Design: [design.md, "Provisioning the missing lane label"](./design.md). Decision and boundary:
+[DR-098](../../../docs/decisions/DR-098.md). The requirements-level wording is tracked in
+[#2330](https://github.com/AIClarityAU/minspec/issues/2330), because `requirements.md` is
+hash-locked. Line numbers were read on the head of #2259.
+
+### T0 - Invariants
+- [x] `packages/minspec/tests/labels-template.test.ts` - no extension source reaches a forge
+      label object except one sanctioned site, a create of `DOCS_LANE_LABEL` in
+      `lib/approval-pr.ts`; only `commands/commit-on-approve.ts` opts in; and that site is
+      recorded by DR-098 and by design.md.
+
+### T1 - Contract
+- [x] `packages/minspec/tests/approval-pr-lane-label.test.ts` - `buildLaneLabelCreateArgs`
+      argv, `missingLabelFrom`, and `openPullRequest`'s provisioning: only the lane label,
+      one create, one retry, never `--force`, never without the opt-in, never throws.
+
+### Implementation
+- [x] `packages/minspec/src/lib/approval-pr.ts` (**owned**) - `provisionLaneLabel` on
+      `OpenPrRequest`, `missingLabel` / `labelProvisioned` on `OpenPrResult`
+      (`approval-pr.ts:234-284`); `attemptCreate` extracted unchanged (`:870`);
+      `createLaneLabel` (`:903`).
+- [x] `packages/minspec/src/commands/commit-on-approve.ts` (**owned**) - opt in only when
+      the PR carries the lane label and the checkout has the lane workflow
+      (`laneWorkflowPresent`, `:372`; gate at `:825`); say so on success (`:860`), name the
+      label on failure (`:882`).
+- [x] `packages/minspec/package.json` (**affects**) - `minspec.approvalPr`'s description
+      names the label creation (DR-071 condition 2).
+- [x] `packages/minspec/src/lib/template-registry.ts` - the `labels.md` template states the
+      single `docs-lane` exception (`template-registry.ts:79-90`).
+
+### Gate
+- [x] T3 regression: `packages/minspec/tests/approval-lane-label-parity.test.ts` runs the
+      same approval through both push paths against a repository with the label and one
+      without, and asserts identical outcomes.
+
+---
+
 ## Out of scope (do not do these here)
 
 - Changing `pushOnApprove`'s contributed default to `always` — deliberately not done

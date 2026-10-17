@@ -72,7 +72,17 @@ export function assertOwnershipDeclaredForAdvance(
     // It also removes the last cycle: `epic-manager` and `spec-layout` both reach back to
     // `./spec`, so importing them here would re-close the loop this module exists to open
     // (measured: 3 cycles with them, 0 without).
-    introduced = violationsIntroducedByApproval(parsed, loadConfig(rootDir));
+    //
+    // `pathExists` IS wired (unlike the omitted knownEpicRefs/siblingShardFiles above):
+    // `implement.claimed-without-evidence` (#1751) is gated on `phases.implement`,
+    // which is exactly what the advance moves — omitting the resolver here would
+    // silently skip the one rule this function exists to pre-check for a phase-gated
+    // false claim (a spec whose advance lands it on `implement: in-progress` while its
+    // declared `implements:` paths don't exist). `fs`/`path` are already this module's
+    // own imports (see header) — the resolver itself is trivial.
+    introduced = violationsIntroducedByApproval(parsed, loadConfig(rootDir), {
+      pathExists: (relPath) => fs.existsSync(path.join(rootDir, relPath)),
+    });
   } catch (err) {
     console.warn(
       `[minspec] ownership pre-check skipped for ${path.basename(specFilePath)} — the ` +

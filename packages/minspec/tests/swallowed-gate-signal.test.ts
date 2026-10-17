@@ -20,12 +20,15 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  findPackageJsonScriptSwallows,
   findSwallowedGateSignals,
   unannotated,
 } from '../../../scripts/lib/swallowed-gate-signal';
 
 const REPO = join(__dirname, '../../..');
 const find = (source: string) => findSwallowedGateSignals('t.sh', source);
+const findPkg = (scripts: Record<string, string>) =>
+  findPackageJsonScriptSwallows('package.json', scripts, JSON.stringify({ scripts }, null, 2));
 
 describe('INV-1: the motivating defect is caught in the real tree', () => {
   // Keyed on the variable, not a line number — line numbers rot between writing a test
@@ -235,6 +238,61 @@ describe('INV-3: both markers require a justification', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0].knownIssue).toBeUndefined();
     expect(unannotated(findings)).toHaveLength(1);
+  });
+});
+
+describe('INV-8: package.json scripts, the other place a swallow hides (#2671)', () => {
+  // The motivating defect, pinned directly: the root package.json's own `prepare`
+  // script before the fix. If this regresses — someone reintroducing `|| true`
+  // ahead of `&&` in a script — the checker must catch it again.
+  it('flags a swallowed command chained via && to a further one (the #2671 shape)', () => {
+    const findings = findPkg({
+      prepare: 'git config core.hooksPath .githooks || true && npm run build --workspace=@aiclarity/shared',
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].variable).toBe('prepare');
+    expect(unannotated(findings)).toHaveLength(1);
+  });
+
+  it('does NOT flag a swallow in the FINAL segment — nothing downstream to mislead', () => {
+    // Same shape as the shell checker's own `rm -f "$tmp" || true` example: a
+    // swallow with nothing after it in the chain has no "&&"-decision to defeat.
+    expect(findPkg({ cleanup: 'rm -rf dist && rm -f .tmp || true' })).toHaveLength(0);
+  });
+
+  it('does NOT flag a script with no swallow at all', () => {
+    expect(findPkg({ build: 'tsc && node scripts/stamp.mjs' })).toHaveLength(0);
+  });
+
+  it('does NOT flag a swallow in a single-segment script with nothing chained after it', () => {
+    expect(findPkg({ lint: 'eslint . || true' })).toHaveLength(0);
+  });
+
+  it('leaves a && inside a quoted argument alone (not a real chain boundary)', () => {
+    expect(findPkg({ echo: 'cmd1 || true && echo "a && b"' })).toHaveLength(1); // the REAL && still flags
+    expect(findPkg({ echo: 'echo "a && b"' })).toHaveLength(0); // no real && at all, nothing to flag
+  });
+
+  it('both markers work exactly as they do for the shell form', () => {
+    const okFindings = findPkg({
+      prepare: 'git config core.hooksPath .githooks || true && npm run build # swallow-ok: optional in this context',
+    });
+    expect(okFindings).toHaveLength(0);
+
+    const knownFindings = findPkg({
+      prepare: 'git config core.hooksPath .githooks || true && npm run build # swallow-known: #2671 fixed on main, this fixture predates it',
+    });
+    expect(knownFindings).toHaveLength(1);
+    expect(knownFindings[0].knownIssue).toBe(2671);
+    expect(unannotated(knownFindings)).toHaveLength(0);
+  });
+
+  it('the real root package.json, post-fix, has nothing left to flag', () => {
+    const rootPkgPath = join(REPO, 'package.json');
+    const source = readFileSync(rootPkgPath, 'utf8');
+    const { scripts } = JSON.parse(source) as { scripts: Record<string, string> };
+    const findings = findPackageJsonScriptSwallows('package.json', scripts, source);
+    expect(findings, 'the #2671 prepare-script swallow has reopened').toHaveLength(0);
   });
 });
 

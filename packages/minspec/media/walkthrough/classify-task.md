@@ -1,6 +1,8 @@
 # Classify Your First Task
 
-The **MinSpec: Classify Task Complexity** command helps you determine how much specification a task needs.
+The **MinSpec: Classify Task Complexity** command is where the ways-of-working shift becomes
+concrete. This isn't "pick a tier and move on" — it's the decision that sets how much you
+write for everything that follows.
 
 ## The tier system
 
@@ -34,8 +36,21 @@ MinSpec uses four tiers based on complexity signals:
 - Identify unknowns and resolve them before coding
 - Write an Architecture Decision Record (ADR)
 
-## How classification works
+## Suggest, don't author — the classifier's actual job
 
-The classifier scores your task on several dimensions: files touched, cross-boundary impact, data changes, reversibility, and more. The total score maps to a tier.
+The classifier scores your task on several dimensions: files touched, cross-boundary impact,
+data changes, reversibility, and more. The total score maps to a tier. That score is content
+— a draft, produced deterministically instead of by an LLM, but still a draft.
 
-**You always have the final say.** The classifier suggests — you decide. Override the tier any time.
+**You always have the final say.** This is the verify-signal-not-content reversal in
+practice: the classifier's job is to produce a defensible starting tier, and your job is to
+check it against what you actually know about the blast radius — not to write the score
+yourself. Override the tier any time; disagreeing with the suggestion is the expected use of
+this command, not an edge case.
+
+## Why this matters beyond this one task
+
+The tier you pick here isn't a one-off checkbox — it's the ceremony contract for the rest of
+the task. Every later step (what phases the sidebar tracks, what the signpost asks you to do
+next) reads from this classification. Get it right once, and the rest of the workflow follows
+without you re-deciding it at every step.
