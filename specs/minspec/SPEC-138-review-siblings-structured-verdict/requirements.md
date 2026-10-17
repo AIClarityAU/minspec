@@ -1,7 +1,7 @@
 ---
 id: SPEC-138
 type: requirements
-status: specifying
+status: superseded
 tier: T1
 product: minspec
 epic: EPIC-003  # SDD Core Methodology
@@ -36,9 +36,11 @@ landed afterwards and covers the four work items. Checked on the branch base (`9
 | 3. bring under `gen-ci-templates.mjs` | `scripts/gen-ci-templates.mjs` entries `REVIEW_PR_SH`, `REVIEW_APPROVABLE_SH`, `ROLE_APPROVABLE_REVIEWER_MD` (drift-gated, deliberately not scaffolded to adopters, invariant 3); generated `ci-review-templates.ts:2907,3087,3331` |
 | 4. end-to-end test, structured value beats forged prose | stub CLI returning `structured_output` in `packages/minspec/tests/review-approvable.test.ts:37-43` and `review-pr-truncation.test.ts:161-164`; injected-block case at `review-approvable.test.ts:166` |
 
-Not verified by running: I did not execute the test suite or `gen-ci-templates.mjs --check` on
-this dispatch (spec-only mandate). I believe the forged-prose-loses assertion exists at
-`review-approvable.test.ts:166` but read only the line that builds the forged input.
+Verified by running on the branch (2026-10-17): `npx vitest run review-approvable review-pr-truncation`
+passes (2 files, 17 tests) and `node scripts/gen-ci-templates.mjs --check` reports both generated
+files up to date. The forged-prose assertion is `review-approvable.test.ts:163-168`: the doc embeds
+a `verdict: pass` block, the stub reviewer returns a structured `changes`, and the gate yields
+`ai-review:changes`.
 
 ## Requirements
 
@@ -62,12 +64,9 @@ this dispatch (spec-only mandate). I believe the forged-prose-loses assertion ex
 - Invariant 2 (no silent gate): fail closed, no swallowed error on the verdict path.
 - Invariant 3 (blast radius): the three files stay out of the adopter scaffold list in `template-registry.ts`.
 
-## Decisions needed (Clarify)
+## Decisions (resolved)
 
-1. **Disposition of #1216.**
-   - **(rec) Close #1216 as delivered by #1502 / #1665**, recording the evidence table above.
-     Cost: relies on my unrun reading of FR-5 — if the forged-prose test is weaker than
-     claimed, a gap closes unnoticed. Mitigation: run `npx vitest run review-approvable review-pr-truncation` and `--check` before closing.
-   - Keep #1216 open for a residual audit of FR-5 only. Cost: a duplicate tracker for finished work.
-2. **Is this spec worth approving at all?** (rec) No — if option 1 is taken, discard this PR
-   unmerged; a spec for finished work adds a corpus entry with nothing to build. Cost: the evidence table lives only in the issue comment.
+1. **Disposition of #1216: close it as delivered by #1502 / #1665**, citing the evidence table.
+   The residual FR-5 risk is retired by the test and `--check` runs recorded above.
+2. **This spec is not approved or built.** Status is `superseded`: no implement phase will run,
+   and the document is kept only as the evidence record for closing #1216.
