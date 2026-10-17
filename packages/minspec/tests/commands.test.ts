@@ -64,6 +64,18 @@ vi.mock('../src/lib/adr-manager', () => ({
   ADR_STATUS_VALUES: ['proposed', 'accepted', 'deprecated', 'superseded'],
 }));
 
+// SPEC-041 Slice 1 (#1066): Accept ADR runs the human-approver gate and writes a sidecar.
+// Keep the real gate; stub the git/fs edges (see adr-command.test.ts).
+vi.mock('../src/lib/approval', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/approval')>()),
+  gitConfigEmail: vi.fn(() => 'human@example.com'),
+  canonicalSpecHash: vi.fn(() => 'hash-of-accepted-dr'),
+}));
+vi.mock('../src/lib/approval-store', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/approval-store')>()),
+  writeRecord: vi.fn(),
+}));
+
 vi.mock('../src/lib/active-spec', () => ({
   findActiveSpec: vi.fn(),
   summarizeActiveSpec: vi.fn(),
@@ -132,6 +144,19 @@ vi.mock('fs', () => ({
   writeFileSync: vi.fn(),
 }));
 
+// ─── The folder has opted in (SPEC-096) ─────────────────────────────────────
+// Every test here drives a command against the fake root `/tmp/test-workspace`, and has always treated it
+// as an initialized project. The commands now check for the `.minspec/` opt-in
+// marker before they do anything. The fake root is not a real folder, and a path
+// under /tmp can be left behind by some other run, so the precondition is stated
+// here instead of being read from whatever the disk happens to hold. What these
+// commands do in a folder that has NOT opted in is pinned, on real folders, by
+// commands-opt-in-invariant.test.ts.
+vi.mock('../src/lib/opt-in', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/opt-in')>()),
+  hasOptInMarker: vi.fn(() => true),
+}));
+
 // ─── Imports ───────────────────────────────────────────────────────────────
 
 import * as vscode from 'vscode';
@@ -147,7 +172,7 @@ import {
 import { generateExampleCommand } from '../src/commands/example';
 import { declareScopeCommand, ensureSession } from '../src/commands/session';
 import { parkCommand } from '../src/commands/park';
-import { commentOnIssue, getRepoFromRemote } from '../src/lib/parking-lot';
+import { commentOnIssue } from '../src/lib/parking-lot';
 import { scoreWsjfCommand, triageIssueCommand } from '../src/commands/backlog';
 import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../src/lib/scaffold';
 import {
@@ -1412,6 +1437,22 @@ describe('commands', () => {
       );
     });
 
+    it('shows the failure reason (not "no open issues found") when fetchIssues rejects (#2247)', async () => {
+      vi.mocked(isGhAvailable).mockResolvedValueOnce(true);
+      vi.mocked(fetchIssues).mockRejectedValueOnce(
+        new Error('network unreachable — check internet connectivity'),
+      );
+
+      await scoreWsjfCommand();
+
+      expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(
+        'MinSpec: No open issues found.',
+      );
+      expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+        'MinSpec: Could not fetch issues — network unreachable — check internet connectivity',
+      );
+    });
+
     it('returns early when user cancels issue selection', async () => {
       vi.mocked(isGhAvailable).mockResolvedValueOnce(true);
       vi.mocked(fetchIssues).mockResolvedValueOnce([
@@ -1624,6 +1665,22 @@ describe('commands', () => {
 
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
         'MinSpec: No inbox issues to triage.',
+      );
+    });
+
+    it('shows the failure reason (not "no inbox issues") when fetchIssues rejects (#2247)', async () => {
+      vi.mocked(isGhAvailable).mockResolvedValueOnce(true);
+      vi.mocked(fetchIssues).mockRejectedValueOnce(
+        new Error('GitHub API rate limit exceeded — try again later'),
+      );
+
+      await triageIssueCommand();
+
+      expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(
+        'MinSpec: No inbox issues to triage.',
+      );
+      expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+        'MinSpec: Could not fetch issues — GitHub API rate limit exceeded — try again later',
       );
     });
 

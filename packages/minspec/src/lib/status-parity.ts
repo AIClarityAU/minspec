@@ -40,7 +40,14 @@
  * The conservative contract is unchanged: `unparseable` and `freeform` still produce NO
  * parity finding. Visibility is the caller's job (the validator WARNs); this module never
  * escalates an unreadable line into a blocking error.
+ *
+ * SPEC-095: the readers here prepare their text at their own entry (`text-io`), because
+ * this repository's commit gate hands them text it read itself. On CRLF text the head
+ * callout pattern (`(.+)$`, no multiline flag) could never match, so a `> **Status: …**`
+ * claim was not seen at all and a mismatch went unreported.
  */
+
+import { prepareText } from './text-io';
 
 /** Which artifact family — decides the recognised status vocabulary. */
 export type ArtifactKind = 'spec' | 'dr';
@@ -140,7 +147,8 @@ function headBlockquoteStatus(
  * cannot parse rather than passing them in silence.
  */
 export function inspectStatusLine(content: string, kind: ArtifactKind): BodyStatusResult {
-  const lines = content.split('\n');
+  // Prepared (SPEC-095 FR-2). Line numbers are unchanged: one terminator becomes one.
+  const lines = prepareText(content).split('\n');
   const words = statusWords(kind);
 
   if (kind === 'spec') {
@@ -290,12 +298,13 @@ export function claimParagraphText(content: string, line: number): string {
  * document showing two different statuses is a false signpost whichever one is read first.
  */
 export function inspectAllStatusClaims(content: string, kind: ArtifactKind): BodyStatusResult[] {
+  const text = prepareText(content); // SPEC-095 FR-2
   const claims: BodyStatusResult[] = [];
-  const primary = inspectStatusLine(content, kind);
+  const primary = inspectStatusLine(text, kind);
   if (primary.kind !== 'absent') claims.push(primary);
 
   if (kind === 'dr') {
-    const bq = headBlockquoteStatus(content.split('\n'), statusWords(kind));
+    const bq = headBlockquoteStatus(text.split('\n'), statusWords(kind));
     // Only add it when it is a DIFFERENT line: when there is no `## Status` section,
     // inspectStatusLine already returned this very blockquote, and reporting it twice
     // would double-count for any caller tallying findings.
