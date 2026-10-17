@@ -244,14 +244,13 @@ describe('SPEC-040 FR-1 — @aiclarity/shared is barrel-only (AC-2, DR-014)', ()
 
   it(
     // Named for what the fixture actually proves. The depth rule's real scope is
-    // its glob, `packages/*/src/**/*.ts` — every package's `src`, inside `lib`
-    // and out — and `VIEWS_HOST` sits in the "out" half. That is NOT repo-wide:
-    // `scripts/**` and `packages/*/tests/**` (this file included) match no config
-    // block and are never linted at all, so no fixture here can demonstrate
-    // repo-wide reach. Widening the globs is real work, not a one-line edit —
-    // those paths fall outside every package tsconfig, which the type-aware
-    // `projectService` parser needs — so it is tracked separately rather than
-    // papered over with a test name that overstates the coverage.
+    // its glob (the FR-1 depth block in `eslint.config.mjs`): every package's
+    // `src`, inside `lib` and out, plus `scripts/**` and `packages/*/tests/**`
+    // since #991, this file included. `VIEWS_HOST` sits in the outside-`lib` half
+    // of `src`, and that half is all this fixture demonstrates. No fixture here is
+    // hosted under `scripts/**` or `packages/*/tests/**`: there the rule is
+    // exercised by `npm run lint` over the real files, not by this suite. The
+    // name stays narrow so it does not overstate what one fixture covers.
     'applies the depth rule outside lib, not just inside it',
     async () => {
       const messages = await lintFixture(valueImport('@aiclarity/shared/src/next-task'), VIEWS_HOST);
