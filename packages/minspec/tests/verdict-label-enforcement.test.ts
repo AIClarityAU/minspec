@@ -23,10 +23,11 @@
  *        position-aware check catches a status posted with the label's separator.
  *
  * The canonical source (SSOT) is `ai-review-guard.js`'s exports: PASS / CHANGES / BLOCKED
- * (labels) + PASS_STATUS_CONTEXT (status). `ai-review:pending` is an ai-review.yml-only
- * in-progress marker with no guard constant, so it is the one plain-string member of the
- * allowed LABEL set. This test asserts every producer's restated literal agrees with the
- * guard — a mismatch fails CI, not an LLM reviewer.
+ * (verdict labels), CARRIED (the #1688 disclosure label a carried verdict wears beside
+ * its verdict - not itself a verdict) + PASS_STATUS_CONTEXT (status). `ai-review:pending`
+ * is an ai-review.yml-only in-progress marker with no guard constant, so it is the one
+ * plain-string member of the allowed LABEL set. This test asserts every producer's
+ * restated literal agrees with the guard — a mismatch fails CI, not an LLM reviewer.
  *
  * SCOPE: this is the ENFORCEMENT GATE half of #822. The SSOT-REFACTOR half (make the
  * shell/YAML producers READ the literals from guard.js via `node -e` so they can no longer
@@ -111,14 +112,22 @@ describe('ENFORCE: ai-review verdict labels + status context cannot drift from g
     PASS: string;
     CHANGES: string;
     BLOCKED: string;
+    CARRIED: string;
     PASS_STATUS_CONTEXT: string;
   };
   const producers = discoverProducers(root);
 
   // The guard-sanctioned LABEL set. `ai-review:pending` has no guard constant (it is the
   // ai-review.yml-only in-progress marker) so it is included as a plain string.
+  //
+  // `guard.CARRIED` (#1688) is sanctioned too, and it is NOT a verdict: it is the
+  // disclosure label a carried verdict wears NEXT TO its verdict label. It belongs in
+  // this set because the check here is about spelling - any `ai-review:<x>` literal a
+  // producer writes must be one the guard defines - and a typo in the disclosure label
+  // would leave a carried verdict undisclosed exactly as silently as a typo in `pass`
+  // leaves a real one unrecognised.
   const PENDING = 'ai-review:pending';
-  const ALLOWED_LABELS = new Set([guard.PASS, guard.CHANGES, guard.BLOCKED, PENDING]);
+  const ALLOWED_LABELS = new Set([guard.PASS, guard.CHANGES, guard.BLOCKED, PENDING, guard.CARRIED]);
 
   it('the SSOT (guard.js) exports the expected colon-form labels + slash-form status', () => {
     // Anchor the contract: if an EXPORT is renamed/removed, this fails first with a clear
@@ -126,6 +135,7 @@ describe('ENFORCE: ai-review verdict labels + status context cannot drift from g
     expect(guard.PASS).toBe('ai-review:pass');
     expect(guard.CHANGES).toBe('ai-review:changes');
     expect(guard.BLOCKED).toBe('ai-review:blocked');
+    expect(guard.CARRIED).toBe('ai-review:carried');
     expect(guard.PASS_STATUS_CONTEXT).toBe('ai-review/pass');
   });
 

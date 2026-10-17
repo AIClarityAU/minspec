@@ -58,7 +58,10 @@ command -v claude >/dev/null 2>&1 || { echo "ERROR: the agent CLI is not on PATH
 [[ -x "$TRIAGE" || -r "$TRIAGE" ]] || { echo "ERROR: ${TRIAGE} missing." >&2; exit 1; }
 
 echo "Selecting OPEN issues with no trusted verdict record…"
-Q='query($c:String){repository(owner:"AIClarityAU",name:"minspec"){issues(first:50,after:$c,states:OPEN,orderBy:{field:CREATED_AT,direction:ASC}){pageInfo{hasNextPage endCursor}nodes{number title labels(first:30){nodes{name}} comments(first:100){nodes{author{login} authorAssociation body}}}}}}'
+# Each comment's author is asked for by ACCOUNT (kind and number), not only by login:
+# `--trusted-comment-bodies` trusts the gate's App by its account, and a comment that
+# arrives with a login alone is not the App's as far as it can tell.
+Q='query($c:String){repository(owner:"AIClarityAU",name:"minspec"){issues(first:50,after:$c,states:OPEN,orderBy:{field:CREATED_AT,direction:ASC}){pageInfo{hasNextPage endCursor}nodes{number title labels(first:30){nodes{name}} comments(first:100){nodes{author{__typename login ... on User{databaseId} ... on Bot{databaseId}} authorAssociation body}}}}}}'
 
 CUR="null"; TOTAL=0
 TARGETS="$(mktemp)"; trap 'rm -f "$TARGETS"' EXIT
@@ -108,8 +111,10 @@ while IFS=$'\t' read -r NUM TITLE; do
   # mean success is worse than an error, because it stops you looking.
   ERR="$(mktemp)"
   bash "$TRIAGE" "$NUM" >/dev/null 2>"$ERR" || true
+  # The filter's stderr is left alone: when it cannot find out which account wrote the
+  # comments it says so, and without that line a failed read looks like a missing record.
   AFTER="$(gh issue view "$NUM" --repo "$REPO" --json comments 2>/dev/null \
-            | "$GATE" --trusted-comment-bodies 2>/dev/null | "$GATE" --newest-record 2>/dev/null)"
+            | "$GATE" --trusted-comment-bodies | "$GATE" --newest-record 2>/dev/null)"
   if [[ -n "$AFTER" ]]; then
     DONE=$((DONE + 1))
   else

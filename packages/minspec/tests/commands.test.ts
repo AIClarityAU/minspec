@@ -64,6 +64,18 @@ vi.mock('../src/lib/adr-manager', () => ({
   ADR_STATUS_VALUES: ['proposed', 'accepted', 'deprecated', 'superseded'],
 }));
 
+// SPEC-041 Slice 1 (#1066): Accept ADR runs the human-approver gate and writes a sidecar.
+// Keep the real gate; stub the git/fs edges (see adr-command.test.ts).
+vi.mock('../src/lib/approval', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/approval')>()),
+  gitConfigEmail: vi.fn(() => 'human@example.com'),
+  canonicalSpecHash: vi.fn(() => 'hash-of-accepted-dr'),
+}));
+vi.mock('../src/lib/approval-store', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/approval-store')>()),
+  writeRecord: vi.fn(),
+}));
+
 vi.mock('../src/lib/active-spec', () => ({
   findActiveSpec: vi.fn(),
   summarizeActiveSpec: vi.fn(),
@@ -160,7 +172,7 @@ import {
 import { generateExampleCommand } from '../src/commands/example';
 import { declareScopeCommand, ensureSession } from '../src/commands/session';
 import { parkCommand } from '../src/commands/park';
-import { commentOnIssue, getRepoFromRemote } from '../src/lib/parking-lot';
+import { commentOnIssue } from '../src/lib/parking-lot';
 import { scoreWsjfCommand, triageIssueCommand } from '../src/commands/backlog';
 import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../src/lib/scaffold';
 import {
