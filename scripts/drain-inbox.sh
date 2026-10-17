@@ -138,6 +138,8 @@ set -euo pipefail
 
 REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The pure seam quota_publish_wall delegates reset-time parsing to (#1062).
+GUARD="${SCRIPT_DIR}/../.github/scripts/ai-review-guard.js"
 # The reconcilers below write to GitHub (close, remove-label, add-label). Those are
 # AGENT writes, so they must carry the App identity rather than the human's — a write
 # made as the human auto-subscribes them to the thread forever and makes the audit
@@ -2551,15 +2553,16 @@ quota_health() {
 # EXTRACTION (#1062): delegates to `parseResetInstant`, the SAME pure, unit-tested
 # seam (.github/scripts/ai-review-guard.js, next to `isQuotaExhaustion`) the
 # ai-review retry already schedules against (#1204, .github/workflows/ai-review.yml).
-# `is_quota`/isQuotaExhaustion above uses this identical node-delegation idiom for the
-# SAME reason: one tested implementation, never two that can quietly drift apart.
+# One tested implementation, never two that can quietly drift apart. (`is_quota` no
+# longer delegates to that file: since #2233 it is a pure-bash notice match, see
+# quota_notice_lines above. Only the reset-time parse still goes through node.)
 #
 # This used to be a second, bash-only regex+`date` extractor, hand-rolled separately
 # from parseResetInstant. It only ever matched the ABSOLUTE clock form ("resets
-# 8:40am (Zone)") — but isQuotaExhaustion's own pattern above (`resets? (at|in)`)
-# already classifies the RELATIVE form ("resets in 25 minutes", "try again in 2
-# hours") as quota-exhaustion too, so a message shaped that way was correctly
-# detected by `is_quota` yet silently fell back to the flat QUOTA_BACKOFF guess here
+# 8:40am (Zone)") — but isQuotaExhaustion's own pattern (`resets? (at|in)`) already
+# classifies the RELATIVE form ("resets in 25 minutes", "try again in 2 hours") as
+# quota-exhaustion too, so a message shaped that way was correctly detected as a
+# quota hit yet silently fell back to the flat QUOTA_BACKOFF guess here
 # — the exact "we capture the text and throw the timestamp away" gap #1062 exists to
 # close. parseResetInstant already handles both forms (with a DST-safe zoned
 # conversion for the absolute one); reusing it fixes the relative form here for free

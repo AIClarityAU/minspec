@@ -330,6 +330,16 @@ describe('drain-inbox.sh --quota-publish-wall — the reactive producer', () => 
     expect(run(['--quota-gate']).code).toBe(42);
   });
 
+  // #1062 — T3: quota_publish_wall read $GUARD, which nothing in the script ever
+  // defined, so under `set -u` every call died with "GUARD: unbound variable" and
+  // published nothing. The script must locate ai-review-guard.js itself.
+  it('does not die on an unbound variable (the guard path is defined under set -u)', () => {
+    const r = at("You've hit your session limit · resets 10:10pm (Australia/Sydney)");
+    expect(r.out).not.toMatch(/unbound variable/);
+    expect(r.code).toBe(0);
+    expect(fs.existsSync(quotaFile)).toBe(true);
+  });
+
   // #1062 — REGRESSION: extraction now delegates to parseResetInstant (the tested
   // pure seam in ai-review-guard.js, next to isQuotaExhaustion) instead of a second,
   // bash-only regex that only ever matched the ABSOLUTE clock form ("resets 8:40am

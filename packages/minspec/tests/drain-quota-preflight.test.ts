@@ -28,6 +28,10 @@ import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
+
+// Module scope: every test below runs with the leak primed (#2574).
+useHostileAmbientDrainKnobs();
 
 function findRepoRoot(): string {
   let dir = __dirname;
@@ -101,7 +105,13 @@ exit 1
         MINSPEC_QUOTA_REFRESH=0 \
         bash "${DRAIN}" --once 2>&1 | grep -oP 'PID \\K[0-9]+')
       while kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
-    `], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+    `], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      // drainBaseEnv(), never the inherited process.env (#2574); the caps are pinned to
+      // the fixed values this 95% reading was written against (an unset cap is a ramp).
+      env: { ...drainBaseEnv(), MINSPEC_QUOTA_ADMIT_PCT: '90', MINSPEC_QUOTA_ADMIT_PCT_7D: '95' },
+    });
 
     const logText = fs.readFileSync(log, 'utf-8');
 
