@@ -71,6 +71,7 @@ vi.mock('vscode', () => ({
 }));
 
 import {
+  GettingStartedPanel,
   OnboardingPage,
   renderGettingStartedHtml,
   DIVERGENCE_COPY,
@@ -769,5 +770,38 @@ describe('SPEC-086 (#2361) - the ScroogeLLM nudge stays gone; FR-12 and AC-10 ar
     expect(MANIFEST.contributes.configuration.properties['minspec.scroogellmNudge.enabled']).toBeUndefined();
     await page.handle({ type: 'toggle', settingId: 'minspec.scroogellmNudge.enabled', value: false });
     expect(f.writes).toEqual([]);
+  });
+});
+
+describe('FR-1 re-open - show() on an open panel hands later messages to the NEW page', () => {
+  it('a message after the second show() is handled by the second page, not the first', async () => {
+    const vscodeMod = await import('vscode');
+    let listener: ((m: unknown) => Promise<void>) | undefined;
+    const fakePanel = {
+      reveal: vi.fn(),
+      onDidDispose: vi.fn(),
+      webview: {
+        html: '',
+        cspSource: '',
+        onDidReceiveMessage: (cb: (m: unknown) => Promise<void>) => {
+          listener = cb;
+          return { dispose: vi.fn() };
+        },
+      },
+    };
+    (vscodeMod.window.createWebviewPanel as unknown as ReturnType<typeof vi.fn>).mockReturnValue(fakePanel);
+
+    const first = new OnboardingPage(fakes().deps);
+    const second = new OnboardingPage(fakes().deps);
+    const firstHandle = vi.spyOn(first, 'handle').mockResolvedValue();
+    const secondHandle = vi.spyOn(second, 'handle').mockResolvedValue();
+
+    const panel = new GettingStartedPanel();
+    panel.show(first);
+    panel.show(second);
+    await listener!({ type: 'showIds', value: true });
+
+    expect(secondHandle).toHaveBeenCalledTimes(1);
+    expect(firstHandle).not.toHaveBeenCalled();
   });
 });

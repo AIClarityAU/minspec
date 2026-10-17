@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import {
   buildOnboardingModel,
@@ -440,7 +441,7 @@ ${model.footer.map((r) => renderRow(r, view)).join('')}
 export function makeNonce(): string {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let out = '';
-  for (let i = 0; i < 32; i++) out += chars.charAt(Math.floor(Math.random() * chars.length));
+  for (const b of crypto.randomBytes(32)) out += chars.charAt(b % chars.length);
   return out;
 }
 
@@ -449,9 +450,12 @@ export function makeNonce(): string {
 /** One re-openable panel (FR-1): reveal it if it is open, create it if not. Never a modal. */
 export class GettingStartedPanel {
   private panel: vscode.WebviewPanel | undefined;
+  /** The page the panel currently shows; the message listener reads this, never a captured arg. */
+  private page: OnboardingPage | undefined;
   private disposables: vscode.Disposable[] = [];
 
   show(page: OnboardingPage): void {
+    this.page = page;
     if (this.panel) {
       this.panel.reveal();
     } else {
@@ -463,19 +467,22 @@ export class GettingStartedPanel {
       );
       this.panel.onDidDispose(() => {
         this.panel = undefined;
+        this.page = undefined;
         this.disposables.forEach((d) => d.dispose());
         this.disposables = [];
       });
       this.panel.webview.onDidReceiveMessage(
         async (message) => {
+          const current = this.page;
+          if (!current) return;
           try {
-            await page.handle(message);
+            await current.handle(message);
           } catch (err) {
             void vscode.window.showErrorMessage(
               `MinSpec: ${err instanceof Error ? err.message : String(err)}`,
             );
           }
-          this.render(page);
+          this.render(current);
         },
         undefined,
         this.disposables,
