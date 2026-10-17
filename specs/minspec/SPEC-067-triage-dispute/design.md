@@ -8,7 +8,7 @@ type: design
 status: planning
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - triage classification is the methodology's admission gate
-relates_to: [DR-091, DR-072, DR-066, DR-062, DR-015, DR-003, SPEC-022]
+relates_to: [DR-091, DR-072, DR-070, DR-076, DR-066, DR-062, DR-015, DR-003, SPEC-022, SPEC-046]
 ---
 
 # SPEC-067 - The triage dispute lane (Design)
@@ -87,10 +87,33 @@ which `fence_agent_text`'s existing generic `<!-- minspec-* -->` rule (`:389-390
 neutralises when republished.
 
 **Why the sentinels cannot collide.** `_newest_record_impl` opens a block on
-`index($0, "MINSPEC_VERDICT_BEGIN")` (`:293`). `MINSPEC_DISPUTE_BEGIN` does not contain that
-string, so the verdict reader is blind to disputes by construction, not by a filter someone
-could later loosen (FR-2). Conversely `record_scrub`'s charset (`:231`) excludes `_`, so no
-dispute field value can spell a verdict sentinel.
+`index($0, b)` (`:293`), where `b` is `$RECORD_BEGIN`, `MINSPEC_VERDICT_BEGIN` (`:208`).
+`MINSPEC_DISPUTE_BEGIN` does not contain that string, so the verdict reader does not see a
+well-formed dispute block at all. That holds because of what the sentinels are, not because
+of a filter someone could later loosen (FR-2).
+
+The other direction, a dispute **field value** that spells a verdict sentinel, is **not**
+stopped by `record_scrub`. Its charset (`:231`, `tr -cd 'A-Za-z0-9:._/[]-'`) keeps `_`, so
+`MINSPEC_VERDICT_BEGIN` passes through it unchanged, and `index($0, b)` matches anywhere on a
+line, so a field line carrying that value would open a verdict block. What stops it is that
+`--render-dispute` validates **every** field to a closed shape, and none of those shapes
+includes `_`:
+
+| field | shape enforced at render (and again by `_dispute_valid` at read) |
+|---|---|
+| `gate`, `direction` | literals written by the renderer, never taken from an argument |
+| `declaredType` | member of the C-2 vocabulary (lowercase letters and `-`) |
+| `disputedHold` | `human` or `none` |
+| `disputedVerdictAt`, `verdictAt` | `^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$` |
+| `disputedBy` | `^[A-Za-z0-9-]{1,39}$`, the GitHub login alphabet; bots are refused separately |
+| `bodyHash` | `sha256:` plus 64 lowercase hex, computed by the renderer |
+
+`record_scrub` stays in front of all of them as it is for verdicts (it stops a newline from
+forging a sibling field), but it is not what keeps a sentinel out. Tests A-T1-2 and A-T1-4
+cover it: a sentinel-shaped value in each argument position is refused at render, and a
+hand-made block carrying one is not selectable. A trusted author can still type a verdict
+sentinel into the **prose** of a comment, as they always could. That is the quoted-record
+class `verdictAt` ranking already handles, and it is not a property of the dispute record.
 
 **Why `verdictAt` ranking is safe for the new family.** The selector's `verdict_at`
 function matches a line beginning `verdictAt:` (`:282`, anchored with `^[[:space:]]*`). The
@@ -128,9 +151,10 @@ All additions are early-exit `--flag` modes placed **before** the positional rea
    `approve-issue.sh` pointer whichever entry point refuses it first.
 6. **Entry points (C-3):**
    - `--render-dispute <declaredType> <disputedHold> <disputedVerdictAt> <disputedBy> [verdictAt]`
-     scrubs every argument, refuses an out-of-vocabulary type (printing the valid set, both
-     halves), a bot or empty `disputedBy`, a hold outside `human`/`none` (via
-     `_hold_disputability`), and an uncomputable hash; derives `direction`; prints the
+     scrubs every argument, then checks each against its section 3 shape: it refuses an
+     out-of-vocabulary type (printing the valid set, both halves), a bot, empty or
+     non-login-shaped `disputedBy`, a non-ISO `disputedVerdictAt` or `verdictAt`, a hold
+     outside `human`/`none` (via `_hold_disputability`), and an uncomputable hash; derives `direction`; prints the
      wrapped block. It never prints `decision`, `hold`, `human_only`, `role` or `tier`
      (FR-2).
    - `--newest-dispute`: `_each_block` the dispute family, keep only `_dispute_valid`

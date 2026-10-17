@@ -83,6 +83,9 @@ Swapping a label is a triage act, not part of this plan.
       `decision`, `hold`, `human_only`, `role`, `tier`.
 - [ ] **A-T1-2 writer refusals.** Out-of-vocabulary type (stderr prints the valid set),
       bot `disputedBy` (`minspec-sdd[bot]`, `github-actions`), empty `disputedBy`,
+      `MINSPEC_VERDICT_BEGIN` passed in **each** argument position in turn (design section
+      3: `record_scrub` keeps `_`, so the shape checks are what refuse it), non-ISO
+      `disputedVerdictAt` and `verdictAt`,
       `disputedHold` of `tier` (message names `approve-issue.sh`), `info`, `garbage`, and
       `sha256sum` absent from `PATH` (fails closed). Each exits 1 and prints no block.
 - [ ] **A-T1-3 derived direction.** Every C-2 token renders the direction `disputeDirection`
@@ -90,7 +93,9 @@ Swapping a label is a triage act, not part of this plan.
 - [ ] **A-T1-4 read-time validity (design section 3).** Each of these is not selectable by
       `--newest-dispute`, `--dispute-exists` or `--fresh-dispute`: wrong `gate`;
       out-of-vocabulary type; `declaredType: chore` with `direction: tightening`; bot
-      `disputedBy`; malformed or future-dated `verdictAt`; malformed `bodyHash`.
+      `disputedBy`; malformed or future-dated `verdictAt`; malformed `bodyHash`; any field
+      whose value is `MINSPEC_VERDICT_BEGIN`. The last case is also run through the
+      dispatch reader beside a `hold: human` verdict, which must still refuse `human-only`.
 - [ ] **A-T1-5 validate-then-select.** A valid older dispute and a garbled newer one:
       `--newest-dispute` returns the older valid one.
 - [ ] **A-T1-6 shared selector, proven shared.** Drive `_newest_record_impl` with both
