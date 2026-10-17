@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { listSpecs, type SpecSummary } from '../lib/spec-catalog';
@@ -274,6 +275,9 @@ export async function approveSpecCommand(
     // #439: sibling shard files (design.md/tasks.md/…) in this spec's directory,
     // so a diverging shard id refuses approval as an error.
     siblingShardFiles: readShardIdFiles(path.dirname(spec.filePath)),
+    // #1751: implement.claimed-without-evidence — resolved here, not inside
+    // spec-validator.ts (filesystem-free by design), against this workspace root.
+    pathExists: (relPath) => fs.existsSync(path.join(rootDir, relPath)),
   });
   const errors = result.violations.filter((v) => v.severity === 'error');
   const warnings = result.violations.filter((v) => v.severity === 'warning');
@@ -302,6 +306,10 @@ export async function approveSpecCommand(
   const introduced = violationsIntroducedByApproval(parsed, config, {
     knownEpicRefs: epicRefSet(rootDir),
     siblingShardFiles: readShardIdFiles(path.dirname(spec.filePath)),
+    // #1751: same resolver as above — the advance can move phases.implement
+    // straight to in-progress (a spec with plan+tasks already done/skipped),
+    // which newly arms implement.claimed-without-evidence.
+    pathExists: (relPath) => fs.existsSync(path.join(rootDir, relPath)),
   });
   if (introduced.length > 0) {
     const summary = introduced.map((v) => `• ${v.message}`).join('\n');
