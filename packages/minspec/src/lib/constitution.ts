@@ -4,6 +4,8 @@
  * Pure logic, no vscode dependency.
  */
 
+import { prepareText } from './text-io';
+
 /** Parsed constitution sections */
 export interface Constitution {
   readonly invariants: string[];
@@ -124,13 +126,16 @@ function parseSectionsLower(content: string): Map<string, string> {
 /**
  * Parse a constitution markdown file into structured data.
  * Extracts items from ## Invariants, ## Principles, and ## Constraints sections.
+ *
+ * Prepares its input first (SPEC-095 FR-2): on CRLF text `^## (.+)$` matched no heading,
+ * so a constitution that lists rules parsed as one with none.
  */
 export function parseConstitution(content: string): Constitution {
   if (!content || !content.trim()) {
     return EMPTY_CONSTITUTION;
   }
 
-  const sections = parseSectionsLower(content);
+  const sections = parseSectionsLower(prepareText(content));
 
   return {
     invariants: extractListItems(sections.get('invariants') ?? ''),

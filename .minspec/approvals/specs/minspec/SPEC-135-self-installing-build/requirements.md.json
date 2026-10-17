@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-135-self-installing-build/requirements.md",
+  "specHash": "277c1b710daf9a9d581aced9e956e62ce82389dfa9e6c7ecf4d4e1b2b756112b",
+  "approvedAt": "2026-10-10T05:47:40.932Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "10e6de1c9291c1608d75133056537a0490b454b0"
+}

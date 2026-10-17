@@ -449,7 +449,15 @@ describe('shepherd wiring: the loop is bounded by CODE, not by a token', () => {
   });
 
   it('tears the renew ticker down in the same EXIT trap that releases the claim (D10)', () => {
-    expect(code).toMatch(/trap 'lease_stop_renew_ticker; lease_release_all[^']*' EXIT/);
+    // The script has ONE exit trap, a function (#2641): `trap ... EXIT` replaces the trap
+    // before it, so the claim's teardown could not stay a trap of its own beside the one
+    // that guards the dispatcher's answering statuses. The two steps are still one
+    // statement in that handler, in this order, and what arms them is set where the
+    // claim is won. dispatch-outcome-status.test.ts runs it and checks the order.
+    expect(code).toMatch(/^trap _dispatch_on_exit EXIT$/m);
+    const handler = code.match(/^_dispatch_on_exit\(\) \{[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(handler).toMatch(/\(\( DISPATCH_RELEASE_ON_EXIT \)\); then\n\s+lease_stop_renew_ticker; lease_release_all /);
+    expect(code).toMatch(/lease_start_renew_ticker "\$ISSUE"\n\s+DISPATCH_RELEASE_ON_EXIT=1\n/);
   });
 
   it('runs the shepherd AFTER the in-process merge actor, never before it', () => {

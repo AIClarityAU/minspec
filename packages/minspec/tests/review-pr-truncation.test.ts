@@ -136,18 +136,25 @@ esac
 // refusal rather than the review. It returns WITHOUT reading the fixture, so the
 // fixture describes the REVIEWER invocation only.
 //
-// The reviewer invocation itself (#2168) captures stdin to
-// $FAKE_CLAUDE_STDIN_CAPTURE_FILE before emitting its canned verdict. review-pr.sh
+// The reviewer invocation itself (#2168) captures stdin to a file in the scratch
+// directory before emitting its canned verdict. review-pr.sh
 // sends the prompt via a temp-file redirected onto stdin, never argv (#624/#477) —
 // a stub that answered from argv alone (or that never touched stdin) would pass
 // this test identically whether that wiring existed or not. Capturing what actually
 // arrived on stdin gives the assertion something real to check.
-const FAKE_CLAUDE = `#!/usr/bin/env bash
+//
+// The two file paths are written INTO the stub, not handed to it in its environment
+// (#1203): review-pr.sh starts the reviewer with an environment built from a list of
+// names (scripts/lib/agent-context.sh), so a helper variable this test set would not
+// reach it. The `gh` stub is started by the script itself and still reads its own.
+const CLAUDE_STDIN_CAPTURE = 'claude-stdin-capture.txt';
+const CLAUDE_OUTPUT = 'claude-output.txt';
+const fakeClaude = (dir: string): string => `#!/usr/bin/env bash
 for a in "$@"; do
   [ "$a" = "--help" ] && { echo "  --json-schema <schema>"; exit 0; }
 done
-cat - > "$FAKE_CLAUDE_STDIN_CAPTURE_FILE"
-cat "$FAKE_CLAUDE_OUTPUT_FILE"
+cat - > ${JSON.stringify(path.join(dir, CLAUDE_STDIN_CAPTURE))}
+cat ${JSON.stringify(path.join(dir, CLAUDE_OUTPUT))}
 `;
 
 // The reviewer returns the CLI envelope; review-pr.sh renders the block from
@@ -178,7 +185,7 @@ describe('review-pr.sh — end-to-end sanity (untruncated path unaffected)', () 
     scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'review-pr-scratch-'));
     binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'review-pr-bin-'));
     writeExecutable(path.join(binDir, 'gh'), FAKE_GH);
-    writeExecutable(path.join(binDir, 'claude'), FAKE_CLAUDE);
+    writeExecutable(path.join(binDir, 'claude'), fakeClaude(scratch));
   });
 
   afterEach(() => {
@@ -189,10 +196,10 @@ describe('review-pr.sh — end-to-end sanity (untruncated path unaffected)', () 
   it('small diff + clean pass verdict → ai-review:pass, no truncation notice', () => {
     const prViewFile = path.join(scratch, 'pr-view.json');
     const diffFile = path.join(scratch, 'pr.diff');
-    const claudeOutFile = path.join(scratch, 'claude-output.txt');
+    const claudeOutFile = path.join(scratch, CLAUDE_OUTPUT);
     const commentBodyFile = path.join(scratch, 'comment-body.txt');
     const editLogFile = path.join(scratch, 'edit-calls.log');
-    const stdinCaptureFile = path.join(scratch, 'claude-stdin-capture.txt');
+    const stdinCaptureFile = path.join(scratch, CLAUDE_STDIN_CAPTURE);
 
     fs.writeFileSync(
       prViewFile,
@@ -220,10 +227,8 @@ describe('review-pr.sh — end-to-end sanity (untruncated path unaffected)', () 
         ...GH_BOT_STUB_ENV,
         FAKE_PR_VIEW_JSON_FILE: prViewFile,
         FAKE_DIFF_FILE: diffFile,
-        FAKE_CLAUDE_OUTPUT_FILE: claudeOutFile,
         FAKE_COMMENT_BODY_FILE: commentBodyFile,
         FAKE_EDIT_LOG_FILE: editLogFile,
-        FAKE_CLAUDE_STDIN_CAPTURE_FILE: stdinCaptureFile,
       },
       encoding: 'utf-8',
     });
