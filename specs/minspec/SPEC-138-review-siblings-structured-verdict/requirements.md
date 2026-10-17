@@ -1,7 +1,7 @@
 ---
 id: SPEC-138
 type: requirements
-status: superseded
+status: archived
 tier: T1
 product: minspec
 epic: EPIC-003  # SDD Core Methodology
@@ -9,11 +9,11 @@ aspects: [ai-review, verdict-channel, drift-gate, no-silent-gate]
 depends_on: [DR-079]  # DR-079 owns the out-of-band verdict contract this spec only confirms is applied everywhere
 relates_to: ["#1216", "#1215", "#1502", "#1665", "#1157", "#1165"]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
-  tasks: pending
-  implement: pending
+  specify: skipped
+  clarify: skipped
+  plan: skipped
+  tasks: skipped
+  implement: skipped
 ---
 
 # SPEC-138: The review siblings speak the structured verdict contract, and their drift is gated
@@ -68,5 +68,5 @@ a `verdict: pass` block, the stub reviewer returns a structured `changes`, and t
 
 1. **Disposition of #1216: close it as delivered by #1502 / #1665**, citing the evidence table.
    The residual FR-5 risk is retired by the test and `--check` runs recorded above.
-2. **This spec is not approved or built.** Status is `superseded`: no implement phase will run,
+2. **This spec is not approved or built.** Status is `archived`: no implement phase will run,
    and the document is kept only as the evidence record for closing #1216.
