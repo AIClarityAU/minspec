@@ -18,7 +18,7 @@ implements: [packages/minspec/src/lib/approval-follow.ts, packages/minspec/tests
 affects: [packages/minspec/src/commands/commit-on-approve.ts, packages/minspec/src/lib/presence.ts, packages/minspec/package.json]
 phases:
   specify: done
-  clarify: done
+  clarify: done  # the Clarify work is done; its answers are agent-recorded and ratified only by approval (see Clarify)
   plan: pending
   tasks: pending
   implement: pending
@@ -325,6 +325,12 @@ stands in for the approval: the lines propose, and approving this spec ratifies 
 requirements above already read as the recorded selections; each question names what
 changes under the other options. None of the four is outward-facing, irreversible or a
 spend: each changes code that is not yet written.
+
+`phases.clarify: done` says the Clarify work is finished, not that its answers are
+ratified. `status:` stays `specifying` on purpose: an unapproved spec derives `specifying`
+whatever its phases say (`packages/minspec/src/lib/lifecycle.ts:140`, INV-1), and SPEC-136
+(headless core) carried this same shape, `specify: done`, `clarify: done`, `status:
+specifying`, until its approval (`d63edcf5`).
 
 ### OQ-1 - Which branch is "the default branch" when `origin/HEAD` is not set?
 
