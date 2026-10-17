@@ -2,7 +2,7 @@
 
 Sample window: 200 most recent PRs (by number) with >=1 AI-review comment: PR #2522 to #2849; run comments dated 2026-10-03T01:42:36Z to 2026-10-17T03:17:05Z. Of the 400 PRs listed (#2188-#2849), 398 had a review comment; the 200 newest were used.
 
-Totals: 331 review comments; 29 are 'carried forward' (no voters ran, excluded from all metrics); 1 parse failures (excluded from metrics, listed in runs.jsonl with parse_ok=false: PRs [2721]); 301 runs analysed. PRs by class: {'spec': 156, 'machinery': 24, 'code': 14, 'docs': 6}. Runs by class: {'spec': 211, 'code': 24, 'machinery': 57, 'docs': 10}.
+Totals: 331 review comments; 29 are 'carried forward' (no voters ran, excluded from all metrics); 1 parse failures (excluded from metrics, listed in runs.jsonl with parse_ok=false: PRs [2721]); 301 runs analysed. PRs by class: {'spec': 156, 'machinery': 24, 'code': 14, 'docs': 6}. Runs by class (before excluding the one parse failure, which is a spec run): {'spec': 211, 'code': 24, 'machinery': 57, 'docs': 10}.
 
 ## Method
 - Source: bot comments starting '## 🤖 AI review'; fetched via issues/<n>/comments (paginated). Label from header; each voter's `verdict:`/`blocking:` parsed from its REVIEW_VERDICT block; voters-that-ran from the footer and cross-checked against sections present (mismatch = parse failure).
