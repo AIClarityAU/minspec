@@ -29,6 +29,11 @@ vi.mock('../src/lib/constitution-nudge', () => ({
 }));
 
 import { defaultCommitter } from '../src/commands/init';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite's own `git()` wrapper around spawnSync builds a real git history
+// across many calls; the literal call-site count alone understates it.
+useShellTimeout();
 
 /**
  * Real-execution coverage for `defaultCommitter` (#1054 review, skeptic finding 2).

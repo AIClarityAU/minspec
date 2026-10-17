@@ -37,6 +37,11 @@ import {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore — plain .mjs, no type declarations
 } from '../../../scripts/tooling-radar/parse-scan.mjs';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite's own `bash()` wrapper around execFileSync is called per-case; the
+// literal call-site count alone understates it.
+useShellTimeout();
 
 const RADAR_DIR = path.resolve(__dirname, '../../../scripts/tooling-radar');
 const runRadarSh = fs.readFileSync(path.join(RADAR_DIR, 'run-radar.sh'), 'utf8');
