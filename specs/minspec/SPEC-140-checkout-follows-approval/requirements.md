@@ -242,8 +242,10 @@ the index and FR-8 checks every path before staging any.
 
 All on real git fixtures (a bare origin and a clone), not stubbed git.
 
-- **AC-1** With the setting `ask`, a successful approval push shows FR-2's question once;
-  answering either way never shows it again in that workspace, including after a reload.
+- **AC-1** With the setting `ask`, a successful approval push through the protected-branch
+  recovery arm shows FR-2's question once; answering either way never shows it again in
+  that workspace, including after a reload. A successful push through the `committed` arm
+  shows no question and records no pending approval (OQ-3).
 - **AC-2** With the setting `off` or `ask`, or with no pending approval, a pass makes no
   network call (asserted by a git stub that fails the test on `fetch`).
 - **AC-3** Leftovers from one approval, one tracked-modified and one untracked sidecar, both
