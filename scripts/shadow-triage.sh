@@ -210,6 +210,9 @@ fi
 # Presence is tested WITHOUT binding the key to a variable here. `shadow_curl_config`
 # reads it straight from the environment at request time, so this runner never holds
 # it — one fewer place for a future `note`/`echo`/trap to interpolate it into a log.
+if shadow_key_legacy_in_use; then
+  note "MINSPEC_SHADOW_TRIAGE_KEY is deprecated — rename it to MINSPEC_ZAI_API_KEY (it is the z.ai key); the old name is read for one release only."
+fi
 if [[ -n "$(shadow_key)" ]] && ! shadow_key_wellformed "$(shadow_key)"; then
   # Deliberately says nothing about the value beyond its shape — a note that echoed
   # the key to diagnose it would be the leak this transport exists to avoid.
@@ -217,7 +220,7 @@ if [[ -n "$(shadow_key)" ]] && ! shadow_key_wellformed "$(shadow_key)"; then
   exit 0
 fi
 if [[ -z "$(shadow_key)" ]]; then
-  note "no z.ai key configured (MINSPEC_SHADOW_TRIAGE_KEY) — skipped; real triage is unaffected."
+  note "no z.ai key configured (MINSPEC_ZAI_API_KEY) — skipped; real triage is unaffected."
   exit 0
 fi
 
