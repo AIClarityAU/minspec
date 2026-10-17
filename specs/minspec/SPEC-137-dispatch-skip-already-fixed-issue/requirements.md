@@ -6,7 +6,7 @@ tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — dispatching an issue that already has a fix wastes an agent run and leaves a conflicting duplicate PR
 relates_to: [SPEC-044, SPEC-073, DR-066, DR-076, "#726", "#705", "#707", "#708", "#359", "#397", "#409", "#410"]
-implements: [scripts/dispatch-issue.sh, scripts/lib/issue-lease.sh]
+affects: [scripts/dispatch-issue.sh, scripts/lib/issue-lease.sh]  # SPEC-044 owns both (SPEC-038 single-owner); this spec co-edits them — affects:, not implements:.
 ---
 
 # MinSpec — Dispatch skips an issue that already has an open or merged fix (Requirements)
@@ -39,7 +39,7 @@ for already-fixed #705) is never produced.
   *different head branch* (`fix/705-invariant-mirror`) is open or merged-but-not-yet-closing is
   not refused. SPEC-044 FR-3's one-PR-per-head CAS only collapses PRs with the *same* head
   (`agent/issue-N`), so it cannot catch #707-vs-#708.
-- **Window 2:** a fix can land *while the agent runs* (the issue says "a human fix landing as
+- **In-flight window** (a fix landing after the claim-time check): a fix can land *while the agent runs* (the issue says "a human fix landing as
   #707 while the agent worked"). A claim-time check alone cannot see it; the publish step can.
 
 ## Functional Requirements
