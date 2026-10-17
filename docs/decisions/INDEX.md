@@ -826,4 +826,12 @@ main requires a pull request to be up to date before it merges, and the stalenes
 <!-- dr-summary:DR-105 auto=7c01ad0c26da -->
 scripts/ holds the dev-time automation that starts headless agents: issue dispatch, triage, the review scripts, pull request remediation and the tooling radar. DR-008 (dispatch security) decided, for that automation, that credentials are kept out of the agent's reach, and that unattended runs are for issues whose text is trusted. Neither was held by code. This record decides how far each is now held, and names what is not.
 <!-- /dr-summary:DR-105 -->
+
+## [DR-106 — Two ranked core tenets head the constitution - make the founder's job smaller first, minimise tokens counting rework second - with a 2%-of-weekly-budget tie-break](DR-106.md)
+
+*Status: proposed · Date: 2026-10-17*
+
+<!-- dr-summary:DR-106 auto=9f8c9e3e5128 -->
+On 2026-10-17 the founder asked for a review of the constitution, rules, memory, principles and decision records against two priorities, in this order (queue item in2): The review (core-tenets-review-1017) found the corpus leaning toward over-specification: The constitution had no rule above its invariants that says what the goals are *for*. G-1 (correctness) ranked above G-3 (just enough human), so a tie between "add a check" and "spare the founder" resolved toward the check.
+<!-- /dr-summary:DR-106 -->
 <!-- minspec:dr-index:end -->
