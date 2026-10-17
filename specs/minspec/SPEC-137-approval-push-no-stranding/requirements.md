@@ -8,8 +8,8 @@ epic: EPIC-009  # Team Readiness — approvals must reach the remote; sibling of
 aspects: [approval, push, consent, protected-branch, stranded-approvals, offline, tier-0, g8-git-transparency, retroactive-spec]
 depends_on: [DR-071]
 relates_to: [SPEC-050, SPEC-039, SPEC-057, DR-050, DR-051, DR-071, DR-077, DR-078, "#1022", "#1023"]
-implements: [packages/minspec/src/lib/approve-push.ts, packages/minspec/src/commands/commit-on-approve.ts]
-affects: [packages/minspec/package.json]
+implements: [packages/minspec/src/lib/approve-push.ts]
+affects: [packages/minspec/package.json, packages/minspec/src/commands/commit-on-approve.ts]  # commit-on-approve.ts is owned by SPEC-050 (implements:); SPEC-137 only reads its call site
 phases:
   specify: done
   clarify: pending
