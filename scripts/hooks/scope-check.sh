@@ -26,15 +26,17 @@ INPUT=$(cat 2>/dev/null || true)
 #
 # session-panel.py's `self` mode exits 2, deliberately, for exactly one decision: this
 # session already had its one no-panel turn and its input still has no writer. That
-# exit code IS a blocking decision, and it is never otherwise produced (every other
-# failure inside the unit is caught and reported as exit 0, so a non-zero, non-2 exit
-# here always means the unit itself did not run). Exit 2 must reach the harness
-# unchanged — folding it into the "did not run" branch below would silently turn a
-# working block back into the advice-only behaviour #2651 was filed to end.
+# exit code IS a blocking decision. But python3 ITSELF exits 2 when it cannot open or
+# read the script (missing / unreadable file), before the unit runs, so the code alone
+# cannot tell a deliberate block from a launcher failure: that would hard-block every
+# prompt, attached human sessions included. A block is therefore exit 2 AND the unit's
+# own "BLOCKED" banner in its output; exit 2 without it is "did not run" and fails open
+# below. A real block must reach the harness unchanged — folding it into that branch
+# would silently turn a working block back into the advice-only behaviour #2651 ended.
 _PANEL="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/session-panel.py"
 _PANEL_OUT="$(printf '%s' "$INPUT" | python3 -W ignore "$_PANEL" self 2>&1)"
 _PANEL_RC=$?
-if [ "$_PANEL_RC" -eq 2 ]; then
+if [ "$_PANEL_RC" -eq 2 ] && printf '%s\n' "$_PANEL_OUT" | grep -q '^⛔ BLOCKED'; then
   # BLOCK: this is a UserPromptSubmit hook, so the harness reads OUR exit code, not
   # the unit's. stderr is what a blocking hook's reason is read from.
   printf '%s\n' "$_PANEL_OUT" >&2

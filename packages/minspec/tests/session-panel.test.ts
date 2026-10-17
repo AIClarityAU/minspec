@@ -1077,6 +1077,22 @@ suite('hook wiring, by execution', () => {
     expect(prompt.stdout).toContain('No scope declared');
   });
 
+  it('does not block a prompt when python cannot even open the unit (exit 2 without the BLOCKED banner)', () => {
+    const hook = isolatedHook();
+    fs.rmSync(path.join(path.dirname(hook), 'session-panel.py'));
+    fs.copyFileSync(PROMPT_HOOK, path.join(path.dirname(hook), 'scope-check.sh'));
+    const cwd = fs.mkdtempSync(path.join(scratch, 'cwd-'));
+    const prompt = spawnSync('bash', [path.join(path.dirname(hook), 'scope-check.sh')], {
+      input: JSON.stringify(promptInput(OTHER)),
+      encoding: 'utf-8',
+      env: hookEnv(),
+      cwd,
+      timeout: 20_000,
+    });
+    expect(prompt.status).toBe(0);
+    expect(prompt.stdout).toMatch(/No-panel check did not run \(exit 2/);
+  });
+
   it('neither hook prints an interpreter warning from a unit that ran', () => {
     // The error stream is captured so a failure can say why. A warning is not a
     // failure, and this runs at every start and before every prompt.
