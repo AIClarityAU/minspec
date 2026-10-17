@@ -6,7 +6,9 @@ tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline (remediation's runaway guard is its bounded-autonomy layer)
 relates_to: [DR-060, DR-003, SPEC-062, SPEC-044]
-implements: [scripts/remediate-pr.sh]
+implements: none
+implements_reason: creates no new file. SPEC-137 only changes exit paths inside scripts/remediate-pr.sh, which SPEC-044 already owns (SPEC-044 requirements.md:12 implements:), so it is declared under affects: as SPEC-044's ownership note (:13) prescribes for a later spec that co-edits it.
+affects: [scripts/remediate-pr.sh]  # modifies-not-owns: SPEC-044 is the primary owner (SPEC-038)
 phases:
   specify: in-progress
   clarify: pending
@@ -17,11 +19,13 @@ phases:
 
 # MinSpec — remediate-pr.sh: every exit path is charged to a budget, and an unwritable ledger fails closed (Requirements)
 
-> Materializes **[#1012](https://github.com/AIClarityAU/minspec/issues/1012)** —
+> Materializes **#1012** —
 > *"remediate-pr.sh has three budget-escape paths that post no marker."* Rests on
 > **DR-060 §4 "Bounded autonomy"** (two independent budgets, counted from marker
 > comments). No new DR: every choice here is a same-day-reversible edit to one script,
-> below the DR-359 ADR filter.
+> below the DR-359 ADR filter. That holds for the recommended options D1(a) and D2(a)
+> only: if Clarify picks D1(b) (DR-060 §4 amended from two to three budgets) or D2(b)
+> (a state store beside the "marker comment is the only state" design), record it in a DR.
 
 ## One-Sentence Scope
 
