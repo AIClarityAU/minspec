@@ -6,7 +6,7 @@ No rule changed; `CLAUDE.md` keeps a pointer to each section below.
 <a id="merge-funnel"></a>
 ## Merge asks in THIS repo - a single funnel (minspec-monorepo only)
 
-**Project-specific, and this repo only.** It overrides one line of the shared convention above
+**Project-specific, and this repo only.** It overrides one line of the shared convention (in CLAUDE.md)
 and is deliberately absent from the shipped templates: an adopter running MinSpec solo has no
 funnel to route through and keeps the `m` merge key the shared convention gives them
 (constitution invariant 3 - nothing MinSpec ships may change behaviour in a repo that did not
@@ -23,7 +23,7 @@ the one key this repo does not use. Founder instruction, 2026-09-12:
 (`specs/minspec/SPEC-044-coordinated-self-completing-sessions/requirements.md:229`): "A single
 driver holds the queue view and owns branch updates and merge confirmation. It picks the next PR
 to update, waits for it to land, then picks the next." The other half - that no session OTHER than the driver may put a merge or
-approval keystroke in front of the founder - is the founder instruction above, which lives only
+approval keystroke in front of the founder - is the founder instruction quoted earlier in this section, which lives only
 in the chief-of-staff skill, outside this repository in the operator's own Claude configuration;
 restated here because a link there resolves to nothing for any reader but the operator. A
 citable in-repo home for it is tracked as #2056. Why a single
