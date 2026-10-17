@@ -1,5 +1,23 @@
 # minspec-monorepo — Constitution
 
+## Core tenets
+
+Ranked. Every rule below must trace to one of them. (DR-106. In force from the founder's
+merge of the pull request that added this section; the record's acceptance is separate.)
+
+1. **Make the founder's job smaller - minimise human involvement.** Founder attention is
+   the scarcest resource. A human gate must name the error it catches that no machine
+   check catches, and is retired once it is rubber-stamped.
+2. **Minimise tokens, counting rework.** Spend on specs, gates and review only where that
+   is cheaper than the expected fix. Measure both sides (repeat-fix share against ceremony
+   cost) and re-tune.
+
+A rule that serves neither tenet is removed. When the two conflict, tenet 1 wins unless
+honouring it costs more than **2% of the weekly budget per decision** (the share of the
+weekly quota cap, with the base named), in which case tenet 2 wins and the decision
+record says so. The 2% is a starting value until measured. The invariants below are not
+traded against either tenet: they are the safety bounds both operate inside.
+
 ## Invariants
 
 Rules that must never be violated. All changes must preserve them.
@@ -36,13 +54,19 @@ has a **stable ID** (`G-N`) that artifacts reference via `goal: G-N` frontmatter
 `epic:`, DR-013). The next-task resolver reads `goal-rank` as a deterministic tie-break
 within a severity class — never an LLM judgement (DR-039, DR-019).
 
-1. **G-1 — AI-slop guardrails (ensure correctness).** Write-time enforcement that
-   AI-assisted code is correct and specified, not vibe-coded slop. The lead benefit.
-2. **G-2 — Prevent tech debt.** Avoid the 333Method failure mode — debt accreted through
+Re-ranked by DR-106 (in force from the founder's merge, as above): G-3 rises to the top because it is core tenet 1, and
+G-1/G-2 become the means of core tenet 2 (preventing rework) rather than ends in
+themselves. The IDs are unchanged.
+
+1. **G-3 — Just enough human (make the founder's job smaller).** The human brain is the
+   bottleneck — automate everything else. The LLM does the thorough thinking; the human
+   verifies signal, not content.
+2. **G-1 — AI-slop guardrails (ensure correctness).** Write-time enforcement that
+   AI-assisted code is correct and specified, not vibe-coded slop. Serves core tenet 2:
+   correctness now is rework not paid later.
+3. **G-2 — Prevent tech debt.** Avoid the 333Method failure mode — debt accreted through
    rework and scope creep (~3 days bugfixing per 1 day of new function). Rebuild-not-patch;
    guard scope.
-3. **G-3 — Just enough human.** The human brain is the bottleneck — automate everything
-   else. The LLM does the thorough thinking; the human verifies signal, not content.
 4. **G-4 — Opinionated / signpost.** Always tell the human the one thing to review next,
    and park off-topic ideas instead of acting on them. Never a list, never wrong.
 5. **G-5 — RETIRED (DR-075, 2026-08-01).** Was "Top of funnel into Scrooge — MinSpec is
