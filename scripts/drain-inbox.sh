@@ -138,6 +138,8 @@ set -euo pipefail
 
 REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The pure seam quota_publish_wall delegates reset-time parsing to (#1062).
+GUARD="${SCRIPT_DIR}/../.github/scripts/ai-review-guard.js"
 # The reconcilers below write to GitHub (close, remove-label, add-label). Those are
 # AGENT writes, so they must carry the App identity rather than the human's — a write
 # made as the human auto-subscribes them to the thread forever and makes the audit
@@ -2548,6 +2550,24 @@ quota_health() {
 # The message carries a clock time and a zone but NO DATE, so the rollover is inferred:
 # a time already past today means tomorrow.
 #
+# EXTRACTION (#1062): delegates to `parseResetInstant`, the SAME pure, unit-tested
+# seam (.github/scripts/ai-review-guard.js, next to `isQuotaExhaustion`) the
+# ai-review retry already schedules against (#1204, .github/workflows/ai-review.yml).
+# One tested implementation, never two that can quietly drift apart. (`is_quota` no
+# longer delegates to that file: since #2233 it is a pure-bash notice match, see
+# quota_notice_lines above. Only the reset-time parse still goes through node.)
+#
+# This used to be a second, bash-only regex+`date` extractor, hand-rolled separately
+# from parseResetInstant. It only ever matched the ABSOLUTE clock form ("resets
+# 8:40am (Zone)") — but isQuotaExhaustion's own pattern (`resets? (at|in)`) already
+# classifies the RELATIVE form ("resets in 25 minutes", "try again in 2 hours") as
+# quota-exhaustion too, so a message shaped that way was correctly detected as a
+# quota hit yet silently fell back to the flat QUOTA_BACKOFF guess here
+# — the exact "we capture the text and throw the timestamp away" gap #1062 exists to
+# close. parseResetInstant already handles both forms (with a DST-safe zoned
+# conversion for the absolute one); reusing it fixes the relative form here for free
+# and makes the two call sites impossible to drift apart again.
+#
 # MULTI-PRODUCER NOTE — do not "fix" this into a bug. More than one producer writes
 # QUOTA_FILE (a statusline render, this wall parser, and a poller). Last-writer-wins is
 # correct in BOTH directions here, but by convergence rather than by design:
@@ -2559,23 +2579,23 @@ quota_health() {
 # The staleness rule, not stickiness, is what keeps a wall reading from being believed
 # forever.
 quota_publish_wall() {
-  local text clock zone target now
+  local text now iso target
   text=$(cat)
-  # e.g. "You've hit your session limit · resets 10:10pm (Australia/Sydney)"
-  clock=$(printf '%s' "$text" | grep -oiE 'resets[[:space:]]+(at[[:space:]]+)?[0-9]{1,2}(:[0-9]{2})?[[:space:]]*(am|pm)' | head -1 \
-          | grep -oiE '[0-9]{1,2}(:[0-9]{2})?[[:space:]]*(am|pm)' | head -1)
-  [[ -n "$clock" ]] || { echo "no reset time in text" >&2; return 1; }
-  zone=$(printf '%s' "$text" | grep -oE '\([A-Za-z]+/[A-Za-z_]+\)' | head -1 | tr -d '()')
-
   now=$(date +%s)
-  if [[ -n "$zone" ]]; then
-    target=$(TZ="$zone" date -d "$clock" +%s 2>/dev/null)
-  else
-    target=$(date -d "$clock" +%s 2>/dev/null)
+
+  iso=""
+  if [[ -f "$GUARD" ]]; then
+    iso=$(GUARD="$GUARD" NOW_MS="$(( now * 1000 ))" node -e '
+      const fs = require("fs");
+      const { parseResetInstant } = require(process.env.GUARD);
+      let t = ""; try { t = fs.readFileSync(0, "utf-8"); } catch {}
+      const out = parseResetInstant(t, Number(process.env.NOW_MS));
+      if (out) process.stdout.write(out);
+    ' <<<"$text" 2>/dev/null) || iso=""
   fi
-  [[ -n "$target" ]] || { echo "could not parse '$clock'" >&2; return 1; }
-  # No date in the message: a time already gone means tomorrow.
-  (( target <= now )) && target=$(( target + 86400 ))
+  [[ -n "$iso" ]] || { echo "no reset time in text" >&2; return 1; }
+  target=$(date -u -d "$iso" +%s 2>/dev/null)
+  [[ -n "$target" ]] || { echo "could not parse '$iso'" >&2; return 1; }
 
   # At the wall the window is spent by definition. 100 makes every consumer defer,
   # which is exactly right until the deadline passes.
@@ -2584,7 +2604,7 @@ quota_publish_wall() {
   printf '{"used_percentage":100,"resets_at":%s,"observed_at":%s,"source":"wall"}\n' \
     "$target" "$now" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$QUOTA_FILE" 2>/dev/null || { rm -f "$tmp"; return 1; }
-  echo "published:$target (from the wall message, resets $clock${zone:+ $zone})"
+  echo "published:$target (from the wall message, resets $iso)"
 }
 
 # quota_backoff_sleep: the rc=42 rest. Sleeps to the deadline; wait_interval still
