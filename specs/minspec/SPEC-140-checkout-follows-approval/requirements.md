@@ -17,8 +17,8 @@ relates_to: [SPEC-022, SPEC-135, SPEC-060, SPEC-095, DR-051, DR-004, DR-086, "#1
 implements: [packages/minspec/src/lib/approval-follow.ts, packages/minspec/tests/approval-follow.test.ts]
 affects: [packages/minspec/src/commands/commit-on-approve.ts, packages/minspec/src/lib/presence.ts, packages/minspec/package.json]
 phases:
-  specify: in-progress
-  clarify: pending
+  specify: done
+  clarify: done  # the Clarify work is done; its answers are agent-recorded and ratified only by approval (see Clarify)
   plan: pending
   tasks: pending
   implement: pending
@@ -102,15 +102,20 @@ the index and FR-8 checks every path before staging any.
 
 ## Terms
 
-- **The checkout**: the working tree of the workspace folder this editor window has open.
+- **The checkout**: the working tree of the workspace folder this editor window's presence
+  record names (`extension.ts:107-127`, the activation-time root). In a window with several
+  folders open, the other folders are not the checkout (OQ-4).
 - **This window**: the extension instance whose SPEC-026 presence record carries its own
   `sessionId` (`presence.ts:515`).
+- **The default branch**: the base branch a pending approval records (FR-4), which is the
+  branch the approval's recovery pushed against (OQ-1).
 - **The target**: the commit `origin/<default branch>` points at after this pass's fetch,
   pinned by its object id for the rest of the pass.
 - **A leftover**: any path `git status --porcelain --untracked-files=all` reports: modified,
   staged, deleted, or untracked and not ignored.
-- **A pending approval**: the set of paths, object ids and modes one successful approval
-  push wrote, recorded by FR-4.
+- **A pending approval**: the record FR-4 keeps for one successful approval push: the
+  checkout's root, the paths with their object ids and modes, the base branch, the branch
+  pushed to, and the time.
 
 ## Requirements
 
@@ -118,9 +123,12 @@ the index and FR-8 checks every path before staging any.
 
 - **FR-1 - The setting.** A setting `minspec.followMergedApprovals` with values `ask`
   (default), `on` and `off`. `on` is the consent for FR-5's fetch and FR-10's move; `off`
-  means no follow pass ever runs; `ask` means none runs until answered.
-- **FR-2 - Asked once.** The first time an approval push succeeds while the setting is
-  `ask`, the extension shows one non-modal notification that does not take focus. It says,
+  means no follow pass ever runs; `ask` means none runs until answered. The setting is
+  declared with `application` scope, so only the user's own settings can hold it and no
+  file committed to a repository can turn it on (OQ-2).
+- **FR-2 - Asked once.** The first time an approval push succeeds through the
+  protected-branch recovery path (the only path that leaves copies in the checkout, OQ-3)
+  while the setting is `ask`, the extension shows one non-modal notification that does not take focus. It says,
   in plain words, what will happen from then on: while an approval is waiting to land, the
   extension fetches `origin`'s default branch; once main carries the approval's exact
   bytes, it moves this checkout forward to main by fast-forward; it never deletes, rewrites,
@@ -130,11 +138,14 @@ the index and FR-8 checks every path before staging any.
   shown again; changing it later is a settings edit.
 - **FR-3 - An unanswered question.** If the notification is dismissed without an answer the
   setting stays `ask`, nothing moves, and the question is shown again at most once per
-  editor window, at the next successful approval push. It is never shown on a timer.
+  editor window, at the next successful approval push through that path. It is never shown
+  on a timer.
 - **FR-4 - Record what the push wrote.** After every successful approval push through
-  `commit-on-approve.ts` (Approve Spec, Accept ADR, epic approval), the extension records a
-  pending approval: each written path with its object id and mode, the branch it was pushed
-  to, and the time. The record is kept in the editor's own workspace storage, never in the
+  the protected-branch recovery arm of `commit-on-approve.ts` (Approve Spec, Accept ADR,
+  epic approval), the extension records a pending approval: the checkout's root, each
+  written path with its object id and mode, the base branch the recovery pushed against,
+  the branch it was pushed to, and the time. A push from the `committed` arm leaves no
+  copies, so it records nothing (OQ-3). The record is kept in the editor's own workspace storage, never in the
   working tree, so recording it can never create a leftover. It is recorded whatever the
   setting says, so an answer of `on` given later still follows approvals made earlier in
   that workspace.
@@ -165,7 +176,7 @@ the index and FR-8 checks every path before staging any.
 
   | # | Condition | Fails when |
   |---|---|---|
-  | C1 | The checkout is on its default branch | Another branch, or detached `HEAD` |
+  | C1 | The checkout is on its default branch | Another branch, or detached `HEAD`; or the pending approvals that triggered the pass record different base branches |
   | C2 | No local commits: `HEAD` is an ancestor of the target | `HEAD` is ahead of, or has diverged from, the target |
   | C3 | No operation in progress | A merge, rebase, cherry-pick, revert or bisect is in progress, or the index lock exists |
   | C4 | No live session other than this window claims the checkout | Any live SPEC-026 record whose `worktreeRoot` is this checkout and whose `sessionId` is not this window's |
@@ -220,15 +231,21 @@ the index and FR-8 checks every path before staging any.
 - **FR-17 - The drain is unchanged.** `sync_shared_checkouts` and DR-065's guards G1 to G4
   are untouched by this spec. A checkout the drain cannot move stays unmovable by the
   drain.
-- **FR-18 - Only this window's checkout.** A pass acts only on the checkout of the folder
-  this window has open. It never moves another worktree or another repository.
+- **FR-18 - Only this window's checkout.** A pass acts only on the checkout this window's
+  presence record names. It never moves another worktree or another repository. A pending
+  approval whose recorded root is a different folder, including another folder open in the
+  same window, is never followed by this window; it is reported once, naming the folder,
+  through the same output channel and once-per-distinct-set notification FR-13 uses for a
+  refusal (OQ-4).
 
 ## Acceptance criteria
 
 All on real git fixtures (a bare origin and a clone), not stubbed git.
 
-- **AC-1** With the setting `ask`, a successful approval push shows FR-2's question once;
-  answering either way never shows it again in that workspace, including after a reload.
+- **AC-1** With the setting `ask`, a successful approval push through the protected-branch
+  recovery arm shows FR-2's question once; answering either way never shows it again in
+  that workspace, including after a reload. A successful push through the `committed` arm
+  shows no question and records no pending approval (OQ-3).
 - **AC-2** With the setting `off` or `ask`, or with no pending approval, a pass makes no
   network call (asserted by a git stub that fails the test on `fetch`).
 - **AC-3** Leftovers from one approval, one tracked-modified and one untracked sidecar, both
@@ -300,6 +317,113 @@ recorded here because nobody saw them live (DR-086 section 4).
 5. **Fetch on focus and every five minutes, only while pending (FR-5).** Matches SPEC-135
    FR-19's cadence. Rejected: fetching only on demand, which leaves the founder's checkout
    stale until someone remembers.
+
+## Clarify (recommended answers recorded by an agent 2026-10-17; ratified only by approval of this spec)
+
+Each question carries a **Recorded selection** line naming the option this document
+recommends. An agent session wrote those lines; the founder has not chosen them. This
+repository runs with `"autonomy": "act"` (`.minspec/config.json`), under which an agent
+proceeds on a stated recommendation and leaves the options it did not take on record
+(DR-086 section 4). Approving a T3 spec is on that record's stop list, so nothing here
+stands in for the approval: the lines propose, and approving this spec ratifies them. The
+requirements above already read as the recorded selections; each question names what
+changes under the other options. None of the four is outward-facing, irreversible or a
+spend: each changes code that is not yet written.
+
+`phases.clarify: done` says the Clarify work is finished, not that its answers are
+ratified. `status:` stays `specifying` on purpose: an unapproved spec derives `specifying`
+whatever its phases say (`packages/minspec/src/lib/lifecycle.ts:140`, INV-1), and SPEC-136
+(headless core) carried this same shape, `specify: done`, `clarify: done`, `status:
+specifying`, until its approval (`d63edcf5`).
+
+### OQ-1 - Which branch is "the default branch" when `origin/HEAD` is not set?
+
+`origin/HEAD` is often absent: the approve gate's own comment records it was "absent in both
+repos this guard was written for" (`packages/minspec/src/lib/approve-commit.ts:324-330`),
+and the gate falls back to the current branch's name. Recovery then pushes from a worktree
+off `origin/<base>` (`packages/minspec/src/lib/approval-recover.ts:213-216`).
+
+**Recorded selection: Option A,** the base the recovery used, recorded with the approval.
+
+- **Option A - record the base in FR-4 and follow `origin/<base>` (rec).** The pass uses
+  the same answer the approval path already acted on, with no new rule to keep in step.
+  *Cost:* if the repository's default branch is renamed between the approval and its
+  merge, C1 refuses (named) and that approval needs the manual clean-up once.
+- **Option B - require `origin/HEAD`, refuse when absent.** *Cost:* on repositories set up
+  like the two the gate was written for, the feature never fires, and every pass is a
+  standing refusal.
+- **Option C - run `git remote set-head origin --auto` to learn it.** *Cost:* a second
+  network call and a ref write the user did not ask for, outside FR-10's operation list.
+
+Under B, the Terms entry and C1 read `origin/HEAD`, and FR-4 records no base. Under C,
+FR-10 gains an operation and FR-5 a second network call.
+
+### OQ-2 - Where does the consent live?
+
+A committed `.vscode/settings.json` outranks the user's own settings for any setting that
+allows workspace scope, and writing one into the checkout would itself be a leftover that
+fails C7. `minspec.approverEmail` already uses `application` scope for a personal choice
+(`packages/minspec/package.json:537-541`).
+
+**Recorded selection: Option A,** user settings only.
+
+- **Option A - `application` scope, written to user settings (rec).** One answer covers
+  every window and every worktree of every MinSpec repository on this machine, which is the
+  once-for-always rule; and a repository cannot grant itself consent to move a checkout.
+  *Cost:* the consent is not per-repository: `on` applies to every folder with `.minspec/`
+  this user opens (FR-16 still keeps it out of every folder without one). A user who wants
+  it in one repository and not another cannot say so.
+- **Option B - workspace scope, written to `.vscode/settings.json`.** *Cost:* the write
+  dirties the checkout and blocks the very move it consents to; a committed `on` would
+  switch the feature on for everyone who clones the repository.
+- **Option C - kept in the editor's workspace storage, not a setting.** *Cost:* invisible
+  in the settings editor, so FR-2's "changing it later is a settings edit" fails; it would
+  need its own reset command.
+
+Under B or C, FR-1's last sentence changes, and under C so does FR-2's last sentence.
+
+### OQ-3 - Which approvals trigger the question and get recorded?
+
+Only the `protected-branch` arm of `commit-on-approve.ts` leaves copies in the checkout
+(`packages/minspec/src/commands/commit-on-approve.ts:214-252`). The `committed` arm commits
+on the current branch first, so its push leaves the tree clean.
+
+**Recorded selection: Option A,** the recovery arm only.
+
+- **Option A - only a successful recovery push asks and records (rec).** A user whose
+  default branch is not protected is never asked about a feature that cannot act for them.
+  *Cost:* such a user who later protects the branch is first asked at that later approval,
+  and approvals made before then are not followed (they left no copies, so there is
+  nothing to follow).
+- **Option B - every successful approval push asks and records, as first drafted.**
+  *Cost:* adopters on an unprotected branch get a consent question, and a five-minute fetch
+  once they answer `on`, for records FR-6 then clears without a move.
+
+Under B, FR-2, FR-3 and FR-4 drop the recovery-path wording.
+
+### OQ-4 - A window with several folders open
+
+The presence record is written for one folder per window, the activation-time root
+(`packages/minspec/src/extension.ts:107-127`). The founder's workspace file opens several
+repositories in one window. An approval made in a folder other than that root has no
+record of this window in it, so C5 would fail there for as long as the window is open.
+
+**Recorded selection: Option A,** follow only the presence root; name the rest.
+
+- **Option A - act only on the checkout this window's presence record names; report a
+  pending approval in any other folder once, naming it (rec).** No change to SPEC-026, and
+  C5's fail direction holds. *Cost:* an approval made in a second folder of a multi-root
+  window is never followed by that window; it needs the manual clean-up, or a window opened
+  on that folder alone.
+- **Option B - extend presence to write one record per opted-in folder in the window.**
+  *Cost:* changes SPEC-026's approved behaviour (an amendment and a second sign-off) and
+  makes the drain see every such folder as occupied, so the drain stops moving checkouts it
+  moves today.
+- **Option C - follow any folder in the window, skipping C5 for folders without this
+  window's record.** *Cost:* removes the demonstration DR-065 condition (a) requires, so a
+  pass could move a checkout whose presence it never proved.
+
+Under B, SPEC-026 is amended and FR-18 widens. C is not buildable under DR-065 as it stands.
 
 ## Alternatives considered (the queue item d1167 options)
 
