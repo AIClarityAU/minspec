@@ -144,6 +144,29 @@ vi.mock('../src/lib/spec-layout', () => ({
   readShardIdFiles: vi.fn(() => []),
 }));
 
+// The shared ownership guard locates its repo root by walking up to a real `.minspec/`
+// directory, which the fake root `/tmp/ws` does not have — so the real guard would fail
+// open here and never consult the mocked validator. This stand-in keeps the guard's
+// contract (throw when the advance introduces errors) over the mocked
+// `violationsIntroducedByApproval`; the REAL guard on a real tree is driven end to end by
+// approve-command-ownership-guard.test.ts.
+vi.mock('../src/lib/ownership-advance-guard', async () => {
+  const validator = await import('../src/lib/spec-validator');
+  return {
+    assertOwnershipDeclaredForAdvance: (_file: string, parsed: never) => {
+      const introduced = (validator.violationsIntroducedByApproval as unknown as (p: unknown) => {
+        message: string;
+        fixHint: string;
+      }[])(parsed);
+      if (introduced.length > 0) {
+        throw new Error(
+          'Approval refused:\n' + introduced.map((v) => `${v.message}\n${v.fixHint}`).join('\n'),
+        );
+      }
+    },
+  };
+});
+
 // ─── The folder has opted in (SPEC-096) ─────────────────────────────────────
 // Every test here drives a command against the fake root `/tmp/ws`, and has always treated it
 // as an initialized project. The commands now check for the `.minspec/` opt-in
