@@ -199,6 +199,19 @@ describe('tooling radar — the scan prompt and the filer agree on the category 
     expect(rule, 'radar-prompt.md must carry the category routing rule').not.toBeNull();
     expect(rule![0]).toMatch(/act: false/);
   });
+
+  it('scans AI-dev practice and model capability as scan area 5', () => {
+    expect(radarPrompt).toMatch(/^5\. AI-dev practice and model capability/m);
+  });
+
+  it('lets a token or cost finding be actionable under minspec, not forced watch-only', () => {
+    // Token spend is a core tenet; forcing every such finding to `act: false` meant the
+    // area could never produce work. The rule must say they route to `minspec` and may act.
+    const rule = radarPrompt.match(/- `category` routes the issue to a repo\.[\s\S]*?\n(?=- `)/);
+    expect(rule![0]).toMatch(/filed under `minspec`/);
+    expect(rule![0]).toMatch(/`act: true`/);
+    expect(radarPrompt).not.toMatch(/never with `act: true`/);
+  });
 });
 
 describe('tooling radar — field validation', () => {
