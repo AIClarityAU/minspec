@@ -1246,12 +1246,13 @@ export async function initCommand(
   // drift detector then reports false drift). Catch any failure, surface exactly
   // what went wrong, and do NOT report a misleading "Initialized" success (#153).
   let untrackedOnInit: string[] = [];
+  const indexNoticesOnInit: ManagedRegionWarning[] = [];
   try {
     scaffold(folder);
     // `?? []` — a stubbed generateHarnessFiles (several suites mock it) returns
     // undefined, and an un-iterable here would turn a reporting nicety into an
     // init-breaking TypeError. Reporting must never be able to fail the command.
-    untrackedOnInit = generateHarnessFiles(folder) ?? [];
+    untrackedOnInit = generateHarnessFiles(folder, indexNoticesOnInit) ?? [];
   } catch (err) {
     vscode.window.showErrorMessage(
       `MinSpec: Initialization failed — ${describeError(err)}. ` +
@@ -1272,6 +1273,10 @@ export async function initCommand(
       message: untrackedNoticeMessage(outputPath),
       kind: 'untracked',
     });
+  }
+  // Hooks init staged into the index as 100755 (#2399) — same notice refresh shows.
+  for (const notice of indexNoticesOnInit) {
+    await surfaceManagedRegionWarning(folder, notice);
   }
   if (isFirstInit) {
     await offerCoverageThresholdPrompt(folder);
@@ -1341,7 +1346,7 @@ export async function surfaceManagedRegionWarning(
   // "Re-scaffold" would be meaningless (nothing was scaffolded) and actively
   // misleading, so this kind gets its own surface: state what changed to the index
   // and offer the place to review and commit it (#1146).
-  if (w.kind === 'untracked') {
+  if (w.kind === 'untracked' || w.kind === 'exec-bit-recorded') {
     const choice = await vscode.window.showInformationMessage(
       `[${label}] ${w.message}`,
       SHOW_SCM_ACTION,
