@@ -155,7 +155,10 @@ function installClaude(reply: Reply): Start[] {
     starts.push(start);
     recorded.push(start);
     reply(start, (err, stdout = '') => {
-      if (err) callback(err, '', (err as unknown as { stderr?: string }).stderr ?? '');
+      if (err) {
+        const printed = err as unknown as { stdout?: string; stderr?: string };
+        callback(err, printed.stdout ?? '', printed.stderr ?? '');
+      }
       else callback(null, stdout, '');
     });
     return { stdin: { end: (data?: string) => { stdinData = data; }, on: () => undefined } };
