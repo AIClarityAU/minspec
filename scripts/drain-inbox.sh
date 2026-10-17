@@ -147,6 +147,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/gh-bot.sh
 source "${SCRIPT_DIR}/lib/gh-bot.sh"
 gh_bot_init
+# launcher_worktree_git, for sync_shared_checkouts: git in a checkout an agent may have
+# been in, by the repository's own record of it (#1203).
+# shellcheck source=scripts/lib/agent-worktree.sh
+source "${SCRIPT_DIR}/lib/agent-worktree.sh"
 # Env-overridable for the same reason as MINSPEC_DRAIN_PRIMARY_ROOT below: the
 # #1208 concurrency harness points it at a hermetic stub so the fan-out can be
 # proven to actually overlap without launching real build agents.
@@ -160,7 +164,20 @@ TRIAGE="${MINSPEC_DRAIN_TRIAGE:-${SCRIPT_DIR}/triage-inbox.sh}"
 # Env-overridable like DISPATCH, so a hermetic test can drive the PR sweep through a
 # stub rather than the real remediator (#2233: the 18:11 false pause was on this path).
 REMEDIATE="${MINSPEC_DRAIN_REMEDIATE:-${SCRIPT_DIR}/remediate-pr.sh}"
-PREF_FILE="$(cd "${SCRIPT_DIR}/.." && pwd)/.minspec/auto-drain"
+# The opt-in is per REPOSITORY, not per checkout (#2715): every session starts in a
+# worktree (rule #8), and the pref file is gitignored, so a per-checkout path meant
+# only the primary checkout ever saw "on" and the drain never restarted. Resolve the
+# pref beside the repo's common git dir (the primary checkout root), falling back to
+# this checkout's root when not in a git repo or the common dir is not a `.git`.
+_checkout_root="$(cd "${SCRIPT_DIR}/.." && pwd)"
+_common_dir="$(git -C "$SCRIPT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"  # swallow-ok: not a git repo / old git → falls back to this checkout's root
+if [[ -n "$_common_dir" && "$(basename "$_common_dir")" == ".git" ]]; then
+  PREF_ROOT="$(dirname "$_common_dir")"
+else
+  PREF_ROOT="$_checkout_root"
+fi
+PREF_FILE="${PREF_ROOT}/.minspec/auto-drain"
+unset _checkout_root _common_dir
 DRY_RUN=false
 CONTINUOUS=false
 # Default lock/log paths; env-overridable so hermetic tests can point them at a
@@ -658,14 +675,20 @@ sync_shared_checkouts() {
       [[ -n "$root" && -d "$root" ]] || continue
       # never touch the drain's own detached run-dir (hard-reset elsewhere)
       [[ "$(readlink -m -- "$root" 2>/dev/null)" == "$(readlink -m -- "$DRAIN_RUN_DIR" 2>/dev/null)" ]] && continue
-      [[ "$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$db" ]] || continue   # G1
-      [[ -z "$(git -C "$root" status --porcelain 2>/dev/null)" ]] || continue                   # G2
+      # Every checkout the repository lists is visited, and some are worktrees an agent
+      # was given. So git is never asked through "$root"'s own `.git` file, which says
+      # whatever was last written to it: launcher_worktree_git takes the git directory
+      # from THIS repository's record of the worktree and the hooks from this tree
+      # (lib/agent-worktree.sh, #1203). A root with no such record is skipped.
+      launcher_worktree_git_dir "$PRIMARY_ROOT" "$root" >/dev/null || continue
+      [[ "$(launcher_worktree_git "$PRIMARY_ROOT" "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$db" ]] || continue   # G1
+      [[ -z "$(launcher_worktree_git "$PRIMARY_ROOT" "$root" status --porcelain 2>/dev/null)" ]] || continue                   # G2
       checkout_occupied "$root" && continue                                                     # G3 (occupied ⇒ skip)
-      head_sha="$(git -C "$root" rev-parse HEAD 2>/dev/null)" || continue
+      head_sha="$(launcher_worktree_git "$PRIMARY_ROOT" "$root" rev-parse HEAD 2>/dev/null)" || continue
       [[ "$head_sha" == "$origin_sha" ]] && continue          # already current
-      base="$(git -C "$root" merge-base HEAD "$origin_ref" 2>/dev/null)" || continue
+      base="$(launcher_worktree_git "$PRIMARY_ROOT" "$root" merge-base HEAD "$origin_ref" 2>/dev/null)" || continue
       [[ "$base" == "$head_sha" ]] || continue                # G4: diverged (local commits) ⇒ skip, never reset
-      git -C "$root" merge --ff-only "$origin_ref" -q 2>/dev/null \
+      launcher_worktree_git "$PRIMARY_ROOT" "$root" merge --ff-only "$origin_ref" -q 2>/dev/null \
         && echo "[drain] fast-forwarded DORMANT checkout $root → ${origin_ref} (${origin_sha:0:7})." \
         || echo "[drain] WARNING: ff of $root refused by git — left as-is (fetch-only)." >&2
     done || true   # never let the loop pipeline's exit status trip `set -e`
@@ -1107,12 +1130,33 @@ sweep_open_prs() {
     # refresh: the sweep's own enumeration is a read, and remediate-pr.sh is a child
     # that inherits this token.
     gh_bot_warm_read
-    local open_prs pr rcap rout
+    local open_prs pr rcap rout sweep_quota_verdict
     open_prs=$(gh pr list --repo "$REPO" --state open --json number,isDraft \
       --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
     if [[ -n "$open_prs" ]]; then
       echo "[drain] sweeping $(echo "$open_prs" | wc -l | tr -d ' ') open PR(s) for fixable problems..."
       for pr in $open_prs; do
+        # Admission control per REMEDIATION, not just per cycle (#2587) — the same
+        # shape admit_next_dispatch gives dispatch (#2573), reused here rather than
+        # called directly: that function is defined INSIDE run_cycle, only once
+        # execution reaches its dispatch section, and this sweep has a second call
+        # site (line ~1444) that can run before that point in a cycle's FIRST call.
+        # A long PR list makes this loop run for hours exactly as the dispatch loop
+        # does, and remediate-pr.sh launches an agent for any PR it classifies as
+        # fixable (scripts/remediate-pr.sh:814) — so a cycle admitted under the cap
+        # can cross it mid-sweep and keep launching until the list ends.
+        #
+        # Asked before EVERY PR, including ones remediate-pr.sh is about to skip
+        # without spending an agent on them at all (a clean PR, one only behind
+        # `main`). remediate-pr.sh is the one thing that knows which PRs those are
+        # — it decides after its own fetch — and reproducing that classification
+        # here, just to skip the gate ask for a non-agent PR, is left as a possible
+        # follow-up (see the issue this fixes) rather than folded into this loop.
+        if ! sweep_quota_verdict=$(quota_gate); then
+          echo "[drain] $sweep_quota_verdict — holding the rest of the PR sweep for the window."
+          QUOTA_PAUSE_CAUSE="gate"
+          return 42
+        fi
         # Same quota discipline as dispatch: remediation may launch claude, which
         # exits 0 even under a usage limit — the signal is in the OUTPUT. Capture
         # + classify; a quota hit pauses the whole cycle (loop backs off). Only the
@@ -2229,7 +2273,11 @@ quota_gate() {
         [[ "$QWAIT_WHY" == "ramp" ]] && next="; at this usage the ramp next admits in $(_quota_span "$QWAIT_SECS")"
         echo "defer:${QWAIT_SECS} (7d window ${wp}% used — the WEEKLY ceiling, resets in $(( (left + 3599) / 3600 )) h; cap ${cap7}${next})"
       else
-        echo "defer:$QUOTA_SLEEP_MAX (7d window ${wp}% used — the WEEKLY ceiling, no usable reset time; cap ${cap7})"
+        # No usable weekly reset: this is the "no deadline" case _quota_sleep_plan
+        # treats as the fixed backoff (#2603), never the 5h reset and never the
+        # QUOTA_SLEEP_MAX clamp — printing either here would claim a wait this gate
+        # does not actually ask for.
+        echo "defer:$QUOTA_BACKOFF (7d window ${wp}% used — the WEEKLY ceiling, no usable reset time; cap ${cap7})"
       fi
       return 42
     fi
@@ -2282,9 +2330,23 @@ _quota_sleep_plan() {
       # what deferred us, the 5h reset is the wrong deadline — it can be minutes away
       # while the weekly window is days out, so the loop would wake, re-defer, and
       # report "sleeping to the published reset" while sleeping to an irrelevant one.
-      if (( wp >= 0 )) && (( wr > now )) && _quota_defers 7d "$wp" "$(( wr - now ))"; then
-        _quota_admit_wait 7d "$wp" "$(( wr - now ))"
-        secs=$(( QWAIT_SECS + QUOTA_SLEEP_MARGIN )); why="$QWAIT_WHY"
+      if (( wp >= 0 )) && _quota_defers 7d "$wp" "$(( wr > now ? wr - now : 0 ))"; then
+        # The weekly window is what's binding (checked with its OWN reset, or 0 when
+        # that reset has already passed — never the 5h window's). A passed-or-missing
+        # weekly reset is not a deadline the gate can sleep toward, so this is "no
+        # usable deadline", exactly the fallback branch below, not the 5h reset (#2603):
+        # the 5h reset can be minutes away while the actual hold is the weekly ceiling,
+        # days out, and sleeping to the wrong one wakes the loop early for nothing — or,
+        # once a wrap producer's weekly figure goes stale for a stretch after its own
+        # reset, with the old reading still fresh enough to pass the staleness check,
+        # sleeps hours past a weekly hold that could have lifted the moment the producer
+        # published the new week.
+        if (( wr > now )); then
+          _quota_admit_wait 7d "$wp" "$(( wr - now ))"
+          secs=$(( QWAIT_SECS + QUOTA_SLEEP_MARGIN )); why="$QWAIT_WHY"
+        else
+          secs="$QUOTA_BACKOFF"; why="fallback"
+        fi
       elif (( r > now )); then
         if _quota_defers 5h "$p" "$(( r - now ))"; then
           _quota_admit_wait 5h "$p" "$(( r - now ))"

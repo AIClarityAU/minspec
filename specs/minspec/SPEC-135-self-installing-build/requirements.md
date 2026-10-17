@@ -1,7 +1,7 @@
 ---
 id: SPEC-135
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - one consent, then an unattended path from main into the editor
@@ -20,8 +20,8 @@ implements: [packages/minspec/src/lib/build-witness.ts, packages/minspec/tests/b
 affects: [packages/minspec/src/extension.ts, scripts/drain-inbox.sh, .gitignore]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
