@@ -113,8 +113,9 @@ the index and FR-8 checks every path before staging any.
   pinned by its object id for the rest of the pass.
 - **A leftover**: any path `git status --porcelain --untracked-files=all` reports: modified,
   staged, deleted, or untracked and not ignored.
-- **A pending approval**: the set of paths, object ids and modes one successful approval
-  push wrote, recorded by FR-4.
+- **A pending approval**: the record FR-4 keeps for one successful approval push: the
+  checkout's root, the paths with their object ids and modes, the base branch, the branch
+  pushed to, and the time.
 
 ## Requirements
 
@@ -233,8 +234,9 @@ the index and FR-8 checks every path before staging any.
 - **FR-18 - Only this window's checkout.** A pass acts only on the checkout this window's
   presence record names. It never moves another worktree or another repository. A pending
   approval whose recorded root is a different folder, including another folder open in the
-  same window, is never followed by this window; it is reported once, naming the folder, as
-  a refusal under FR-13 (OQ-4).
+  same window, is never followed by this window; it is reported once, naming the folder,
+  through the same output channel and once-per-distinct-set notification FR-13 uses for a
+  refusal (OQ-4).
 
 ## Acceptance criteria
 
