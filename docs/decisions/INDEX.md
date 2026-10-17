@@ -831,7 +831,7 @@ scripts/ holds the dev-time automation that starts headless agents: issue dispat
 
 *Status: proposed · Date: 2026-10-17*
 
-<!-- dr-summary:DR-109 auto=b15597c58f5d -->
-The core-tenets review proposed one voter for docs and T1, and four for machinery and T3/T4 (DR-033 §6, DR-047), to save tokens under DR-106 core tenet 2. The founder accepted it with an amendment: specs are "the pointy end, where you have to get it right, as everything downstream depends on it". The recommendation also said to measure voter disagreement before landing it.
+<!-- dr-summary:DR-109 auto=01ee89682199 -->
+The core-tenets review proposed one voter for docs and T1, and four for machinery and T3/T4 (DR-033 §6, DR-047), to save tokens under core tenet 2. The founder accepted it with an amendment: specs are "the pointy end, where you have to get it right, as everything downstream depends on it". The recommendation also said to measure voter disagreement before landing it.
 <!-- /dr-summary:DR-109 -->
 <!-- minspec:dr-index:end -->
