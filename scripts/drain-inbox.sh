@@ -147,6 +147,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/gh-bot.sh
 source "${SCRIPT_DIR}/lib/gh-bot.sh"
 gh_bot_init
+# launcher_worktree_git, for sync_shared_checkouts: git in a checkout an agent may have
+# been in, by the repository's own record of it (#1203).
+# shellcheck source=scripts/lib/agent-worktree.sh
+source "${SCRIPT_DIR}/lib/agent-worktree.sh"
 # Env-overridable for the same reason as MINSPEC_DRAIN_PRIMARY_ROOT below: the
 # #1208 concurrency harness points it at a hermetic stub so the fan-out can be
 # proven to actually overlap without launching real build agents.
@@ -160,7 +164,20 @@ TRIAGE="${MINSPEC_DRAIN_TRIAGE:-${SCRIPT_DIR}/triage-inbox.sh}"
 # Env-overridable like DISPATCH, so a hermetic test can drive the PR sweep through a
 # stub rather than the real remediator (#2233: the 18:11 false pause was on this path).
 REMEDIATE="${MINSPEC_DRAIN_REMEDIATE:-${SCRIPT_DIR}/remediate-pr.sh}"
-PREF_FILE="$(cd "${SCRIPT_DIR}/.." && pwd)/.minspec/auto-drain"
+# The opt-in is per REPOSITORY, not per checkout (#2715): every session starts in a
+# worktree (rule #8), and the pref file is gitignored, so a per-checkout path meant
+# only the primary checkout ever saw "on" and the drain never restarted. Resolve the
+# pref beside the repo's common git dir (the primary checkout root), falling back to
+# this checkout's root when not in a git repo or the common dir is not a `.git`.
+_checkout_root="$(cd "${SCRIPT_DIR}/.." && pwd)"
+_common_dir="$(git -C "$SCRIPT_DIR" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"  # swallow-ok: not a git repo / old git → falls back to this checkout's root
+if [[ -n "$_common_dir" && "$(basename "$_common_dir")" == ".git" ]]; then
+  PREF_ROOT="$(dirname "$_common_dir")"
+else
+  PREF_ROOT="$_checkout_root"
+fi
+PREF_FILE="${PREF_ROOT}/.minspec/auto-drain"
+unset _checkout_root _common_dir
 DRY_RUN=false
 CONTINUOUS=false
 # Default lock/log paths; env-overridable so hermetic tests can point them at a
@@ -384,6 +401,69 @@ _breaker_decide() {
   echo halt
 }
 
+# ── Did a dispatch start anything? (#2641) ────────────────────────────────────
+# The dispatcher exits 0 both when it ran a build and when it declined to start one: the
+# issue is not dispatchable any more, or another session owns it. The queue limit is a
+# budget of builds, so run_cycle has to tell the two apart. It could not, and counted a
+# refusal as a dispatch: with the top of the ranking refused, every slot of the limit
+# went to a refusal on every cycle, and the drain started nothing for 8.5 hours while
+# logging "cycle done" (#2641).
+#
+# So run_cycle ASKS (MINSPEC_DISPATCH_OUTCOME_STATUS=1 on the dispatcher's own command),
+# and the dispatcher answers with its exit status. These two numbers are the dispatcher's
+# DISPATCH_RC_DECLINED and DISPATCH_RC_STARTED, and a test holds the two files to them.
+#
+# The exit status is the ONLY thing read. Nothing is written down between the two
+# processes, so there is nothing for a dispatched agent to write: the first version of
+# this used a file named in the environment, and an agent could find the name
+# (/proc/<pid>/environ of the dispatcher) and mark its own build "not started", which
+# gave the slot back and let a cycle run past its limit. Nor is the dispatcher's output
+# read for this: agent prose travels on it (#2233). A status is also never stale. It is
+# what `wait` returns for the process this cycle launched for this issue.
+_DISPATCH_RC_DECLINED=75
+_DISPATCH_RC_STARTED=76
+
+# _dispatch_own_status <dispatcher's status> [<status of each later stage>...]
+# Prints the one status to judge a dispatch by, from the PIPESTATUS of
+# `dispatcher | tee [| sed]`. That is the dispatcher's own status when every later stage
+# succeeded, and 1 otherwise: a capture that failed is a failed dispatch, as it always
+# was under `pipefail`, and it must never pass for an answer the dispatcher did not give.
+# No status at all, or one that is not a number, is 1 for the same reason.
+_dispatch_own_status() {
+  local own="${1-}" s
+  [[ "$own" =~ ^[0-9]+$ ]] || { printf '1'; return 0; }
+  shift
+  for s in "$@"; do
+    [[ "$s" == "0" ]] || { printf '1'; return 0; }
+  done
+  printf '%s' "$own"
+}
+
+# _dispatch_outcome <status>: what one finished dispatch came to.
+#
+#   declined     the dispatcher refused the issue before starting anything.
+#   started      it won its claim, and ended as it used to end on exit 0.
+#   unanswered   exit 0 and NO answer: a dispatcher from before the question, an exit in
+#                it that nobody taught to answer, or a question that never reached it.
+#   failed       any other status.
+#
+# `unanswered` is its own outcome because the two things that read this want opposite
+# defaults from it, and folding it into either neighbour gets one of them wrong:
+#
+#   the queue limit     counts it. Unknown is treated as spent, so a missing answer can
+#                       never make a cycle launch more than its limit.
+#   "did anything run"  does NOT count it. Unknown is not evidence of work. The first
+#                       version of this read it as a dispatch that ran, and a cycle of
+#                       refusals that left no answer ended "cycle done." again.
+_dispatch_outcome() {
+  case "${1-}" in
+    "$_DISPATCH_RC_DECLINED") printf 'declined' ;;
+    "$_DISPATCH_RC_STARTED")  printf 'started' ;;
+    0)                        printf 'unanswered' ;;
+    *)                        printf 'failed' ;;
+  esac
+}
+
 DISPATCH_CONCURRENCY="$(_validated_concurrency "${MINSPEC_DRAIN_CONCURRENCY:-1}")"
 
 # ── Is the Claude CLI itself saying it hit a limit? (#2233) ───────────────────
@@ -595,14 +675,20 @@ sync_shared_checkouts() {
       [[ -n "$root" && -d "$root" ]] || continue
       # never touch the drain's own detached run-dir (hard-reset elsewhere)
       [[ "$(readlink -m -- "$root" 2>/dev/null)" == "$(readlink -m -- "$DRAIN_RUN_DIR" 2>/dev/null)" ]] && continue
-      [[ "$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$db" ]] || continue   # G1
-      [[ -z "$(git -C "$root" status --porcelain 2>/dev/null)" ]] || continue                   # G2
+      # Every checkout the repository lists is visited, and some are worktrees an agent
+      # was given. So git is never asked through "$root"'s own `.git` file, which says
+      # whatever was last written to it: launcher_worktree_git takes the git directory
+      # from THIS repository's record of the worktree and the hooks from this tree
+      # (lib/agent-worktree.sh, #1203). A root with no such record is skipped.
+      launcher_worktree_git_dir "$PRIMARY_ROOT" "$root" >/dev/null || continue
+      [[ "$(launcher_worktree_git "$PRIMARY_ROOT" "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$db" ]] || continue   # G1
+      [[ -z "$(launcher_worktree_git "$PRIMARY_ROOT" "$root" status --porcelain 2>/dev/null)" ]] || continue                   # G2
       checkout_occupied "$root" && continue                                                     # G3 (occupied ⇒ skip)
-      head_sha="$(git -C "$root" rev-parse HEAD 2>/dev/null)" || continue
+      head_sha="$(launcher_worktree_git "$PRIMARY_ROOT" "$root" rev-parse HEAD 2>/dev/null)" || continue
       [[ "$head_sha" == "$origin_sha" ]] && continue          # already current
-      base="$(git -C "$root" merge-base HEAD "$origin_ref" 2>/dev/null)" || continue
+      base="$(launcher_worktree_git "$PRIMARY_ROOT" "$root" merge-base HEAD "$origin_ref" 2>/dev/null)" || continue
       [[ "$base" == "$head_sha" ]] || continue                # G4: diverged (local commits) ⇒ skip, never reset
-      git -C "$root" merge --ff-only "$origin_ref" -q 2>/dev/null \
+      launcher_worktree_git "$PRIMARY_ROOT" "$root" merge --ff-only "$origin_ref" -q 2>/dev/null \
         && echo "[drain] fast-forwarded DORMANT checkout $root → ${origin_ref} (${origin_sha:0:7})." \
         || echo "[drain] WARNING: ff of $root refused by git — left as-is (fetch-only)." >&2
     done || true   # never let the loop pipeline's exit status trip `set -e`
@@ -1044,12 +1130,33 @@ sweep_open_prs() {
     # refresh: the sweep's own enumeration is a read, and remediate-pr.sh is a child
     # that inherits this token.
     gh_bot_warm_read
-    local open_prs pr rcap rout
+    local open_prs pr rcap rout sweep_quota_verdict
     open_prs=$(gh pr list --repo "$REPO" --state open --json number,isDraft \
       --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
     if [[ -n "$open_prs" ]]; then
       echo "[drain] sweeping $(echo "$open_prs" | wc -l | tr -d ' ') open PR(s) for fixable problems..."
       for pr in $open_prs; do
+        # Admission control per REMEDIATION, not just per cycle (#2587) — the same
+        # shape admit_next_dispatch gives dispatch (#2573), reused here rather than
+        # called directly: that function is defined INSIDE run_cycle, only once
+        # execution reaches its dispatch section, and this sweep has a second call
+        # site (line ~1444) that can run before that point in a cycle's FIRST call.
+        # A long PR list makes this loop run for hours exactly as the dispatch loop
+        # does, and remediate-pr.sh launches an agent for any PR it classifies as
+        # fixable (scripts/remediate-pr.sh:814) — so a cycle admitted under the cap
+        # can cross it mid-sweep and keep launching until the list ends.
+        #
+        # Asked before EVERY PR, including ones remediate-pr.sh is about to skip
+        # without spending an agent on them at all (a clean PR, one only behind
+        # `main`). remediate-pr.sh is the one thing that knows which PRs those are
+        # — it decides after its own fetch — and reproducing that classification
+        # here, just to skip the gate ask for a non-agent PR, is left as a possible
+        # follow-up (see the issue this fixes) rather than folded into this loop.
+        if ! sweep_quota_verdict=$(quota_gate); then
+          echo "[drain] $sweep_quota_verdict — holding the rest of the PR sweep for the window."
+          QUOTA_PAUSE_CAUSE="gate"
+          return 42
+        fi
         # Same quota discipline as dispatch: remediation may launch claude, which
         # exits 0 even under a usage limit — the signal is in the OUTPUT. Capture
         # + classify; a quota hit pauses the whole cycle (loop backs off). Only the
@@ -1109,7 +1216,42 @@ _ready_numbers() {
 # (#2197) rather than at the read above. Same env var and default as the old
 # read-time cap (MINSPEC_DRAIN_QUEUE_LIMIT, 30): the knob a human already knows
 # didn't need a new name, only a new point of application.
-_dispatch_cap="${MINSPEC_DRAIN_QUEUE_LIMIT:-30}"
+#
+# It counts dispatches that START (#2641). An issue the dispatcher refuses before doing
+# any work does not use one, so a cycle may OFFER more issues than this; it never starts
+# more. The counting is in run_cycle's dispatch loops (slots_used, book_dispatch).
+#
+# _queue_limit <raw>: the limit as a whole number of dispatches, or nothing and a
+# non-zero status when <raw> is not one.
+#
+# The limit is compared in arithmetic, and bash arithmetic does two things to a value it
+# is handed raw. One it cannot evaluate (`5x`, `2.5`, `1e3`) makes the comparison an
+# ERROR, and an error in a test reads as false: on `main` the trim sat inside such a
+# test, so a mistyped limit skipped the trim and the whole ready set was dispatched. And
+# it EVALUATES what it is given: a limit of `ready_total[$(command)]` ran the command
+# (the name has to be a variable that is set; an unset one stops on `set -u` first).
+# Nothing but digits reaches arithmetic now.
+#
+# Leading zeros are decimal, as `head -n` read them (`010` is ten; arithmetic alone would
+# call it eight and refuse `08`). Whitespace around the value is dropped. Nine digits at
+# most, so the conversion cannot overflow.
+_queue_limit() {
+  local raw="${1-}"
+  raw="${raw#"${raw%%[![:space:]]*}"}"
+  raw="${raw%"${raw##*[![:space:]]}"}"
+  [[ "$raw" =~ ^[0-9]{1,9}$ ]] || return 1
+  printf '%s' "$(( 10#$raw ))"
+}
+
+# A limit that cannot be read is not "no limit", and it is not the default either:
+# somebody asked for something else. Nothing is dispatched until it is a number, and
+# every cycle says so where the log carries it (run_cycle), not once at start-up where
+# only the launcher sees it.
+_dispatch_cap_unreadable=0
+if ! _dispatch_cap="$(_queue_limit "${MINSPEC_DRAIN_QUEUE_LIMIT:-30}")"; then
+  _dispatch_cap=0
+  _dispatch_cap_unreadable=1
+fi
 
 # DRAIN_SPECIFY — whether this drain dispatches spec-writing work (#2582). 1, the
 # default, is the behaviour there has always been: both ready queues are dispatched.
@@ -1386,21 +1528,34 @@ run_cycle() {
     echo "[drain] dispatch order ranked by value (#2196): $(printf '%s' "$all_ready" | tr '\n' ' ')"
   fi
 
-  # Apply the dispatch cap HERE — after ranking, not at the read above (#2197). The
-  # full ready set was fetched and fully ranked (or, on a ranker failure, fully
-  # ordered numerically); only the BATCH this cycle actually dispatches is trimmed to
-  # size. Nothing is dropped: the untrimmed issues stay labelled agent-ready and are
-  # read, ranked, and reconsidered again next cycle — deferred by value, not silently
-  # lost. `head` on an already-ordered list keeps the first N, which is the top N by
-  # rank (or the lowest-numbered N on a numeric-order fallback).
+  # The dispatch cap applies AFTER ranking, not at the read above (#2197), and it is a
+  # cap on dispatches that START, not on issues offered (#2641). The full ready set was
+  # fetched and fully ranked (or, on a ranker failure, fully ordered numerically), and
+  # `all_ready` stays that whole ordered list: the dispatch loops below walk it from the
+  # top and stop once `_dispatch_cap` dispatches have used a slot.
+  #
+  # It used to be trimmed right here, with `head -n "$_dispatch_cap"`, and that trim was
+  # the defect in #2641. The one check that can refuse an issue (a countermanding label,
+  # a stale verdict, another session's claim) runs inside the dispatcher, which is AFTER
+  # this point, so the trim spent the cap on issues nobody had asked about yet. With the
+  # top of the ranking refused, every slot went to a refusal on every cycle and the clean
+  # issues ranked below were never offered: 22 cycles and 8.5 hours of "cycle done" with
+  # 19 dispatchable issues queued. The spec-writing switch above met the same shape and
+  # narrowed its one class before the cap. This is the general answer.
+  #
+  # Nothing is dropped either way: an issue this cycle does not reach stays labelled, and
+  # is read, ranked, and reconsidered next cycle.
   #
   # This NOTE is the dispatch-time sibling of the fetch-time one above (#2197): same
-  # shape, moved to the point where a cap now actually decides anything.
+  # shape, at the point where a cap decides anything.
   ready_total="$(printf '%s\n' "$all_ready" | grep -c . || true)"  # swallow-ok: all_ready is already known non-empty above, so grep -c cannot be the empty-input 1
-  if (( ready_total > _dispatch_cap )); then
+  if (( _dispatch_cap_unreadable )); then
+    # Said every cycle (#2641). The value itself is not printed back: it is whatever the
+    # environment held, and this line is what an operator searches the log for.
+    echo "[drain] WARNING: MINSPEC_DRAIN_QUEUE_LIMIT is not a whole number of dispatches, so this cycle dispatches nothing. A limit that cannot be read is not 'no limit'. Set it to a number of at most nine digits." >&2
+  elif (( ready_total > _dispatch_cap )); then
     echo "[drain] NOTE: ${ready_total} issue(s) ready — dispatching the top ${_dispatch_cap} this cycle." >&2
-    echo "[drain]       The rest stay queued and are re-ranked next cycle. Raise MINSPEC_DRAIN_QUEUE_LIMIT to dispatch more per cycle." >&2
-    all_ready="$(printf '%s\n' "$all_ready" | head -n "$_dispatch_cap")"
+    echo "[drain]       An issue the dispatcher refuses does not count toward that. The rest stay queued and are re-ranked next cycle. Raise MINSPEC_DRAIN_QUEUE_LIMIT to dispatch more per cycle." >&2
   fi
 
   # Freshness is guaranteed by ensure_fresh_run_dir at the top of this cycle (#773):
@@ -1423,12 +1578,19 @@ run_cycle() {
   ac_sig="${MINSPEC_DISPATCH_AUTOCOMPACT_SIG:-Autocompact is thrashing}"
   ac_consec=0
 
-  echo "[drain] dispatching $(echo "$all_ready" | wc -l | tr -d ' ') agent-ready issue(s) (concurrency=${DISPATCH_CONCURRENCY})..."
+  # The number announced is the most this cycle will START: the queue limit, or the whole
+  # ready set when that is smaller. `all_ready` itself is no longer trimmed (#2641).
+  local batch=$(( ready_total < _dispatch_cap ? ready_total : _dispatch_cap ))
+  (( batch < 0 )) && batch=0
+  echo "[drain] dispatching ${batch} agent-ready issue(s) (concurrency=${DISPATCH_CONCURRENCY})..."
 
   # `ac_outcomes` is the breaker's completion-ordered history for this cycle: `1`
   # per dispatch that carried the thrash signature, `0` otherwise. Both paths below
   # append to it and both ask the SAME pure `_breaker_decide`, so widening the fan-out
   # can never quietly weaken the gate that has already caught two real outages.
+  # A dispatch the dispatcher refused before starting is not in this history at all
+  # (#2641, book_dispatch): it neither thrashed nor ran, so it must not count as the
+  # clean completion that ends a run of thrashes.
   local ac_outcomes=""
 
   # classify_dispatch <issue> <rc> <output>: shared post-processing for one finished
@@ -1468,7 +1630,7 @@ run_cycle() {
   # text) paused the cycle, and returns 42.
   #
   # The cycle's own check at the top of run_cycle is not enough, and for a while it was
-  # all the one-at-a-time path had. A cycle is up to MINSPEC_DRAIN_QUEUE_LIMIT issues
+  # all the one-at-a-time path had. A cycle is up to MINSPEC_DRAIN_QUEUE_LIMIT builds
   # long and runs for hours, so a cap checked once was a cap on the first issue only.
   # #2573, 2026-10-04: started under a 60% weekly cap at 58%, a 100-issue cycle was
   # still dispatching at 66% two hours later, and was stopped by hand.
@@ -1502,16 +1664,74 @@ run_cycle() {
   # #2066 above for the read-refresh fix; this is the separate, more important
   # half — making an all-failed cycle say so, regardless of WHY every dispatch
   # failed).
+  #
+  # An attempt is a dispatch that used a slot (#2641, below). An issue the dispatcher
+  # refused is not one: nothing was tried, so counting it here would dilute "every
+  # attempt failed" now that a cycle can walk past any number of refusals.
   local dispatch_attempts=0 dispatch_failures=0
+
+  # ── The queue limit is a budget of dispatches that START (#2641) ─────────────
+  # `slots_used` is what the limit is compared with, on both paths. It goes up for every
+  # dispatch EXCEPT one the dispatcher answered "refused" for (_dispatch_outcome), so a
+  # refusal costs nothing and the loop goes on to the next ranked issue. A dispatch that
+  # gave no answer at all DOES use a slot.
+  #
+  # The other three are there to be reported, not to decide anything:
+  #   declined_count / declined   refused before starting: no slot used, named in one line.
+  #   unanswered_count            exit 0 and no answer. A slot WAS used, each one is named
+  #                               when it happens, and none is counted as work done.
+  #   started_count               the dispatcher said it started: the only evidence that
+  #                               this cycle did any work at all.
+  local slots_used=0 started_count=0 declined_count=0 unanswered_count=0 declined="" outcome=""
+  local -a pst=()
+
+  # book_dispatch <issue> <outcome> <thrash 0|1>: enter one finished dispatch in the
+  # cycle's counts. ONE function for both paths, for the reason admit_next_dispatch
+  # gives: two copies of the same bookkeeping is how one of them comes to be wrong.
+  #
+  # Called directly, never inside `$(...)`: it sets the counters, and an assignment made
+  # in a subshell would be discarded (the trap classify_dispatch documents).
+  book_dispatch() {
+    local n="$1" what="$2" thrash="$3"
+    if [[ "$what" == "declined" ]]; then
+      declined_count=$(( declined_count + 1 ))
+      declined="${declined} #${n}"
+      return 0
+    fi
+    slots_used=$(( slots_used + 1 ))
+    ac_outcomes="${ac_outcomes:+$ac_outcomes,}${thrash}"
+    dispatch_attempts=$(( dispatch_attempts + 1 ))
+    case "$what" in
+      started) started_count=$(( started_count + 1 )) ;;
+      failed)  dispatch_failures=$(( dispatch_failures + 1 )) ;;
+      *)
+        # No answer, or an outcome this function was never taught: both are "unknown".
+        # Said here, by number, the moment it happens. The cycle's own summary is hours
+        # away in a long cycle, and a cycle the quota gate holds never reaches it.
+        unanswered_count=$(( unanswered_count + 1 ))
+        echo "[drain] WARNING: the dispatcher exited 0 for #$n without saying whether it started a build or refused the issue. Counted against the queue limit, and not as a dispatch (#2641)." >&2
+        ;;
+    esac
+    return 0
+  }
 
   if (( DISPATCH_CONCURRENCY <= 1 )); then
     # ── Serial path — one at a time, the default. Output still streams
     # LIVE through `tee`, which matters for a multi-minute build: a captured-then-
     # dumped block would leave the log silent while work is happening.
+    #
+    # `all_ready` is the WHOLE ranked list (#2641), and this loop is where the queue
+    # limit is applied: it stops once that many dispatches have used a slot. The check
+    # comes before the gate is asked, so a cycle that has spent its limit does not ask
+    # the quota gate about a launch it was never going to make.
     for n in $all_ready; do
+      (( slots_used >= _dispatch_cap )) && break
       # Admission control per DISPATCH, not just per cycle (#2573). A hold here ends the
       # cycle exactly as the parallel path's does: nothing more is launched, the cause
-      # is the gate, and run_loop sleeps on 42 instead of counting a failure.
+      # is the gate, and run_loop sleeps on 42 instead of counting a failure. It is
+      # asked before EVERY offer, including one the dispatcher goes on to refuse: the
+      # drain cannot know that in advance, and an offer that turns out to be a build
+      # must already have been admitted.
       admit_next_dispatch || return 42
       # Per ITEM, not just per cycle. One cycle over a 60-issue queue runs for hours, so
       # the token minted at the top of it dies partway down the list — measured on
@@ -1522,12 +1742,19 @@ run_cycle() {
       gh_bot_warm_read
       echo "[drain] dispatching #$n..."
       cap=$(mktemp)
-      if "$DISPATCH" "$n" 2>&1 | tee "$cap"; then drc=0; else drc=$?; fi
+      # The question goes to the dispatcher as a prefix on its own command, so it is
+      # asked in these words whatever this process inherited under that name. The answer
+      # is the dispatcher's OWN exit status: the first entry of PIPESTATUS, and not the
+      # pipeline's, which under `pipefail` is whichever stage failed last (#2641).
+      if MINSPEC_DISPATCH_OUTCOME_STATUS=1 "$DISPATCH" "$n" 2>&1 | tee "$cap"; then pst=("${PIPESTATUS[@]}"); else pst=("${PIPESTATUS[@]}"); fi
+      drc="$(_dispatch_own_status "${pst[@]}")"
       out=$(cat "$cap" 2>/dev/null || true); rm -f "$cap"
+      # From here `drc` is a FAILURE's status and nothing else: "started" and "refused"
+      # are non-zero answers, not failures, and classify_dispatch warns on any non-zero.
+      outcome="$(_dispatch_outcome "$drc")"
+      [[ "$outcome" == "failed" ]] || drc=0
       verdict="$(classify_dispatch "$n" "$drc" "$out")"
-      ac_outcomes="${ac_outcomes:+$ac_outcomes,}${verdict:0:1}"
-      dispatch_attempts=$(( dispatch_attempts + 1 ))
-      [[ "$drc" -ne 0 ]] && dispatch_failures=$(( dispatch_failures + 1 ))
+      book_dispatch "$n" "$outcome" "${verdict:0:1}"
       [[ "${verdict:1:1}" == "1" ]] && saw_quota=1
       if (( saw_quota )); then
         echo "[drain] Claude usage-limit signal while dispatching #$n — pausing this cycle (will back off, not fail)."
@@ -1552,13 +1779,26 @@ run_cycle() {
       local n="${queue[$qi]}"; qi=$(( qi + 1 ))
       local cap; cap=$(mktemp)
       echo "[drain] dispatching #$n... (in flight: $(( ${#pid_issue[@]} + 1 ))/${DISPATCH_CONCURRENCY})"
-      ( "$DISPATCH" "$n" 2>&1 | tee "$cap" | sed -u "s/^/[#${n}] /" ) &
+      # As on the serial path (#2641): the question on the dispatcher's own command, and
+      # the dispatcher's own exit status for an answer. The job is a subshell, so its
+      # status is all the parent gets back: `set +e` lets the pipeline finish whatever it
+      # returns, and the subshell then exits on the dispatcher's status alone, which the
+      # parent collects with `wait` under this job's pid.
+      (
+        set +e
+        MINSPEC_DISPATCH_OUTCOME_STATUS=1 "$DISPATCH" "$n" 2>&1 | tee "$cap" | sed -u "s/^/[#${n}] /"
+        exit "$(_dispatch_own_status "${PIPESTATUS[@]}")"
+      ) &
       local pid=$!
       pid_issue[$pid]="$n"; pid_cap[$pid]="$cap"
     }
 
     while (( qi < ${#queue[@]} || ${#pid_issue[@]} > 0 )); do
-      while (( ! stop_launching && qi < ${#queue[@]} && ${#pid_issue[@]} < DISPATCH_CONCURRENCY )); do
+      # The queue limit, on this path (#2641). A dispatch in flight HOLDS a slot until it
+      # is known to have been refused, so the test is on slots used plus jobs in flight:
+      # the limit can never be exceeded while waiting to find out, and a job that comes
+      # back refused gives its slot to the next ranked issue on the following pass.
+      while (( ! stop_launching && qi < ${#queue[@]} && ${#pid_issue[@]} < DISPATCH_CONCURRENCY && slots_used + ${#pid_issue[@]} < _dispatch_cap )); do
         # Admission control per LAUNCH, not just per cycle. A fan-out can outlive
         # the window it started in, and an agent begun near the wall dies partway
         # having spent everything — the expensive failure this whole gate exists
@@ -1579,10 +1819,11 @@ run_cycle() {
       out=$(cat "${pid_cap[$p]}" 2>/dev/null || true); rm -f "${pid_cap[$p]}"
       unset 'pid_issue[$p]' 'pid_cap[$p]'
 
+      # As on the serial path: past this point `rc` is a failure's status and nothing else.
+      outcome="$(_dispatch_outcome "$rc")"
+      [[ "$outcome" == "failed" ]] || rc=0
       verdict="$(classify_dispatch "$n" "$rc" "$out")"
-      ac_outcomes="${ac_outcomes:+$ac_outcomes,}${verdict:0:1}"
-      dispatch_attempts=$(( dispatch_attempts + 1 ))
-      [[ "$rc" -ne 0 ]] && dispatch_failures=$(( dispatch_failures + 1 ))
+      book_dispatch "$n" "$outcome" "${verdict:0:1}"
       if [[ "${verdict:1:1}" == "1" ]]; then
         saw_quota=1
         QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
@@ -1601,6 +1842,41 @@ run_cycle() {
     done
 
     (( saw_quota )) && return 42
+  fi
+
+  # ── What this cycle's offers came to (#2641, constitution invariant 2) ───────
+  # Said HERE, before the sweep: the sweep can run for hours and can end the cycle on a
+  # pause, and neither should be able to take these lines with it. A cycle the quota gate
+  # held never reaches this point; it has said why in its own line.
+  if (( declined_count > 0 )); then
+    echo "[drain] ${declined_count} issue(s) were refused by the dispatcher before any work started and did not use a slot of the queue limit:${declined}"
+  fi
+
+  # Nothing was confirmed started, with issues ready. Until #2641 this ended "cycle done."
+  # like any other cycle, 22 times running. The all-failed roll-up further down (#2140)
+  # could not see it: that counts non-zero exits, and a refusal was exit 0.
+  #
+  # `started_count` is the witness, and it only moves on a POSITIVE answer: the
+  # dispatcher saying it started. Silence does not move it. So this fires when
+  # everything offered was refused (nothing in the queue is dispatchable), when the limit
+  # offers nothing, and when dispatches came back with no answer at all, which is the
+  # case that put #2641 back the first time this was written: a refusal that left no
+  # answer had been read as a dispatch that ran.
+  #
+  # An all-failed cycle is left to #2140's CYCLE FAILED, which also returns non-zero.
+  # This one does not: a ready queue made of stale stamps is not a transient fault, and
+  # counting it toward MAX_CONSEC_FAIL would stop a loop whose triage and pull request
+  # sweep are still doing work. It is loud instead, and it changes the last line.
+  local nothing_ran=0
+  if (( started_count == 0 )) && ! (( dispatch_attempts > 0 && dispatch_failures == dispatch_attempts )); then
+    nothing_ran=1
+    echo "[drain] NOTHING DISPATCHED this cycle: ${ready_total} issue(s) ready, ${declined_count} refused by the dispatcher before any work started, ${dispatch_failures} failed, ${unanswered_count} answered neither way, $(( ready_total - declined_count - dispatch_attempts )) never offered (queue limit ${_dispatch_cap})." >&2
+    if (( declined_count > 0 )); then
+      echo "[drain]   A ready label on an issue the dispatcher refuses is a stale stamp. Re-triage it (scripts/triage-inbox.sh <N>) or remove the label: until then it is offered, and refused, every cycle." >&2
+    fi
+    if (( unanswered_count > 0 )); then
+      echo "[drain]   An unanswered dispatch exited 0 without the dispatcher saying whether it started a build or refused the issue, so it is not counted as work done. Each is named in a WARNING above. If builds did run, the dispatcher in use predates the answer (#2641)." >&2
+    fi
   fi
 
   # Step 3: sweep open PRs for fixable problems (sweep_open_prs, above). A limit
@@ -1627,7 +1903,16 @@ run_cycle() {
     return 1
   fi
 
-  echo "[drain] cycle done."
+  # The last line of a cycle that started nothing must not be the last line of one that
+  # worked (#2641): it is the line a reader checks, and for 8.5 hours it was the only
+  # thing the log had to say. It still begins "cycle done.", because the cycle is done.
+  # "Confirmed", because a dispatch that gave no answer may have run: the drain does not
+  # know, and says only what it knows.
+  if (( nothing_ran )); then
+    echo "[drain] cycle done. No dispatch was confirmed: see NOTHING DISPATCHED above."
+  else
+    echo "[drain] cycle done."
+  fi
   return 0
 }
 
@@ -1724,7 +2009,9 @@ _quota_read() {
 # in run_cycle, #2573), and every ask that finds no reading spends one admit. So a
 # machine that has never had a reading gets QUOTA_BOOTSTRAP_ADMITS asks in all, cycle
 # tops and launches alike: with work queued, that is one cycle's top and
-# QUOTA_BOOTSTRAP_ADMITS - 1 launches, and then it holds. Until #2573 the serial path
+# QUOTA_BOOTSTRAP_ADMITS - 1 launches, and then it holds. (A launch here is an OFFER to
+# the dispatcher: one it goes on to refuse has still been asked about, #2641, exactly as
+# it was when a refusal also used a slot of the queue limit.) Until #2573 the serial path
 # asked once per cycle, so the same allowance bought QUOTA_BOOTSTRAP_ADMITS whole
 # cycles, each free to dispatch the entire backlog with no further check.
 # Best-effort refresh of the reading, called by quota_gate before it consults.
@@ -1986,7 +2273,11 @@ quota_gate() {
         [[ "$QWAIT_WHY" == "ramp" ]] && next="; at this usage the ramp next admits in $(_quota_span "$QWAIT_SECS")"
         echo "defer:${QWAIT_SECS} (7d window ${wp}% used — the WEEKLY ceiling, resets in $(( (left + 3599) / 3600 )) h; cap ${cap7}${next})"
       else
-        echo "defer:$QUOTA_SLEEP_MAX (7d window ${wp}% used — the WEEKLY ceiling, no usable reset time; cap ${cap7})"
+        # No usable weekly reset: this is the "no deadline" case _quota_sleep_plan
+        # treats as the fixed backoff (#2603), never the 5h reset and never the
+        # QUOTA_SLEEP_MAX clamp — printing either here would claim a wait this gate
+        # does not actually ask for.
+        echo "defer:$QUOTA_BACKOFF (7d window ${wp}% used — the WEEKLY ceiling, no usable reset time; cap ${cap7})"
       fi
       return 42
     fi
@@ -2039,9 +2330,23 @@ _quota_sleep_plan() {
       # what deferred us, the 5h reset is the wrong deadline — it can be minutes away
       # while the weekly window is days out, so the loop would wake, re-defer, and
       # report "sleeping to the published reset" while sleeping to an irrelevant one.
-      if (( wp >= 0 )) && (( wr > now )) && _quota_defers 7d "$wp" "$(( wr - now ))"; then
-        _quota_admit_wait 7d "$wp" "$(( wr - now ))"
-        secs=$(( QWAIT_SECS + QUOTA_SLEEP_MARGIN )); why="$QWAIT_WHY"
+      if (( wp >= 0 )) && _quota_defers 7d "$wp" "$(( wr > now ? wr - now : 0 ))"; then
+        # The weekly window is what's binding (checked with its OWN reset, or 0 when
+        # that reset has already passed — never the 5h window's). A passed-or-missing
+        # weekly reset is not a deadline the gate can sleep toward, so this is "no
+        # usable deadline", exactly the fallback branch below, not the 5h reset (#2603):
+        # the 5h reset can be minutes away while the actual hold is the weekly ceiling,
+        # days out, and sleeping to the wrong one wakes the loop early for nothing — or,
+        # once a wrap producer's weekly figure goes stale for a stretch after its own
+        # reset, with the old reading still fresh enough to pass the staleness check,
+        # sleeps hours past a weekly hold that could have lifted the moment the producer
+        # published the new week.
+        if (( wr > now )); then
+          _quota_admit_wait 7d "$wp" "$(( wr - now ))"
+          secs=$(( QWAIT_SECS + QUOTA_SLEEP_MARGIN )); why="$QWAIT_WHY"
+        else
+          secs="$QUOTA_BACKOFF"; why="fallback"
+        fi
       elif (( r > now )); then
         if _quota_defers 5h "$p" "$(( r - now ))"; then
           _quota_admit_wait 5h "$p" "$(( r - now ))"
