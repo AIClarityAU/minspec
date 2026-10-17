@@ -124,12 +124,54 @@ describe('#2399 — scaffolded executable templates keep their bit in the git IN
       expect(indexMode(dir, preCommit)).toBe('100644');
 
       const warnings = refreshHarnessFiles(dir);
-      expect(warnings).toEqual([]);
+      // The index change is REPORTED, never silent (G-8).
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatchObject({ outputPath: preCommit, kind: 'exec-bit-recorded' });
+      expect(warnings[0].message).toContain('100755');
 
       expect(
         indexMode(dir, preCommit),
         'refresh should have re-recorded the execute bit in the index',
       ).toBe('100755');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('the self-heal flips ONLY the mode: unstaged edits to the hook are not staged', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-win-execbit-edit-'));
+    try {
+      git(dir, 'init', '-b', 'main');
+      git(dir, 'config', 'core.fileMode', 'false');
+      generateHarnessFiles(dir);
+      git(dir, 'add', '-A');
+      git(dir, 'commit', '-m', 'scaffold');
+
+      const preCommit = `${MINSPEC_HOOKS_DIR}/pre-commit`;
+      git(dir, 'update-index', '--chmod=-x', '--', preCommit);
+      git(dir, 'commit', '-m', 'simulate a Windows-committed 100644 hook', '--allow-empty');
+      // A user edit OUTSIDE the managed region, left unstaged.
+      fs.appendFileSync(path.join(dir, preCommit), '\n# my local tweak\n');
+
+      refreshHarnessFiles(dir);
+
+      expect(indexMode(dir, preCommit)).toBe('100755');
+      // Worktree still differs from the index (edit unstaged), mode aside.
+      expect(git(dir, 'diff', '--name-only', '--', preCommit).trim()).toBe(preCommit);
+      expect(git(dir, 'show', `:${preCommit}`)).not.toContain('my local tweak');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refresh reports nothing when the hooks are already 100755', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-win-execbit-quiet-'));
+    try {
+      git(dir, 'init', '-b', 'main');
+      generateHarnessFiles(dir);
+      git(dir, 'add', '-A');
+      git(dir, 'commit', '-m', 'scaffold');
+      expect(refreshHarnessFiles(dir).filter((w) => w.kind === 'exec-bit-recorded')).toEqual([]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

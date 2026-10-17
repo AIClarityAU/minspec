@@ -842,6 +842,56 @@ describe('activate()', () => {
     }
   });
 
+  // #2461: constitution invariant 3 (blast radius) — a folder with no
+  // `.minspec/` never opted in, so a saved decision file there must not make
+  // MinSpec write docs/decisions/INDEX.md.
+  it('does NOT regenerate INDEX.md in a folder that has not opted in (no .minspec/)', () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      activate(makeMockContext());
+      vi.mocked(regenerateDrIndex).mockClear();
+
+      // Opt-in check is re-evaluated when the debounced timer fires, not
+      // cached from activation — flip it to "never opted in" here.
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+
+      const onChangeHandler = adrWatcher.onDidChange.mock.calls[0][0];
+      onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-007.md' });
+
+      vi.advanceTimersByTime(300);
+      expect(regenerateDrIndex).not.toHaveBeenCalled();
+      // Tree still refreshes regardless — only the write is gated.
+      expect(mockAdrTreeProvider.refresh).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('regenerates INDEX.md once a folder opts in mid-session, with no window reload', () => {
+    vi.useFakeTimers();
+    try {
+      // Starts un-opted-in...
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      activate(makeMockContext());
+      vi.mocked(regenerateDrIndex).mockClear();
+
+      const onChangeHandler = adrWatcher.onDidChange.mock.calls[0][0];
+      onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-007.md' });
+      vi.advanceTimersByTime(300);
+      expect(regenerateDrIndex).not.toHaveBeenCalled();
+
+      // ...then `MinSpec: Initialize` runs and creates .minspec/ on the SAME
+      // activation; the next debounced fire must pick that up live.
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-008.md' });
+      vi.advanceTimersByTime(300);
+      expect(regenerateDrIndex).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('wires traceability watcher callbacks to refresh CodeLens providers', () => {
     activate(makeMockContext());
 
@@ -1233,7 +1283,6 @@ describe('injectContext command', () => {
   // A full T4/implementing spec on disk. The walk reads its file content via
   // fs.readFileSync; parseSpec (mocked) turns it into frontmatter. The id must
   // match what the user typed so the finder selects this file.
-  const T4_SPEC_FILE = '/tmp/test-workspace/specs/SPEC-007-thing.md';
   const T4_FRONTMATTER = {
     id: 'SPEC-007',
     title: 'Real Feature Title',

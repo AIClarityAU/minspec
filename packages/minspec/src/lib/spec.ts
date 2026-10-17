@@ -7,6 +7,7 @@ import type { Tier, Phase } from './config';
 import { PHASES } from './config';
 import { deriveStatus, phasesForApproval } from './lifecycle';
 import { bodyStatusToken, claimParagraphText } from './status-parity';
+import { prepareText, readDocument, readDocumentText, restoreLineEndings } from './text-io';
 
 /** Status of an individual phase */
 export type PhaseStatus = 'pending' | 'in-progress' | 'done' | 'skipped';
@@ -96,6 +97,16 @@ export interface ParsedSpec {
    * compiling unchanged.
    */
   readonly extraFrontmatter?: readonly string[];
+  /**
+   * The text this spec was parsed from, exactly as `parseSpec` was handed it, line endings
+   * included (SPEC-095). `raw` is the same text prepared, and is what every parser reads;
+   * this is what a writer restores the file's own line endings from (`writeSpecFile`, the
+   * spec panel's checkbox write, a layout migration), so a CRLF spec is not rewritten LF.
+   * Absent on a spec built in memory or merged from a spec-kit directory: written fresh,
+   * such a spec is LF, as a file MinSpec creates is (FR-5). Optional for the same reason
+   * `extraFrontmatter` is.
+   */
+  readonly source?: string;
 }
 
 // --- Parser ---
@@ -272,8 +283,9 @@ export function parseSpec(content: string): ParsedSpec {
   // (`\r\n`) or old-Mac (`\r`) spec failed to match — id came out '' and the spec
   // was silently dropped from listSpecs. Single-point normalization here covers
   // every read seam that flows through the parser (readSpecFile, readSpecKitDir,
-  // the custom editor, …); writeSpec always emits `\n`, so this loses nothing.
-  const normalized = content.replace(/\r\n?/g, '\n');
+  // the custom editor, …). The rule is the one `text-io` owns (SPEC-095 FR-1); the text
+  // as handed in is kept as `source`, so a writer can give the file its endings back.
+  const normalized = prepareText(content);
   const raw = normalized;
 
   // Extract frontmatter
@@ -358,7 +370,7 @@ export function parseSpec(content: string): ParsedSpec {
   }
   flushSection();
 
-  return { frontmatter, preamble, sections, phaseSections, raw, extraFrontmatter };
+  return { frontmatter, preamble, sections, phaseSections, raw, extraFrontmatter, source: content };
 }
 
 const TIERS_SET = new Set(['T1', 'T2', 'T3', 'T4']);
@@ -476,9 +488,13 @@ export function readSpecFile(filePath: string): ParsedSpec {
   return parseSpec(content);
 }
 
-/** Write a parsed spec back to disk */
+/**
+ * Write a parsed spec back to disk, in the line endings of the text it was parsed from
+ * (`ParsedSpec.source`, SPEC-095 FR-3). A CRLF spec used to come back LF after one phase
+ * transition. A spec built in memory has no source and is written LF.
+ */
 export function writeSpecFile(filePath: string, spec: ParsedSpec): void {
-  fs.writeFileSync(filePath, writeSpec(spec), 'utf-8');
+  fs.writeFileSync(filePath, restoreLineEndings(writeSpec(spec), spec.source ?? ''), 'utf-8');
 }
 
 /**
@@ -525,8 +541,11 @@ export function specStatusProseWouldInvert(content: string): { line: number; tex
  * without it, `setSpecStatus` was the only writer of the *frontmatter* status,
  * leaving the body's prose line — a second source of truth for the same fact —
  * stale on every approve / phase-advance (#667).
+ *
+ * `content` is LF text; `original` is the file as it was read, whose line endings the
+ * write restores (SPEC-095).
  */
-function setBodyStatusToken(filePath: string, content: string, status: SpecStatus): void {
+function setBodyStatusToken(filePath: string, content: string, status: SpecStatus, original: string): void {
   const existing = bodyStatusToken(content, 'spec');
   if (!existing) return;
   const lines = content.split('\n');
@@ -535,7 +554,7 @@ function setBodyStatusToken(filePath: string, content: string, status: SpecStatu
     /^(\*\*Status:\*\*[ \t]*)[A-Za-z]+/,
     `$1${capitalized}`,
   );
-  fs.writeFileSync(filePath, lines.join('\n'), 'utf-8');
+  fs.writeFileSync(filePath, restoreLineEndings(lines.join('\n'), original), 'utf-8');
 }
 
 /**
@@ -550,12 +569,16 @@ function setBodyStatusToken(filePath: string, content: string, status: SpecStatu
  * (e.g. the DR-012 hash-lock reminder) and reorder fields. The symmetric
  * present-value writer specs previously lacked — its absence is why approval
  * could not keep the lifecycle signpost in sync (DR-003 RCDD; #137).
+ *
+ * Reads through `text-io` and writes the file back in the line endings it had
+ * (SPEC-095). A CRLF spec used to throw "No frontmatter block", which is how Approve Spec
+ * failed on a Windows checkout (#2397).
  */
 export function setSpecStatus(filePath: string, status: SpecStatus): SpecStatus {
   if (!(SPEC_STATUSES as readonly string[]).includes(status)) {
     throw new Error(`Invalid spec status: ${status}`);
   }
-  const content = fs.readFileSync(filePath, 'utf-8');
+  const { text: content, original } = readDocument(filePath);
   const fmMatch = content.match(FRONTMATTER_RE);
   if (!fmMatch) {
     throw new Error(`No frontmatter block in ${filePath}`);
@@ -585,8 +608,8 @@ export function setSpecStatus(filePath: string, status: SpecStatus): SpecStatus 
     ? yaml.replace(statusLineRe, `status: ${status}`)
     : `${yaml}\nstatus: ${status}`;
   const newContent = content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`);
-  fs.writeFileSync(filePath, newContent, 'utf-8');
-  setBodyStatusToken(filePath, newContent, status);
+  fs.writeFileSync(filePath, restoreLineEndings(newContent, original), 'utf-8');
+  setBodyStatusToken(filePath, newContent, status, original);
   return status;
 }
 
@@ -663,7 +686,9 @@ export function setSpecPhases(
         `(SPEC-061 DQ-1 / #957).`,
     );
   }
-  const content = fs.readFileSync(filePath, 'utf-8');
+  // Read through `text-io`; both writes below give the file its own line endings back
+  // (SPEC-095). A CRLF spec used to throw "No frontmatter block" here.
+  const { text: content, original } = readDocument(filePath);
   const fmMatch = content.match(FRONTMATTER_RE);
   if (!fmMatch) {
     throw new Error(`No frontmatter block in ${filePath}`);
@@ -680,7 +705,11 @@ export function setSpecPhases(
     // it. Two-space indent is the corpus convention and the shape `parseSpec` reads back.
     const created = ['phases:', ...PHASES.map((p) => `  ${p}: ${phases[p] ?? 'pending'}`)];
     const newYaml = [...lines, ...created].join('\n');
-    fs.writeFileSync(filePath, content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`), 'utf-8');
+    fs.writeFileSync(
+      filePath,
+      restoreLineEndings(content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`), original),
+      'utf-8',
+    );
     return;
   }
   for (let i = phasesIdx + 1; i < lines.length; i++) {
@@ -692,7 +721,11 @@ export function setSpecPhases(
     if (val !== undefined) lines[i] = `${m[1]}${m[2]}: ${val}`;
   }
   const newYaml = lines.join('\n');
-  fs.writeFileSync(filePath, content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`), 'utf-8');
+  fs.writeFileSync(
+    filePath,
+    restoreLineEndings(content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`), original),
+    'utf-8',
+  );
 }
 
 /**
@@ -731,7 +764,8 @@ export function setSpecPhases(
  * degenerate phases block cannot realize the approval target without desyncing.
  */
 export function advanceSpecToImplementing(filePath: string): SpecStatus {
-  const content = fs.readFileSync(filePath, 'utf-8');
+  // Prepared (SPEC-095): the two writers it calls read and restore the file themselves.
+  const content = readDocumentText(filePath);
   const fmMatch = content.match(FRONTMATTER_RE);
   if (!fmMatch) {
     throw new Error(`No frontmatter block in ${filePath}`);

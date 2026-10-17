@@ -35,6 +35,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
+
+// Module scope: nothing in this file may depend on drain or quota knobs in the surrounding
+// environment, so it runs with hostile ones planted there (#2574, helpers/drain-env.ts).
+useHostileAmbientDrainKnobs();
 
 const DRAIN = path.resolve(__dirname, '../../../scripts/drain-inbox.sh');
 const nowSec = () => Math.floor(Date.now() / 1000);
@@ -56,7 +61,7 @@ function run(env: Record<string, string> = {}): { code: number; out: string; err
     const out = execFileSync('bash', [DRAIN, '--quota-gate'], {
       encoding: 'utf-8',
       env: {
-        ...process.env,
+        ...drainBaseEnv(),
         MINSPEC_QUOTA_FILE: quotaFile,
         // Disable the bootstrap carve-out so these tests read the pure arms, exactly
         // as drain-quota-deadline.test.ts does.
