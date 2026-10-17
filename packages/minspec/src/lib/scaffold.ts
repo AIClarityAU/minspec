@@ -885,7 +885,8 @@ function missingMarkersMessage(outputPath: string): string {
  * boundary Refresh later uses to update only MinSpec's region. The user is expected
  * to add any custom content OUTSIDE the markers.
  */
-function generateManagedRegionTemplates(rootDir: string, tools: DetectedTools): void {
+function generateManagedRegionTemplates(rootDir: string, tools: DetectedTools): ManagedRegionWarning[] {
+  const notices: ManagedRegionWarning[] = [];
   for (const tpl of MANAGED_REGION_TEMPLATES) {
     // Tool-gated templates (the slash-command shims, #241) are only scaffolded for a
     // tool the project actually uses; tool-independent templates (CI workflow, git
@@ -893,9 +894,18 @@ function generateManagedRegionTemplates(rootDir: string, tools: DetectedTools): 
     if (tpl.condition && !tpl.condition(tools)) continue;
     const fullPath = path.join(rootDir, tpl.outputPath);
     if (!fs.existsSync(fullPath)) {
-      writeManagedFile(fullPath, tpl, rootDir);
+      // An index change is REPORTED (G-8), with the same notice refresh raises.
+      const change = writeManagedFile(fullPath, tpl, rootDir);
+      if (change) {
+        notices.push({
+          outputPath: tpl.outputPath,
+          message: executableBitIndexNoticeMessage(tpl.outputPath, change),
+          kind: 'exec-bit-recorded',
+        });
+      }
     }
   }
+  return notices;
 }
 
 /**
@@ -1666,8 +1676,14 @@ export function recordVerifyAndSaveManifest(
  * `seedConstitution` and `generateSlashCommandShims` run after it and can write to a
  * file that was already there.
  * Stores initial section hashes for future merge-on-refresh.
+ *
+ * Returns the paths removed from the git index by the machine-local reconcile. When
+ * `indexNotices` is passed, a notice is appended for each hook staged into the index.
  */
-export function generateHarnessFiles(rootDir: string): string[] {
+export function generateHarnessFiles(
+  rootDir: string,
+  indexNotices?: ManagedRegionWarning[],
+): string[] {
   // Ensure .minspec/ exists
   scaffold(rootDir);
   // Returned, not discarded. `initCommand` is re-runnable and is NOT gated on
@@ -1733,7 +1749,10 @@ export function generateHarnessFiles(rootDir: string): string[] {
   // to update only MinSpec's region. Tools are detected here, AFTER the Markdown
   // templates are written, so freshly-written CLAUDE.md / .cursorrules gate the shims.
   const tools = detectTools(rootDir);
-  generateManagedRegionTemplates(rootDir, tools);
+  // Hooks staged into the git index are handed back through `indexNotices` (G-8) so the
+  // init caller can show them as refresh does; an out-param keeps the `string[]` return.
+  const execBitNotices = generateManagedRegionTemplates(rootDir, tools);
+  indexNotices?.push(...execBitNotices);
 
   // Wire the just-scaffolded Claude Code hooks into .claude/settings.json (#1093) —
   // the hook files are inert until the event lists them.

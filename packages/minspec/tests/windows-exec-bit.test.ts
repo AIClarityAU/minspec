@@ -22,7 +22,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { generateHarnessFiles, refreshHarnessFiles } from '../src/lib/scaffold';
+import { generateHarnessFiles, refreshHarnessFiles, type ManagedRegionWarning } from '../src/lib/scaffold';
 import { MANAGED_REGION_TEMPLATES, MINSPEC_HOOKS_DIR } from '../src/lib/template-registry';
 import { useShellTimeout } from './helpers/shell-timeout';
 
@@ -174,6 +174,44 @@ describe('#2399 — scaffolded executable templates keep their bit in the git IN
       expect(refreshHarnessFiles(dir).filter((w) => w.kind === 'exec-bit-recorded')).toEqual([]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('#2399 — init reports hooks it stages into the git index (G-8)', () => {
+  it('init raises an exec-bit-recorded notice for each hook it staged', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-win-execbit-init-'));
+    try {
+      git(dir, 'init', '-b', 'main');
+      const notices: ManagedRegionWarning[] = [];
+      generateHarnessFiles(dir, notices);
+
+      const preCommit = `${MINSPEC_HOOKS_DIR}/pre-commit`;
+      expect(indexMode(dir, preCommit)).toBe('100755');
+      const recorded = notices.filter((n) => n.kind === 'exec-bit-recorded').map((n) => n.outputPath);
+      expect(recorded).toContain(preCommit);
+      expect(recorded).toContain(`${MINSPEC_HOOKS_DIR}/commit-msg`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('init raises no notice when the index did not change (re-run, or no git repo)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-win-execbit-init-quiet-'));
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-win-execbit-init-norepo-'));
+    try {
+      git(dir, 'init', '-b', 'main');
+      generateHarnessFiles(dir);
+      const again: ManagedRegionWarning[] = [];
+      generateHarnessFiles(dir, again);
+      expect(again).toEqual([]);
+
+      const noRepo: ManagedRegionWarning[] = [];
+      generateHarnessFiles(bare, noRepo);
+      expect(noRepo).toEqual([]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(bare, { recursive: true, force: true });
     }
   });
 });

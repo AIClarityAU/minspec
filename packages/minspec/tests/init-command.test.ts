@@ -118,9 +118,26 @@ describe('initCommand() — write-failure surfacing (#153)', () => {
     await initCommand('/tmp/ws');
 
     expect(scaffold).toHaveBeenCalledWith('/tmp/ws');
-    expect(generateHarnessFiles).toHaveBeenCalledWith('/tmp/ws');
+    expect(generateHarnessFiles).toHaveBeenCalledWith('/tmp/ws', []);
     expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
     expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  // #2399 / G-8: a hook init staged into the git index is shown, as on refresh.
+  it('shows the exec-bit notice when init staged a hook into the index', async () => {
+    vi.mocked(generateHarnessFiles).mockImplementationOnce((_dir, notices) => {
+      notices?.push({
+        outputPath: '.minspec/hooks/pre-commit',
+        message: 'STAGED-NOTICE-TEXT',
+        kind: 'exec-bit-recorded',
+      });
+      return [];
+    });
+
+    await initCommand('/tmp/ws');
+
+    const shown = vi.mocked(vscode.window.showInformationMessage).mock.calls.map((c) => String(c[0]));
+    expect(shown.some((m) => m.includes('STAGED-NOTICE-TEXT'))).toBe(true);
   });
 });
 
