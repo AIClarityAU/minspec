@@ -826,4 +826,28 @@ main requires a pull request to be up to date before it merges, and the stalenes
 <!-- dr-summary:DR-105 auto=7c01ad0c26da -->
 scripts/ holds the dev-time automation that starts headless agents: issue dispatch, triage, the review scripts, pull request remediation and the tooling radar. DR-008 (dispatch security) decided, for that automation, that credentials are kept out of the agent's reach, and that unattended runs are for issues whose text is trusted. Neither was held by code. This record decides how far each is now held, and names what is not.
 <!-- /dr-summary:DR-105 -->
+
+## [DR-107 — Decision records split in two - direction records the founder accepts, engineering records accepted on an AI review pass and listed in a weekly digest](DR-107.md)
+
+*Status: proposed · Date: 2026-10-17*
+
+<!-- dr-summary:DR-107 auto=24170a0e8b9b -->
+DR-086 §2.2 (the approval-or-acceptance stop class) makes every DR acceptance a founder stop. The register held 105 records by 2026-10-10, about five a week (core-tenets-review-1017), and many decide mechanism rather than direction: DR-095 (socket bind-mount), DR-094 (token lifetime), DR-077 (hook parity test), DR-097 and its successor on whole-panel vote reuse (2026-10). Under the core-tenets record core tenet 1 (make the founder's job smaller) a gate must name the error only it catches. For an engineering record that error is already…
+<!-- /dr-summary:DR-107 -->
+
+## [DR-108 — Agents may approve under a delegation the founder gives once, recorded under the bot's own name and never his - impersonation stays banned, delegation is allowed](DR-108.md)
+
+*Status: proposed · Date: 2026-10-17*
+
+<!-- dr-summary:DR-108 auto=9ca2b32c25d7 -->
+The approval-or-acceptance stop class (DR-086 §2.2) says, in code (scripts/lib/autonomy.ts, STOP_CLASSES): "The agent cannot sign these without forging the human." That is true only while the approval record has no field for *who acted, on whose delegation*. The rules-consent review (rules-consent-review-1017) separated two acts:
+<!-- /dr-summary:DR-108 -->
+
+## [DR-109 — The AI review panel scales by risk, but specs are never the low tier - specs get at least the machinery voter count, and one voter is allowed only for non-spec prose](DR-109.md)
+
+*Status: proposed · Date: 2026-10-17*
+
+<!-- dr-summary:DR-109 auto=01ee89682199 -->
+The core-tenets review proposed one voter for docs and T1, and four for machinery and T3/T4 (DR-033 §6, DR-047), to save tokens under core tenet 2. The founder accepted it with an amendment: specs are "the pointy end, where you have to get it right, as everything downstream depends on it". The recommendation also said to measure voter disagreement before landing it.
+<!-- /dr-summary:DR-109 -->
 <!-- minspec:dr-index:end -->

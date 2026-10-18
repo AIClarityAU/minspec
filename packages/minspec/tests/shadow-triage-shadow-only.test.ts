@@ -515,6 +515,17 @@ describe('shadow-triage — verdict-block schema conformance (#1338 metric 2)', 
     expect(conformant(`Here is my analysis.\n\n${SHADOW_VERDICT}\n\nHope that helps!`)).toBe(true);
   });
 
+  it('a large block stays conformant under pipefail (no SIGPIPE from early grep -q exit, #2874)', () => {
+    // Fields come first, then more than a pipe buffer of rationale: `grep -q` exits on the
+    // first match while a piped writer is still writing, which under `set -o pipefail`
+    // reported a conformant block as non-conformant.
+    const big = SHADOW_VERDICT.replace(
+      'TRIAGE_VERDICT_END',
+      `${'rationale padding line\n'.repeat(20000)}TRIAGE_VERDICT_END`,
+    );
+    for (let i = 0; i < 5; i++) expect(conformant(big)).toBe(true);
+  });
+
   it('no block at all is NOT conformant', () => {
     expect(conformant('the model rambled and emitted no verdict block')).toBe(false);
   });
