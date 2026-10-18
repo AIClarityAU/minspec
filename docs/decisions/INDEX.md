@@ -829,7 +829,7 @@ scripts/ holds the dev-time automation that starts headless agents: issue dispat
 
 ## [DR-107 — Decision records split in two - direction records the founder accepts, engineering records accepted on an AI review pass and listed in a weekly digest](DR-107.md)
 
-*Status: proposed · Date: 2026-10-17*
+*Status: accepted · Date: 2026-10-17*
 
 <!-- dr-summary:DR-107 auto=24170a0e8b9b -->
 DR-086 §2.2 (the approval-or-acceptance stop class) makes every DR acceptance a founder stop. The register held 105 records by 2026-10-10, about five a week (core-tenets-review-1017), and many decide mechanism rather than direction: DR-095 (socket bind-mount), DR-094 (token lifetime), DR-077 (hook parity test), DR-097 and its successor on whole-panel vote reuse (2026-10). Under the core-tenets record core tenet 1 (make the founder's job smaller) a gate must name the error only it catches. For an engineering record that error is already…
