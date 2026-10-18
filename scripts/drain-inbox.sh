@@ -1125,6 +1125,10 @@ reconcile_labels() {
 # must still get here. The body is the old block, moved and not edited, so where a
 # comment in it says "the dispatch loop above" it means run_cycle's.
 sweep_open_prs() {
+  # Globals, not locals: the callers read them after the sweep to decide whether the
+  # cycle was clean (#2868).
+  SWEEP_PRS_SEEN=0
+  SWEEP_FETCH_FAILURES=0
   if [[ "${MINSPEC_DRAIN_REMEDIATE_PRS:-1}" != "0" ]]; then
     # The dispatch loop above may have run for hours. Same reason as the per-item
     # refresh: the sweep's own enumeration is a read, and remediate-pr.sh is a child
@@ -1162,9 +1166,18 @@ sweep_open_prs() {
         # + classify; a quota hit pauses the whole cycle (loop backs off). Only the
         # CLI's own notice counts: a refreshed PR's `HEAD is now at <subject>` is not
         # one, which is what paused the drain at 18:11 on 2026-09-30 (#2233).
+        # Per-PR token refresh (#2868): the warm above runs once, and one long
+        # remediation can outlive the ~1h App token for every PR after it.
+        gh_bot_warm_read
+        SWEEP_PRS_SEEN=$(( SWEEP_PRS_SEEN + 1 ))
         rcap=$(mktemp)
         "$REMEDIATE" "$pr" 2>&1 | tee "$rcap" || true
         rout=$(cat "$rcap" 2>/dev/null || true); rm -f "$rcap"  # swallow-ok: the capture file is written by this script moments earlier and removed on the same line; absent means the launch produced no output
+        # A skipped remediation must not read as a clean one (#2868).
+        if grep -q "ERROR: could not fetch PR" <<<"$rout"; then
+          SWEEP_FETCH_FAILURES=$(( SWEEP_FETCH_FAILURES + 1 ))
+          echo "[drain] WARNING: could not fetch PR #$pr — its remediation was skipped this cycle (#2868); the cause is in the output above." >&2
+        fi
         if is_quota <<<"$rout"; then
           echo "[drain] Claude usage-limit signal while remediating PR #$pr — pausing this cycle (will back off, not fail)."
           QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
@@ -1172,6 +1185,24 @@ sweep_open_prs() {
         fi
       done
     fi
+  fi
+  return 0
+}
+
+# _sweep_fetch_verdict — roll up the sweep's PR fetch failures (#2868).
+#
+# Some failures print a WARNING per PR and the cycle still ends "cycle done."; 8 skipped
+# remediations in a row were invisible. Says so on stderr, and returns 1 (the existing
+# transient-error code; run_loop counts consecutive 1s) only when EVERY PR the sweep
+# touched failed to fetch — the same all-failed scope as #2140, since a partial failure
+# already has its own WARNING and the PR is retried next cycle.
+_sweep_fetch_verdict() {
+  local n="${SWEEP_FETCH_FAILURES:-0}" seen="${SWEEP_PRS_SEEN:-0}"
+  (( n > 0 )) || return 0
+  echo "[drain] SWEEP NOT CLEAN: ${n} of ${seen} open PR(s) could not be fetched, so their remediation was skipped this cycle (#2868). See the gh error text above each." >&2
+  if (( n == seen )); then
+    echo "[drain] CYCLE FAILED: every PR fetch in the sweep failed — likely a dead credential, not a quiet backlog." >&2
+    return 1
   fi
   return 0
 }
@@ -1486,6 +1517,7 @@ run_cycle() {
       # sweep runs from here. (That an empty queue skips the sweep at all is #1708's.)
       echo "[drain] nothing to dispatch this cycle: every ready issue is agent-ready-specify. Going on to pull request remediation."
       sweep_open_prs || return $?
+      _sweep_fetch_verdict || return $?
       echo "[drain] cycle done."
       return 0
     fi
@@ -1882,6 +1914,7 @@ run_cycle() {
   # Step 3: sweep open PRs for fixable problems (sweep_open_prs, above). A limit
   # notice from a remediation pauses the cycle: 42, cause already recorded.
   sweep_open_prs || return $?
+  _sweep_fetch_verdict || return $?
 
   # #2140 — a cycle in which EVERY attempted dispatch failed is not a completed
   # cycle, and must never read as one. Per-dispatch WARNINGs (classify_dispatch,
