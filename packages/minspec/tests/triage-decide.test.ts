@@ -177,6 +177,61 @@ describe('triage-decide.sh — deterministic triage gate', () => {
     expect(decide(verdict({ tier: 'T3', decision: 'needs-info' }))).toBe('needs-info dev info');
   });
 
+  // #345 — the gate documents (lines 7-9) that it "fails CLOSED: any
+  // missing/garbled field downgrades to a human gate", but a MISSING
+  // human_only line previously fell through to `agent-ready` for a T1/T2
+  // agent-ready verdict instead of downgrading. Every other test in this
+  // file supplies human_only via verdict()'s default fill, so none of them
+  // exercised the field's actual absence — these two build the block by
+  // hand, omitting the line entirely.
+  it('MISSING human_only line fails closed to needs-review, hold human (#345)', () => {
+    const noHumanOnly = [
+      'TRIAGE_VERDICT_BEGIN',
+      'decision: agent-ready',
+      'role: dev',
+      'tier: T1',
+      'rationale: x',
+      'TRIAGE_VERDICT_END',
+    ].join('\n');
+    expect(decide(noHumanOnly)).toBe('needs-review dev human');
+  });
+
+  it('MISSING human_only line at T3 still fails closed (not agent-ready-specify either)', () => {
+    const noHumanOnly = [
+      'TRIAGE_VERDICT_BEGIN',
+      'decision: agent-ready',
+      'role: architect',
+      'tier: T3',
+      'rationale: x',
+      'TRIAGE_VERDICT_END',
+    ].join('\n');
+    expect(decide(noHumanOnly)).toBe('needs-review architect human');
+  });
+
+  it('garbled human_only value (neither yes/true nor no/false) also fails closed', () => {
+    expect(decide(verdict({ human_only: 'maybe', tier: 'T2', decision: 'agent-ready' }))).toBe(
+      'needs-review dev human',
+    );
+  });
+
+  it('--fields reports human_only=unknown for a missing line, not a false no or yes', () => {
+    const noHumanOnly = [
+      'TRIAGE_VERDICT_BEGIN',
+      'decision: agent-ready',
+      'role: dev',
+      'tier: T1',
+      'rationale: x',
+      'TRIAGE_VERDICT_END',
+    ].join('\n');
+    expect(fields(noHumanOnly)).toEqual({
+      label: 'needs-review',
+      role: 'dev',
+      hold: 'human',
+      tier: 'T1',
+      human_only: 'unknown',
+    });
+  });
+
   it('the agent cannot ASSERT the specify class — T1/T2 + agent-ready-specify is not affirmative', () => {
     // The class is derived from TIER by the gate. An issue body that injects
     // "decision: agent-ready-specify" into a T1/T2 verdict buys nothing: it is not

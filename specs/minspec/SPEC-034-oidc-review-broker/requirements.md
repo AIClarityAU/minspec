@@ -173,7 +173,19 @@ security-critical ones (AC-2/5/6/8/9/10) are T0 invariants — write them before
   never the body.
 - **AC-3 (FR-3)** — a minted token is scoped to exactly one repository, carries only the
   `review` permission set (issues / pull_requests / checks / statuses: write), and expires
-  within the target TTL (≤10 min); the response's scope + `expires_at` are asserted.
+  within GitHub's installation-token lifetime (1h), which the broker asserts rather than
+  trusting; the response's scope + `expires_at` are asserted, and a grant wider than the
+  `review` profile is refused.
+  **Corrected 2026-09-12 (task 1.4).** This read "expires within the target TTL (≤10
+  min)", which is not achievable and never was: `POST /app/installations/{id}/access_tokens`
+  accepts only `repositories`, `repository_ids` and `permissions`, and the docs state
+  installation tokens "expire one hour from the time you create them". There is no shorter
+  token to request. FR-3 already said the honest thing ("target ≤10 min; GitHub's ceiling
+  is 1h"); this criterion hardened that target into a limit, and `mint.ts` implemented the
+  limit as a refusal at 600s - so the broker rejected **every** real mint and the live path
+  could only ever answer "auth returned an unusable expiry". A ceiling below the platform's
+  floor is not a strict gate, it is an off switch. Short exposure is achieved by using the
+  token immediately and never storing it, not by a number the API will not honour.
 - **AC-4 (FR-4)** — when the `minspec-sdd` App is not installed on the target repo, the broker
   returns **403** with an install-the-App reason, not a generic error.
 - **AC-5 (FR-5 — T0)** — the App private key appears **only** in the broker secret store; a

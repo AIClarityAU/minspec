@@ -33,7 +33,7 @@
  *
  * Drift on either side is a red here, not a silent divergence.
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -98,6 +98,54 @@ describe('#2078 lock-step parity — the producer reads the lane\'s own literals
 
   it('STATUS_TRANSITION_PATTERN is byte-identical to the lane\'s grep -qE', () => {
     expect(STATUS_TRANSITION_PATTERN).toBe(laneStatusPattern());
+  });
+});
+
+// ─── 1b. #2158 — push-docs.sh is a THIRD producer and must read the same literals ───
+//
+// `push-docs.sh` decides the `docs-lane` label from the shell, not the extension host, so
+// it cannot import governance-transition.ts. scripts/lib/governance-transition.sh is its
+// mirror (GOVERNANCE_PATH_RE / STATUS_TRANSITION_RE) — pinned here against the SAME two TS
+// constants already pinned against docs-lane.yml above, so all three producers now chain
+// off one another rather than drifting independently (the #2158 root cause: push-docs.sh
+// knew the corpus rule and never learned this second precondition).
+
+const governanceTransitionSh = fs.readFileSync(
+  path.join(root, 'scripts', 'lib', 'governance-transition.sh'),
+  'utf8',
+);
+
+function pushDocsGovernPattern(): string {
+  const m = governanceTransitionSh.match(/^GOVERNANCE_PATH_RE='([^']*)'\s*$/m);
+  if (!m) throw new Error("could not locate GOVERNANCE_PATH_RE='…' in governance-transition.sh");
+  return m[1];
+}
+
+function pushDocsStatusPattern(): string {
+  const m = governanceTransitionSh.match(/^STATUS_TRANSITION_RE='([^']*)'\s*$/m);
+  if (!m) throw new Error("could not locate STATUS_TRANSITION_RE='…' in governance-transition.sh");
+  return m[1];
+}
+
+describe('#2158 push-docs.sh parity — the shell producer reads the same literals', () => {
+  it('the extractors really found the shell constants (guard against a vacuous parity pass)', () => {
+    expect(pushDocsGovernPattern().length, 'GOVERNANCE_PATH_RE must be non-empty').toBeGreaterThan(0);
+    expect(pushDocsStatusPattern().length, 'STATUS_TRANSITION_RE must be non-empty').toBeGreaterThan(0);
+  });
+
+  it('GOVERNANCE_PATH_RE is byte-identical to GOVERNANCE_PATH_PATTERN', () => {
+    expect(pushDocsGovernPattern()).toBe(GOVERNANCE_PATH_PATTERN);
+  });
+
+  it('STATUS_TRANSITION_RE is byte-identical to STATUS_TRANSITION_PATTERN', () => {
+    expect(pushDocsStatusPattern()).toBe(STATUS_TRANSITION_PATTERN);
+  });
+
+  it('push-docs.sh actually sources governance-transition.sh (not just a stray copy)', () => {
+    const pushDocsSh = fs.readFileSync(path.join(root, 'scripts', 'push-docs.sh'), 'utf8');
+    expect(pushDocsSh).toContain('lib/governance-transition.sh');
+    expect(pushDocsSh).toContain('GOVERNANCE_PATH_RE');
+    expect(pushDocsSh).toContain('STATUS_TRANSITION_RE');
   });
 });
 

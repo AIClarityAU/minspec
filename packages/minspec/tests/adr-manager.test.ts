@@ -391,6 +391,31 @@ describe('adr-manager', () => {
       expect(content).toContain('## Context');
     });
 
+    // #2149 — the writer's status-line regex captured indent instead of
+    // anchoring to column 0, and was non-global, so it matched the FIRST
+    // `status:` line at ANY indent. A nested `status:` key sorting before
+    // the top-level one was rewritten instead, silently leaving the real
+    // status untouched. Anchoring to `^status:` fixes this regardless of
+    // key order.
+    it('rewrites the top-level status: line, not a nested status: key that sorts first', () => {
+      const dir = resolveDecisionsDir(tmpDir);
+      fs.mkdirSync(dir, { recursive: true });
+      const fp = path.join(dir, 'DR-020-nested.md');
+      fs.writeFileSync(
+        fp,
+        '---\nid: DR-020\ntitle: Nested\nreview:\n  status: needs-changes\nstatus: proposed\n---\n\n## Context\n',
+        'utf-8',
+      );
+
+      setAdrStatus(fp, 'accepted');
+      const content = fs.readFileSync(fp, 'utf-8');
+      expect(content).toContain('\nstatus: accepted');
+      expect(content).toContain('  status: needs-changes');
+
+      const reloaded = listAdrs(tmpDir).find(a => a.id === 'DR-020');
+      expect(reloaded?.status).toBe('accepted');
+    });
+
     it('adds a status field when frontmatter has none', () => {
       const dir = path.join(tmpDir, 'decisions');
       fs.mkdirSync(dir, { recursive: true });

@@ -20,6 +20,13 @@
 # Its own file, like session-autonomy.sh, so a test can EXECUTE it without also firing the
 # drain, the radar or the branch guardrail. Never fatal, and the background run is detached
 # from the hook's stdout — a hook that held its pipe open would hold the session start.
+#
+# A FAIL verdict has two shapes that must never share wording (#2044): a path that
+# ACTUALLY YIELDS a credential is a finding ("may be reachable"); a path that returns no
+# answer at all (fail-closed — e.g. the token broker is down) is an availability failure
+# that could not observe anything. Measured 2026-09-22: 6/6 "could not be verified" paths
+# traced to one dead broker, while every direct leak probe was clean — the banner still
+# read as a possible founder-credential leak because both shapes rendered identically.
 
 IBC="$HOME/.claude/scripts/identity-boundary-check.sh"
 STATE="${XDG_CACHE_HOME:-$HOME/.cache}/identity-boundary"
@@ -78,6 +85,24 @@ else
   [ "$age_s" -ge "$STALE_S" ] && stale=" — STALE: the background check has not completed for $(human_age "$age_s")"
   case "$lrc/$verdict" in
     0/PASS*) echo "🔑 Identity: container · last full check $(human_age "$age_s") ago: ${verdict%% (*}$stale" ;;
+    # A verdict of "could not be verified ... (fail-closed)" means a path returned no
+    # answer (e.g. the token broker is down) — the check refused to call that clean, but
+    # it did NOT observe a credential. That is an availability failure, not a finding, and
+    # #2044 measured it read as a possible founder-credential leak. Keep it visibly
+    # distinct from the "yields a GitHub USER credential" verdict below, which IS a finding.
+    0/*fail-closed*|0/*"could not be verified"*)
+      # Best-effort: the record may carry one status line per checked path above the
+      # final IDENTITY-BOUNDARY line (see the stub's "[clean]   <name>" shape in
+      # session-identity.test.ts). The first line that isn't "[clean]" and isn't the
+      # verdict itself is named inline when present; its absence changes nothing else.
+      first_path=$(grep -v '^\[clean\]' "$last" 2>/dev/null | grep -v '^IDENTITY-BOUNDARY ' | grep -v '^[[:space:]]*$' | head -1)
+      cat <<EOF
+⚠️  IDENTITY: the last full check inside the container ($(human_age "$age_s") ago) could not verify
+    every path — this is an AVAILABILITY failure, not a confirmed credential leak: $verdict
+    Most commonly the token broker is down.${first_path:+ First unverified: $first_path.} Diagnose
+    with ~/.claude/scripts/identity-boundary-check.sh before escalating a security incident (#2044).$stale
+EOF
+      ;;
     0/*)     cat <<EOF
 ⚠️  IDENTITY: the last full check FAILED inside the container ($(human_age "$age_s") ago): $verdict
     A founder credential may be reachable from agent sessions. See which path with

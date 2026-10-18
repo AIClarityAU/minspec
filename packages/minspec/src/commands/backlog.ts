@@ -37,15 +37,24 @@ export async function scoreWsjfCommand(): Promise<void> {
     return;
   }
 
-  // Fetch open issues for selection
-  const issues = await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: 'MinSpec: Fetching issues...',
-      cancellable: false,
-    },
-    () => fetchIssues(folder, { state: 'open' }),
-  );
+  // Fetch open issues for selection. fetchIssues() rejects (rather than
+  // resolving []) on a gh failure so this can't be conflated with "zero open
+  // issues" (#2247) — catch it here and say so.
+  let issues;
+  try {
+    issues = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'MinSpec: Fetching issues...',
+        cancellable: false,
+      },
+      () => fetchIssues(folder, { state: 'open' }),
+    );
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(`MinSpec: Could not fetch issues — ${reason}`);
+    return;
+  }
 
   if (issues.length === 0) {
     vscode.window.showInformationMessage('MinSpec: No open issues found.');
@@ -157,15 +166,24 @@ export async function triageIssueCommand(): Promise<void> {
     return;
   }
 
-  // Fetch inbox issues
-  const allIssues = await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: 'MinSpec: Fetching inbox issues...',
-      cancellable: false,
-    },
-    () => fetchIssues(folder, { state: 'open' }),
-  );
+  // Fetch inbox issues. fetchIssues() rejects (rather than resolving []) on a
+  // gh failure so this can't be conflated with "zero inbox issues" (#2247) —
+  // catch it here and say so.
+  let allIssues;
+  try {
+    allIssues = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'MinSpec: Fetching inbox issues...',
+        cancellable: false,
+      },
+      () => fetchIssues(folder, { state: 'open' }),
+    );
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(`MinSpec: Could not fetch issues — ${reason}`);
+    return;
+  }
 
   // Filter to inbox or unlabeled (no lifecycle label)
   const triageableIssues = allIssues.filter(

@@ -18,6 +18,7 @@ import {
   clampExpiry,
   REVIEW_PERMISSIONS,
   MAX_TTL_SECONDS,
+  CLOCK_SKEW_GRACE_SECONDS,
   type InstallationTokenFactory,
 } from '../../broker/src/mint';
 
@@ -194,15 +195,34 @@ describe('AC-3 — scoped minting', () => {
     });
   });
 
-  it('REFUSES a token whose TTL exceeds the ceiling', async () => {
-    // GitHub's default is an hour. Minting it anyway would silently turn a 10-minute
-    // credential into a 60-minute one — invisible until a leaked token still works.
-    const longLived: InstallationTokenFactory = async ({ permissions }) => ({
+  it('ACCEPTS the one-hour token GitHub actually returns', async () => {
+    // Regression for the bound that made the live path impossible. This asserted
+    // REFUSAL of a 60-minute token, which is the only thing
+    // `POST /app/installations/{id}/access_tokens` ever issues - its body takes
+    // `repositories`, `repository_ids` and `permissions`, and no lifetime field. With
+    // MAX_TTL_SECONDS at 600 the broker rejected every real mint and answered "auth
+    // returned an unusable expiry" forever. A ceiling below the platform's floor is not
+    // a strict gate, it is an off switch.
+    const real: InstallationTokenFactory = async ({ permissions }) => ({
       token: 'ghs_test',
       expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
       permissions,
     });
-    expect((await mintScopedToken({ repository: REPO, repository_owner: '' }, longLived)).ok).toBe(false);
+    const r = await mintScopedToken({ repository: REPO, repository_owner: '' }, real);
+    expect(r.ok).toBe(true);
+  });
+
+  it('REFUSES a TTL beyond what the platform documents', async () => {
+    // The ceiling still has a job: anything longer than GitHub's documented hour means a
+    // factory or API change we have not reasoned about, so fail closed.
+    const tooLong: InstallationTokenFactory = async ({ permissions }) => ({
+      token: 'ghs_test',
+      expiresAt: new Date(Date.now() + 2 * 60 * 60_000).toISOString(),
+      permissions,
+    });
+    const r = await mintScopedToken({ repository: REPO, repository_owner: '' }, tooLong);
+    expect(r.ok).toBe(false);
+    expect(JSON.stringify(r)).not.toContain('ghs_');
   });
 
   it('never returns a token when the factory throws (AC-9)', async () => {
@@ -233,8 +253,34 @@ describe('AC-3 — scoped minting', () => {
     it('accepts a TTL inside the ceiling', () => {
       expect(clampExpiry(new Date(now + 9 * 60_000).toISOString(), now)).toBeTruthy();
     });
-    it('rejects exactly over the ceiling', () => {
-      expect(clampExpiry(new Date(now + (MAX_TTL_SECONDS + 1) * 1000).toISOString(), now)).toBeNull();
+    it('accepts a 1h token even when our clock reads behind GitHub\'s', () => {
+      // The intermittent form of the off switch. GitHub stamps expires_at on GitHub's
+      // clock; we compare against ours. A ceiling of exactly 3600 refuses a legitimate
+      // token whenever we are behind by more than the round trip - unreproducibly, and
+      // only under drift.
+      const weAreBehindBy = 90_000;
+      const githubStamp = new Date(now + 3600_000 + weAreBehindBy).toISOString();
+      expect(clampExpiry(githubStamp, now)).toBeTruthy();
+    });
+
+    it('still refuses a token far beyond the documented lifetime', () => {
+      // The grace must not become a hole: the guard's job is catching an API change or a
+      // misconfigured factory handing back something much longer.
+      expect(clampExpiry(new Date(now + 2 * 3600_000).toISOString(), now)).toBeNull();
+    });
+
+    it('the grace is a margin, not a second issuance period', () => {
+      expect(CLOCK_SKEW_GRACE_SECONDS).toBeGreaterThan(0);
+      expect(CLOCK_SKEW_GRACE_SECONDS).toBeLessThan(MAX_TTL_SECONDS / 2);
+    });
+
+    it('rejects beyond the ceiling plus its grace', () => {
+      expect(
+        clampExpiry(
+          new Date(now + (MAX_TTL_SECONDS + CLOCK_SKEW_GRACE_SECONDS + 1) * 1000).toISOString(),
+          now,
+        ),
+      ).toBeNull();
     });
     it('rejects an already-expired or unparseable expiry', () => {
       expect(clampExpiry(new Date(now - 1000).toISOString(), now)).toBeNull();

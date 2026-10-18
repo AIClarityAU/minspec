@@ -105,6 +105,23 @@ export interface SpecNode {
    * `phase-action` node source SPEC-012 FR-4 composes rather than re-derives.
    */
   implementHole?: ImplementHole;
+  /**
+   * #2370. True iff the spec's RAW frontmatter `status:` line is itself one of
+   * `done`/`archived`/`superseded` — the SAME literal-trusting check
+   * `commands/approve.ts` / `approve-active.ts` use to decide whether an approve
+   * command will offer this spec. Computed by the fs-adapter (which reads the
+   * literal line) and only CONSUMED here, exactly like `implementHole` —
+   * deliberately NOT folded into `status` above, because `status` must never
+   * trust a literal `done`/etc. (the #112 fix: an unapproved spec with no
+   * `phases:` block cannot become `done` just by being told so).
+   *
+   * Without this, a spec whose literal status is already terminal but whose
+   * `phases:` block is missing/empty derives `status: 'new'` (`allPending` wins
+   * before the approval check), so the gate below kept asking the human to
+   * "Approve" it forever — while every approve command refuses it, because THEY
+   * trust the literal. Absent/false ⇒ no change from before this field existed.
+   */
+  literalStatusTerminal?: boolean;
 }
 
 /**
@@ -746,6 +763,11 @@ function generateNodes(
   for (const s of graph.specs) {
     if (superseded.has(s.id)) continue;
     if (isSpecTerminal(s)) continue;
+    // #2370: `status` can derive non-terminal (e.g. `new`, via `allPending`) for a
+    // spec whose literal `status:` line already reads done/archived/superseded —
+    // see `literalStatusTerminal`'s doc comment. Skip it too, or this loop emits
+    // "Approve X" for a spec every approve command refuses, forever.
+    if (s.literalStatusTerminal) continue;
     const pendingApproval = s.approvalState === 'unapproved' || s.approvalState === 'stale';
     if (!pendingApproval) continue;
     const epic = s.epic ? index.epicById.get(s.epic) : undefined;
