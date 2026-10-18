@@ -36,7 +36,7 @@ two comments refuting its own body; a triage pass sees only the body.
 
 ## Root cause (mechanism plus missing gate)
 
-`scripts/triage-inbox.sh:81` runs `gh issue view --json body,title,labels`; comments are never
+`scripts/triage-inbox.sh:99` runs `gh issue view --json body,title,labels`; comments are never
 fetched, so they cannot reach the prompt. Nothing compares a verdict with later comments, so the
 stale verdict is written without warning.
 
