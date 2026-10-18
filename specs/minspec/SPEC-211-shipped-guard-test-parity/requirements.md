@@ -1,7 +1,7 @@
 ---
 id: SPEC-211
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - what the harness ships into an adopter must arrive with the evidence its own comments cite
@@ -23,8 +23,8 @@ implements_reason: >-
 affects: [.github/scripts/ai-review-guard.js, .github/scripts/ai-review-guard.test.js, packages/minspec/src/lib/ci-review-templates.ts, packages/minspec/tests/voter-survivor-reuse.test.ts, packages/minspec/tests/review-protocol-tokens.test.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
