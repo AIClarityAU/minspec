@@ -18,6 +18,8 @@ const {
   CHANGES,
   BLOCKED,
   isQuotaExhaustion,
+  isQuotaExhaustionStrict,
+  wholeCheckRunListing,
   parseAllowlist,
   isAuthorizedReviewer,
   decideProvenanceRevert,
@@ -2391,3 +2393,72 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     }
   });
 }
+
+// ── isQuotaExhaustionStrict (#2897) ──────────────────────────────────────────
+test('isQuotaExhaustionStrict: recognises the CLI\'s own sentences', () => {
+  for (const msg of [
+    'Claude AI usage limit reached',
+    "You've reached your usage limit",
+    'weekly limit reached',
+    '5-hour limit reached',
+    'HTTP 429',
+    'too many requests',
+    'resets at 3pm',
+  ]) {
+    assert.equal(isQuotaExhaustionStrict(msg), true, msg);
+  }
+});
+
+test('isQuotaExhaustionStrict: does not fire on review prose that merely discusses quota', () => {
+  for (const msg of [
+    'the quota classifier',
+    'reviewing the rate limit branch',
+    'the overloaded path',
+    'insufficient credit handling',
+    '',
+    null,
+    undefined,
+  ]) {
+    assert.equal(isQuotaExhaustionStrict(msg), false, String(msg));
+  }
+  // Control: the loose predicate does fire on a bare topic word.
+  assert.equal(isQuotaExhaustion('the quota classifier'), true);
+});
+
+test('isQuotaExhaustionStrict: never wider than the loose predicate', () => {
+  for (const s of ['Claude AI usage limit reached', 'weekly limit', 'HTTP 429', 'resets in 12 minutes']) {
+    if (isQuotaExhaustionStrict(s)) assert.equal(isQuotaExhaustion(s), true, s);
+  }
+});
+
+// ── wholeCheckRunListing (#2897) ─────────────────────────────────────────────
+test('wholeCheckRunListing: accepts a listing whose count matches and is under a full page', () => {
+  const runs = [{ id: 1 }, { id: 2 }];
+  const r = wholeCheckRunListing({ total_count: 2, check_runs: runs }, 'abc1234');
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.checkRuns, runs);
+  assert.equal(r.reason, '');
+  assert.equal(wholeCheckRunListing({ total_count: 0, check_runs: [] }).ok, true, 'an empty whole list is still whole');
+});
+
+test('wholeCheckRunListing: refuses anything not provably whole, with a reason', () => {
+  const run = { id: 1 };
+  const full = Array.from({ length: 100 }, () => run);
+  for (const [name, listing] of [
+    ['bare array', [run]],
+    ['null', null],
+    ['no check_runs', { total_count: 1 }],
+    ['no count', { check_runs: [run] }],
+    ['non-integer count', { total_count: '1', check_runs: [run] }],
+    ['negative count', { total_count: -1, check_runs: [] }],
+    ['count mismatch', { total_count: 2, check_runs: [run] }],
+    ['full page', { total_count: 100, check_runs: full }],
+  ]) {
+    const r = wholeCheckRunListing(listing, 'abc1234');
+    assert.equal(r.ok, false, name);
+    assert.equal(r.checkRuns, null, name);
+    assert.ok(r.reason.length > 0, `${name}: a refusal says why`);
+  }
+  assert.match(wholeCheckRunListing({ total_count: 2, check_runs: [run] }, 'abc1234').reason, /for abc1234/);
+  assert.match(wholeCheckRunListing({ total_count: 2, check_runs: [run] }).reason, /1 of 2/);
+});
