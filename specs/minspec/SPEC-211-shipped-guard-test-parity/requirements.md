@@ -104,7 +104,10 @@ the coverage that should exist.
 - 9 of the 41 functions do not appear in the shipped suite outside comments:
   `selectVotersToRun`, `renderVoterRecord`, `parseVoterRecords`, `isStructuralVerdictBlock`
   (the #2163 four), `renderVerdictBlock`, `defangProtocolTokens`, `parseCliVerdict`,
-  `isQuotaExhaustionStrict`, `wholeCheckRunListing`. 6 constants are likewise absent:
+  `isQuotaExhaustionStrict`, `wholeCheckRunListing`. The same nine, and only those, fail
+  FR-5's stricter "used" test (a call or member access after comments and string literals
+  are stripped; re-measured 2026-10-18 by the independent approver), so the T0 red count
+  below holds under either reading. 6 constants are likewise absent:
   `VOTER_RECORD_PREFIX`, `VERDICT_END_TOKEN`, `UNAVAILABLE_TOKEN`, `ROUND_RECORD_PREFIX`,
   `VERDICT_SCHEMA`, `PENDING`.
 - `voter-survivor-reuse.test.ts` holds 32 cases in three groups (round-trip, 5;
@@ -194,9 +197,13 @@ the coverage that should exist.
   so nothing carries`), and states the narrower thing that case proves. No comment in the
   guard claims a test that is not in the shipped suite.
 - **FR-5 - Export-reference gate.** The shipped suite contains a case that loads the guard,
-  takes every export whose value is a function, and fails unless each name occurs as a whole
-  word in the suite's own source with comments removed and the exemption declaration
-  removed. The failure message lists every missing name and the two ways to fix it: add a
+  takes every export whose value is a function, and fails unless each name is USED in the
+  suite's own source: a whole-word occurrence immediately followed by `(` (a call) or
+  immediately preceded by `.` (member access, e.g. `guard.name`), counted only after
+  comments, string and template literals, and the exemption declaration are removed. An
+  occurrence that is only an import - a name in the `const { ... } = require(...)`
+  destructuring list - or only text inside a test title does not count, so adding a name to
+  the import list or to a title cannot satisfy the gate. The failure message lists every missing name and the two ways to fix it: add a
   behavioural case, or add an exemption entry naming a tracking issue. The core check is a
   pure helper (export names, source text, exemptions in; missing names and stale exemptions
   out), and the suite exercises it against a synthetic input with one name planted missing,
@@ -209,7 +216,9 @@ the coverage that should exist.
   (#2897). `renderVerdictBlock` and `defangProtocolTokens` are not exempted, because the
   ported cases from FR-1 and FR-2 already reference them.
 - **FR-5b - The gate fails closed.** It fails, never passes, when the guard cannot be
-  loaded, when it finds zero function exports, or when the suite cannot read its own source.
+  loaded, when it finds zero function exports, or when the suite cannot read its own source
+  (the helper given a `null`, `undefined` or empty source text reports failure, not an
+  empty missing list).
 - **FR-6 - Citation gate.** The shipped suite contains a case that reads the guard's source,
   collects every citation in the FR-4 form, and fails for each cited title that is not the
   exact title of a test in the suite. Finding zero citations is a failure, because FR-4
@@ -248,15 +257,16 @@ Everything else is low: comments, tests and one regenerated file, revertable in 
       quoted titles). (FR-1, FR-2, FR-3)
 - [ ] **Export gate passes and can fail** - the FR-5 case passes on the branch; in a scratch
       copy, adding `function zzUnreferenced() {}` to the guard's exports makes it fail naming
-      `zzUnreferenced`, and removing every code reference to `selectVotersToRun` from a copy
-      of the suite makes it fail naming `selectVotersToRun`. Both scratch copies are
-      discarded. (FR-5)
+      `zzUnreferenced`, and removing every call and member access of `selectVotersToRun`
+      from a copy of the suite - leaving its import-list entry and its `selectVotersToRun:`
+      test titles in place - makes it fail naming `selectVotersToRun`. Both scratch copies
+      are discarded. (FR-5)
 - [ ] **Exemptions exact and shrink-only** - the exemption list holds exactly
       `parseCliVerdict`, `isQuotaExhaustionStrict` and `wholeCheckRunListing` with their
       issue refs; in a scratch copy, adding a case that calls `parseCliVerdict` without
       deleting its exemption makes the gate fail as stale. (FR-5a)
 - [ ] **Gate fails closed** - the suite contains cases showing the FR-5 helper reports
-      failure on an empty export set and on an unreadable source. (FR-5b)
+      failure on an empty export set and on a `null`/empty source text. (FR-5b)
 - [ ] **No uncheckable test claims** - `grep -n -E "the diff's own test|the test asserting
       recency|the test is \(#2163 review\)|a test pins it to what review-branch.sh reads"
       .github/scripts/ai-review-guard.js` prints nothing, and the FR-6 case passes with at
@@ -275,8 +285,10 @@ Everything else is low: comments, tests and one regenerated file, revertable in 
       the scaffolded-repo `node --test` run) and `managed-region-enumeration.test.ts` pass,
       and `npm test`, `npm run lint` and `npm run typecheck` exit 0. (FR-7, INV-5)
 - [ ] **Vitest copies gone, DR-097 still true** - the two vitest files no longer exist, and
-      every remaining `git grep` hit for either file name is on a line that also carries a
-      `#2163 @ <sha>` commit address. (FR-3)
+      every remaining hit of `git grep -n -E "voter-survivor-reuse\.test\.ts|review-protocol-tokens\.test\.ts"
+      -- ':!specs/minspec/SPEC-211-shipped-guard-test-parity/'` is on a line that also
+      carries a `#2163 @ <sha>` commit address. This spec is excluded because it names the
+      files to describe their deletion. (FR-3)
 
 ## Invariants (must not break)
 
@@ -296,9 +308,10 @@ Everything else is low: comments, tests and one regenerated file, revertable in 
 
 ## Limitations, stated plainly
 
-- **"Referenced" is a textual proxy for "tested".** A name that appears in test code but is
-  never meaningfully asserted passes FR-5, and a name that appears only inside a string
-  literal (a test title, for example) also counts. FR-1 and FR-2 supply real behavioural
+- **"Used" is a textual proxy for "tested".** A name that is called in test code but whose
+  result is never meaningfully asserted passes FR-5. An import-list entry or a test title
+  alone does not (FR-5), which closes the two cheapest ways to satisfy the gate without a
+  test. FR-1 and FR-2 supply real behavioural
   cases for the functions this spec is about; the gate stops the zero-coverage case
   recurring, which is the case #2371 is. A call-recording gate was considered and rejected
   (Alternatives).
