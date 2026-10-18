@@ -10,7 +10,7 @@ relates_to: [SPEC-044, SPEC-062, SPEC-073, SPEC-074, DR-003, DR-033, DR-076]
 affects: [scripts/dispatch-issue.sh, scripts/remediate-pr.sh, scripts/drain-inbox.sh]  # dispatch-issue.sh and drain-inbox.sh are OWNED by SPEC-044 via implements: - this spec modifies them, never owns them (INV: one owner per file). Files this spec will own are named in Plan, not guessed here.
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -197,6 +197,16 @@ pipeline's false-success rate becomes a measured number instead of an unstateabl
 
 ## Decisions needed (Clarify)
 
+D1 to D6 each carry a **Recorded selection** line naming the option this document already
+recommended. An agent session wrote those lines on 2026-10-18, and no human chose them. This
+repository runs with `"autonomy": "act"` (`.minspec/config.json:58`), under which an agent
+proceeds on a stated recommendation and leaves the options it did not take on record (DR-086
+§2 and §4), which is why the options stay below with their costs. Approving a T3 spec is on
+that section's stop list, so nothing here stands in for that approval: the lines propose, and
+approving this spec is what ratifies them. The requirements above assume the recommended
+option in every case. A question in this section with no **Recorded selection** line is still
+open.
+
 - **D1 — How does the parent observe tool calls?**
   - **Option A (rec) — switch the agent launch to `--output-format stream-json`**, tee the
     raw event stream to a sidecar log, and render a plain-text `.agent.log` from it so the
@@ -210,6 +220,7 @@ pipeline's false-success rate becomes a measured number instead of an unstateabl
     a loop of read-only calls changes nothing on disk and is indistinguishable from thinking
     — so #1336's item 3 is dropped, and FR-1's window has to be longer to avoid ending runs
     that are legitimately reading.
+  - **Recorded selection: Option A.** Option B is not taken, so #1336's item 3 stays in scope.
 - **D2 — Where is the "human intervention" line for unassisted acceptance?** Options:
   **(a, rec)** strict — any non-pipeline commit, any `needs-human-review`, any first verdict
   other than `ai-review:pass`, or a pipeline fix-agent cycle all count as assisted. *Cost:*
@@ -218,7 +229,7 @@ pipeline's false-success rate becomes a measured number instead of an unstateabl
   human-applied labels count; automated fix cycles are "unassisted". *Cost:* hides exactly the
   wasted cycles #1336 wants visible. Recording the raw signals (first verdict, fix-cycle
   count, human commits) lets either be computed later; the decision is which one the headline
-  ratio uses.
+  ratio uses. **Recorded selection: (a)** strict. (b) is not taken.
 - **D3 — Where and in what shape is the outcome ledger?** **(a, rec)** an append-only JSONL
   file under the dispatch working base (`MINSPEC_LEASE_WORKTREE_BASE`, default
   `/tmp/minspec-agent`, [`issue-lease.sh:45`](../../../scripts/lib/issue-lease.sh#L45)) plus
@@ -231,23 +242,28 @@ pipeline's false-success rate becomes a measured number instead of an unstateabl
   ~15 sessions collide on push. The schema, whichever home, is the near-irreversible part:
   once a baseline is collected under it, changing field meanings breaks comparability — the
   human may want this one recorded as a DR.
+  **Recorded selection: (a)** JSONL under the dispatch working base; the durable-copy
+  location stays open for Plan, and no DR is written here. (b) and (c) are not taken.
 - **D4 — Which launch sites?** **(a, rec)** all three (`dispatch-issue.sh` build agent,
   its shepherd fix agent at `:1768`, and `remediate-pr.sh:873`) through one shared launcher
   wrapper. *Cost:* wider change across two files, one of them a remediation path with its own
   tests. **(b)** build agent only. *Cost:* fix agents, which run on the same models, stay
-  unwatched, and their cycles never reach the rate.
+  unwatched, and their cycles never reach the rate. **Recorded selection: (a)** all three
+  launch sites through one shared wrapper. (b) is not taken.
 - **D5 — Thresholds.** `W` (no-progress window) and `N` (identical calls). Rec: `W` = 15
   minutes, `N` = 8. *Cost:* both are guesses — no measured base rate exists, which is FR-5's
   point. 15 minutes is long enough for a full `npm test` (I believe, unverified; Plan should
   measure the slowest legitimate silent step, since a test run emits no tool call while it
   runs and only criterion (c) can see it); 8 is far below the 137 #1336 cites and above the
   small retry loops an agent legitimately makes. Both should be env-overridable and printed
-  in the outcome record so a later re-tune can compare like with like.
+  in the outcome record so a later re-tune can compare like with like. **Recorded selection:**
+  `W` = 15 minutes, `N` = 8, both env-overridable; Plan measures the slowest silent step.
 - **D6 — Does a stall earn the DR-355 opus retry?** **(a, rec)** yes, a stall on a
   lower-tier model routes through the same `escalate_next_action` as an `ESCALATE:`, sharing
   the one-retry flag and the claim ceiling. *Cost:* the retry may stall the same way,
   spending up to one more `W` before a human sees it. **(b)** no, stalls go straight to a
-  human. *Cost:* a sonnet loop that opus would have finished costs a human look.
+  human. *Cost:* a sonnet loop that opus would have finished costs a human look. **Recorded selection: (a)** yes, stalls share the one-retry
+  path. (b) is not taken.
 
 ## Acceptance Criteria
 
