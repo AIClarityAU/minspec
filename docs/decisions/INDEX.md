@@ -835,6 +835,22 @@ scripts/ holds the dev-time automation that starts headless agents: issue dispat
 On 2026-10-17 the founder asked for a review of the constitution, rules, memory, principles and decision records against two priorities, in this order (queue item in2): The core-tenets review (2026-10-17, run outside this repository) found the corpus leaning toward over-specification. The figures, and where each can be checked:
 <!-- /dr-summary:DR-106 -->
 
+## [DR-107 — Decision records split in two - direction records the founder accepts, engineering records accepted on an AI review pass and listed in a weekly digest](DR-107.md)
+
+*Status: proposed · Date: 2026-10-17*
+
+<!-- dr-summary:DR-107 auto=24170a0e8b9b -->
+DR-086 §2.2 (the approval-or-acceptance stop class) makes every DR acceptance a founder stop. The register held 105 records by 2026-10-10, about five a week (core-tenets-review-1017), and many decide mechanism rather than direction: DR-095 (socket bind-mount), DR-094 (token lifetime), DR-077 (hook parity test), DR-097 and its successor on whole-panel vote reuse (2026-10). Under the core-tenets record core tenet 1 (make the founder's job smaller) a gate must name the error only it catches. For an engineering record that error is already…
+<!-- /dr-summary:DR-107 -->
+
+## [DR-108 — Agents may approve under a delegation the founder gives once, recorded under the bot's own name and never his - impersonation stays banned, delegation is allowed](DR-108.md)
+
+*Status: proposed · Date: 2026-10-17*
+
+<!-- dr-summary:DR-108 auto=9ca2b32c25d7 -->
+The approval-or-acceptance stop class (DR-086 §2.2) says, in code (scripts/lib/autonomy.ts, STOP_CLASSES): "The agent cannot sign these without forging the human." That is true only while the approval record has no field for *who acted, on whose delegation*. The rules-consent review (rules-consent-review-1017) separated two acts:
+<!-- /dr-summary:DR-108 -->
+
 ## [DR-109 — The AI review panel scales by risk, but specs are never the low tier - specs get at least the machinery voter count, and one voter is allowed only for non-spec prose](DR-109.md)
 
 *Status: proposed · Date: 2026-10-17*
