@@ -44,7 +44,9 @@ Verified against the tree at the time of writing:
 - `npm run typecheck` (`package.json:23`, CI step "Typecheck", `ci.yml` ~line 105, added by
   #1424) runs `tsc --noEmit -p` on exactly those two configs, so it also skips tests.
 - `packages/minspec/tsconfig.test.json` exists but includes only `src/test/**` (mocha
-  types); it matches no file today and is not the missing gate.
+  types); it matches only the five `src/test` mocha specs (`codelens`, `commands`,
+  `extension`, `screenshots`, `views`), not `packages/*/tests/**`, so it is not the missing
+  gate.
 - The root `tsconfig.json` has no `include`, but nothing invokes it.
 - vitest/esbuild strip `import type` before execution, so the defect cannot fail at runtime.
 - eslint does no type-aware resolution of these imports.
