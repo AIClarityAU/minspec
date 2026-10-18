@@ -7,11 +7,17 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - the same domain as SPEC-037 (approver identity) and the human-decision-witness draft
 aspects: [security, identity, credential-boundary, host-vs-container, fail-closed, no-silent-gate, blast-radius, never-wrong]
 relates_to: [DR-086, DR-087, DR-105, SPEC-037, SPEC-069, "#1816", "#1872", "#1927", "#2048", "#2172", "#2691", "#2871", "#1614"]
-# `implements:`/`affects:` are left UNDECLARED here, not merely undecided, following the
-# precedent SPEC-071 set: SPEC-038 FR-3 requires ownership before PLAN starts, not before
-# SPECIFY, and the spec-gate freezes `affects:` as hard as `implements:`. The file set is
-# downstream of D-1 (how much a host session may do), D-2 (where the location probe lives)
-# and D-4 (how a scripted push names its identity), all open. Declared at Clarify.
+# Ownership declared in Specify, per SPEC-038 FR-3 (requirements.md:45-51: authored BEFORE
+# approval, because `implements:` is inside the canonical hash and `canonical.ts` strips only
+# `status:` and `phases:`, so adding it later stales the approval). An earlier draft deferred
+# it to Clarify on a misreading of SPEC-071's precedent; SPEC-071 itself declares in Specify.
+# `implements:` lists only files this spec CREATES (greenfield paths are valid by design):
+# the FR-1/FR-2 location probe under D-2 (a)'s recommendation, and its fixture tests (AC-1).
+# Revisable at no cost until approval, which is when the set is first hashed; if D-2 resolves
+# to (b) the probe entry is dropped. `affects:` lists the existing files FR-3..FR-6 edit but
+# do not own.
+implements: [scripts/lib/agent-location.sh, packages/minspec/tests/agent-location.test.ts]
+affects: [scripts/hooks/host-write-guard.py, packages/minspec/tests/host-write-guard.test.ts, scripts/drain-inbox.sh, scripts/dispatch-issue.sh, scripts/remediate-pr.sh, scripts/triage-inbox.sh, scripts/push-docs.sh, scripts/check-gh-bot-attribution.sh, scripts/lib/gh-bot.sh]
 phases:
   specify: in-progress
   clarify: pending
