@@ -374,6 +374,28 @@ describe('#1688 inv 2 - any change in the pull request\'s own diff runs the full
     expect(d.carry, d.reason).toBe(true);
   });
 
+  it('#2926 T3: swapping a binary file for different content at the same path and mode runs the full panel', () => {
+    // Plain `git diff` shows a changed binary as "Binary files a/x and b/x differ"; the
+    // blob ids on its `index` line are the only trace of WHAT changed. A pass on content
+    // A must not carry to content B.
+    const f = repo();
+    const m0 = seed(f);
+    f.git('checkout', '-q', '-b', 'feat');
+    const bin = (tag: string) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0]), Buffer.from(tag)]);
+    fs.mkdirSync(path.join(f.dir, 'assets'), { recursive: true });
+    fs.writeFileSync(path.join(f.dir, 'assets/logo.png'), bin('reviewed content A'));
+    const p = f.commit('feat: add a logo');
+    const priorRound = postedRound(f, m0, p);
+    fs.writeFileSync(path.join(f.dir, 'assets/logo.png'), bin('swapped content B'));
+    const h = f.commit('feat: swap the logo');
+    // The premise, checked: the diff body is the same constant line both times.
+    expect(f.git('diff', `${m0}...${p}`)).toMatch(/^Binary files \/dev\/null and b\/assets\/logo\.png differ$/m);
+    expect(f.git('diff', `${m0}...${h}`).replace(/^index .*$/m, '')).toBe(f.git('diff', `${m0}...${p}`).replace(/^index .*$/m, ''));
+    const d = plan(f, { before: p, head: h, base: m0, checkRuns: [priorRound] });
+    expect(d.carry, d.reason).toBe(false);
+    expect(d.reason).toMatch(/changed since/);
+  });
+
   it('tm1 control: main editing a CONTEXT line the voters are shown runs the full panel', () => {
     // Line 18 sits inside the three lines of context around the change at line 20, so
     // the voters would read different text. That is not a position move.

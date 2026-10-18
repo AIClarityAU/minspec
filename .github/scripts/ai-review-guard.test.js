@@ -2331,6 +2331,61 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     );
   });
 
+  // ── #2926 security finding: a binary file's only content signal is its blob ids ──
+  //
+  // `review-branch.sh` runs plain `git diff` (no --binary), so a changed binary file is a
+  // constant body line and the `index <old>..<new>` blob ids. Normalising those ids made
+  // two different binary contents hash equal, so a swapped binary would have carried a
+  // pass. A file section keeps its blob ids unless its content is shown as text hunks.
+  const SECTION = (o = {}) => {
+    const v = { path: 'img.png', index: 'index 1111111..2222222 100644', body: ['Binary files a/img.png and b/img.png differ'], ...o };
+    return [`diff --git a/${v.path} b/${v.path}`, v.index, ...v.body];
+  };
+  const IN = (...sections) => ['<untrusted_diff>', ...sections.flat(), REVIEW_INPUT_DIFF_CLOSE, '', ''].join('\n');
+  const TEXT_SECTION = (o = {}) => {
+    const v = { index: 'index 1111111..2222222 100644', hunk: '@@ -18,7 +19,7 @@ int f()', ...o };
+    return ['diff --git a/x.c b/x.c', v.index, '--- a/x.c', '+++ b/x.c', v.hunk, '   ctx 1', '-old', '+new', '   ctx 2'];
+  };
+
+  test('#2926 reviewInputFingerprint: a different binary content at the same path and mode changes the key', () => {
+    assert.notEqual(
+      reviewInputFingerprint(IN(SECTION())),
+      reviewInputFingerprint(IN(SECTION({ index: 'index 1111111..3333333 100644' }))),
+      'the "Binary files ... differ" form: the new blob id is the only content signal',
+    );
+    assert.notEqual(
+      reviewInputFingerprint(IN(SECTION())),
+      reviewInputFingerprint(IN(SECTION({ index: 'index 4444444..2222222 100644' }))),
+      'the old blob id counts too: the base content of a binary is not shown either',
+    );
+    const patch = (idx) => SECTION({ index: idx, body: ['GIT binary patch', 'literal 5', 'McmZ?wb@xD0000', '', 'literal 0', 'HcmV?d00001'] });
+    assert.notEqual(
+      reviewInputFingerprint(IN(patch('index 1111111..2222222 100644'))),
+      reviewInputFingerprint(IN(patch('index 1111111..3333333 100644'))),
+      'the "GIT binary patch" form',
+    );
+  });
+
+  test('#2926 reviewInputFingerprint: a section with no text hunk keeps its blob ids; text sections beside it still normalise', () => {
+    // An index line with no hunk at all (an empty file added, or any form this parser
+    // does not recognise) keeps its ids: the default is to count, never to drop.
+    const bare = (idx) => IN([`diff --git a/e b/e`, 'new file mode 100644', idx]);
+    assert.notEqual(reviewInputFingerprint(bare('index 0000000..e69de29')), reviewInputFingerprint(bare('index 0000000..1234567')));
+    // A binary section next to a text section: the text one still ignores position, the
+    // binary one still counts its ids, whichever order they come in.
+    const moved = TEXT_SECTION({ index: 'index abcdef0..1234567 100644', hunk: '@@ -218,7 +240,7 @@ int f()' });
+    assert.equal(reviewInputFingerprint(IN(SECTION(), moved)), reviewInputFingerprint(IN(SECTION(), TEXT_SECTION())));
+    assert.equal(reviewInputFingerprint(IN(moved, SECTION())), reviewInputFingerprint(IN(TEXT_SECTION(), SECTION())));
+    assert.notEqual(
+      reviewInputFingerprint(IN(TEXT_SECTION(), SECTION({ index: 'index 1111111..3333333 100644' }))),
+      reviewInputFingerprint(IN(TEXT_SECTION(), SECTION())),
+    );
+    // An added line that reads like a binary marker is a body line ('+' first), not a marker.
+    const lookalike = TEXT_SECTION().map((l) => (l === '+new' ? '+Binary files a/x and b/x differ' : l));
+    const lookalikeMoved = lookalike.map((l) => (l.startsWith('index ') ? 'index abcdef0..1234567 100644' : l));
+    assert.equal(reviewInputFingerprint(IN(lookalike)), reviewInputFingerprint(IN(lookalikeMoved)));
+  });
+
   test('tm1 reviewInputFingerprint: no closing line means nothing is taken out; empty is null', () => {
     const open = (idx) => ['<untrusted_diff>', idx, '@@ -1 +1 @@', '-a', '+b', ''].join('\n');
     assert.notEqual(reviewInputFingerprint(open('index 1111111..2222222')), reviewInputFingerprint(open('index 3333333..4444444')));

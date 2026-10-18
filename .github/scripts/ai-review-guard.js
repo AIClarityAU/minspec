@@ -498,6 +498,13 @@ function patchFingerprint(diffText) {
 const REVIEW_INPUT_DIFF_CLOSE = '</untrusted_diff>';
 
 /**
+ * A line that marks a file section of `git diff` as binary: the plain form review-branch.sh
+ * prints, and the `--binary` form in case that ever changes. In a text section no body
+ * line can match, since each starts with ' ', '+', '-' or '\'.
+ */
+const BINARY_DIFF_MARKER = /^(?:Binary files .* differ|GIT binary patch)$/;
+
+/**
  * Fingerprint of the reviewable input, as the verdict carry keys it (#1688; queue item
  * tm1, founder "go" 2026-10-17). It is `patchFingerprint` over the input with exactly two
  * things taken out, and only inside the diff block:
@@ -517,10 +524,16 @@ const REVIEW_INPUT_DIFF_CLOSE = '</untrusted_diff>';
  * reviewed again; the hunk lengths and the function text in the header; file headers,
  * modes, renames; and the approval facts after the diff block, untouched.
  *
+ * BINARY FILES KEEP THEIR BLOB IDS (#2926 security finding). `review-branch.sh` runs a
+ * plain `git diff`, so a changed binary file is one constant line ("Binary files a/x and
+ * b/x differ") and its blob ids are the only trace of what changed. The ids are dropped
+ * only from a file section that shows its content as text hunks and has no binary
+ * marker; a binary section, or any section with no hunk at all, is hashed as written.
+ *
  * WHAT IT ACCEPTS, stated: a change whose text is identical but that now sits at a
  * different line, with identical context, carries. The voters would read the same
- * lines with different numbers. Placement relative to the rest of the file is the
- * "files outside the diff move with the base" class this carry already accepts (DR-104).
+ * lines with different numbers. This is NOT a class DR-104 accepted: DR-104 rejected a
+ * position-insensitive identity, and this reversal is recorded, proposed, in DR-110.
  *
  * A malformed input (no closing line) is hashed with nothing taken out: never wider
  * than before. Empty is null, as for patchFingerprint.
@@ -531,15 +544,28 @@ function reviewInputFingerprint(inputText) {
   const lines = text.split('\n');
   const end = lines.indexOf(REVIEW_INPUT_DIFF_CLOSE);
   if (end === -1) return patchFingerprint(text);
-  for (let i = 0; i < end; i += 1) {
-    const line = lines[i];
-    let m = /^index [0-9a-f]+\.\.[0-9a-f]+((?: [0-7]{6})?)$/.exec(line);
-    if (m) {
-      lines[i] = `index ..${m[1]}`;
-      continue;
+  const HUNK = /^@@ -\d+(,\d+)? \+\d+(,\d+)? @@(.*)$/;
+  // Walk one file section (`diff --git` up to the next one) at a time. The blob ids are
+  // dropped only from a section whose content is shown as text hunks and that carries no
+  // binary marker; anywhere else they are the only trace of the content and stay.
+  let start = 0;
+  while (start < end) {
+    let stop = start + 1;
+    while (stop < end && !lines[stop].startsWith('diff --git ')) stop += 1;
+    const section = lines.slice(start, stop);
+    const shownAsText =
+      section.some((l) => HUNK.test(l)) && !section.some((l) => BINARY_DIFF_MARKER.test(l));
+    for (let i = start; i < stop; i += 1) {
+      const line = lines[i];
+      let m = /^index [0-9a-f]+\.\.[0-9a-f]+((?: [0-7]{6})?)$/.exec(line);
+      if (m) {
+        if (shownAsText) lines[i] = `index ..${m[1]}`;
+        continue;
+      }
+      m = HUNK.exec(line);
+      if (m) lines[i] = `@@ -${m[1] || ''} +${m[2] || ''} @@${m[3]}`;
     }
-    m = /^@@ -\d+(,\d+)? \+\d+(,\d+)? @@(.*)$/.exec(line);
-    if (m) lines[i] = `@@ -${m[1] || ''} +${m[2] || ''} @@${m[3]}`;
+    start = stop;
   }
   return patchFingerprint(`review-input/v2\n${lines.join('\n')}`);
 }
