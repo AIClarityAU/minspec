@@ -73,6 +73,10 @@
         "title": "MinSpec: Refresh Harness Files"
       },
       {
+        "command": "minspec.gettingStarted",
+        "title": "MinSpec: Getting Started"
+      },
+      {
         "command": "minspec.commitHarnessRefresh",
         "title": "MinSpec: Commit Harness Refresh"
       },
@@ -531,8 +535,8 @@
         },
         "minspec.advancePhaseOnApprove": {
           "type": "boolean",
-          "default": false,
-          "description": "Always enqueue a phase-advance request when you approve a spec (skips the per-approval follow-up prompt). Choosing 'Always' on that prompt saves the same choice for this project only, in .minspec/preferences.json. Enqueue-only: writes a request to .minspec/queue/ for a downstream consumer to dequeue; never runs 'claude -p' itself. Off by default."
+          "default": true,
+          "description": "Always enqueue a phase-advance request when you approve a spec (skips the per-approval follow-up prompt). Choosing 'Always' on that prompt saves the same choice for this project only, in .minspec/preferences.json. Enqueue-only: writes a request to .minspec/queue/ for a downstream consumer to dequeue; never runs 'claude -p' itself. On by default; a value you have set yourself is kept."
         },
         "minspec.approverEmail": {
           "type": "string",
@@ -566,7 +570,7 @@
           {
             "id": "minspec.walkthrough.welcome",
             "title": "Welcome to MinSpec",
-            "description": "MinSpec changes how you work, not just what you click: spec before code, always — even for a one-line fix.\n\n**Ceremony proportional to complexity** — a one-line fix needs one sentence of spec. A new subsystem gets the full treatment. The tool suggests; you verify the signal, not author the content.",
+            "description": "MinSpec changes how you work, not just what you click: spec before code, always — even for a one-line fix.\n\n**Ceremony proportional to complexity** — a one-line fix needs one sentence of spec. A new subsystem gets the full treatment. The tool suggests; you verify the signal, not author the content.\n\n[Open the Getting Started page](command:minspec.gettingStarted)",
             "media": {
               "markdown": "media/walkthrough/welcome.md"
             }
