@@ -127,8 +127,9 @@ Covers **FR-4, FR-6, FR-7, FR-10, FR-13**, FR-9 (meta-toggle + shortcut labels),
       `planned: true` for `silentRefresh` ([#186]).
 - [ ] `getting-started-webview.ts` — toggle rows write via
       `workspace.getConfiguration('minspec').update(key, value, scope)`, honoring each
-      setting's declared scope (`approverEmail` is `scope: application` —
-      [package.json:510](../../../packages/minspec/package.json#L510)); whole-row click
+      setting's declared scope; `approverEmail` (`scope: application` —
+      [package.json:510](../../../packages/minspec/package.json#L510), machine-wide) is
+      **never** written by the page (constitution invariant 3, FR-5); whole-row click
       handler bound **only** where `rowClickToggles`; Space/Enter flips the focused
       switch; Tab order follows visual order.
 - [ ] `getting-started-webview.ts` — the **"Show setting ids"** meta-toggle, **default
@@ -165,8 +166,11 @@ This is the only slice that introduces an external read — every one of them is
       row's first render; before that click the row shows the offline value with zero
       network; on an air-gapped host (spawn fails / `gh` absent) the page renders without
       hanging and the offline value stands.
-- [ ] `getting-started.test.ts` — **INV-4 / AC-5**: entering a valid email writes **only**
-      `minspec.approverEmail` and **no approval record** — asserted by watching the **real
+- [ ] `getting-started.test.ts` — **INV-4 / AC-5**: entering a valid email writes
+      **neither** `minspec.approverEmail` (no `getConfiguration('minspec').update` call for
+      that key) **nor any approval record**; an invalid string shows a format error; the
+      **"Open in Settings"** click runs `workbench.action.openSettings` with
+      `minspec.approverEmail` and writes nothing. The approval half is asserted by watching the **real
       approval store**, the per-file sidecar tree `.minspec/approvals/**` (37 tracked
       records; `.minspec/approvals/specs/<specPath>.json`), for zero writes across the
       whole interaction. The watch must be the **directory tree**, not the legacy
@@ -193,7 +197,8 @@ This is the only slice that introduces an external read — every one of them is
 - [ ] `onboarding-settings.ts` — `ApproverIdentity` compute (offline seed + format check;
       divergence computable only post-verify).
 - [ ] `getting-started-webview.ts` — the approver email field (offline seed, editable, not
-      hard-locked), the click-gated **Verify against GitHub** action (best-effort
+      hard-locked, validated but **never saved** by the page), the **"Open in Settings"**
+      button (opens VS Code Settings at `minspec.approverEmail`; FR-5), the click-gated **Verify against GitHub** action (best-effort
       `gh api user` shell-out — D4), and the **non-blocking amber** divergence line
       (`--vscode-editorWarning-foreground`) reading *"differs from your GitHub login —
       approvals under this email can't be auto-verified."*
@@ -247,7 +252,7 @@ requirements FR-1..FR-17 with every external action click-gated.
 | Foundation reused | [#883] per-signature toast memory (merged, PR [#887]) |
 | Dependencies (not built here) | [#186] `silentRefresh` behavior · [#758] harness-refresh commit unification |
 | Adjacent, out of scope | [#920] scaffolded projects get the coverage seed without the enforcement (narrowed 2026-07-26; the in-repo gate at [vitest.config.ts:11](../../../vitest.config.ts#L11) **is** real) |
-| Identity gate | [DR-056] / [SPEC-037] — the page sets `minspec.approverEmail` only; it never mints a sign-off |
+| Identity gate | [DR-056] / [SPEC-037] — the page validates the approver email and opens Settings to save it; it never writes `minspec.approverEmail` and never mints a sign-off |
 
 [#186]: https://github.com/AIClarityAU/minspec/issues/186
 [#533]: https://github.com/AIClarityAU/minspec/issues/533
