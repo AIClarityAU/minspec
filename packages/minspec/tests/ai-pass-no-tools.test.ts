@@ -24,9 +24,10 @@
  *   an empty directory alone  stopped nothing once the user's settings allowed `Read`
  *
  * WHAT THESE TESTS CAN SHOW. `child_process.execFile` is mocked, so they pin what REACHES
- * the binary: the argument list, the environment and the working directory. They cannot
- * show what the binary does with it. That half was measured by hand against the real CLI
- * and is recorded on the pull request that closes #2570; CI has no `claude` to ask.
+ * the binary: the argument list, the environment, the working directory, and (#2575) what
+ * is written to and closed on its `stdin`. They cannot show what the binary does with it.
+ * That half was measured by hand against the real CLI and is recorded on the pull requests
+ * that close #2570 and #2575; CI has no `claude` to ask.
  *
  * Every assertion here is on the captured call, never on an exported helper, so each one
  * fails on the unfixed code for the reason it names.
@@ -79,13 +80,19 @@ import { createEpic } from '../src/lib/epic-manager';
 
 const mockExecFile = execFile as unknown as ReturnType<typeof vi.fn>;
 
-type ExecCallback = (err: Error | null, result?: { stdout: string; stderr: string }) => void;
+/** The real `execFile` callback shape: two separate strings, never one object (#2575). */
+type ExecCallback = (err: Error | null, stdout?: string, stderr?: string) => void;
 
 interface StartOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   timeout?: number;
   signal?: AbortSignal;
+}
+
+/** A fake `ChildProcess`: just enough to receive the prompt the way the real one does. */
+interface FakeChild {
+  readonly stdin: { end(data?: string): void; on(event: string, listener: (e: Error) => void): unknown };
 }
 
 /** One prompt-carrying start of `claude`, with the state of its directory AT CALL TIME. */
@@ -96,6 +103,8 @@ interface Start {
   readonly cwdEntriesAtCall: string[] | null;
   /** Permission bits of the directory at call time, or null when there was none. */
   readonly cwdModeAtCall: number | null;
+  /** What was written to `stdin` and closed, or undefined while the call is still open. */
+  readonly stdin: string | undefined;
 }
 
 type Reply = (start: Start, finish: (err: Error | null, stdout?: string) => void) => void;
@@ -116,31 +125,43 @@ const GOOD_JSON = JSON.stringify({
  * Stand in for the binary. The `--version` probe always answers; every other start is
  * recorded, with a look at its working directory before the reply is given, because
  * "existed and was empty" is only checkable while the call is in flight.
+ *
+ * Returns a `FakeChild` so the production code's `child.stdin.end(prompt)` has something
+ * real to call — exactly the shape `execFile` itself returns, with `stdin` captured
+ * instead of piped to a real process (#2575). What is written there is exposed on
+ * `start.stdin`, read lazily: the write happens after this function returns, once the
+ * production code has the fake child back.
  */
 function installClaude(reply: Reply): Start[] {
   const starts: Start[] = [];
-  mockExecFile.mockImplementation((_cmd: string, args: string[], opts: unknown, cb: unknown) => {
+  mockExecFile.mockImplementation((_cmd: string, args: string[], opts: unknown, cb: unknown): FakeChild | undefined => {
     const callback = (typeof opts === 'function' ? opts : cb) as ExecCallback;
     const options = (typeof opts === 'function' || opts == null ? {} : opts) as StartOptions;
     if (args.includes('--version')) {
-      callback(null, { stdout: '2.1.283 (Claude Code)\n', stderr: '' });
-      return;
+      callback(null, '2.1.283 (Claude Code)\n', '');
+      return undefined;
     }
     const cwd = options.cwd;
     const exists = typeof cwd === 'string' && fs.existsSync(cwd);
+    let stdinData: string | undefined;
     const start: Start = {
       args: [...args],
       options,
       cwdExistedAtCall: exists,
       cwdEntriesAtCall: exists ? fs.readdirSync(cwd) : null,
       cwdModeAtCall: exists ? fs.statSync(cwd).mode & 0o777 : null,
+      get stdin() { return stdinData; },
     };
     starts.push(start);
     recorded.push(start);
     reply(start, (err, stdout = '') => {
-      if (err) callback(err);
-      else callback(null, { stdout, stderr: '' });
+      if (err) {
+        const printed = err as unknown as { stdout?: string; stderr?: string };
+        callback(err, printed.stdout ?? '', printed.stderr ?? '');
+      }
+      else callback(null, stdout, '');
     });
+    return { stdin: { end: (data?: string) => { stdinData = data; }, on: () => undefined } };
   });
   return starts;
 }
@@ -150,6 +171,9 @@ const succeed: Reply = (_start, finish) => finish(null, GOOD_JSON);
 /** The error shapes `execFile` really produces, as observed through the same call. */
 const exitCode1 = (stderr = ''): Error =>
   Object.assign(new Error('Command failed: claude -p ...'), { code: 1, killed: false, signal: null, stdout: '', stderr });
+/** Like `exitCode1`, but with control over stdout too — the stream the "not logged in" refusal (#2577) lands on. */
+const exitCode1Output = (stdout = '', stderr = ''): Error =>
+  Object.assign(new Error('Command failed: claude -p ...'), { code: 1, killed: false, signal: null, stdout, stderr });
 const killedByTimeout = (): Error =>
   Object.assign(new Error('Command failed: claude -p ...'), { code: null, killed: true, signal: 'SIGTERM', stdout: '', stderr: '' });
 const aborted = (): Error =>
@@ -283,30 +307,51 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       expect(args).not.toContain('--mcp-config');
     });
 
-    it('T3: the prompt arrives whole, in the one place no switch can take it from', async () => {
+    it('T3: no argument carries the prompt - every one is a switch or a value of one (#2575)', async () => {
       const { args } = await onePass();
 
       expect(args[0]).toBe('-p');
-      const prompt = args[1];
+      // `--tools` takes a LIST: any bare word after it is read as a tool name. Measured:
+      // a prompt placed there is swallowed and the CLI reports it was given none. With
+      // the prompt gone from argv entirely (#2575), everything after `-p` is a switch,
+      // plus the one empty value that IS the tool list.
+      const afterP = args.slice(1);
+      const bare = afterP.filter((token, i) => {
+        if (token.startsWith('--')) return false;
+        return !(token === '' && afterP[i - 1] === '--tools');
+      });
+      expect(bare).toEqual([]);
+      // Nothing from the project's text reaches argv at all.
+      expect(args.some(a => a.includes('SPEC-001') || a.includes('Payment Flow'))).toBe(false);
+    });
+
+    it('T3: a prompt past the measured 131,072-char `E2BIG` ceiling still starts (#2575)', async () => {
+      // Measured on Linux: one argument of this length or more makes `execFile` throw
+      // `spawn E2BIG` before the process exists. With the prompt moved to stdin there is
+      // no such argument. A corpus that pushes the built prompt past that ceiling -
+      // comparable to the 179-artifact / 76,937-char prompt #1570 measured on this repo,
+      // scaled up - must still start the call, with argv as small as ever.
+      for (let i = 2; i <= 451; i++) {
+        writeSpec(project, `SPEC-${String(i).padStart(3, '0')}`, `Feature ${i}`, { body: 'x'.repeat(300) });
+      }
+      const { args, stdin } = await onePass();
+
+      expect((stdin as string).length).toBeGreaterThan(131_072);
+      expect(args.join(' ').length).toBeLessThan(200);
+    });
+
+    it('T3: the prompt arrives whole on stdin, closed, never as a command-line argument (#2575)', async () => {
+      const { stdin } = await onePass();
+
       // MinSpec's own words first: a prompt that began with project text could begin
       // with `-`, which the CLI refuses as an unknown switch (measured), or with
       // whatever a later release treats specially at the start of a prompt.
+      expect(stdin).toBeDefined();
+      const prompt = stdin as string;
       expect(prompt.startsWith('You are organizing')).toBe(true);
       expect(prompt).toContain('SPEC-001');
       expect(prompt).toContain('Payment Flow');
       expect(prompt.trimEnd().endsWith('}')).toBe(true); // the JSON shape it must answer in is the last line
-      expect(args.filter(a => a === prompt)).toHaveLength(1);
-
-      // `--tools` takes a LIST: any bare word after it is read as a tool name. Measured:
-      // a prompt placed there is swallowed and the CLI reports it was given none. So
-      // after the prompt there are only switches, plus the one empty value that IS the
-      // tool list.
-      const afterPrompt = args.slice(2);
-      const bare = afterPrompt.filter((token, i) => {
-        if (token.startsWith('--')) return false;
-        return !(token === '' && afterPrompt[i - 1] === '--tools');
-      });
-      expect(bare).toEqual([]);
     });
 
     it('T3: no transcript of the call is kept', async () => {
@@ -345,7 +390,7 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       await proposeAI(project);
 
       expect(starts).toHaveLength(1);
-      const prompt = starts[0].args[1];
+      const prompt = starts[0].stdin as string;
       // The property. Every reference form begins with this character, so its absence
       // rules them all out without knowing which characters may come before one.
       expect(prompt).not.toContain('@');
@@ -447,7 +492,10 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       { outcome: 'a reply that is not JSON', reply: (_s, finish) => finish(null, 'I cannot help with that.'), reason: 'non-json' },
       { outcome: 'a non-zero exit', reply: (_s, finish) => finish(exitCode1()), reason: 'exit' },
       { outcome: 'a timeout', reply: (_s, finish) => finish(killedByTimeout()), reason: 'timeout' },
-      { outcome: 'a prompt too long to start a process with', reply: () => { throw tooBigToStart(); }, reason: 'exit' },
+      // No longer reachable through the prompt's own size (#2575 took it out of argv
+      // entirely), but `execFile` can still throw synchronously for other reasons, and
+      // the directory must be taken back exactly the same way when it does.
+      { outcome: 'a synchronous throw from execFile itself', reply: () => { throw tooBigToStart(); }, reason: 'exit' },
     ])('T3: after $outcome', async ({ reply, reason }) => {
       const starts = installClaude(reply);
 
@@ -458,6 +506,39 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       expect(starts).toHaveLength(1);
       expect(starts[0].cwdExistedAtCall).toBe(true);
       expect(fs.existsSync(starts[0].options.cwd as string)).toBe(false);
+    });
+
+    it('T3: a claude that exits without reading stdin is a handled failure, not an uncaught EPIPE (#2575)', async () => {
+      // Writing the prompt to a child that has already exited emits `error` (EPIPE) on
+      // its stdin. With no listener Node raises it as an uncaught exception, which
+      // would crash the extension host and break proposeAI's "never throws" contract.
+      const { EventEmitter } = await import('events');
+      const uncaught: Error[] = [];
+      const onUncaught = (e: Error): void => { uncaught.push(e); };
+      process.on('uncaughtException', onUncaught);
+      try {
+        mockExecFile.mockImplementation((_cmd: string, args: string[], opts: unknown, cb: unknown) => {
+          const callback = (typeof opts === 'function' ? opts : cb) as ExecCallback;
+          if (args.includes('--version')) { callback(null, '2.1.283 (Claude Code)\n', ''); return undefined; }
+          const stdin = new EventEmitter() as EventEmitter & { end(data?: string): void };
+          stdin.end = () => {
+            // The pipe breaks after the write, then the process reports its early exit.
+            setImmediate(() => {
+              stdin.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE', syscall: 'write' }));
+              callback(exitCode1("error: unknown option '--tools'\n"), '', "error: unknown option '--tools'\n");
+            });
+          };
+          return { stdin };
+        });
+
+        const result = await proposeAI(project);
+        await new Promise(r => setImmediate(r));
+
+        expect(uncaught).toEqual([]);
+        expect(result.failure).toBeDefined();
+      } finally {
+        process.off('uncaughtException', onUncaught);
+      }
     });
 
     it('T3: after a cancel - there while the call runs, gone once it is cancelled', async () => {
@@ -649,13 +730,71 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       expect(starts).toHaveLength(1);
     });
 
-    it('T3: any other non-zero exit is still reported as an exit', async () => {
+    it('T3: any other non-zero exit is still reported as an exit, and names what `claude` printed', async () => {
       const starts = installClaude((_s, finish) => finish(exitCode1('Something else went wrong\n')));
 
       const result = await proposeAI(project);
 
       expect(result.failure?.reason).toBe('exit');
       expect(result.failure?.detail).toMatch(/code 1/);
+      // The distinguishing assertion (#2577): the old code gave the user nothing past
+      // the bare exit code. Now the refusal explains itself.
+      expect(result.failure?.detail).toContain('Something else went wrong');
+      expect(starts).toHaveLength(1);
+    });
+
+    it('T3: not logged in - named from what `claude` said on stdout, not left as a bare exit code (#2577)', async () => {
+      // Measured: Claude Code 2.1.283, started against an empty config directory, exits
+      // 1 with this line on stdout (never stderr) and nothing else useful.
+      const starts = installClaude(
+        (_s, finish) => finish(exitCode1Output('Not logged in · Please run /login\n')),
+      );
+
+      const result = await proposeAI(project);
+
+      expect(result.proposal).toBeNull();
+      expect(result.failure?.reason).toBe('exit');
+      expect(result.failure?.detail).toContain('Not logged in · Please run /login');
+      expect(starts).toHaveLength(1);
+    });
+
+    it('T3: a prompt too long to start the process with is named as that, not "failed to run" (#2577)', async () => {
+      // `spawn E2BIG` is thrown synchronously, before any process exists, so there is no
+      // stdout/stderr to read a line from — this case needs its own wording.
+      const starts = installClaude(() => { throw tooBigToStart(); });
+
+      const result = await proposeAI(project);
+
+      expect(result.proposal).toBeNull();
+      expect(result.failure?.reason).toBe('exit');
+      expect(result.failure?.detail).toBe('the prompt was too long for the process to start with');
+      expect(result.failure?.detail).not.toBe('failed to run');
+      expect(starts).toHaveLength(1);
+    });
+
+    it('T3: the open-stdin wait `claude` prints while nobody is feeding it is never surfaced as the failure (#2577)', async () => {
+      // `execFile` leaves the child's stdin pipe open with nobody writing to it; Claude
+      // Code 2.1.283 waits roughly 3s, prints this, and carries on. A refusal that
+      // happens to follow it must still be named by its own line, not this one.
+      const starts = installClaude(
+        (_s, finish) => finish(exitCode1Output('No stdin data received, continuing...\nNot logged in · Please run /login\n')),
+      );
+
+      const result = await proposeAI(project);
+
+      expect(result.failure?.detail).not.toContain('stdin');
+      expect(result.failure?.detail).toContain('Not logged in · Please run /login');
+      expect(starts).toHaveLength(1);
+    });
+
+    it('T3: a printed line longer than the fixed limit is cut, not carried whole (#2577)', async () => {
+      const long = 'x'.repeat(500);
+      const starts = installClaude((_s, finish) => finish(exitCode1Output(long)));
+
+      const result = await proposeAI(project);
+
+      expect(result.failure?.detail).toContain('x'.repeat(200));
+      expect(result.failure?.detail.length).toBeLessThan(long.length);
       expect(starts).toHaveLength(1);
     });
 
@@ -683,7 +822,8 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       for (const { args, options } of starts) {
         expect(valueAfter(args, '--tools')).toBe('');
         expect(args).toContain('--strict-mcp-config');
-        expect(args[1]).not.toContain('@');
+        // Not just "no `@`" — no project text at all, because none of it is in argv (#2575).
+        expect(args.some(a => a.includes('@'))).toBe(false);
         expect(typeof options.cwd).toBe('string');
         expect(options.env?.CLAUDE_CODE_DISABLE_ATTACHMENTS).toBe('1');
       }
