@@ -1609,6 +1609,8 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     planVerdictCarry,
     carriedLabelFault,
     patchFingerprint,
+    reviewInputFingerprint,
+    REVIEW_INPUT_DIFF_CLOSE,
     VERDICT_BEGIN_TOKEN,
   } = g;
 
@@ -2223,7 +2225,7 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
   // ── the single seam the workflow calls ──
   const INPUT = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n';
   const rawPlan = (o = {}) => {
-    const inputHash = patchFingerprint(INPUT);
+    const inputHash = reviewInputFingerprint(INPUT);
     const panelKey = reviewPanelKey({ lsTree: TREE(), coverage: '' });
     const src = round({ output: { title: 't', summary: record({ inputHash, panelKey }) } });
     return {
@@ -2246,7 +2248,7 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     assert.equal(p.label, PASS);
     assert.equal(p.fromSha, P);
     assert.equal(p.reviewedSha, P);
-    assert.equal(p.inputHash, patchFingerprint(INPUT));
+    assert.equal(p.inputHash, reviewInputFingerprint(INPUT));
     assert.equal(p.panelKey, reviewPanelKey({ lsTree: TREE(), coverage: '' }));
     assert.match(p.comment, /carried forward/i);
     assert.ok(p.comment.includes(P));
@@ -2286,6 +2288,62 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     }
     assert.equal(planVerdictCarry().carry, false);
     assert.equal(planVerdictCarry(null).carry, false);
+  });
+
+  // ── tm1: the input fingerprint ignores where the BASE put the change, nothing else ──
+  //
+  // A base merge that edits the same file away from the change moves two things the
+  // change did not: the old blob id on the `index` line and the hunk START numbers. Each
+  // case below changes one thing and says whether the key must see it.
+  const IN_DIFF = (o = {}) => {
+    const v = { index: 'index 1111111..2222222 100644', hunk: '@@ -18,7 +19,7 @@ int f()', body: ['   ctx 1', '-old', '+new', '   ctx 2'], after: '', ...o };
+    return ['<untrusted_diff>', 'diff --git a/x.c b/x.c', v.index, '--- a/x.c', '+++ b/x.c', v.hunk, ...v.body, REVIEW_INPUT_DIFF_CLOSE, v.after, ''].join('\n');
+  };
+
+  test('tm1 reviewInputFingerprint: blob ids and hunk start numbers are positional, so they do not count', () => {
+    const fp = reviewInputFingerprint(IN_DIFF());
+    assert.match(fp, /^[0-9a-f]{64}$/);
+    assert.equal(reviewInputFingerprint(IN_DIFF({ index: 'index abcdef0..1234567 100644' })), fp);
+    assert.equal(reviewInputFingerprint(IN_DIFF({ hunk: '@@ -218,7 +240,7 @@ int f()' })), fp);
+    assert.equal(reviewInputFingerprint(IN_DIFF({ index: 'index abcdef0..1234567 100644', hunk: '@@ -1,7 +9,7 @@ int f()' })), fp);
+    assert.equal(reviewInputFingerprint(IN_DIFF().replace(/\n/g, '\r\n')), fp);
+  });
+
+  test('tm1 reviewInputFingerprint: everything the voters read still counts', () => {
+    const fp = reviewInputFingerprint(IN_DIFF());
+    for (const [what, o] of [
+      ['an added line', { body: ['   ctx 1', '-old', '+NEW', '   ctx 2'] }],
+      ['whitespace on an added line', { body: ['   ctx 1', '-old', '+ new', '   ctx 2'] }],
+      ['a context line', { body: ['   ctx 1 moved by main', '-old', '+new', '   ctx 2'] }],
+      ['the file mode', { index: 'index 1111111..2222222 100755' }],
+      ['a hunk length', { hunk: '@@ -18,8 +19,7 @@ int f()' }],
+      ['the function text in the hunk header', { hunk: '@@ -18,7 +19,7 @@ int g()' }],
+      ['the approval facts after the diff', { after: '<approval_provenance>MISMATCH</approval_provenance>' }],
+      ['an index-shaped line in the approval facts', { after: 'index 3333333..4444444' }],
+    ]) {
+      assert.notEqual(reviewInputFingerprint(IN_DIFF(o)), fp, `${what} must change the key`);
+    }
+    // Normalisation stops at the diff's closing line: the same index-shaped line after it
+    // is hashed as written, so two different ones differ.
+    assert.notEqual(
+      reviewInputFingerprint(IN_DIFF({ after: 'index 3333333..4444444' })),
+      reviewInputFingerprint(IN_DIFF({ after: 'index 5555555..6666666' })),
+    );
+  });
+
+  test('tm1 reviewInputFingerprint: no closing line means nothing is taken out; empty is null', () => {
+    const open = (idx) => ['<untrusted_diff>', idx, '@@ -1 +1 @@', '-a', '+b', ''].join('\n');
+    assert.notEqual(reviewInputFingerprint(open('index 1111111..2222222')), reviewInputFingerprint(open('index 3333333..4444444')));
+    assert.equal(reviewInputFingerprint(''), null);
+    assert.equal(reviewInputFingerprint('\n\n'), null);
+    assert.equal(reviewInputFingerprint(null), null);
+    // Never the same key as the un-normalised one, so an old record cannot be read as new.
+    assert.notEqual(reviewInputFingerprint(IN_DIFF()), patchFingerprint(IN_DIFF()));
+  });
+
+  test('tm1 REVIEW_INPUT_DIFF_CLOSE is the line review-branch.sh closes the diff block with', () => {
+    const script = require('fs').readFileSync(require('path').join(__dirname, '../../scripts/review-branch.sh'), 'utf8');
+    assert.ok(script.includes(`REVIEW_INPUT="<untrusted_diff>\n\${DIFF}\n${REVIEW_INPUT_DIFF_CLOSE}\n`), 'review-branch.sh must close REVIEW_INPUT with this exact line');
   });
 
   // ── invariant 3, continued: a listing that is not the WHOLE list ──

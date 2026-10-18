@@ -489,6 +489,61 @@ function patchFingerprint(diffText) {
   return require('crypto').createHash('sha256').update(norm, 'utf8').digest('hex');
 }
 
+/**
+ * The line `review-branch.sh --print-input` closes the diff block with. Inside the diff
+ * no line can equal it: every body line starts with ' ', '+', '-' or '\', and the
+ * script defangs the tag in the payload before wrapping it. A test pins this literal
+ * against the script.
+ */
+const REVIEW_INPUT_DIFF_CLOSE = '</untrusted_diff>';
+
+/**
+ * Fingerprint of the reviewable input, as the verdict carry keys it (#1688; queue item
+ * tm1, founder "go" 2026-10-17). It is `patchFingerprint` over the input with exactly two
+ * things taken out, and only inside the diff block:
+ *
+ *   - the blob ids on a diff's `index <old>..<new> <mode>` line (the mode stays), and
+ *   - the START line numbers on a hunk header `@@ -a,b +c,d @@` (the lengths, and the
+ *     function text git prints after the second `@@`, stay).
+ *
+ * WHY. Both follow the BASE copy of a file, not the change. When main edits a file the
+ * pull request also edits, anywhere outside the hunk's context, a base merge leaves every
+ * added, removed and context line identical and still moves the old blob id and the line
+ * numbers. Hashing them refused the carry on exactly the push it exists for: measured
+ * 2026-10-18, 2 of the 4 base merges refused in a 26-push sample.
+ *
+ * WHAT IT STILL SEES. Every body line byte-for-byte, whitespace included (which is why
+ * this is not `git patch-id`); the context lines, so a base edit next to the change is
+ * reviewed again; the hunk lengths and the function text in the header; file headers,
+ * modes, renames; and the approval facts after the diff block, untouched.
+ *
+ * WHAT IT ACCEPTS, stated: a change whose text is identical but that now sits at a
+ * different line, with identical context, carries. The voters would read the same
+ * lines with different numbers. Placement relative to the rest of the file is the
+ * "files outside the diff move with the base" class this carry already accepts (DR-104).
+ *
+ * A malformed input (no closing line) is hashed with nothing taken out: never wider
+ * than before. Empty is null, as for patchFingerprint.
+ */
+function reviewInputFingerprint(inputText) {
+  const text = String(inputText == null ? '' : inputText).replace(/\r\n?/g, '\n');
+  if (patchFingerprint(text) === null) return null;
+  const lines = text.split('\n');
+  const end = lines.indexOf(REVIEW_INPUT_DIFF_CLOSE);
+  if (end === -1) return patchFingerprint(text);
+  for (let i = 0; i < end; i += 1) {
+    const line = lines[i];
+    let m = /^index [0-9a-f]+\.\.[0-9a-f]+((?: [0-7]{6})?)$/.exec(line);
+    if (m) {
+      lines[i] = `index ..${m[1]}`;
+      continue;
+    }
+    m = /^@@ -\d+(,\d+)? \+\d+(,\d+)? @@(.*)$/.exec(line);
+    if (m) lines[i] = `@@ -${m[1] || ''} +${m[2] || ''} @@${m[3]}`;
+  }
+  return patchFingerprint(`review-input/v2\n${lines.join('\n')}`);
+}
+
 /** Render the marker embedded in a check-run's output so a later run can read it. */
 function renderPatchFingerprint(fp) {
   return fp ? `${PATCH_FINGERPRINT_PREFIX}${fp}` : '';
@@ -1216,7 +1271,7 @@ function carriedLabelFault({ current = [], carried } = {}) {
  */
 function planVerdictCarry(raw) {
   const o = raw && typeof raw === 'object' ? raw : {};
-  const inputHash = patchFingerprint(o.inputText);
+  const inputHash = reviewInputFingerprint(o.inputText);
   const panelKey = reviewPanelKey({ lsTree: o.lsTree, coverage: o.coverage });
 
   // The response is handed on WHOLE - count and all - and never unwrapped to its
@@ -1996,6 +2051,8 @@ module.exports = {
   renderCarriedComment,
   carriedLabelFault,
   planVerdictCarry,
+  reviewInputFingerprint,
+  REVIEW_INPUT_DIFF_CLOSE,
   parseResetInstant,
   VERDICT_SCHEMA,
   defangProtocolTokens,
