@@ -133,9 +133,11 @@ consolidate — link, bidirectionally: issue→DR (rationale) and DR→issue/spe
 - **Sub-issues** reference parent DR: `See DR-NNN for design rationale`
 - **DRs materialize their follow-ups (DR-023):** every DR carries a `## Follow-ups (tracked)`
   section; each actionable item it surfaces links a `SPEC-NNN` or a GitHub issue `#`. Forward
-  rule — when writing a DR, **file the issues for any follow-up not covered by a spec**
-  (especially cross-repo / non-code work like site/marketplace copy, which never enters the SDD
-  flow). Prose-only consequences are a leak. `None` is a valid, explicit answer.
+  rule — when writing a DR, materialize every follow-up not covered by a spec: **file an issue
+  only if it would change a decision within 30 days**; otherwise add one dated line to
+  `docs/backlog.md` and cite it as `backlog: <line text>` (DR-023 amendment 2026-10-17,
+  proposed; queue item ctg change 4). Prose-only consequences are a leak. `None` is a valid,
+  explicit answer.
 
 ### Cross-project & paragraph references — carry the code (DR-053)
 

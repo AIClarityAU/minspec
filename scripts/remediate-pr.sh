@@ -90,6 +90,7 @@ REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/lib/agent-context.sh"
+agent_caveman_init
 # How this script touches the worktree it checks a pull request's branch out into. That
 # branch is usually an agent's work, but nothing here checks who wrote it: any branch of
 # this repository whose name fits is taken, from whoever can push one, and the list in
@@ -488,10 +489,33 @@ ${marker}" 2>/dev/null || true
 ALLOWED_TOOLS="Read,Edit,Write,Glob,Grep,Bash(npm test),Bash(npm run validate),Bash(npm run lint),Bash(npm run build),Bash(npm ci),Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
 
 echo "Fetching PR #$PR ($REPO)..."
-PR_JSON=$(gh pr view "$PR" --repo "$REPO" \
-  --json number,state,isDraft,headRefName,headRepository,headRepositoryOwner,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>/dev/null) || {
-  echo "ERROR: could not fetch PR #$PR" >&2; exit 1
+# gh's stderr is KEPT (#2868): the HTTP status / auth error / rate-limit text is the only
+# thing that tells an expired token from a transient fault, and 2>/dev/null threw it away.
+# On a failure, force ONE re-mint (gh_bot_reauth_read: non-zero when the broker gave back
+# the same credential or we do not own the token, so a retry would be pointless) and retry
+# once. A second failure is reported WITH its stderr and exits 1.
+_PR_FETCH_ERR=$(mktemp)
+# Mint in THIS shell, not inside the $(...) below: a mint in a subshell is lost with it,
+# which would also leave gh_bot_reauth_read nothing to compare a re-mint against.
+gh_bot_warm_read
+_fetch_pr_json() {
+  gh pr view "$PR" --repo "$REPO" \
+    --json number,state,isDraft,headRefName,headRepository,headRepositoryOwner,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>"$_PR_FETCH_ERR"
 }
+if ! PR_JSON=$(_fetch_pr_json); then
+  echo "WARNING: fetch of PR #$PR failed: $(tr '\n' ' ' <"$_PR_FETCH_ERR")" >&2
+  if gh_bot_reauth_read; then
+    echo "Re-minted the read token — retrying the fetch of PR #$PR once." >&2
+    PR_JSON=$(_fetch_pr_json) || {
+      echo "ERROR: could not fetch PR #$PR (after re-mint): $(tr '\n' ' ' <"$_PR_FETCH_ERR")" >&2
+      rm -f "$_PR_FETCH_ERR"; exit 1
+    }
+  else
+    echo "ERROR: could not fetch PR #$PR: $(tr '\n' ' ' <"$_PR_FETCH_ERR")" >&2
+    rm -f "$_PR_FETCH_ERR"; exit 1
+  fi
+fi
+rm -f "$_PR_FETCH_ERR"
 
 STATE=$(jq -r '.state' <<<"$PR_JSON")
 IS_DRAFT=$(jq -r '.isDraft' <<<"$PR_JSON")
@@ -868,6 +892,7 @@ echo "  Launching remediation agent (model: $RUN_MODEL, log: $LOG)..."
 while true; do
   if (cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$RUN_PROMPT" \
         "${AGENT_CONTEXT_ARGS[@]}" \
+        ${AGENT_CAVEMAN_ARGS[@]+"${AGENT_CAVEMAN_ARGS[@]}"} \
         --model "$RUN_MODEL" \
         --allowedTools "$ALLOWED_TOOLS" \
         --output-format text 2>&1 | tee "$LOG"); then
