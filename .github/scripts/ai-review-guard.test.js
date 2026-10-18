@@ -1153,7 +1153,7 @@ test('verdictLabelFault: exactly the decided verdict is clean', () => {
 {
   const {
     patchFingerprint, renderPatchFingerprint, parsePatchFingerprint,
-    findReattestableVerdict, CHECK_NAME,
+    findReattestableVerdict, isAuthorizedReviewer, CHECK_NAME,
   } = require('./ai-review-guard.js');
 
   const ALLOW = ['minspec-sdd', 'minspec-sdd[bot]'];
@@ -1206,7 +1206,6 @@ test('verdictLabelFault: exactly the decided verdict is clean', () => {
   });
 
   test('provenance case rule matches isAuthorizedReviewer (mixed-case app slug)', () => {
-    const { isAuthorizedReviewer } = require('./ai-review-guard.js');
     const mixed = run({ app: { slug: 'MinSpec-SDD' } });
     assert.equal(isAuthorizedReviewer('MinSpec-SDD', ALLOW), true);
     assert.equal(findReattestableVerdict({ checkRuns: [mixed], patchHash: fp, allowlist: ALLOW }).ok, true);
