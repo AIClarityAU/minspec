@@ -108,19 +108,31 @@ agent_caveman_init() {
     lite|full|ultra) ;;
     *) echo "  Caveman trial: MINSPEC_CAVEMAN_MODE='$mode' is not off|lite|full|ultra; running without caveman." >&2; return 0 ;;
   esac
-  hook=$(ls -d "${HOME}"/.claude/plugins/cache/caveman/caveman/*/hooks/caveman-activate.js 2>/dev/null | tail -1 || true)
-  if [[ -z "$hook" ]] || ! command -v node >/dev/null 2>&1; then
+  # No caveman plugin cache at all (CI, an adopter's machine): the trial does not apply
+  # here, so say nothing. An installed plugin whose hook cannot be used IS reported below.
+  [[ -d "${HOME}/.claude/plugins/cache/caveman" ]] || return 0
+  local -a hooks=( "${HOME}"/.claude/plugins/cache/caveman/caveman/*/hooks/caveman-activate.js )
+  hook="${hooks[${#hooks[@]}-1]}"
+  if [[ ! -f "$hook" ]] || ! command -v node >/dev/null 2>&1; then
     echo "  Caveman trial: plugin hook or node not found; running without caveman." >&2
     return 0
   fi
   cfg=$(mktemp -d)
   printf '{"statusLine":{}}' > "$cfg/settings.json"
-  rules=$(CLAUDE_CONFIG_DIR="$cfg" CAVEMAN_DEFAULT_MODE="$mode" node "$hook" 2>/dev/null || true)
+  if ! rules=$(CLAUDE_CONFIG_DIR="$cfg" CAVEMAN_DEFAULT_MODE="$mode" node "$hook" 2>/dev/null); then
+    rm -rf "$cfg"
+    echo "  Caveman trial: the plugin hook failed; running without caveman." >&2
+    return 0
+  fi
   rm -rf "$cfg"
   case "$rules" in
     "CAVEMAN MODE ACTIVE — level: $mode"*) ;;
     *) echo "  Caveman trial: hook did not report level '$mode'; running without caveman." >&2; return 0 ;;
   esac
+  # The ruleset says "code, commits, PRs: write normal", but these markers are parsed by
+  # the launchers and gates (ESCALATE: by dispatch-issue.sh and remediate-pr.sh, Root
+  # cause: by the commit-msg gate, closes #N by the PR-body check), so name them.
+  rules+=$'\n\nTRIAL EXCEPTION (machine-parsed text, never terse): keep these exact and in normal prose. A line that starts with `ESCALATE:`, `DEEPER:` or `Root cause:`; commit subjects (`type(#N): description`) and commit bodies; PR titles and bodies, including `Closes #N` lines. Caveman style applies to your running commentary only.'
   AGENT_CAVEMAN_ARGS=(--append-system-prompt "$rules")
   echo "  Caveman trial: mode=$mode (MINSPEC_CAVEMAN_MODE=off to disable)" >&2
 }

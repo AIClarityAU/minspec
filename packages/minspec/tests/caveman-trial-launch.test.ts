@@ -60,6 +60,13 @@ describe('caveman trial: AGENT_CAVEMAN_ARGS', () => {
     expect(r.args).toContain('CAVEMAN MODE ACTIVE — level: full');
   });
 
+  it('names the machine-parsed markers as exempt from terse style', () => {
+    const r = init(fakeHome(true), {});
+    for (const m of ['ESCALATE:', 'Root cause:', 'DEEPER:', 'Closes #N', 'commit subjects']) {
+      expect(r.args).toContain(m);
+    }
+  });
+
   it('honours MINSPEC_CAVEMAN_MODE for another level', () => {
     expect(init(fakeHome(true), { MINSPEC_CAVEMAN_MODE: 'ultra' }).args).toContain('level: ultra');
   });
@@ -75,10 +82,27 @@ describe('caveman trial: AGENT_CAVEMAN_ARGS', () => {
     expect(fs.existsSync(path.join(home, '.claude/.caveman-active'))).toBe(false);
   });
 
-  it('fails visible, not silent: a missing hook launches without caveman and says so', () => {
+  it('no caveman plugin installed at all (CI, an adopter): no args and no stderr noise', () => {
     const r = init(fakeHome(false), {});
     expect(r.count).toBe(0);
+    expect(r.stderr).toBe('');
+  });
+
+  it('fails visible, not silent: an installed plugin with no usable hook launches without caveman and says so', () => {
+    const home = fakeHome(false);
+    fs.mkdirSync(path.join(home, '.claude/plugins/cache/caveman/caveman/abc123'), { recursive: true });
+    const r = init(home, {});
+    expect(r.count).toBe(0);
     expect(r.stderr).toContain('running without caveman');
+  });
+
+  it('a hook that reports a different level launches without caveman and says so', () => {
+    const home = fakeHome(true);
+    const hook = path.join(home, '.claude/plugins/cache/caveman/caveman/abc123/hooks/caveman-activate.js');
+    fs.writeFileSync(hook, "process.stdout.write('something else');\n");
+    const r = init(home, {});
+    expect(r.count).toBe(0);
+    expect(r.stderr).toContain('did not report level');
   });
 
   it('rejects an unknown level visibly', () => {
