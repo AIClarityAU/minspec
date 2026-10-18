@@ -1205,6 +1205,13 @@ test('verdictLabelFault: exactly the decided verdict is clean', () => {
     assert.equal(findReattestableVerdict({ checkRuns: [impostor], patchHash: fp, allowlist: ALLOW }).ok, false);
   });
 
+  test('provenance case rule matches isAuthorizedReviewer (mixed-case app slug)', () => {
+    const { isAuthorizedReviewer } = require('./ai-review-guard.js');
+    const mixed = run({ app: { slug: 'MinSpec-SDD' } });
+    assert.equal(isAuthorizedReviewer('MinSpec-SDD', ALLOW), true);
+    assert.equal(findReattestableVerdict({ checkRuns: [mixed], patchHash: fp, allowlist: ALLOW }).ok, true);
+  });
+
   test('refuses when the allowlist is empty — never re-attest with no trusted producer', () => {
     assert.equal(findReattestableVerdict({ checkRuns: [run()], patchHash: fp, allowlist: [] }).ok, false);
     assert.equal(findReattestableVerdict({ checkRuns: [run()], patchHash: fp }).ok, false);
