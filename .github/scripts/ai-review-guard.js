@@ -445,7 +445,7 @@ function parseResetInstant(text, nowMs) {
 //
 // WHAT THIS SECTION IS. The ai-review workflow embeds a `patch-fingerprint:` marker -
 // a hash of the three-dot diff - in the verdict check-run's output. It is a
-// MEASUREMENT record: `scripts/review-churn-report.sh` reads it back to count how often
+// MEASUREMENT record: the review-churn report script reads it back to count how often
 // a round re-reviewed a patch an earlier round had already passed.
 //
 // WHAT READS IT TO SKIP A REVIEW: nothing. `findReattestableVerdict` below is
