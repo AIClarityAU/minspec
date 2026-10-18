@@ -48,9 +48,14 @@ blind; fixing the shared reader repairs both.
 
 Correction to the issue text: `statusProseWouldInvert` does not define what a claim is; it
 re-strips a prefix (`^>`, `Status:`, leading emphasis) from lines the reader already found.
-Its strip regex `^[*_]{0,2}Status:` does not match `**Status:**` (colon inside the bold)
-and must be updated in step with the reader, or the #1833 negation guard sees the wrong
-"first word" on newly visible lines.
+Its strip chain (`adr-manager.ts:707`: `^>\s*`, then `^[*_]{0,2}Status:\s*`, then `^[*_]+`)
+already handles the bare column-0 `**Status:** proposed` shape (`[*_]{0,2}` consumes the
+leading `**`, `Status:` matches, the last step removes the trailing `**`). It fails on the
+list-item shapes: `- **Status:** proposed` / `* **Status:** proposed` keep their bullet, so
+the `Status:` strip never anchors and the "first word" is not the status token. (It also
+fails on `**Status**:`, colon outside the bold - see DQ-2.) The strip must gain a bullet
+prefix in step with the reader, or the #1833 negation guard sees the wrong "first word" on
+newly visible lines.
 
 Second defect (same issue): `setAdrStatus(file, s)` on a file already at `s` reconciles the
 body only through the same write path; the issue reports it produces no diff. Not verified
@@ -71,7 +76,8 @@ here beyond the issue's statement; the implementer must reproduce before relying
   (see DQ-2).
 - **FR-4** `reconcileBodyStatus` rewrites the token on those newly visible lines, mirroring
   capitalisation, and leaves `freeform` / `unparseable` lines untouched as today.
-- **FR-5** `statusProseWouldInvert` strips the bullet and `**Status:**` prefix so the first
+- **FR-5** `statusProseWouldInvert` strips the bullet (the new part; the bare `**Status:**`
+  prefix already strips today) and `**Status:**` prefix so the first
   word is the status token and the negation test runs on the real remainder, including the
   wrapped-paragraph behaviour from #2180. `- **Status:** Proposed. Not accepted yet.`
   still refuses.
