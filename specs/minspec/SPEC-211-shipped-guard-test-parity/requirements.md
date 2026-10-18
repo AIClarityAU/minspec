@@ -1,7 +1,7 @@
 ---
 id: SPEC-211
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - what the harness ships into an adopter must arrive with the evidence its own comments cite
