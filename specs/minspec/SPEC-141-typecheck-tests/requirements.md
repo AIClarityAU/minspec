@@ -53,8 +53,11 @@ The gate that should have rejected it is a typecheck whose input set includes th
 The #1424 comment says "nothing else typechecks the source"; the same sentence holds for
 the tests, and #1424 fixed only half of it.
 
-Not measured: the count of pre-existing errors in `packages/*/tests/**` (no installed
-toolchain in the authoring environment). FR-3 makes the plan measure it first.
+Backlog, measured once and NOT trustworthy: a throwaway root-extending config over
+`packages/*/tests/**/*.ts` gave 2565 errors across 414 files, but 1180 are TS2307 (module
+not found) and 470 TS2580 (node/vitest types not resolved), i.e. the throwaway config's own
+type resolution, not real defects. The real backlog is therefore unknown and likely far
+smaller; FR-3 and FR-5 make the plan produce a correctly resolved count first.
 
 ## Functional requirements
 
