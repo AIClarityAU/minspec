@@ -93,18 +93,25 @@ and replaces with a space every `//` line comment, `/* */` block comment, single
 double-quoted string, template literal (the whole literal, `${...}` included), and regular
 expression literal. A `/` opens a regex literal when the previous significant character is
 one of `( , = : [ ! & | ? { } ; + - * % < > ~ ^` or start of input, or the previous token is
-`return`, `typeof`, `case`, `in`, `of`, `delete`, `void`, `throw`, `new`; otherwise it is
-division. Inside a regex, `[...]` classes and `\` escapes are honoured. Returns `null` when
+`return`, `typeof`, `case`, `in`, `of`, `delete`, `void`, `throw`, `new`, or the previous
+significant character is a `)` that closes the head of an `if`, `while`, `for` or `with`
+(tracked with a stack that records, for each `(`, whether the keyword before it was one of
+those four); otherwise it is division. Inside a regex, `[...]` classes and `\` escapes are honoured. Returns `null` when
 `source` is not a non-empty string, or when a string, template, block comment or regex is
 still open at end of input (an unterminated construct means the lexer lost sync, so its
 output proves nothing).
 
 Why removing the whole template literal is safe in the fail direction: a call that exists
 only inside `${...}` is not counted, which can only produce a false red, never a false green.
-The same holds for every lexer mistake that swallows code; the one mistake that could
-produce a false green - treating string text as code - needs a quote to be swallowed by a
-mis-opened regex, and the self-tests in [B] pin the regex-versus-division cases the suite
-actually contains (`/x/.test(s)`, `a / b`, a regex containing a quote).
+The same holds for every lexer mistake that swallows code. The mistakes that could produce
+a false green are the ones that read literal text as code: a regex literal lexed as division
+(its body, say `foo(`, then counts as a call), or a quote swallowed by a mis-opened regex so
+that string text becomes code. The regex-opening rule above is the heuristic every
+non-parsing JavaScript lexer uses, and it is not complete JavaScript grammar, so this design
+claims no more than the [B] self-tests pin: `/x/.test(s)`, `a / b`, `(a) / b(c)` (division
+after a plain `)`, so `b(` stays code), `if (x) /foo(/.test(s)` (regex after an `if` head,
+so `foo(` is removed), and a regex containing a quote. Any other shape is unpinned, and the
+suite's own source is the only input the live case lexes.
 
 **Use test.** Over the lexed text, a name is used when a whole-word occurrence is
 immediately followed by optional whitespace and `(`, or immediately preceded by `.` and
@@ -152,7 +159,7 @@ cited title not in `titles`. Self-tests plant an invented title and an empty sou
 
 | Site at 23a58c2f | New text keeps | New citation |
 |---|---|---|
-| `isStructuralVerdictBlock` token note, 504-507 | why the tokens are exported (bash and a `run:` block cannot import them) | the ported token-shape case, `review protocol tokens: exports non-empty tokens with no separator characters` |
+| `isStructuralVerdictBlock` token note, 504-507 | why the tokens are exported (bash and a `run:` block cannot import them), and that a cross-file test pins them | the ported per-(site, token) cases for the three non-guard sites, e.g. `review protocol tokens: scripts/review-decide.sh still uses REVIEW_VERDICT_BEGIN`; never the token-shape case, which checks shape only and reads no other file |
 | `selectVotersToRun` docblock, 636-637 | that the first version matched only the fingerprint and three voters caught it | the ported cross-SHA case |
 | `selectVotersToRun` docblock, 652-653 | that recency was once satisfied only by fixture order | the ported recency and order-independence cases |
 | panel-key note, 836 | which scripts are in the panel key | `#1688 panel key: an unreadable or incomplete listing yields NO key, so nothing carries`, stating only that it pins an incomplete listing to no key; the claim that a shipped test checks what `review-branch.sh` reads is removed |
@@ -166,13 +173,26 @@ Titles are `<function>: <vitest title>`: `renderVoterRecord:` / `parseVoterRecor
 round-trip group (by the function under test), `selectVotersToRun:` for the 15 selector
 cases, `isStructuralVerdictBlock:` for the 12 structural cases, and `review protocol
 tokens:` for the token group (its subjects are constants, plus `defangProtocolTokens:` for
-the two defang cases). vitest's `expect(x).toBe(y)` becomes `assert.equal`, `toEqual`
+the two defang cases). The ten (site, token) cases are written out, each with a literal title
+of the form `review protocol tokens: <site> still uses <token value>`, and each calls one
+shared helper with its site and token; the vitest file's templated loop over `SITES` is not
+carried over, because `collectTestTitles` collects literal titles only and FR-4 cites these
+cases. The ten are: `scripts/review-decide.sh` with `REVIEW_VERDICT_BEGIN`,
+`REVIEW_VERDICT_END` and `REVIEW_UNAVAILABLE`; `scripts/review-branch.sh` with
+`REVIEW_UNAVAILABLE`; `.github/workflows/ai-review.yml` with the three; and
+`.github/scripts/ai-review-guard.js` with the three. The vitest `role` text moves into each
+case's assertion message. A further [B]-style case asserts the ten literal titles equal the
+product of the four sites and their token lists, so a site or token added later without a
+case fails by name instead of drifting. vitest's `expect(x).toBe(y)` becomes `assert.equal`, `toEqual`
 becomes `assert.deepEqual`, `toContain` becomes `assert.ok(x.includes(y))`; the
 `priorRun` / `select` fixtures move over as plain functions. The digest-mismatch case uses
 `node:crypto`, which FR-8 allows.
 
 Each of the seven FR-1 guard rails maps to at least one ported title; the mapping table, all
-32 voter-reuse titles and all 13 token titles go in the pull request body (FR-3).
+32 voter-reuse titles and all 13 token titles go in the pull request body (FR-3). The mapping
+is checked mechanically, never by eye: every quoted `it(` title in the two vitest files is
+grepped for in the shipped suite under its prefix, so cases that map to no rail (app-slug
+lower-casing, the auditable `notes`, no prior runs) are not dropped.
 
 **Sibling reads.** The token cases read `scripts/review-decide.sh`,
 `scripts/review-branch.sh`, `.github/workflows/ai-review.yml` and the guard at
@@ -188,6 +208,14 @@ After every case has a counterpart, `packages/minspec/tests/voter-survivor-reuse
 and `packages/minspec/tests/review-protocol-tokens.test.ts` are deleted. DR-097 cites the
 first at lines 43 and 151; both citations are repointed to the shipped suite and keep their
 `#2163 @ <sha>` commit addresses. DR-097 stays `accepted`; only those two lines change.
+
+## Registry comment
+
+The `ai-review-guard-test` entry in `packages/minspec/src/lib/template-registry.ts` names the
+suite's runtime siblings as `ai-review.yml` and `docs-lane.yml`. After the token port it also
+reads `scripts/review-decide.sh` and `scripts/review-branch.sh`; both are managed templates,
+so the scaffolded set stays dependency-closed, and the comment is updated to name all four.
+Comment only; no registry value changes.
 
 ## Verification
 

@@ -36,7 +36,8 @@ change.
   a planted unused name is reported; an import-list entry and a title alone are not use; a
   call and a member access are use; a stale and an unexported exemption are reported; an
   empty export set and a `null`/`undefined`/empty source report failure; an unterminated
-  string reports failure; regex-versus-division inputs lex correctly; an invented citation
+  string reports failure; regex-versus-division inputs lex correctly, including `(a) / b(c)`
+  (division, `b(` stays code) and `if (x) /foo(/.test(s)` (regex, `foo(` removed); an invented citation
   is unresolved; a source with zero citations reports failure.
   *Done when:* every [B] case is green.
 - [ ] **1.2** Same file - add the two [C] live cases.
@@ -44,20 +45,27 @@ change.
   naming exactly `selectVotersToRun`, `renderVoterRecord`, `parseVoterRecords`,
   `isStructuralVerdictBlock`, `renderVerdictBlock`, `defangProtocolTokens`, and the
   citation case fails on zero citations. The output is quoted in the pull request body as
-  the red-before evidence. Commit 1.1 and 1.2 together.
+  the red-before evidence. Do not commit 1.1 and 1.2 while 1.2 is red: CI
+  (the ci.yml lint job, line 113) and `npm test` (the #871 parity test) both run the shipped
+  suite, so a red commit breaks bisect and blocks any push between tasks. Record the output,
+  then commit 1.1 and 1.2 in the same commit as the ports in 2.1 and 2.2, once green.
 
 ## 2 - T1: the ports, written against the unchanged guard
 
 - [ ] **2.1** Same file - port the 32 cases of the voter-reuse vitest file (5 round-trip,
   15 `selectVotersToRun`, 12 `isStructuralVerdictBlock`) under the design's title scheme,
   with a named case for each of the seven FR-1 guard rails.
-  *Done when:* all 32 pass with the guard unchanged; a case that fails is a `DEEPER:` stop,
+  *Done when:* all 32 pass with the guard unchanged, and a grep of every quoted `it(` title
+  in the vitest file finds its prefixed counterpart in the shipped suite (so non-rail cases
+  such as app-slug lower-casing are not dropped); a case that fails is a `DEEPER:` stop,
   not a guard edit (INV-1).
 - [ ] **2.2** Same file - port the 13 cases of the protocol-token vitest file: the
-  token-shape case, the ten (site, token) cases over the four sites, and the two
-  `defangProtocolTokens` cases, reading siblings relative to the suite and failing by name
-  on an unreadable one.
-  *Done when:* all 13 pass, and the export case from 1.2 now fails on nothing.
+  token-shape case, the ten (site, token) cases over the four sites, each with a literal
+  title per the design, and the two `defangProtocolTokens` cases, reading siblings relative
+  to the suite and failing by name on an unreadable one; plus the case asserting the ten
+  literal titles cover every (site, token) pair.
+  *Done when:* all 13 pass with the same title grep as 2.1, the coverage case passes, and the
+  export case from 1.2 now fails on nothing. Commit 1.1 to 2.2 here, together.
 
 ## 3 - Comments and citations
 
@@ -78,12 +86,20 @@ change.
 
 ## 5 - Generated copy and full verification
 
+- [ ] **5.0** `packages/minspec/src/lib/template-registry.ts` - update the comment on the
+  `ai-review-guard-test` entry to name all four sibling files the shipped suite reads
+  (ai-review.yml, docs-lane.yml, scripts/review-decide.sh and scripts/review-branch.sh).
+  Comment only.
+  *Done when:* the comment names the four, and the managed-script-dependencies test passes.
 - [ ] **5.1** Regenerate `packages/minspec/src/lib/ci-review-templates.ts` with
   `node scripts/gen-ci-templates.mjs`; never by hand.
   *Done when:* `node scripts/gen-ci-templates.mjs --check` and `npm run validate` exit 0.
 - [ ] **5.2** Run the scratch-copy mutations in the acceptance criteria (dummy export,
   stripped `selectVotersToRun` calls, stale `parseCliVerdict` exemption, invented citation),
   each beside a clean control, in a directory outside the worktree; discard the copies.
+  Then measure which guard constants the suite still never references, and confirm each
+  protocol-relevant one is named in #1941 (`VERDICT_SCHEMA` is); the rest stay on the
+  2026-10-18 backlog line.
 - [ ] **5.3** `npm test`, `npm run lint`, `npm run typecheck`; the #871 parity test and the
   managed-region enumeration test pass.
 - [ ] **5.4** Pull request body: the red-before output from 1.2, the rail-to-title table,

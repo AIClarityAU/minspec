@@ -18,9 +18,10 @@ implements_reason: >-
   the shipped suite itself so they travel to adopters with it; owning a shared, parity-managed
   file from a defect spec would freeze it for every other change to the guard.
 # Modified, not owned. The guard changes in comments only (INV-1). ci-review-templates.ts is
-# generated (FR-7) and is never hand-edited. The two vitest files are deleted under DQ-1
+# generated (FR-7) and is never hand-edited. template-registry.ts changes in one comment
+# only: the shipped suite's runtime sibling list (task 5.1). The two vitest files are deleted under DQ-1
 # option (a); choosing option (b) removes them from this list.
-affects: [.github/scripts/ai-review-guard.js, .github/scripts/ai-review-guard.test.js, packages/minspec/src/lib/ci-review-templates.ts, packages/minspec/tests/voter-survivor-reuse.test.ts, packages/minspec/tests/review-protocol-tokens.test.ts]
+affects: [.github/scripts/ai-review-guard.js, .github/scripts/ai-review-guard.test.js, packages/minspec/src/lib/ci-review-templates.ts, packages/minspec/src/lib/template-registry.ts, packages/minspec/tests/voter-survivor-reuse.test.ts, packages/minspec/tests/review-protocol-tokens.test.ts]
 phases:
   specify: done
   clarify: done
@@ -98,16 +99,20 @@ the coverage that should exist.
 
 ### Measured
 
-- The guard exports 62 names: 41 functions and 21 constants
+The bullets down to the re-measurement bullet were measured at `origin/main` `f3850fde`,
+when this spec was written; each carries that prefix. The re-measurement bullet gives the
+numbers at `23a58c2f`, which FR-5a and the acceptance criteria are written against.
+
+- At `f3850fde`: the guard exports 62 names: 41 functions and 21 constants
   (`.github/scripts/ai-review-guard.js:1960-2023`, counted with `Object.keys(require(...))`
   and `typeof`).
-- 9 of the 41 functions do not appear in the shipped suite outside comments:
+- At `f3850fde`: 9 of the 41 functions did not appear in the shipped suite outside comments:
   `selectVotersToRun`, `renderVoterRecord`, `parseVoterRecords`, `isStructuralVerdictBlock`
   (the #2163 four), `renderVerdictBlock`, `defangProtocolTokens`, `parseCliVerdict`,
   `isQuotaExhaustionStrict`, `wholeCheckRunListing`. The same nine, and only those, fail
   FR-5's stricter "used" test (a call or member access after comments and string literals
   are stripped; re-measured 2026-10-18 by the independent approver), so the T0 red count
-  below holds under either reading. 6 constants are likewise absent:
+  held under either reading. 6 constants were likewise absent:
   `VOTER_RECORD_PREFIX`, `VERDICT_END_TOKEN`, `UNAVAILABLE_TOKEN`, `ROUND_RECORD_PREFIX`,
   `VERDICT_SCHEMA`, `PENDING`.
 - `voter-survivor-reuse.test.ts` holds 32 cases in three groups (round-trip, 5;
@@ -116,7 +121,8 @@ the coverage that should exist.
   `scripts/review-decide.sh`, `scripts/review-branch.sh`, `.github/workflows/ai-review.yml`
   and the guard itself. All three sibling files are themselves shipped generator sources
   (`scripts/gen-ci-templates.mjs` `CI_TEMPLATE_SOURCE_PATHS`).
-- The shipped suite passes 185 of 185 under `node --test` and runs in CI on every pull
+- At `f3850fde`: the shipped suite passed 185 of 185 under `node --test` (190 of 190 at
+  `23a58c2f`, below). It runs in CI on every pull
   request with no path filter (`.github/workflows/ci.yml:113`, job `lint`). Under `npm test`
   it runs too, as a scaffolded copy, through
   `packages/minspec/tests/ai-review-guard-test-parity.test.ts:214`. Moving a case from
@@ -138,9 +144,9 @@ the coverage that should exist.
   does exercise (lines 310, 363, 452, 1200, 1860). Line 694's "(#2163 review)" cites a
   review finding, not a test.
 - `parseCliVerdict`, `defangProtocolTokens`, `renderVerdictBlock` and `VERDICT_SCHEMA` are
-  the subject of #1941 (port 38 tests salvaged in scroogellm#160). `isQuotaExhaustionStrict`
-  and `wholeCheckRunListing` had no tracking item; #2897 was filed for them while writing
-  this spec.
+  the subject of #1941 (port 38 tests salvaged in scroogellm#160). At `f3850fde`,
+  `isQuotaExhaustionStrict` and `wholeCheckRunListing` had no tracking item; #2897 was
+  filed for them while writing this spec, and #2901 closed it.
 - **Re-measured at `origin/main` `23a58c2f` (2026-10-18, Plan phase), after #2901 merged.**
   #2901 (closing #2897) added shipped cases for `isQuotaExhaustionStrict` and
   `wholeCheckRunListing`, so the suite now passes 190 of 190 and 7 of the 41 function
@@ -185,7 +191,9 @@ the coverage that should exist.
 - **FR-2 - The protocol-token pin is in the shipped suite.** The cases of
   `review-protocol-tokens.test.ts` are ported the same way: the token-shape case, one case
   per (site, token) pair over the four sites it lists, and the two `defangProtocolTokens`
-  cases. Sibling files are read relative to the suite's own location. A sibling that cannot
+  cases. Each (site, token) case has a literal title naming its site and token, never a
+  templated one, because FR-6 resolves citations against literal titles only and FR-4
+  cites these cases. Sibling files are read relative to the suite's own location. A sibling that cannot
   be read fails its case and names the path (constitution invariant 2); it is never skipped.
 - **FR-3 - No duplicate copies (DQ-1, option a).** Once every case of a vitest file has a
   shipped counterpart, that vitest file is deleted. The pull request body carries the
@@ -195,8 +203,9 @@ the coverage that should exist.
   which stay true. No other wording in DR-097 changes.
 - **FR-4 - Guard comments cite only tests a reader of the shipped files can find.** The four
   comments in the Measured table are rewritten. A comment that cites a test does so in one
-  fixed form, `ai-review-guard.test.js: "<exact test title>"`. Lines 504-507 cite the ported
-  token pin. Lines 636-637 and 652-653 keep their history (that the first version was wrong
+  fixed form, `ai-review-guard.test.js: "<exact test title>"`. Lines 504-507 claim a
+  cross-file pin, so they cite the ported per-(site, token) cases that read the sibling
+  files, never the token-shape case, which checks shape only and reads no other file. Lines 636-637 and 652-653 keep their history (that the first version was wrong
   and three voters caught it) and cite the ported cross-SHA and recency cases as what now
   pins the fix. Line 836 stops claiming that a shipped test checks what `review-branch.sh`
   reads, because none does; it may cite the existing shipped case that pins which scripts
