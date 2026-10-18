@@ -834,4 +834,12 @@ scripts/ holds the dev-time automation that starts headless agents: issue dispat
 <!-- dr-summary:DR-106 auto=ed677406570b -->
 On 2026-10-17 the founder asked for a review of the constitution, rules, memory, principles and decision records against two priorities, in this order (queue item in2): The core-tenets review (2026-10-17, run outside this repository) found the corpus leaning toward over-specification. The figures, and where each can be checked:
 <!-- /dr-summary:DR-106 -->
+
+## [DR-109 — The AI review panel scales by risk, but specs are never the low tier - specs get at least the machinery voter count, and one voter is allowed only for non-spec prose](DR-109.md)
+
+*Status: proposed · Date: 2026-10-17*
+
+<!-- dr-summary:DR-109 auto=01ee89682199 -->
+The core-tenets review proposed one voter for docs and T1, and four for machinery and T3/T4 (DR-033 §6, DR-047), to save tokens under core tenet 2. The founder accepted it with an amendment: specs are "the pointy end, where you have to get it right, as everything downstream depends on it". The recommendation also said to measure voter disagreement before landing it.
+<!-- /dr-summary:DR-109 -->
 <!-- minspec:dr-index:end -->
