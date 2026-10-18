@@ -41,6 +41,7 @@ import {
   openPullRequest,
   resolveHeadSha,
   slugFromOriginUrl,
+  splitCommitMessage,
   type ExecRun,
 } from '../src/lib/approval-pr';
 import type { ApprovalRecord } from '../src/lib/approval';
@@ -193,6 +194,53 @@ describe('buildPrCreateArgs', () => {
     const none = buildPrCreateArgs({ head: 'h', title: 't', body: 'b', labels: [] });
     expect(none).not.toContain('--label');
     expect(none).not.toContain(DOCS_LANE_LABEL);
+  });
+});
+
+// =============================================================================
+// splitCommitMessage — the TS twin of push-docs.sh's pr_title/pr_rest split
+// (#1606 in the bash copy, #1883 here). Pure — no I/O.
+// =============================================================================
+
+describe('splitCommitMessage (#1883)', () => {
+  it('a subject + blank line + body splits into just the subject as title, rest as body', () => {
+    const longBody = 'x'.repeat(300);
+    const message = `docs(DR-102): wire note\n\nRoot cause: ${longBody}`;
+    const { title, body } = splitCommitMessage(message);
+    expect(title).toBe('docs(DR-102): wire note');
+    expect(title.length).toBeLessThanOrEqual(256);
+    expect(body).toBe(`Root cause: ${longBody}`);
+  });
+
+  it('a single-line message over 256 chars is truncated to a title on a word boundary', () => {
+    const message = 'docs(DR-103): ' + Array.from({ length: 40 }, (_, i) => `word${i}word`).join(' ');
+    expect(message.length).toBeGreaterThan(256);
+    const { title, body } = splitCommitMessage(message);
+    expect(title.length).toBeLessThanOrEqual(256);
+    // Truncated on a word boundary: title is a clean prefix of the message up
+    // to some space, never a mid-word cut.
+    expect(message.startsWith(title)).toBe(true);
+    expect(message[title.length]).toBe(' ');
+    expect(body).toBe('');
+  });
+
+  it('a message with no newline is the title verbatim (when within the cap), empty body', () => {
+    const { title, body } = splitCommitMessage('docs: short subject');
+    expect(title).toBe('docs: short subject');
+    expect(body).toBe('');
+  });
+
+  it('a subject immediately followed by body text (no blank separator line) keeps the body intact', () => {
+    const { title, body } = splitCommitMessage('subject\nbody line 1\nbody line 2');
+    expect(title).toBe('subject');
+    expect(body).toBe('body line 1\nbody line 2');
+  });
+
+  it('an exactly-256-char subject is not truncated', () => {
+    const subject = 'a'.repeat(256);
+    const { title } = splitCommitMessage(subject);
+    expect(title).toBe(subject);
+    expect(title.length).toBe(256);
   });
 });
 

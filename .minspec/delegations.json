@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "_comment": "Delegations the founder gave in his own words. Each covers nothing until its decision record is accepted (scripts/lib/autonomy.ts evaluateDelegation). memory-fabric is never delegated. A delegated approval is recorded under minspec-sdd[bot], never the founder. See DR-108.",
+  "delegations": [
+    {
+      "id": "DLG-001",
+      "decision": "DR-108",
+      "words": "the specs are well defined enough thus far, so i'm happy to greenlight all future development, provided you keep that ratio in mind.",
+      "said": "2026-10-17",
+      "source": "Founder to his chief-of-staff session, queue item in5 (the operator task queue, outside this repo). The ratio is 333Method's 3:1 bugfixes to functionality.",
+      "repo": "AIClarityAU/minspec",
+      "covers": ["spec-approval", "engineering-dr-acceptance"],
+      "tiers": ["T1", "T2", "T3", "T4"],
+      "reviewBy": "2027-01-17",
+      "tripwire": { "metric": "repeat-fix-share", "max": 0.13 }
+    }
+  ]
+}

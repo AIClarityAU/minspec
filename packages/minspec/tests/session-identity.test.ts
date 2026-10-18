@@ -184,7 +184,37 @@ describe('session-identity — the last full check, with its age', () => {
     seedLast('FAIL — 1 path(s) yield a GitHub USER credential', 60);
     const { out } = run();
     expect(out).toContain('FAILED inside the container');
+    expect(out).toContain('A founder credential may be reachable');
     expect(out).toContain('tell the human before any GitHub write');
+    expect(out).not.toContain('availability failure');
+  });
+
+  it('#2044 — a fail-closed "could not be verified" FAIL reads as availability, not a leak', () => {
+    stub({ locRc: 0 });
+    seedLast('FAIL — 6 path(s) could not be verified (fail-closed)', 60);
+    const { out } = run();
+    expect(out).toContain('AVAILABILITY failure, not a confirmed credential leak');
+    expect(out).toContain('token broker is down');
+    expect(out).not.toContain('may be reachable');
+    expect(out).not.toContain('tell the human before any GitHub write');
+  });
+
+  it('#2044 — names the first unverified path inline when the record carries one', () => {
+    stub({ locRc: 0 });
+    fs.mkdirSync(path.dirname(lastFile()), { recursive: true });
+    fs.writeFileSync(
+      lastFile(),
+      [
+        '[clean]   gh auth status',
+        '[unverifiable] /usr/local/bin/agent-git-credential (broker exit 1)',
+        'IDENTITY-BOUNDARY [container (stub)]: FAIL — 6 path(s) could not be verified (fail-closed)',
+        '',
+      ].join('\n'),
+    );
+    const t = Date.now() / 1000 - 60;
+    fs.utimesSync(lastFile(), t, t);
+    const { out } = run();
+    expect(out).toContain('First unverified: [unverifiable] /usr/local/bin/agent-git-credential (broker exit 1).');
   });
 
   it('an old result says STALE and starts a new run', async () => {

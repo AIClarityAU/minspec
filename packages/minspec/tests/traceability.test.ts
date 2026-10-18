@@ -36,6 +36,9 @@ describe('traceability', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-trace-test-'));
+    // SPEC-096: traceability.json lives in `.minspec/`, so it is written only in a
+    // folder that has opted in. The store used to create that directory itself.
+    fs.mkdirSync(path.join(tmpDir, '.minspec'));
   });
 
   afterEach(() => {
@@ -79,7 +82,11 @@ describe('traceability', () => {
   });
 
   describe('saveTraceability()', () => {
-    it('creates .minspec directory and file', () => {
+    // Retitled by SPEC-096: this used to say the store creates `.minspec/`. It no
+    // longer does (that directory is the opt-in marker); it writes its file into
+    // one that exists. The refusal with no marker is in
+    // opt-in-writer-inventory.test.ts.
+    it('writes traceability.json into an existing .minspec directory', () => {
       const data: TraceabilityData = {
         'SPEC-001': { requirements: { req1: { files: ['a.ts:1'], tests: [] } } },
       };

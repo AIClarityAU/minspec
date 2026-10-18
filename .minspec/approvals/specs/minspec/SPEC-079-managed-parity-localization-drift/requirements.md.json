@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-079-managed-parity-localization-drift/requirements.md",
+  "specHash": "ffb0e6bafa7cfd41d1a23f5b26432d07f8c2644c7a152c7b98576e1a6a9c29e9",
+  "approvedAt": "2026-09-30T22:08:50.128Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "712eef3eb910d4c31d8cd175222309559e807aa8"
+}
