@@ -51,17 +51,17 @@ Covers **FR-1, FR-2, FR-14**, FR-9 (hero row), **INV-1, INV-2, INV-6**.
 Thinnest end-to-end path: open the command → render current state offline → run init.
 
 ### T0 — Invariants (write first, before implementation)
-- [ ] `packages/minspec/tests/getting-started.test.ts` (**new — owned**) — **INV-1 / AC-1**:
+- [x] `packages/minspec/tests/getting-started.test.ts` (**new — owned**) — **INV-1 / AC-1**:
       a network-recording harness asserts **zero** network/external calls on open+render
       (no `fetch`, no `https`, no `gh`/child-process spawn), including the identity seed.
-- [ ] same file — **INV-2 / AC-2**: a structure assertion that the rendered HTML contains
+- [x] same file — **INV-2 / AC-2**: a structure assertion that the rendered HTML contains
       **no** progress-meter / "N of M" / percentage-complete element. Written as a
       deny-list on the markup, so a later slice cannot reintroduce one silently.
-- [ ] same file — **AC-11 (FR-15)**: no reading-time and no conformance
+- [x] same file — **AC-11 (FR-15)**: no reading-time and no conformance
       (`minspec.conformance.enabled`) control is present anywhere on the page.
 
 ### T1 — Contract
-- [ ] `packages/minspec/tests/onboarding-settings.test.ts` (**new — owned**) — the pure
+- [x] `packages/minspec/tests/onboarding-settings.test.ts` (**new — owned**) — the pure
       `buildOnboardingModel()` returns the design.md §API row inventory: every row's
       `settingId` / `commandId` is a **real** contributed key or registered command
       (assert against `package.json` `contributes`, not a hand-copied literal), tiers are
@@ -69,23 +69,23 @@ Thinnest end-to-end path: open the command → render current state offline → 
       config + the offline `resolveApproverEmail` read.
 
 ### Implementation
-- [ ] `packages/minspec/src/lib/onboarding-settings.ts` (**new — owned**) — the pure
+- [x] `packages/minspec/src/lib/onboarding-settings.ts` (**new — owned**) — the pure
       `OnboardingModel` / `OnboardingRow` builder (design.md §API/Contracts). No vscode
       webview imports, no network; reads current config values and the offline
       `resolveApproverEmail` seed ([approve.ts:92](../../../packages/minspec/src/commands/approve.ts#L92)).
-- [ ] `packages/minspec/src/views/getting-started-webview.ts` (**new — owned**) — the
+- [x] `packages/minspec/src/views/getting-started-webview.ts` (**new — owned**) — the
       webview panel: four-point primer, hero *Initialize SDD structure* → `minspec.init`,
       read-only tiered render, Phase-2 banner (INV-6). **Strict CSP**, theme tokens only
       (`var(--vscode-*)`), no remote resources — the CSP is what makes AC-1 hold by
       construction, not just by test.
-- [ ] `packages/minspec/src/commands/getting-started.ts` (**new — owned**) — registers
+- [x] `packages/minspec/src/commands/getting-started.ts` (**new — owned**) — registers
       `minspec.gettingStarted`, opens/reveals the single panel (re-openable, never a
       one-shot modal — FR-1).
-- [ ] `packages/minspec/package.json` (**affects**) — contribute the
+- [x] `packages/minspec/package.json` (**affects**) — contribute the
       `minspec.gettingStarted` command; point the existing *Get Started with MinSpec*
       walkthrough steps at `command:minspec.gettingStarted` (D1 — deep-link, don't
       duplicate).
-- [ ] `packages/minspec/src/extension.ts` (**affects**) — register the command in
+- [x] `packages/minspec/src/extension.ts` (**affects**) — register the command in
       `activate`; **no panel is opened at activation** (constitution Constraints: cheap,
       side-effect-free activation).
 
@@ -101,15 +101,15 @@ Covers **FR-4, FR-6, FR-7, FR-10, FR-13**, FR-9 (meta-toggle + shortcut labels),
 **INV-3, INV-5**.
 
 ### T0 — Invariants (first)
-- [ ] `getting-started.test.ts` — **INV-3 / AC-3**: a page dismissal round-trips through
+- [x] `getting-started.test.ts` — **INV-3 / AC-3**: a page dismissal round-trips through
       the [#883] `answeredSignatures` model
       ([auto-bootstrap.ts:68](../../../packages/minspec/src/lib/auto-bootstrap.ts#L68))
       — dismissed item stays hidden, and **reappears** once its state signature changes.
       Asserts **no second dismissal store** is created (D2).
-- [ ] `getting-started.test.ts` — **INV-5**: `silentRefresh` renders **disabled with a
+- [x] `getting-started.test.ts` — **INV-5**: `silentRefresh` renders **disabled with a
       "Planned" tag** and is not writable from the page (it is not a contributed setting;
       a live no-op toggle would fail this test).
-- [ ] `packages/minspec/tests/advance-phase-default.test.ts` (**new — owned**) —
+- [x] `packages/minspec/tests/advance-phase-default.test.ts` (**new — owned**) —
       **INV-5 / FR-6 back-compat**: with the contributed default flipped to `true`, a user
       who has **explicitly** set `minspec.advancePhaseOnApprove: false` still reads
       `false` through
@@ -117,24 +117,24 @@ Covers **FR-4, FR-6, FR-7, FR-10, FR-13**, FR-9 (meta-toggle + shortcut labels),
       This is the one irreversible-feeling change in the spec — it gets its own test.
 
 ### T1 — Contract
-- [ ] `onboarding-settings.test.ts` — **AC-7 (FR-10)**: `rowClickToggles` is `true`
+- [x] `onboarding-settings.test.ts` — **AC-7 (FR-10)**: `rowClickToggles` is `true`
       **only** for non-planned `kind: 'toggle'` rows. Truth-tabled over: email row,
       coverage row, approvals/multi row, refresh row (secondary action), planned
       `silentRefresh` row, plain toggle row.
 
 ### Implementation
-- [ ] `onboarding-settings.ts` — the `rowClickToggles` derivation (D7) and
+- [x] `onboarding-settings.ts` — the `rowClickToggles` derivation (D7) and
       `planned: true` for `silentRefresh` ([#186]).
-- [ ] `getting-started-webview.ts` — toggle rows write via
+- [x] `getting-started-webview.ts` — toggle rows write via
       `workspace.getConfiguration('minspec').update(key, value, scope)`, honoring each
       setting's declared scope; `approverEmail` (`scope: application` —
       [package.json:510](../../../packages/minspec/package.json#L510), machine-wide) is
       **never** written by the page (constitution invariant 3, FR-5); whole-row click
       handler bound **only** where `rowClickToggles`; Space/Enter flips the focused
       switch; Tab order follows visual order.
-- [ ] `getting-started-webview.ts` — the **"Show setting ids"** meta-toggle, **default
+- [x] `getting-started-webview.ts` — the **"Show setting ids"** meta-toggle, **default
       off** (FR-9), and the footer master `minspec.autoBootstrap.enabled` (FR-13).
-- [ ] `getting-started-webview.ts` — render each row's keybinding where one exists
+- [x] `getting-started-webview.ts` — render each row's keybinding where one exists
       (inline/tooltip, always visible — hotkey-visibility rule); rows without a binding
       do **not** invent one.
 - [ ] `packages/minspec/package.json` (**affects**) — flip
@@ -143,7 +143,7 @@ Covers **FR-4, FR-6, FR-7, FR-10, FR-13**, FR-9 (meta-toggle + shortcut labels),
       `commitOnApprove` label copy to the single unified consent wording (FR-7:
       "commit MinSpec's own changes (approvals + harness refreshes); never pushed
       automatically").
-- [ ] `packages/minspec/src/lib/auto-bootstrap.ts` (**affects — reuse only**) — page
+- [x] `packages/minspec/src/lib/auto-bootstrap.ts` (**affects — reuse only**) — page
       dismissals call the existing `loadPreferences`/`savePreferences` +
       `answeredSignatures`. **No behavior change to the module**; if this task starts
       needing one, stop — that is a different spec.
@@ -161,7 +161,7 @@ Covers **FR-5, FR-8, FR-11, FR-12, FR-16, FR-17, FR-14**, **INV-1, INV-4**.
 This is the only slice that introduces an external read — every one of them is a click.
 
 ### T0 — Invariants (first)
-- [ ] `getting-started.test.ts` — **INV-1/INV-4 / AC-14**: the `gh api user` read fires
+- [x] `getting-started.test.ts` — **INV-1/INV-4 / AC-14**: the `gh api user` read fires
       **only** on an explicit *Verify against GitHub* click, **never** on the identity
       row's first render; before that click the row shows the offline value with zero
       network; on an air-gapped host (spawn fails / `gh` absent) the page renders without
@@ -179,7 +179,7 @@ This is the only slice that introduces an external read — every one of them is
       spurious sign-off through (#974). The page must never mint a sign-off; DR-056
       ([approve.ts:240](../../../packages/minspec/src/commands/approve.ts#L240)) stays the
       sole adjudicator.
-- [ ] `getting-started.test.ts` — **FR-14 / AC-6, AC-12, AC-13**: render-only tests assert
+- [x] `getting-started.test.ts` — **FR-14 / AC-6, AC-12, AC-13**: render-only tests assert
       `minspec.backfillEpics`, `minspec.initRefresh`, and the GitHub-PR-extension install
       path each fire **zero** times on render, and exactly once on their button click.
       AC-13 explicitly fails an implementation that **omits** the Install button.
@@ -188,13 +188,13 @@ This is the only slice that introduces an external read — every one of them is
       the Scrooge row) and renders it **on** with no off-control.
 
 ### T1 — Contract
-- [ ] `onboarding-settings.test.ts` — `ApproverIdentity`: `value` is the offline
+- [x] `onboarding-settings.test.ts` — `ApproverIdentity`: `value` is the offline
       `resolveApproverEmail` seed with no network; `valid` is a pure email-format check;
       `divergesFromGh` is **false whenever `ghLogin === null`** (i.e. impossible before a
       verify click) and true only for valid-but-different — truth-tabled.
 
 ### Implementation
-- [ ] `onboarding-settings.ts` — `ApproverIdentity` compute (offline seed + format check;
+- [x] `onboarding-settings.ts` — `ApproverIdentity` compute (offline seed + format check;
       divergence computable only post-verify).
 - [ ] `getting-started-webview.ts` — the approver email field (offline seed, editable, not
       hard-locked, validated but **never saved** by the page), the **"Open in Settings"**
@@ -202,21 +202,21 @@ This is the only slice that introduces an external read — every one of them is
       `gh api user` shell-out — D4), and the **non-blocking amber** divergence line
       (`--vscode-editorWarning-foreground`) reading *"differs from your GitHub login —
       approvals under this email can't be auto-verified."*
-- [ ] `getting-started-webview.ts` — **Backfill with AI** button → `minspec.backfillEpics`
+- [x] `getting-started-webview.ts` — **Backfill with AI** button → `minspec.backfillEpics`
       with `{ aiConsent: true }` on click only (mirrors
       [auto-bootstrap.ts:592](../../../packages/minspec/src/lib/auto-bootstrap.ts#L592));
       `minspec.autoBackfillUseAi` is deliberately **not** rendered (FR-8).
-- [ ] `getting-started-webview.ts` — **Refresh now** button → existing
+- [x] `getting-started-webview.ts` — **Refresh now** button → existing
       `minspec.initRefresh` on click only (FR-16); its row is excluded from row-click
       (FR-10).
-- [ ] `getting-started-webview.ts` — **Install** button → the existing
+- [x] `getting-started-webview.ts` — **Install** button → the existing
       [`offerGitHubPrExtensionAdvisory` install path](../../../packages/minspec/src/commands/init.ts#L707)
       on click only (FR-17). **No new install logic.**
 - [ ] `getting-started-webview.ts` — the coverage number field bound to
       `minspec.coverage.minimumPercentage`, helper copy **verbatim from**
       [package.json:528](../../../packages/minspec/package.json#L528) (FR-11 / AC-9); and
       the Scrooge nudge row rendered **on** with no off-control (FR-12).
-- [ ] `packages/minspec/src/commands/init.ts` (**affects — reuse only**) — expose/reuse the
+- [x] `packages/minspec/src/commands/init.ts` (**affects — reuse only**) — expose/reuse the
       existing install + refresh entry points for the buttons. No new network capability
       beyond the click-gated `gh api user` read named in D4.
 
@@ -238,7 +238,7 @@ requirements FR-1..FR-17 with every external action click-gated.
 - [ ] **Manual verification** — install the built `.vsix` (bump version; same-version
       `--force` reinstall is unreliable), reload, and confirm the page opens, persists,
       and re-opens with the dismissals remembered.
-- [ ] **Retire nothing silently** — the six activation toasts stay under
+- [x] **Retire nothing silently** — the six activation toasts stay under
       `autoBootstrap.enabled`; if implement finds a toast made redundant, that is a
       **follow-up issue**, not an in-scope deletion (requirements Out of scope).
 
