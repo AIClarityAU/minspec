@@ -771,6 +771,10 @@ const CLASSIFICATION: Readonly<Record<string, readonly [CommandClass, string]>> 
   'minspec.constitutionShowPrompt': ['no-marker-write', 'Opens a prompt in an untitled editor.'],
   'minspec.constitutionCompact': ['no-marker-write', 'Rewrites a constitution that already exists; says so when there is none.'],
   'minspec.classify': ['no-marker-write', 'Reads the diff. Its two persisting buttons are offered only when opted in (#2355).'],
+  'minspec.gettingStarted': [
+    'no-marker-write',
+    'SPEC-042: opens a webview that reads settings; every write hangs off a click, and a dismissal is only offered once opted in.',
+  ],
   'minspec.status': ['no-marker-write', 'Read-only: opens the active spec and reports the running build.'],
   'minspec.nextTask': ['no-marker-write', 'Read-only: opens the next artifact that needs a human.'],
   'minspec.refreshTree': ['no-marker-write', 'Re-draws the Specs and Decisions panes.'],
@@ -1049,6 +1053,12 @@ async function open(dir: string, kind: FixtureKind, options: OpenOptions = {}): 
   // Spec is not stopped by whatever git identity this machine happens to have
   // (in CI there is none; in an agent container it is the bot, which is denied).
   host.settings.set('minspec.approverEmail', 'human@example.com');
+  // The follow-up prompt ("Advance to next phase" / "Always") is offered only to someone who has
+  // not turned auto-advance on. SPEC-042 FR-6 made ON the contributed default, so a fixture that
+  // sets nothing is a user who never sees that prompt, and the tests below that answer "Always"
+  // would exercise nothing. This is the explicit prior `false` a user of the old default holds
+  // (the case advance-phase-default.test.ts pins as preserved), which keeps the prompt on screen.
+  host.settings.set('minspec.advancePhaseOnApprove', false);
   if (kind === 'primed, specsDir and decisionsDir inside .minspec/') {
     host.settings.set('minspec.specsDir', '.minspec/specs');
     host.settings.set('minspec.decisionsDir', '.minspec/decisions');

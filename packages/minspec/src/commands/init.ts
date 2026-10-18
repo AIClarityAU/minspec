@@ -1096,6 +1096,23 @@ export function resolveGitHubPrExtensionLearnMoreUrl(appName: string): string {
     : GITHUB_PR_EXTENSION_OPEN_VSX_URL;
 }
 
+/** The one install path: the host's own `workbench.extensions.installExtension` command. */
+async function defaultInstallExtension(id: string): Promise<void> {
+  await vscode.commands.executeCommand('workbench.extensions.installExtension', id);
+}
+
+/**
+ * Install the GitHub PR extension with no prompt of its own (SPEC-042 FR-17). The caller
+ * must already hold the user's explicit click: the Getting Started page's "Install" button
+ * is that click, so asking again through the advisory toast would be a second consent for
+ * one action. Same id, same command as {@link offerGitHubPrExtensionAdvisory}'s "Install".
+ */
+export async function installGitHubPrExtension(
+  install: (id: string) => Promise<void> = defaultInstallExtension,
+): Promise<void> {
+  await install(GITHUB_PR_EXTENSION_ID);
+}
+
 /** Dependencies for {@link offerGitHubPrExtensionAdvisory}, injectable for tests. */
 export interface GitHubPrExtAdvisoryDeps {
   /** Whether `folder` is a git working tree. Defaults to the same `.git`-existence check the other advisories use. */
@@ -1139,11 +1156,7 @@ export async function offerGitHubPrExtensionAdvisory(
       deps.isInstalled ?? ((id: string) => vscode.extensions.getExtension(id) !== undefined);
     if (isInstalled(GITHUB_PR_EXTENSION_ID)) return; // already have it — nothing to do
 
-    const install =
-      deps.install ??
-      (async (id: string) => {
-        await vscode.commands.executeCommand('workbench.extensions.installExtension', id);
-      });
+    const install = deps.install ?? defaultInstallExtension;
     const openExternal =
       deps.openExternal ?? ((url: string) => vscode.env.openExternal(vscode.Uri.parse(url)));
 
