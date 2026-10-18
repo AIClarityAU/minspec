@@ -555,7 +555,7 @@ describe('INV-1 / INV-4 / AC-14 - the gh read is click-gated', () => {
   });
 });
 
-describe('INV-4 / AC-5 (as narrowed, see PR) - the approver field mints no sign-off and writes no machine-wide setting', () => {
+describe('INV-4 / AC-5 - the approver field mints no sign-off and writes no machine-wide setting', () => {
   it('a full interaction leaves the approval store byte-identical', async () => {
     const folder = tmpFolder({ optedIn: true });
     const store = path.join(folder, '.minspec', 'approvals', 'specs', 'minspec', 'SPEC-001-x');
