@@ -20,6 +20,7 @@ const {
   isQuotaExhaustion,
   isQuotaExhaustionStrict,
   wholeCheckRunListing,
+  CHECK_RUNS_PAGE_SIZE,
   parseAllowlist,
   isAuthorizedReviewer,
   decideProvenanceRevert,
@@ -2426,9 +2427,16 @@ test('isQuotaExhaustionStrict: does not fire on review prose that merely discuss
 });
 
 test('isQuotaExhaustionStrict: never wider than the loose predicate', () => {
-  for (const s of ['Claude AI usage limit reached', 'weekly limit', 'HTTP 429', 'resets in 12 minutes']) {
-    if (isQuotaExhaustionStrict(s)) assert.equal(isQuotaExhaustion(s), true, s);
+  const samples = ['Claude AI usage limit reached', 'weekly limit', 'HTTP 429', 'resets in 12 minutes',
+    'the quota classifier', 'rate limit', 'overloaded', 'insufficient credit', 'plain text', ''];
+  let strictHits = 0;
+  for (const s of samples) {
+    if (isQuotaExhaustionStrict(s)) {
+      strictHits += 1;
+      assert.equal(isQuotaExhaustion(s), true, s);
+    }
   }
+  assert.ok(strictHits > 0, 'the subset check must exercise at least one strict match');
 });
 
 // ── wholeCheckRunListing (#2897) ─────────────────────────────────────────────
@@ -2443,7 +2451,7 @@ test('wholeCheckRunListing: accepts a listing whose count matches and is under a
 
 test('wholeCheckRunListing: refuses anything not provably whole, with a reason', () => {
   const run = { id: 1 };
-  const full = Array.from({ length: 100 }, () => run);
+  const full = Array.from({ length: CHECK_RUNS_PAGE_SIZE }, () => run);
   for (const [name, listing] of [
     ['bare array', [run]],
     ['null', null],
@@ -2452,7 +2460,7 @@ test('wholeCheckRunListing: refuses anything not provably whole, with a reason',
     ['non-integer count', { total_count: '1', check_runs: [run] }],
     ['negative count', { total_count: -1, check_runs: [] }],
     ['count mismatch', { total_count: 2, check_runs: [run] }],
-    ['full page', { total_count: 100, check_runs: full }],
+    ['full page', { total_count: CHECK_RUNS_PAGE_SIZE, check_runs: full }],
   ]) {
     const r = wholeCheckRunListing(listing, 'abc1234');
     assert.equal(r.ok, false, name);
