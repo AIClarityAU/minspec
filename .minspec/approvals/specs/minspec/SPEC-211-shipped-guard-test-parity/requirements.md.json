@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-211-shipped-guard-test-parity/requirements.md",
-  "specHash": "d733b4f9d1de0f7c00c52291af901d8c9bb59cb83d3b32343fdbb5324b878a4a",
-  "approvedAt": "2026-10-18T07:47:42.387Z",
+  "specHash": "26a9dfa730371a4efe5c9bfbfea52f6b30cf18a02df422ca0033868b083abb30",
+  "approvedAt": "2026-10-18T09:27:26.322Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T3",
   "migrated": false,
-  "baselineBlob": "54640d26ba2afaded3228b8c9d5e3bcd64d27f56"
+  "baselineBlob": "14ef3a86cbfe4cc4704fdb2d94cdb5520b239105"
 }
