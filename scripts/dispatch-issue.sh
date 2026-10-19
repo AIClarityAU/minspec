@@ -168,6 +168,7 @@ if [[ ! -d "${REPO_ROOT}/.minspec" ]]; then
 fi
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/lib/agent-context.sh"
+agent_caveman_init
 # Agent writes carry the BOT's identity, never the human's (#1355). This arms a
 # `gh` wrapper; acquiring the token is LAZY, so reads pass through untouched and
 # only the first WRITE mints — aborting there, loudly, if it cannot.
@@ -1827,6 +1828,7 @@ shepherd_fix() {
   echo "  Dispatching a fresh fix agent into the warm worktree (no re-clone)..."
   (cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$fix_prompt" \
        "${AGENT_CONTEXT_ARGS[@]}" \
+       ${AGENT_CAVEMAN_ARGS[@]+"${AGENT_CAVEMAN_ARGS[@]}"} \
        "${SYS_PROMPT_ARGS[@]}" \
        --model "$RUN_MODEL" \
        --allowedTools "$ALLOWED_TOOLS" \
@@ -2106,6 +2108,7 @@ fi
 # removed (the autocompact override, #1203) is not on the list, so it is still dropped.
 if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude -p "$RUN_PROMPT" \
       "${AGENT_CONTEXT_ARGS[@]}" \
+      ${AGENT_CAVEMAN_ARGS[@]+"${AGENT_CAVEMAN_ARGS[@]}"} \
       "${SYS_PROMPT_ARGS[@]}" \
       --model "$RUN_MODEL" \
       --allowedTools "$ALLOWED_TOOLS" \
