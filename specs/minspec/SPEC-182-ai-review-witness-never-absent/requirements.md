@@ -11,7 +11,7 @@ relates_to: [DR-090, "#1925", "#1834", "#1839", "#1120", "#486", "#1728", "#1688
 # Ownership declared in Specify, before approval mints a hash (SPEC-038). Nothing is
 # built from this spec until it is approved. The work lands in .github/workflows, which
 # the App cannot push (#1120): a human pushes it.
-affects: [.github/workflows/ai-review.yml, .github/scripts/ai-review-guard.js]
+affects: [.github/workflows/ai-review.yml, .github/scripts/ai-review-guard.js, scripts/gen-ci-templates.mjs, packages/minspec/src/lib/hook-templates.ts, packages/minspec/tests/managed-region-templates.test.ts]
 phases:
   specify: in-progress
   clarify: pending
@@ -114,7 +114,12 @@ from the head, with no version handshake (#1834), which makes the failure reacha
   errored witness fails closed and visibly, with a second producer (the guard-free
   fallback) so one fault in the guard cannot disable the check.
 - **Invariant 1 (offline)** unaffected: CI-only, no extension network calls.
-- **Invariant 3 (blast radius)** unaffected: edits only this repo's own workflow.
+- **Invariant 3 (blast radius)** holds, but not because the edit is local. Both
+  `ai-review.yml` and `ai-review-guard.js` are managed templates (`scripts/gen-ci-templates.mjs`
+  `SOURCES`, regenerated into `packages/minspec/src/lib/hook-templates.ts` and checked by
+  `managed-region-templates.test.ts`), so the change reaches every adopter on Refresh Harness
+  Files. It stays inside the blast radius because adopters opt in via `.minspec/`; the
+  regenerated template and its parity test are part of this change.
 - Trusted-input discipline stays: only App token, repo slug, GitHub-assigned SHAs and our
   own gate's outputs reach the shell; no PR-controlled text in the fallback summary.
 - The fallback must not mask a real verdict: it is only reachable on compute failure.
@@ -145,3 +150,6 @@ from the head, with no version handshake (#1834), which makes the failure reacha
   apart from a changes verdict except by title, so the title must say "could not compute".
 - **D5 - Delivery.** The change is in `.github/workflows/`, which the App cannot push
   (#1120), and it is machinery so it needs a human `--admin` merge. A human must push it.
+- **D6 - Record a DR?** FR-2's guard-free second witness and the FR-5/FR-6 preflight contract
+  are design choices. Clarify/Plan decides whether they need a DR (constitution invariant 2,
+  "independent second witness") or stay spec-only.
