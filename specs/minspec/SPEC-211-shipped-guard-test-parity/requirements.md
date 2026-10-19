@@ -1,7 +1,7 @@
 ---
 id: SPEC-211
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - what the harness ships into an adopter must arrive with the evidence its own comments cite
@@ -18,14 +18,15 @@ implements_reason: >-
   the shipped suite itself so they travel to adopters with it; owning a shared, parity-managed
   file from a defect spec would freeze it for every other change to the guard.
 # Modified, not owned. The guard changes in comments only (INV-1). ci-review-templates.ts is
-# generated (FR-7) and is never hand-edited. The two vitest files are deleted under DQ-1
+# generated (FR-7) and is never hand-edited. template-registry.ts changes in one comment
+# only: the shipped suite's runtime sibling list (task 5.1). The two vitest files are deleted under DQ-1
 # option (a); choosing option (b) removes them from this list.
-affects: [.github/scripts/ai-review-guard.js, .github/scripts/ai-review-guard.test.js, packages/minspec/src/lib/ci-review-templates.ts, packages/minspec/tests/voter-survivor-reuse.test.ts, packages/minspec/tests/review-protocol-tokens.test.ts]
+affects: [.github/scripts/ai-review-guard.js, .github/scripts/ai-review-guard.test.js, packages/minspec/src/lib/ci-review-templates.ts, packages/minspec/src/lib/template-registry.ts, packages/minspec/tests/voter-survivor-reuse.test.ts, packages/minspec/tests/review-protocol-tokens.test.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
-  tasks: pending
+  clarify: done
+  plan: done
+  tasks: done
   implement: pending
 ---
 
@@ -45,9 +46,9 @@ This spec moves those tests into the shipped test file, rewrites the four guard 
 that cite tests an adopter cannot see, and adds two checks to the shipped test file: every
 function the guard exports must be used by the shipped tests, and every test the guard's
 comments cite by name must exist there. Guard behaviour does not change. Cost: the shipped
-test file grows by about 45 cases, three known gaps are listed in a visible exemption
-instead of being fixed here, and adopters see the fix only after their next refresh from a
-rebuilt extension. Riskiest assumption: that "the name appears in the test code" is a good
+test file grows by about 45 cases, one known gap (`parseCliVerdict`, #1941) is listed in a
+visible exemption instead of being fixed here, and adopters see the fix only after their
+next refresh from a rebuilt extension. Riskiest assumption: that "the name appears in the test code" is a good
 enough proxy for "the function is tested" (see Limitations).
 
 > **SPECIFICATION ONLY.** Nothing is built by the session that wrote this. A human reads
@@ -98,16 +99,20 @@ the coverage that should exist.
 
 ### Measured
 
-- The guard exports 62 names: 41 functions and 21 constants
+The bullets down to the re-measurement bullet were measured at `origin/main` `f3850fde`,
+when this spec was written; each carries that prefix. The re-measurement bullet gives the
+numbers at `23a58c2f`, which FR-5a and the acceptance criteria are written against.
+
+- At `f3850fde`: the guard exports 62 names: 41 functions and 21 constants
   (`.github/scripts/ai-review-guard.js:1960-2023`, counted with `Object.keys(require(...))`
   and `typeof`).
-- 9 of the 41 functions do not appear in the shipped suite outside comments:
+- At `f3850fde`: 9 of the 41 functions did not appear in the shipped suite outside comments:
   `selectVotersToRun`, `renderVoterRecord`, `parseVoterRecords`, `isStructuralVerdictBlock`
   (the #2163 four), `renderVerdictBlock`, `defangProtocolTokens`, `parseCliVerdict`,
   `isQuotaExhaustionStrict`, `wholeCheckRunListing`. The same nine, and only those, fail
   FR-5's stricter "used" test (a call or member access after comments and string literals
   are stripped; re-measured 2026-10-18 by the independent approver), so the T0 red count
-  below holds under either reading. 6 constants are likewise absent:
+  held under either reading. 6 constants were likewise absent:
   `VOTER_RECORD_PREFIX`, `VERDICT_END_TOKEN`, `UNAVAILABLE_TOKEN`, `ROUND_RECORD_PREFIX`,
   `VERDICT_SCHEMA`, `PENDING`.
 - `voter-survivor-reuse.test.ts` holds 32 cases in three groups (round-trip, 5;
@@ -116,7 +121,8 @@ the coverage that should exist.
   `scripts/review-decide.sh`, `scripts/review-branch.sh`, `.github/workflows/ai-review.yml`
   and the guard itself. All three sibling files are themselves shipped generator sources
   (`scripts/gen-ci-templates.mjs` `CI_TEMPLATE_SOURCE_PATHS`).
-- The shipped suite passes 185 of 185 under `node --test` and runs in CI on every pull
+- At `f3850fde`: the shipped suite passed 185 of 185 under `node --test` (190 of 190 at
+  `23a58c2f`, below). It runs in CI on every pull
   request with no path filter (`.github/workflows/ci.yml:113`, job `lint`). Under `npm test`
   it runs too, as a scaffolded copy, through
   `packages/minspec/tests/ai-review-guard-test-parity.test.ts:214`. Moving a case from
@@ -138,9 +144,16 @@ the coverage that should exist.
   does exercise (lines 310, 363, 452, 1200, 1860). Line 694's "(#2163 review)" cites a
   review finding, not a test.
 - `parseCliVerdict`, `defangProtocolTokens`, `renderVerdictBlock` and `VERDICT_SCHEMA` are
-  the subject of #1941 (port 38 tests salvaged in scroogellm#160). `isQuotaExhaustionStrict`
-  and `wholeCheckRunListing` had no tracking item; #2897 was filed for them while writing
-  this spec.
+  the subject of #1941 (port 38 tests salvaged in scroogellm#160). At `f3850fde`,
+  `isQuotaExhaustionStrict` and `wholeCheckRunListing` had no tracking item; #2897 was
+  filed for them while writing this spec, and #2901 closed it.
+- **Re-measured at `origin/main` `23a58c2f` (2026-10-18, Plan phase), after #2901 merged.**
+  #2901 (closing #2897) added shipped cases for `isQuotaExhaustionStrict` and
+  `wholeCheckRunListing`, so the suite now passes 190 of 190 and 7 of the 41 function
+  exports are unused under FR-5's reading: the #2163 four, `renderVerdictBlock`,
+  `defangProtocolTokens` and `parseCliVerdict`. The FR-5a list and the acceptance criteria
+  below are written against this re-measurement; the paragraphs above keep the
+  `f3850fde` numbers they were written from.
 - The embedded copies adopters receive are generated:
   `node scripts/gen-ci-templates.mjs` writes `packages/minspec/src/lib/ci-review-templates.ts`
   (`AI_REVIEW_GUARD_JS`, `AI_REVIEW_GUARD_TEST_JS`), and Rule 12 of
@@ -178,7 +191,9 @@ the coverage that should exist.
 - **FR-2 - The protocol-token pin is in the shipped suite.** The cases of
   `review-protocol-tokens.test.ts` are ported the same way: the token-shape case, one case
   per (site, token) pair over the four sites it lists, and the two `defangProtocolTokens`
-  cases. Sibling files are read relative to the suite's own location. A sibling that cannot
+  cases. Each (site, token) case has a literal title naming its site and token, never a
+  templated one, because FR-6 resolves citations against literal titles only and FR-4
+  cites these cases. Sibling files are read relative to the suite's own location. A sibling that cannot
   be read fails its case and names the path (constitution invariant 2); it is never skipped.
 - **FR-3 - No duplicate copies (DQ-1, option a).** Once every case of a vitest file has a
   shipped counterpart, that vitest file is deleted. The pull request body carries the
@@ -188,8 +203,9 @@ the coverage that should exist.
   which stay true. No other wording in DR-097 changes.
 - **FR-4 - Guard comments cite only tests a reader of the shipped files can find.** The four
   comments in the Measured table are rewritten. A comment that cites a test does so in one
-  fixed form, `ai-review-guard.test.js: "<exact test title>"`. Lines 504-507 cite the ported
-  token pin. Lines 636-637 and 652-653 keep their history (that the first version was wrong
+  fixed form, `ai-review-guard.test.js: "<exact test title>"`. Lines 504-507 claim a
+  cross-file pin, so they cite the ported per-(site, token) cases that read the sibling
+  files, never the token-shape case, which checks shape only and reads no other file. Lines 636-637 and 652-653 keep their history (that the first version was wrong
   and three voters caught it) and cite the ported cross-SHA and recency cases as what now
   pins the fix. Line 836 stops claiming that a shipped test checks what `review-branch.sh`
   reads, because none does; it may cite the existing shipped case that pins which scripts
@@ -212,8 +228,10 @@ the coverage that should exist.
   the suite; each entry names the function, a tracking issue as `AIClarityAU/minspec#N`, and a
   one-line reason. The gate fails when an exempted name is no longer exported, or is now
   referenced (the exemption is stale and must be deleted). The initial list is exactly:
-  `parseCliVerdict` (#1941), `isQuotaExhaustionStrict` (#2897), `wholeCheckRunListing`
-  (#2897). `renderVerdictBlock` and `defangProtocolTokens` are not exempted, because the
+  `parseCliVerdict` (#1941). `isQuotaExhaustionStrict` and `wholeCheckRunListing` were on
+  this list when the spec was written; #2901 gave them shipped cases before implementation
+  began, so listing them now would fail this requirement's own stale-exemption rule.
+  `renderVerdictBlock` and `defangProtocolTokens` are not exempted, because the
   ported cases from FR-1 and FR-2 already reference them.
 - **FR-5b - The gate fails closed.** It fails, never passes, when the guard cannot be
   loaded, when it finds zero function exports, or when the suite cannot read its own source
@@ -246,7 +264,7 @@ Everything else is low: comments, tests and one regenerated file, revertable in 
 ## Acceptance Criteria
 
 - [ ] **Shipped suite green** - `node --test .github/scripts/ai-review-guard.test.js` exits 0
-      with `# fail 0`, and `# tests` is at least 185 plus the number of ported cases.
+      with `# fail 0`, and `# tests` is at least 190 plus the number of ported cases.
       (FR-1, FR-2)
 - [ ] **Every guard rail named** - for each of the seven FR-1 rails, a test title in the
       shipped suite starts with `selectVotersToRun:` and names the rail; the PR body maps
@@ -262,9 +280,8 @@ Everything else is low: comments, tests and one regenerated file, revertable in 
       test titles in place - makes it fail naming `selectVotersToRun`. Both scratch copies
       are discarded. (FR-5)
 - [ ] **Exemptions exact and shrink-only** - the exemption list holds exactly
-      `parseCliVerdict`, `isQuotaExhaustionStrict` and `wholeCheckRunListing` with their
-      issue refs; in a scratch copy, adding a case that calls `parseCliVerdict` without
-      deleting its exemption makes the gate fail as stale. (FR-5a)
+      `parseCliVerdict` with its issue ref; in a scratch copy, adding a case that calls
+      `parseCliVerdict` without deleting its exemption makes the gate fail as stale. (FR-5a)
 - [ ] **Gate fails closed** - the suite contains cases showing the FR-5 helper reports
       failure on an empty export set and on a `null`/empty source text. (FR-5b)
 - [ ] **No uncheckable test claims** - `grep -n -E "the diff's own test|the test asserting
@@ -349,7 +366,7 @@ unchanged; only where its evidence lives moves.
 - **Porting the scroogellm#160 tests for `parseCliVerdict`, `renderVerdictBlock`,
   `defangProtocolTokens`, `VERDICT_SCHEMA`, `parseResetInstant`.** #1941. FR-2's ported
   cases reference two of these; #1941's deeper coverage still applies.
-- **Cases for `isQuotaExhaustionStrict` and `wholeCheckRunListing`.** #2897.
+- **Cases for `isQuotaExhaustionStrict` and `wholeCheckRunListing`.** #2897, done by #2901.
 - **The lower-severity findings listed on #2371** (`validate.py` `is_escaping_path` severity,
   `parseVoterRecords` greedy base64 on concatenated records, the two-dot diff misreading a
   refresh branch as a DR revert). Each is a dated line in `docs/backlog.md`.
@@ -376,7 +393,7 @@ unchanged; only where its evidence lives moves.
 ## Test plan (for the Plan phase to place)
 
 - **T0, before any port:** the FR-5 and FR-6 cases, shown red on the current tree (FR-5:
-  six missing names, the nine measured less the three exempted; FR-6: zero citations in the
+  six missing names, the seven measured at `23a58c2f` less the one exempted; FR-6: zero citations in the
   fixed form), with the planted-failure helper cases green.
 - **T1:** the ported FR-1 and FR-2 cases, written first against the unchanged guard; all
   should pass on arrival, since the guard is not changing (INV-1). A ported case that fails
@@ -392,7 +409,7 @@ unchanged; only where its evidence lives moves.
 - **Earlier instance of the same class:** #871 (the guard shipped without its test file at
   all), whose parity test this spec extends from "the file ships" to "the file covers what
   ships".
-- **Follow-ups:** #2897 (filed from this spec: two remaining untested exports), #1941
+- **Follow-ups:** #2897 (filed from this spec: two remaining untested exports; closed by #2901), #1941
   (existing: scroogellm#160 port), backlog lines dated 2026-10-18 in `docs/backlog.md`.
 - **Adopter pull requests blocked by this defect:** AIClarityAU/memory-fabric #40,
   AIClarityAU/voip-sms-inbox #121.
