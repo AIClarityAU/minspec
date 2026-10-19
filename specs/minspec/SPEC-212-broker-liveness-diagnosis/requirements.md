@@ -107,7 +107,7 @@ remains.
   back to ambient human auth (`gh-bot.sh:213-216`).
 - **INV-3 (constitution 3, blast radius).** Nothing writes to `~/.claude` or the container's
   mount configuration from this repo without the adopter's opt-in marker `.minspec/`.
-- **INV-4.** A broker answer is only emitted if it is token-shaped (existing `_is_token`).
+- **INV-4.** A broker answer is only emitted if it is token-shaped (the existing token-shape check: inline in `scripts/gh-bot.sh`; a `_is_token` helper in the out-of-repo `~/.claude/scripts/gh-app-token.sh`, unverified here).
 
 ## Decisions needed (Clarify)
 
