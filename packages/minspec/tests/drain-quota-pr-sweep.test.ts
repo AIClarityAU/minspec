@@ -95,3 +95,33 @@ describe('T2 regression (#2587): the PR sweep stops remediating when the reading
     expect(log).not.toContain('holding the rest of the PR sweep');
   });
 });
+
+describe('T2 regression (#2975): the PR sweep reads every open PR, not gh\'s default 30', () => {
+  const many = Array.from({ length: 45 }, (_, i) => 3000 + i);
+
+  it('a pile larger than 30 is swept in full', async () => {
+    const d = await runLoop(
+      { ready: [901], openPrs: many, reading: AT_58, readingAfterIssue: { 901: AT_58 }, env: CAP_60 },
+      settled,
+    );
+    expect(d.remediated()).toEqual(many);
+    expect(d.log()).toContain('cycle done');
+  });
+
+  it('a read that comes back at the limit fails closed instead of sweeping a truncated list', async () => {
+    const d = await runLoop(
+      {
+        ready: [901],
+        openPrs: many,
+        reading: AT_58,
+        readingAfterIssue: { 901: AT_58 },
+        env: { ...CAP_60, MINSPEC_DRAIN_PR_SWEEP_LIMIT: '45' },
+      },
+      (log) => log.includes('cycle error'),
+    );
+    expect(d.remediated()).toEqual([]);
+    expect(d.log()).toContain('may be truncated');
+    expect(d.log()).not.toContain('cycle done');
+    expect(d.log()).toContain('cycle error');
+  });
+});
