@@ -90,6 +90,7 @@ REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/lib/agent-context.sh"
+agent_caveman_init
 # How this script touches the worktree it checks a pull request's branch out into. That
 # branch is usually an agent's work, but nothing here checks who wrote it: any branch of
 # this repository whose name fits is taken, from whoever can push one, and the list in
@@ -891,6 +892,7 @@ echo "  Launching remediation agent (model: $RUN_MODEL, log: $LOG)..."
 while true; do
   if (cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$RUN_PROMPT" \
         "${AGENT_CONTEXT_ARGS[@]}" \
+        ${AGENT_CAVEMAN_ARGS[@]+"${AGENT_CAVEMAN_ARGS[@]}"} \
         --model "$RUN_MODEL" \
         --allowedTools "$ALLOWED_TOOLS" \
         --output-format text 2>&1 | tee "$LOG"); then

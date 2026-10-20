@@ -49,7 +49,12 @@
 #                                    builds and pull request remediation carry on, and
 #                                    each cycle says how many such issues it left.
 #                                    Default 1. Anything else is read as 0, and said so.
-#   MINSPEC_DRAIN_INTERVAL=1200    — seconds between cycles (default 20 min).
+#   MINSPEC_DRAIN_SPECIFY_MAX_HELD=10 — with spec-writing on, pause it for any cycle in
+#                                    which this many or more of the drain's own PRs
+#                                    (`agent/issue-*`) sit at `needs-human-review` (#2939).
+#                                    An unreadable count pauses too. Anything but a whole
+#                                    number is read as 0, and said so.
+#   MINSPEC_DRAIN_INTERVAL=1200   — seconds between cycles (default 20 min).
 #   MINSPEC_DRAIN_QUOTA_BACKOFF=1800 — seconds to pause after a quota signal (30 min).
 #                  Now only a FALLBACK: when ~/.claude/quota.json carries a live
 #                  reset time, the loop sleeps to that instead of guessing, or to
@@ -138,6 +143,8 @@ set -euo pipefail
 
 REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The pure seam quota_publish_wall delegates reset-time parsing to (#1062).
+GUARD="${SCRIPT_DIR}/../.github/scripts/ai-review-guard.js"
 # The reconcilers below write to GitHub (close, remove-label, add-label). Those are
 # AGENT writes, so they must carry the App identity rather than the human's — a write
 # made as the human auto-subscribes them to the thread forever and makes the audit
@@ -1302,6 +1309,31 @@ fi
 # that lies about what it is doing.
 DRAIN_SPECIFY="${MINSPEC_DRAIN_SPECIFY:-1}"
 
+# SPECIFY_MAX_HELD — backpressure on spec-writing (#2939). The switch above is manual and
+# lives in a launcher's environment, so every restart of the drain turned spec-writing
+# back on: the same pile of held drafts formed three times (2026-10-07, 2026-10-16,
+# 2026-10-18, the last at 62). Every spec draft is withheld from auto-merge as
+# approval-or-acceptance, so writing more while that many already wait on a human spends
+# quota on work nothing can land. With the switch on, each cycle counts the drain's own
+# open pull requests held for a human (`needs-human-review` on an `agent/issue-*`
+# branch) and leaves the spec-writing queue alone while that count is at or above this
+# cap. Builds, triage and remediation are untouched. Anything but a whole number is read
+# as 0, which pauses spec-writing: the reading that spends nothing.
+SPECIFY_MAX_HELD="${MINSPEC_DRAIN_SPECIFY_MAX_HELD:-10}"
+
+# _held_drain_prs <varname> — count the drain's open pull requests held for a human INTO
+# a named variable. Returns gh's status: a failed read is not a count of zero, and the
+# caller pauses spec-writing on it rather than guess (invariant 2).
+_held_drain_prs() {
+  local -n _held_out="$1"
+  local _held_val _held_rc=0
+  _held_val=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit 1000 \
+    --json headRefName --jq '[.[] | select(.headRefName | startswith("agent/issue-"))] | length') || _held_rc=$?
+  if (( _held_rc != 0 )); then return "$_held_rc"; fi
+  [[ "$_held_val" =~ ^[0-9]+$ ]] || return 1
+  _held_out="$_held_val"
+}
+
 # _specify_only <agent-ready numbers> <agent-ready-specify numbers>: the issues that are
 # queued for spec-writing and NOT also queued for a build, one per line. An issue in
 # both queues is a build (an approved spec leaves the old label beside the new one), so
@@ -1490,6 +1522,31 @@ run_cycle() {
     fi
   fi
 
+  # Backpressure (#2939, see SPECIFY_MAX_HELD). Asked only when the switch is on and there
+  # is spec-writing to decide, so a quiet queue costs no read. specify_on is what the
+  # narrowing below reads: the switch and the backpressure are one decision there.
+  local specify_on=0
+  [[ "$DRAIN_SPECIFY" == "1" ]] && specify_on=1
+  if (( specify_on )); then
+    mapfile -t spec_left < <(_specify_only "$ready_full" "$ready_spec")
+    if (( ${#spec_left[@]} > 0 )); then
+      local held=0 held_rc=0
+      if [[ ! "$SPECIFY_MAX_HELD" =~ ^[0-9]+$ ]]; then
+        specify_on=0
+        echo "[drain] spec-writing is PAUSED: MINSPEC_DRAIN_SPECIFY_MAX_HELD=$(printf '%q' "$SPECIFY_MAX_HELD") is not a whole number, so it is read as 0, the setting that spends nothing: ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+      else
+        _held_drain_prs held || held_rc=$?
+        if (( held_rc != 0 )); then
+          specify_on=0
+          echo "[drain] spec-writing is PAUSED: the drain pull requests held for a human could not be counted (exit ${held_rc}; see the gh error above), and a count nobody read is not zero (#2939): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+        elif (( 10#$held >= 10#$SPECIFY_MAX_HELD )); then
+          specify_on=0
+          echo "[drain] spec-writing is PAUSED: ${held} drain pull request(s) held for a human (needs-human-review on agent/issue-*), at or above the cap ${SPECIFY_MAX_HELD} (MINSPEC_DRAIN_SPECIFY_MAX_HELD, #2939): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+        fi
+      fi
+    fi
+  fi
+
   if [[ -z "$all_ready" ]]; then
     # The contradiction is reported ALONGSIDE "cycle done", not instead of it: the
     # query itself succeeded (ready_rc==0, checked above), so this is not the #1855
@@ -1503,11 +1560,11 @@ run_cycle() {
     return 0
   fi
 
-  # With spec-writing off, what is dispatched is the build queue alone. Narrowed HERE,
+  # With spec-writing off or paused (#2939), what is dispatched is the build queue alone. Narrowed HERE,
   # before ranking and before the dispatch cap: capped first and skipped afterwards, a
   # cap of 2 whose top two were spec-writing issues would dispatch nothing at all, on
   # every cycle, with builds queued behind them.
-  if [[ "$DRAIN_SPECIFY" != "1" ]]; then
+  if (( ! specify_on )); then
     all_ready="$(printf '%s\n' "$ready_full" | sed '/^$/d' | sort -un)"
     if [[ -z "$all_ready" ]]; then
       # Everything ready is spec-writing. There is nothing to rank or dispatch, but this
@@ -2581,6 +2638,24 @@ quota_health() {
 # The message carries a clock time and a zone but NO DATE, so the rollover is inferred:
 # a time already past today means tomorrow.
 #
+# EXTRACTION (#1062): delegates to `parseResetInstant`, the SAME pure, unit-tested
+# seam (.github/scripts/ai-review-guard.js, next to `isQuotaExhaustion`) the
+# ai-review retry already schedules against (#1204, .github/workflows/ai-review.yml).
+# One tested implementation, never two that can quietly drift apart. (`is_quota` no
+# longer delegates to that file: since #2233 it is a pure-bash notice match, see
+# quota_notice_lines above. Only the reset-time parse still goes through node.)
+#
+# This used to be a second, bash-only regex+`date` extractor, hand-rolled separately
+# from parseResetInstant. It only ever matched the ABSOLUTE clock form ("resets
+# 8:40am (Zone)") — but isQuotaExhaustion's own pattern (`resets? (at|in)`) already
+# classifies the RELATIVE form ("resets in 25 minutes", "try again in 2 hours") as
+# quota-exhaustion too, so a message shaped that way was correctly detected as a
+# quota hit yet silently fell back to the flat QUOTA_BACKOFF guess here
+# — the exact "we capture the text and throw the timestamp away" gap #1062 exists to
+# close. parseResetInstant already handles both forms (with a DST-safe zoned
+# conversion for the absolute one); reusing it fixes the relative form here for free
+# and makes the two call sites impossible to drift apart again.
+#
 # MULTI-PRODUCER NOTE — do not "fix" this into a bug. More than one producer writes
 # QUOTA_FILE (a statusline render, this wall parser, and a poller). Last-writer-wins is
 # correct in BOTH directions here, but by convergence rather than by design:
@@ -2592,23 +2667,23 @@ quota_health() {
 # The staleness rule, not stickiness, is what keeps a wall reading from being believed
 # forever.
 quota_publish_wall() {
-  local text clock zone target now
+  local text now iso target
   text=$(cat)
-  # e.g. "You've hit your session limit · resets 10:10pm (Australia/Sydney)"
-  clock=$(printf '%s' "$text" | grep -oiE 'resets[[:space:]]+(at[[:space:]]+)?[0-9]{1,2}(:[0-9]{2})?[[:space:]]*(am|pm)' | head -1 \
-          | grep -oiE '[0-9]{1,2}(:[0-9]{2})?[[:space:]]*(am|pm)' | head -1)
-  [[ -n "$clock" ]] || { echo "no reset time in text" >&2; return 1; }
-  zone=$(printf '%s' "$text" | grep -oE '\([A-Za-z]+/[A-Za-z_]+\)' | head -1 | tr -d '()')
-
   now=$(date +%s)
-  if [[ -n "$zone" ]]; then
-    target=$(TZ="$zone" date -d "$clock" +%s 2>/dev/null)
-  else
-    target=$(date -d "$clock" +%s 2>/dev/null)
+
+  iso=""
+  if [[ -f "$GUARD" ]]; then
+    iso=$(GUARD="$GUARD" NOW_MS="$(( now * 1000 ))" node -e '
+      const fs = require("fs");
+      const { parseResetInstant } = require(process.env.GUARD);
+      let t = ""; try { t = fs.readFileSync(0, "utf-8"); } catch {}
+      const out = parseResetInstant(t, Number(process.env.NOW_MS));
+      if (out) process.stdout.write(out);
+    ' <<<"$text" 2>/dev/null) || iso=""
   fi
-  [[ -n "$target" ]] || { echo "could not parse '$clock'" >&2; return 1; }
-  # No date in the message: a time already gone means tomorrow.
-  (( target <= now )) && target=$(( target + 86400 ))
+  [[ -n "$iso" ]] || { echo "no reset time in text" >&2; return 1; }
+  target=$(date -u -d "$iso" +%s 2>/dev/null)
+  [[ -n "$target" ]] || { echo "could not parse '$iso'" >&2; return 1; }
 
   # At the wall the window is spent by definition. 100 makes every consumer defer,
   # which is exactly right until the deadline passes.
@@ -2617,7 +2692,7 @@ quota_publish_wall() {
   printf '{"used_percentage":100,"resets_at":%s,"observed_at":%s,"source":"wall"}\n' \
     "$target" "$now" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$QUOTA_FILE" 2>/dev/null || { rm -f "$tmp"; return 1; }
-  echo "published:$target (from the wall message, resets $clock${zone:+ $zone})"
+  echo "published:$target (from the wall message, resets $iso)"
 }
 
 # quota_backoff_sleep: the rc=42 rest. Sleeps to the deadline; wait_interval still
