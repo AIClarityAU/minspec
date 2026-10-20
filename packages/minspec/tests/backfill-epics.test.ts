@@ -74,7 +74,6 @@ import * as vscode from 'vscode';
 import { backfillEpicsCommand } from '../src/commands/backfill-epics';
 import {
   proposeHeuristic,
-  proposeAI,
   isClaudeAvailable,
   applyBackfill,
   renderProposalMarkdown,

@@ -1,7 +1,7 @@
 ---
 id: SPEC-079
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — a sanctioned "MinSpec: Refresh Harness Files" run tripping the very gate it exists to keep green is DR-066's silent-gate family arriving through the front door
@@ -18,9 +18,9 @@ implements: [packages/minspec/tests/managed-region-parity-equality.test.ts]
 # `localizeMachineryPathsComment` transform, so it is declared `affects:`, not `implements:`.
 affects: [packages/minspec/src/lib/template-registry.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
