@@ -128,7 +128,9 @@ function reviewState(f: Fixture, base: string, head: string) {
   return {
     inputText,
     lsTree,
-    inputHash: GUARD.patchFingerprint(inputText) as string | null,
+    // Taken from the seam itself, so the record a fixture posts uses the one definition
+    // of the input fingerprint the workflow records, whatever that definition is.
+    inputHash: (GUARD.planVerdictCarry({ inputText, lsTree, coverage: '' }).inputHash || null) as string | null,
     panelKey: GUARD.reviewPanelKey({ lsTree, coverage: '' }) as string | null,
   };
 }
@@ -353,19 +355,78 @@ describe('#1688 inv 2 - any change in the pull request\'s own diff runs the full
     expect(d.reason).toMatch(/reviewer/);
   });
 
-  it('KNOWN COST: main editing the SAME file moves the hunk, the voters would be shown different text, so it is reviewed again', () => {
-    // The measured 7 of 25 rounds (5.4 percent of the panel). Deliberately not carried:
-    // the key is the bytes the voters read, and those bytes differ here.
+  it('tm1 T3: main editing the SAME file away from the hunk carries - only the blob ids and line numbers moved', () => {
+    // Measured 2026-10-18: 2 of the 4 base merges refused in a 26-push sample (#2640's
+    // feat/2018 and agent/issue-1062) were exactly this. The pull request's own patch -
+    // every added, removed and context line, whitespace included - was identical; the
+    // input differed only in the `index <blob>..<blob>` line and the `@@ -a +b @@` start
+    // numbers, both of which follow the BASE file, not the change.
     const { f, m0, p, m1, priorRound } = reviewedPullRequest((g) => {
       g.write('src/feature.txt', `main put a line at the top\n${lines(40, 'feature')}`);
     });
     const h = mergeBaseIn(f);
-    // Same added and removed lines...
-    const changed = (base: string, head: string) =>
-      f.git('diff', `${base}...${head}`).split('\n').filter((l) => /^[+-][^+-]/.test(l));
-    expect(changed(m1, h)).toEqual(changed(m0, p));
-    // ...at a different position.
+    // The premise, checked: the raw diff the voters see DID change, by position only.
     expect(f.git('diff', `${m1}...${h}`)).not.toBe(f.git('diff', `${m0}...${p}`));
+    const body = (base: string, head: string) =>
+      f.git('diff', `${base}...${head}`).split('\n').filter((l) => /^[ +-]/.test(l) && !/^(\+\+\+|---) /.test(l));
+    expect(body(m1, h)).toEqual(body(m0, p));
+    const d = plan(f, { before: p, head: h, base: m1, checkRuns: [priorRound] });
+    expect(d.carry, d.reason).toBe(true);
+  });
+
+  it('#2926 T3: swapping a binary file for different content at the same path and mode runs the full panel', () => {
+    // Plain `git diff` shows a changed binary as "Binary files a/x and b/x differ"; the
+    // blob ids on its `index` line are the only trace of WHAT changed. A pass on content
+    // A must not carry to content B.
+    const f = repo();
+    const m0 = seed(f);
+    f.git('checkout', '-q', '-b', 'feat');
+    const bin = (tag: string) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0, 0]), Buffer.from(tag)]);
+    fs.mkdirSync(path.join(f.dir, 'assets'), { recursive: true });
+    fs.writeFileSync(path.join(f.dir, 'assets/logo.png'), bin('reviewed content A'));
+    const p = f.commit('feat: add a logo');
+    const priorRound = postedRound(f, m0, p);
+    fs.writeFileSync(path.join(f.dir, 'assets/logo.png'), bin('swapped content B'));
+    const h = f.commit('feat: swap the logo');
+    // The premise, checked: the diff body is the same constant line both times.
+    expect(f.git('diff', `${m0}...${p}`)).toMatch(/^Binary files \/dev\/null and b\/assets\/logo\.png differ$/m);
+    expect(f.git('diff', `${m0}...${h}`).replace(/^index .*$/m, '')).toBe(f.git('diff', `${m0}...${p}`).replace(/^index .*$/m, ''));
+    const d = plan(f, { before: p, head: h, base: m0, checkRuns: [priorRound] });
+    expect(d.carry, d.reason).toBe(false);
+    expect(d.reason).toMatch(/changed since/);
+  });
+
+  it('tm1 control: main editing a CONTEXT line the voters are shown runs the full panel', () => {
+    // Line 18 sits inside the three lines of context around the change at line 20, so
+    // the voters would read different text. That is not a position move.
+    const { f, p, m1, priorRound } = reviewedPullRequest((g) => {
+      g.write('src/feature.txt', lines(40, 'feature').replace('feature line 18\n', 'feature line 18 edited by main\n'));
+    });
+    const h = mergeBaseIn(f);
+    expect(plan(f, { before: p, head: h, base: m1, checkRuns: [priorRound] }).carry).toBe(false);
+  });
+
+  it('tm1 control: main renaming the enclosing function shown in the hunk header runs the full panel', () => {
+    // git prints the nearest "function line" after `@@ ... @@`. Only the NUMBERS there
+    // are positional; that text is something the voters read, so it stays in the key.
+    // The rename is far above the hunk (line 1 against a change at line 21), so no
+    // context line moves - the header text is the only thing that differs.
+    const src = (fn: string) => `${fn}() {\n${lines(30, '  body')}}\n`;
+    const f = repo();
+    seed(f);
+    f.write('src/fn.c', src('int original'));
+    const m0 = f.commit('M0b: a function');
+    f.git('checkout', '-q', '-b', 'feat');
+    f.write('src/fn.c', src('int original').replace('  body line 20\n', '  body line 20 CHANGED\n'));
+    const p = f.commit('feat: edit inside the function');
+    const priorRound = postedRound(f, m0, p);
+    f.git('checkout', '-q', 'main');
+    f.write('src/fn.c', src('int renamed_by_main'));
+    const m1 = f.commit('M1: rename the function');
+    f.git('checkout', '-q', 'feat');
+    const h = mergeBaseIn(f);
+    expect(f.git('diff', `${m0}...${p}`)).toMatch(/^@@ .* @@ int original\(\)/m);
+    expect(f.git('diff', `${m1}...${h}`)).toMatch(/^@@ .* @@ int renamed_by_main\(\)/m);
     expect(plan(f, { before: p, head: h, base: m1, checkRuns: [priorRound] }).carry).toBe(false);
   });
 });
