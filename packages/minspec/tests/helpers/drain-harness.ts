@@ -305,7 +305,13 @@ if [[ "$1" == "pr" && "$2" == "list" && "$label" == "needs-human-review" ]]; the
   echo "pr list --label needs-human-review" >> "${dir}/held-asked"
   ${f.heldPrs === 'fail' ? 'echo "HTTP 502: Bad Gateway (https://api.github.com/graphql)" >&2; exit 1' : `echo ${f.heldPrs ?? 0}; exit 0`}
 fi
-if [[ "$1" == "pr" && "$2" == "list" && " $* " == *" --state open "* ]]; then cat "${dir}/queue.prs"; exit 0; fi
+if [[ "$1" == "pr" && "$2" == "list" && " $* " == *" --state open "* ]]; then
+  # Honour --limit the way gh does (default 30), and answer in the row shape the drain's
+  # --jq template produces, so a drain that omits --limit sees only 30 PRs (#2975).
+  lim=30; prev=""
+  for a in "$@"; do [[ "$prev" == "--limit" ]] && lim="$a"; prev="$a"; done
+  head -n "$lim" "${dir}/queue.prs" | sed 's/$/ false/'; exit 0
+fi
 exit 0
 `,
   );
