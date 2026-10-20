@@ -45,6 +45,7 @@ import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold'
 // The corpus walkers, under their former local names. `safeGlob` now tolerates ONLY an
 // absent root; every other read failure reaches the rule's own catch instead of being
 // turned into an empty corpus (#1999).
+import { drsMissingPlainTerms } from './lib/dr-required-sections';
 import { walkFilesByExt as glob, walkOptionalRoot as safeGlob } from './lib/corpus-walk';
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
 import { checkDeclaredSpecIds } from './lib/spec-id-collision';
@@ -383,6 +384,26 @@ try {
   warn(
     `DR-id uniqueness check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
       'Rule 17 validated NOTHING this run; do not read the green as a collision-free register.',
+  );
+}
+
+// Rule 20 (non-fatal, #2921): every decision record carries `## In plain terms`.
+// That section is what the founder reads to accept a DR, and it existed only in the
+// generator template, so a hand-written DR skipped it with no gate noticing. WARNS
+// until the existing corpus is backfilled, then flips to fatal. Not a silent catch
+// (invariant 2): an unreadable register says so.
+try {
+  const drs = safeGlob(resolveDecisionsDir(), '.md').map((file) => ({
+    file: relative(ROOT, file),
+    content: readFileSync(file, 'utf-8'),
+  }));
+  for (const file of drsMissingPlainTerms(drs)) {
+    warn(`${file}: decision record lacks a \`## In plain terms\` section (#2921).`);
+  }
+} catch (err) {
+  warn(
+    `DR required-section check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
+      'Rule 20 validated NOTHING this run.',
   );
 }
 
