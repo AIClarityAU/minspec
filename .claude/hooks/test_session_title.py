@@ -201,5 +201,43 @@ class TestSessionTitle(unittest.TestCase):
         self.assertEqual(title_of(json.loads(proc.stdout)), "DR-071")
 
 
+def command_line(name):
+    return json.dumps(
+        {
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": f"<command-message>{name}</command-message>\n"
+                f"<command-name>/{name}</command-name>",
+            },
+        }
+    )
+
+
+class TestProxyTitleExempt(unittest.TestCase):
+    def test_proxy_session_keeps_fixed_title_despite_refs(self):
+        result = run_hook(
+            prompt="look at SPEC-042 #2877",
+            transcript_lines=[command_line("chief-of-staff"), ai_title_line("Something else")],
+        )
+        self.assertEqual(title_of(result), "Chief of Staff")
+
+    def test_proxy_start_command_outside_tail_window_still_detected(self):
+        filler = [assistant_line("x" * 1000)] * 9000  # > 8 MB after the start command
+        result = run_hook(
+            prompt="SPEC-042", transcript_lines=[command_line("chief-of-staff")] + filler
+        )
+        self.assertEqual(title_of(result), "Chief of Staff")
+
+    def test_runner_sessions_are_not_exempted(self):
+        for name in ("chief-of-staff-runner", "chief-of-staff-runner-light"):
+            result = run_hook(prompt="SPEC-042 #2877", transcript_lines=[command_line(name)])
+            self.assertEqual(title_of(result), "SPEC-042 #2877")
+
+    def test_ordinary_session_unchanged(self):
+        result = run_hook(prompt="DR-071", transcript_lines=[user_line("hello")])
+        self.assertEqual(title_of(result), "DR-071")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
