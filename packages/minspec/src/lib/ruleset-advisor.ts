@@ -11,14 +11,15 @@
  * ──────────────────────────────────────────────────────────────────────────
  * MinSpec core "makes zero network calls in its core path." Every function in
  * this module that touches the network does so ONLY by shelling out to the
- * *user's own* authenticated `gh` CLI. MinSpec opens no socket itself — the same
+ * *user's own authenticated* `gh` CLI. MinSpec opens no socket itself — the same
  * posture by which it already shells `git`.
  *
  * Two distinct classes of network action live here, gated differently per
  * DR-050 (Amendments 2026-07-01 and 2026-07-16):
  *
- *   - READ-ONLY CONFIG PROBE (autonomous) — {@link isGhReady} (probe the *local*
- *     `gh`), {@link hasRequiredChecksRuleset} / {@link listRequiredCheckContexts}
+ *   - READ-ONLY CONFIG PROBE (autonomous) — {@link isGhReady} /
+ *     {@link probeGhAvailability} (probe the *local* `gh`),
+ *     {@link hasRequiredChecksRuleset} / {@link listRequiredCheckContexts}
  *     (a `gh api .../rulesets` GET of the repo's OWN settings), and
  *     {@link probeReviewerConfigured} (a `gh api .../actions/secrets` GET of the
  *     repo's OWN secret NAMES — never values). These egress NO user artifacts,
@@ -169,24 +170,45 @@ async function runSafe(
   }
 }
 
+/** Whether the local `gh` binary exists at all, and whether it is authenticated. */
+export interface GhAvailability {
+  /** `gh --version` succeeded — the binary is on PATH and runnable. */
+  readonly installed: boolean;
+  /** `gh auth status` succeeded — there is a usable token. Always `false` when `!installed`. */
+  readonly authenticated: boolean;
+}
+
+/**
+ * Probe the local `gh` CLI's readiness: is the binary installed, and is it
+ * authenticated? Split into two booleans (rather than {@link isGhReady}'s single
+ * collapsed bool) so a caller can distinguish "no `gh` at all" — nothing to try —
+ * from "`gh` is here but has no token" — so the advisory can state the real
+ * limit accurately for each (#1889).
+ *
+ * `gh --version` proves the binary exists; `gh auth status` proves there is a
+ * usable token. This runs the user's own local `gh` to PROBE the local CLI's
+ * readiness — a read-only capability probe in the same class as MinSpec
+ * shelling `git`. It egresses no user data and needs no consent toast; it runs
+ * autonomously as the first step of the post-init advisory.
+ */
+export async function probeGhAvailability(run: CommandRunner): Promise<GhAvailability> {
+  const version = await runSafe(run, 'gh', ['--version']);
+  if (version.code !== 0) return { installed: false, authenticated: false };
+  const auth = await runSafe(run, 'gh', ['auth', 'status']);
+  return { installed: true, authenticated: auth.code === 0 };
+}
+
 /**
  * Detect whether the `gh` CLI is BOTH installed AND authenticated.
  *
- * `gh --version` proves the binary exists; `gh auth status` proves there is a
- * usable token. Both must pass — an installed-but-unauthed `gh` cannot read or
- * write rulesets, so for our purposes it is "unavailable" and we fall back to
- * the zero-network docs link.
- *
- * This runs the user's own local `gh` (`gh --version`, then `gh auth status`) to
- * PROBE the local CLI's readiness — a read-only capability probe in the same
- * class as MinSpec shelling `git`. It egresses no user data and needs no consent
- * toast; it runs autonomously as the first step of the post-init advisory.
+ * An installed-but-unauthed `gh` cannot read or write rulesets via the
+ * AUTHENTICATED path, so for that purpose it is "unavailable". Thin wrapper
+ * over {@link probeGhAvailability} kept for callers (and existing tests) that
+ * only need the collapsed bool.
  */
 export async function isGhReady(run: CommandRunner): Promise<boolean> {
-  const version = await runSafe(run, 'gh', ['--version']);
-  if (version.code !== 0) return false;
-  const auth = await runSafe(run, 'gh', ['auth', 'status']);
-  return auth.code === 0;
+  const { installed, authenticated } = await probeGhAvailability(run);
+  return installed && authenticated;
 }
 
 /**
