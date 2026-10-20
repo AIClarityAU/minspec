@@ -837,7 +837,7 @@ DR-086 §2.2 (the approval-or-acceptance stop class) makes every DR acceptance a
 
 ## [DR-108 — Agents may approve under a delegation the founder gives once, recorded under the bot's own name and never his - impersonation stays banned, delegation is allowed](DR-108.md)
 
-*Status: proposed · Date: 2026-10-17*
+*Status: accepted · Date: 2026-10-17*
 
 <!-- dr-summary:DR-108 auto=9ca2b32c25d7 -->
 The approval-or-acceptance stop class (DR-086 §2.2) says, in code (scripts/lib/autonomy.ts, STOP_CLASSES): "The agent cannot sign these without forging the human." That is true only while the approval record has no field for *who acted, on whose delegation*. The rules-consent review (rules-consent-review-1017) separated two acts:
