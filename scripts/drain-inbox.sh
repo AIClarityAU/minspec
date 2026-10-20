@@ -1141,9 +1141,22 @@ sweep_open_prs() {
     # refresh: the sweep's own enumeration is a read, and remediate-pr.sh is a child
     # that inherits this token.
     gh_bot_warm_read
-    local open_prs pr rcap rout sweep_quota_verdict
-    open_prs=$(gh pr list --repo "$REPO" --state open --json number,isDraft \
-      --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
+    local open_prs open_rows open_count pr rcap rout sweep_quota_verdict
+    # An explicit --limit (#2975): gh's default is 30, so without one the sweep silently
+    # saw half of a 61-PR pile. One row per open PR, drafts included, so the count below
+    # is the count gh RETURNED and can be compared with the limit.
+    local pr_limit="${MINSPEC_DRAIN_PR_SWEEP_LIMIT:-500}"
+    open_rows=$(gh pr list --repo "$REPO" --state open --limit "$pr_limit" --json number,isDraft \
+      --jq '.[] | "\(.number) \(.isDraft)"' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
+    open_count=0
+    [[ -n "$open_rows" ]] && open_count=$(printf '%s\n' "$open_rows" | wc -l | tr -d ' ')
+    # Fail closed (#2975): a read that came back exactly at the limit may have been cut
+    # off, and a capped read is not "all open PRs".
+    if (( open_count >= pr_limit )); then
+      echo "[drain] CYCLE FAILED: the open-PR read returned ${open_count} rows, the limit (${pr_limit}) — it may be truncated, so the sweep would silently skip PRs (#2975). Raise MINSPEC_DRAIN_PR_SWEEP_LIMIT." >&2
+      return 1
+    fi
+    open_prs=$(awk '$2=="false"{print $1}' <<<"$open_rows")
     if [[ -n "$open_prs" ]]; then
       echo "[drain] sweeping $(echo "$open_prs" | wc -l | tr -d ' ') open PR(s) for fixable problems..."
       for pr in $open_prs; do
