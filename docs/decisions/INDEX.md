@@ -837,7 +837,7 @@ DR-086 §2.2 (the approval-or-acceptance stop class) makes every DR acceptance a
 
 ## [DR-108 — Agents may approve under a delegation the founder gives once, recorded under the bot's own name and never his - impersonation stays banned, delegation is allowed](DR-108.md)
 
-*Status: proposed · Date: 2026-10-17*
+*Status: accepted · Date: 2026-10-17*
 
 <!-- dr-summary:DR-108 auto=9ca2b32c25d7 -->
 The approval-or-acceptance stop class (DR-086 §2.2) says, in code (scripts/lib/autonomy.ts, STOP_CLASSES): "The agent cannot sign these without forging the human." That is true only while the approval record has no field for *who acted, on whose delegation*. The rules-consent review (rules-consent-review-1017) separated two acts:
@@ -845,7 +845,7 @@ The approval-or-acceptance stop class (DR-086 §2.2) says, in code (scripts/lib/
 
 ## [DR-109 — The AI review panel scales by risk, but specs are never the low tier - specs get at least the machinery voter count, and one voter is allowed only for non-spec prose](DR-109.md)
 
-*Status: proposed · Date: 2026-10-17*
+*Status: accepted · Date: 2026-10-17*
 
 <!-- dr-summary:DR-109 auto=01ee89682199 -->
 The core-tenets review proposed one voter for docs and T1, and four for machinery and T3/T4 (DR-033 §6, DR-047), to save tokens under core tenet 2. The founder accepted it with an amendment: specs are "the pointy end, where you have to get it right, as everything downstream depends on it". The recommendation also said to measure voter disagreement before landing it.
@@ -853,7 +853,7 @@ The core-tenets review proposed one voter for docs and T1, and four for machiner
 
 ## [DR-110 — The ai-review verdict carry ignores where the base put the change - text hunks lose their blob ids and start line numbers, binary files keep theirs](DR-110.md)
 
-*Status: proposed · Date: 2026-10-18*
+*Status: accepted · Date: 2026-10-18*
 
 <!-- dr-summary:DR-110 auto=be6169d668c2 -->
 The verdict-carry record ("A pass is carried across a push that changes nothing the voters are given", accepted 2026-10-13, #2701; it is the record named in this one's supersedes_partial:, and bodies here do not spell local ids of that range out, per the parent-register reference gate, #2148) carries an ai-review pass across a push when the bytes the voters are given are identical, and it explicitly rejected a position-insensitive identity.
