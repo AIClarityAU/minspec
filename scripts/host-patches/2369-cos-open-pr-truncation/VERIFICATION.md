@@ -1,4 +1,4 @@
-# Verification record: #2369 host patch is applied to the live `cos.py`
+# Verification record: #2369 host patch — applied to the live `cos.py` is UNCONFIRMED until the human check below
 
 `e1137124` ("chore(#2500): delete the applied host patch directory for #2369") deleted
 this directory on the strength of a prose claim — "Verified before deletion: the patch
@@ -19,22 +19,26 @@ one command, and (b) the exact command for the human confirmation below.
 ## Human confirmation before merge
 
 This is a machinery pull request, so it already merges only by a human. Before merging,
-run on the host, from a checkout of this branch:
+run on the host, from a checkout of this branch (`e1137124^` is `722e7b57`, on `main`):
 
-    git show e1137124^:scripts/host-patches/2369-cos-open-pr-truncation/cos.py.patch \
+    git show 722e7b57:scripts/host-patches/2369-cos-open-pr-truncation/cos.py.patch \
       | grep '^+' | grep -v '^+++' | cut -c2- | grep -v '^[[:space:]]*$' \
       | while IFS= read -r l; do grep -qF -- "$l" ~/.claude/scripts/cos.py || echo "MISSING: $l"; done
     (cd ~/.claude/scripts/tests && COS_PY=~/.claude/scripts/cos.py python3 open-pr-truncation.test.py)
 
-No `MISSING:` lines and an `ok open-pr-truncation` line means the patch is live. Any
-`MISSING:` line means it is not: restore this directory (`git revert e1137124`) instead
-of merging.
+No `MISSING:` lines and an `ok open-pr-truncation` line means the patch is live, and
+only then is the claim in the title settled. Any `MISSING:` line means it is not: do
+not merge this pull request, and leave #2369 open. The deleted files stay recoverable
+from `722e7b57`.
 
-## Agent reading, 2026-10-21T03:00Z
+## Agent reading, 2026-10-21T03:00Z (unverified by any repo reader)
+
+The figures below are what one agent session reported from the host. Treat them as
+a lead for the human check above, not as established fact.
 
 ### 1. Every line the patch adds is present in the live file
 
-The patch itself is in this repository's history at `e1137124^`. Each non-blank `+`
+The patch itself is in this repository's history at `722e7b57`. Each non-blank `+`
 line of it was searched for, as a fixed string, in the live file:
 
     added lines: 103 missing: 0
@@ -48,7 +52,7 @@ regression test in §2 covers behaviour.
 
 ### 2. The installed regression test is the repo's test, and it passes
 
-    $ git show e1137124^:.../open-pr-truncation.test.py | sha256sum
+    $ git show 722e7b57:.../open-pr-truncation.test.py | sha256sum
     05886bee2fabf976212f5fe47600a0d27d288e21495070ca79b2d79d39d9b2d7  -
     $ sha256sum ~/.claude/scripts/tests/open-pr-truncation.test.py
     05886bee2fabf976212f5fe47600a0d27d288e21495070ca79b2d79d39d9b2d7
@@ -68,5 +72,5 @@ by other work since (mtime 2026-10-20); it is a point-in-time reading, not an id
 
 ## Recovery
 
-`apply.sh`, `cos.py.patch` and the test remain recoverable at `e1137124^`. Delete this
+`apply.sh`, `cos.py.patch` and the test remain recoverable at `722e7b57`. Delete this
 file once the human confirmation above has been done and the pull request is merged.
