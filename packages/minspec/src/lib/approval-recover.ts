@@ -37,6 +37,13 @@
  *     stays vscode-free and unit-testable. The caller contract is stated on
  *     {@link recoverProtectedBranchApproval}.
  *
+ * SETTLING THE PRIMARY (#2974). Recovery itself still never writes to the primary.
+ * Once the caller has the PR open, {@link settleRecoveredApproval} retires the
+ * transported copies from the primary's WORKING TREE — and only there: HEAD and the
+ * index are never touched, and a path is restored only when its working bytes are
+ * proven equal to the blob just pushed. What those copies used to tell the editor
+ * (approved, accepted) moves to the in-flight record (`approval-inflight.ts`).
+ *
  * WIRED TO SPEC-050's PR SEAM (#1653). #1115 requirement 2 asked that PR opening
  * reuse the `approval-pr.ts` seam rather than grow a second `gh pr create`. That
  * seam landed in #1224, and the `recovered` outcome is now its call site:
@@ -51,8 +58,11 @@ import { promisify } from 'util';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { canonicalizeSpec } from '@aiclarity/shared';
 import { compareUrlFor, approvalBranchName } from './approve-push';
 import { spliceDrIndexEntry } from './dr-index-splice';
+import { sha256Of, writeInflight, inflightFile, type InflightRecordV1 } from './approval-inflight';
+import { SPEC_STATUSES } from './spec-vocabulary';
 
 const execFileAsync = promisify(execFile);
 
@@ -340,5 +350,251 @@ export async function recoverProtectedBranchApproval(
   } catch (err) {
     // INV-2 backstop: anything unexpected still degrades to a typed result.
     return { outcome: 'failed', error: describeError(err) };
+  }
+}
+
+// ─── #2974: settle the primary once the approval PR is open ────────────────────
+
+/** Outcome of {@link settleRecoveredApproval}. Never an exception. */
+export interface SettleResult {
+  /** Transported paths retired from the primary's working tree (restored to the index copy, or a new sidecar removed). */
+  readonly restored: string[];
+  /** Transported paths deliberately left in place, each for a stated reason in {@link reasons}. */
+  readonly kept: string[];
+  /** The in-flight record written, when the sidecar was retired. */
+  readonly inflight?: string;
+  /** Why each kept path was kept, or why nothing was settled at all (key `*`). */
+  readonly reasons: Record<string, string>;
+}
+
+const SIDECAR_PREFIX = '.minspec/approvals/';
+
+/**
+ * Status words that a lifecycle transition rewrites in a document's BODY (the spec
+ * `**Status:**` line, a decision's `## Status` line). The decision words are listed
+ * here rather than imported because `adr-manager.ts` keeps its set private; a status
+ * added there and missing here only makes {@link differsOnlyInLifecycle} answer
+ * "no", which leaves the document in place — the safe direction.
+ */
+const LIFECYCLE_WORDS = [...SPEC_STATUSES, 'proposed', 'accepted', 'deprecated', 'superseded'];
+const LIFECYCLE_WORD_RE = new RegExp(`\\b(${[...new Set(LIFECYCLE_WORDS)].join('|')})\\b`, 'gi');
+
+/**
+ * Do two versions of an approvable differ ONLY in lifecycle — frontmatter `status:` /
+ * `phases:` and the status word in the body? Built on the approval hash's own
+ * canonical form, so "same content" means exactly what an approval already means
+ * by it. Restoring a document that differed in anything else would show the founder
+ * the OLD text in the editor until the PR merged, so such a document stays put.
+ */
+export function differsOnlyInLifecycle(headText: string, pushedText: string): boolean {
+  const norm = (t: string): string => canonicalizeSpec(t).replace(LIFECYCLE_WORD_RE, '\u0000');
+  return norm(headText) === norm(pushedText);
+}
+
+/** The frontmatter block of a document, LF-normalized, or '' when it has none. */
+function frontmatterBlock(text: string): string {
+  const m = /^---\n[\s\S]*?\n---\n?/.exec(text.replace(/\r\n?/g, '\n'));
+  return m ? m[0].replace(/\n?$/, '\n') : '';
+}
+
+function posixRel(p: string): string {
+  return p.split(path.sep).join('/').split('\\').join('/');
+}
+
+/**
+ * Retire an approval's transported copies from the primary checkout once its PR is
+ * open (#2974), keeping what they told the editor in the in-flight record.
+ *
+ * GUARDS, each checked per path immediately before it is touched:
+ *   - PROVEN: the working bytes (`git hash-object`, so clean filters apply exactly as
+ *     they did for the pushed commit) equal the blob at `res.sha`. A path the founder
+ *     edited after the push is never restored — their work is never lost.
+ *   - INDEX UNTOUCHED: a path with STAGED changes is left alone, and only
+ *     `git restore --worktree` runs (source: the index), so HEAD and the index never
+ *     move. A sidecar new to this branch is removed with `unlink`, nothing else.
+ *   - SIDECAR FIRST: the in-flight record is written before anything is retired; if
+ *     the sidecar is not proven, or cannot be retired, NOTHING is touched and the
+ *     record is removed, so the approval is never left recorded nowhere.
+ *   - DOCUMENT ONLY ON A LIFECYCLE-ONLY DIFF: the approved document is restored only
+ *     when it is tracked and differs from HEAD only in lifecycle
+ *     ({@link differsOnlyInLifecycle}); otherwise it stays, still reading approved
+ *     through the in-flight record.
+ *   - An untracked transported document is never deleted: it is the founder's open
+ *     editor buffer, and nothing on `main` would show in its place.
+ *
+ * Never throws. Makes no network call (every git step here is local).
+ */
+export async function settleRecoveredApproval(
+  rootDir: string,
+  res: RecoverResult,
+  opts: { baseBranch?: string; now?: Date } = {},
+  deps: { run?: GitRun } = {},
+): Promise<SettleResult> {
+  const run = deps.run ?? defaultGitRun();
+  const restored: string[] = [];
+  const kept: string[] = [];
+  const reasons: Record<string, string> = {};
+  const nothing = (why: string): SettleResult => ({
+    restored: [],
+    kept: (res.paths ?? []).map(posixRel),
+    reasons: { '*': why },
+  });
+
+  if (res.outcome !== 'recovered' || !res.sha || !res.branch || !res.paths || res.paths.length === 0) {
+    return nothing('no recovered approval commit to compare against');
+  }
+  const sha = res.sha;
+  const rel = res.paths.map(posixRel);
+  const abs = (p: string): string => path.join(rootDir, ...p.split('/'));
+
+  const ok = async (args: string[]): Promise<boolean> => {
+    try {
+      await run(args, { cwd: rootDir });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  const out = async (args: string[]): Promise<string | undefined> => {
+    try {
+      return await run(args, { cwd: rootDir });
+    } catch {
+      return undefined;
+    }
+  };
+  const proven = async (p: string): Promise<boolean> => {
+    if (!fs.existsSync(abs(p))) return false;
+    const working = (await out(['hash-object', '--', p]))?.trim();
+    const pushed = (await out(['rev-parse', '--verify', '-q', `${sha}:${p}`]))?.trim();
+    return !!working && working === pushed;
+  };
+  const tracked = (p: string): Promise<boolean> => ok(['rev-parse', '--verify', '-q', `HEAD:${p}`]);
+  // `diff --cached --quiet` REJECTS when the index differs from HEAD for the path.
+  const indexClean = (p: string): Promise<boolean> => ok(['diff', '--cached', '--quiet', '--', p]);
+
+  /** Retire one path from the working tree; false (and nothing done) unless every guard holds. */
+  const retire = async (p: string, why: (r: string) => void): Promise<boolean> => {
+    if (!(await indexClean(p))) {
+      why('staged changes in the index');
+      return false;
+    }
+    if (!(await proven(p))) {
+      why('working bytes differ from the pushed blob');
+      return false;
+    }
+    if (await tracked(p)) {
+      if (await ok(['restore', '--worktree', '--', p])) return true;
+      why('git restore failed');
+      return false;
+    }
+    try {
+      fs.unlinkSync(abs(p));
+      return true;
+    } catch (err) {
+      why(describeError(err));
+      return false;
+    }
+  };
+
+  try {
+    const sidecars = rel.filter((p) => p.startsWith(SIDECAR_PREFIX) && p.endsWith('.json'));
+    if (sidecars.length !== 1) return nothing(`expected one approval sidecar, found ${sidecars.length}`);
+    const sidecarRel = sidecars[0];
+    if (!(await proven(sidecarRel))) return nothing('the sidecar differs from the pushed blob');
+
+    let record: { specPath?: unknown; specHash?: unknown };
+    try {
+      record = JSON.parse(fs.readFileSync(abs(sidecarRel), 'utf-8')) as typeof record;
+    } catch {
+      return nothing('the sidecar is not readable JSON');
+    }
+    if (typeof record.specPath !== 'string' || typeof record.specHash !== 'string') {
+      return nothing('the sidecar names no document');
+    }
+    const docRel = posixRel(record.specPath);
+    if (!inflightFile(rootDir, docRel)) return nothing('no git directory for the in-flight record');
+
+    // Decide the document BEFORE anything is written, from bytes read now.
+    let docText: string | undefined;
+    let docEligible = false;
+    if (rel.includes(docRel)) {
+      try {
+        docText = fs.readFileSync(abs(docRel), 'utf-8');
+      } catch {
+        docText = undefined;
+      }
+      const headText = await out(['show', `HEAD:${docRel}`]);
+      if (docText === undefined) reasons[docRel] = 'the document is not readable';
+      else if (headText === undefined) reasons[docRel] = 'the document is not on HEAD (never deleted)';
+      else if (!differsOnlyInLifecycle(headText, docText)) reasons[docRel] = 'it differs from HEAD beyond lifecycle';
+      else docEligible = true;
+    }
+
+    const base: InflightRecordV1 = {
+      version: 1,
+      branch: res.branch,
+      base: opts.baseBranch ?? 'main',
+      sha,
+      sidecarRel,
+      record,
+      recordedAt: (opts.now ?? new Date()).toISOString(),
+    };
+    let file: string;
+    try {
+      file = writeInflight(rootDir, docRel, base);
+    } catch (err) {
+      return nothing(`could not write the in-flight record: ${describeError(err)}`);
+    }
+
+    if (!(await retire(sidecarRel, (r) => (reasons[sidecarRel] = r)))) {
+      // The sidecar stays where it was, so the in-flight record would be a second
+      // copy with no purpose; remove it and touch nothing else.
+      try {
+        fs.unlinkSync(file);
+      } catch {
+        // a leftover record is ignored once HEAD carries the approval
+      }
+      return { restored: [], kept: rel, reasons };
+    }
+    restored.push(sidecarRel);
+
+    for (const p of rel) {
+      if (p === sidecarRel) continue;
+      if (p === docRel) {
+        if (!docEligible) {
+          kept.push(p);
+          continue;
+        }
+        // The overlay is keyed to the RESTORED bytes, so it is written straight after
+        // the restore; until then a reader sees HEAD's lifecycle for that instant.
+        const frontmatter = frontmatterBlock(docText ?? '');
+        if (!(await retire(p, (r) => (reasons[p] = r)))) {
+          kept.push(p);
+          continue;
+        }
+        try {
+          writeInflight(rootDir, docRel, {
+            ...base,
+            doc: { rel: docRel, restoredSha256: sha256Of(fs.readFileSync(abs(p))), frontmatter },
+          });
+        } catch (err) {
+          // The approval record itself is already in place; only the lifecycle
+          // overlay is missing, so the document reads as HEAD says until merge.
+          reasons[p] = `restored, but the lifecycle overlay was not recorded: ${describeError(err)}`;
+        }
+        restored.push(p);
+        continue;
+      }
+      if (!(await tracked(p))) {
+        reasons[p] = 'not on HEAD (never deleted)';
+        kept.push(p);
+        continue;
+      }
+      if (await retire(p, (r) => (reasons[p] = r))) restored.push(p);
+      else kept.push(p);
+    }
+    return { restored, kept, inflight: file, reasons };
+  } catch (err) {
+    return { restored, kept: rel.filter((p) => !restored.includes(p)), reasons: { ...reasons, '*': describeError(err) } };
   }
 }

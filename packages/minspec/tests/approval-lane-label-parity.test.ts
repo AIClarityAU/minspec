@@ -112,6 +112,8 @@ vi.mock('../src/lib/approve-commit', () => ({
 const recoverMock = vi.fn();
 vi.mock('../src/lib/approval-recover', () => ({
   recoverProtectedBranchApproval: (...a: unknown[]) => recoverMock(...a),
+  // #2974: settling the primary is local git; this suite tests lane labels only.
+  settleRecoveredApproval: async () => ({ restored: [], kept: [], reasons: {} }),
 }));
 
 const pushApprovalMock = vi.fn();

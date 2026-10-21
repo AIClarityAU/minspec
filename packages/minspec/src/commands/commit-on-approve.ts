@@ -3,7 +3,11 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { commitApproval, isUntrackedAtHead, type CommitApprovalResult } from '../lib/approve-commit';
 import { pushApproval, type PushApprovalResult } from '../lib/approve-push';
-import { recoverProtectedBranchApproval, type RecoverResult } from '../lib/approval-recover';
+import {
+  recoverProtectedBranchApproval,
+  settleRecoveredApproval,
+  type RecoverResult,
+} from '../lib/approval-recover';
 import {
   branchChangedPaths,
   branchDiffEntries,
@@ -163,7 +167,7 @@ async function recoverOnProtectedBranch(
   // `openApprovalPr` never rejects and degrades to the old `Open PR` notification
   // (with the reason stated) on any failure, so the worst case here is exactly the
   // behaviour this fix replaces.
-  const { suffix } = await openApprovalPr(
+  const { suffix, pr } = await openApprovalPr(
     rootDir,
     { outcome: 'pushed-branch', branch: res.branch, compareUrl: res.compareUrl },
     // `sha` is REQUIRED here, not a nicety: recovery commits in a separate
@@ -172,6 +176,25 @@ async function recoverOnProtectedBranch(
     // body omits the line rather than falling back to a SHA we KNOW is wrong.
     { subject: message, paths: res.paths, sha: res.sha ?? null },
   );
+
+  // #2974 — the approval now lives on its branch AND in an open PR, so the copies in
+  // this (protected) checkout carry nothing that is not already on the remote. Left
+  // in place they kept the primary dirty for as long as the PR stayed open. Retire
+  // them, keeping what they told the editor in the in-flight record. Only once a PR
+  // exists: with no PR, the dirty files are the visible prompt to open one.
+  // `settleRecoveredApproval` never throws and never discards bytes it has not
+  // proven are on the pushed branch.
+  if (pr?.outcome === 'created' || pr?.outcome === 'adopted') {
+    try {
+      const settled = await settleRecoveredApproval(rootDir, res, { baseBranch });
+      if (settled.kept.length > 0) {
+        console.warn(`MinSpec: approval files left in the working tree — ${JSON.stringify(settled.reasons)}`);
+        return { suffix: `${suffix} · ${settled.kept.length} file(s) left in your working tree (see console)` };
+      }
+    } catch (err) {
+      console.warn(`MinSpec: settling the approval threw — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
   return { suffix };
 }
 
@@ -232,7 +255,9 @@ export async function commitApprovalIfEnabled(
       //
       // Recovery still never moves the shared checkout's HEAD (rule #8 / DR-051
       // §4a) — approval-recover.ts copies into a separate worktree with a separate
-      // index, and this arm still stages nothing in the primary.
+      // index, and this arm still stages nothing in the primary. Once the PR is
+      // open, the primary's WORKING TREE copies are retired (#2974) — never HEAD,
+      // never the index — see `settleRecoveredApproval`.
       const current = result.branch?.current ?? 'the default branch';
       const recovery = await recoverOnProtectedBranch(
         rootDir,

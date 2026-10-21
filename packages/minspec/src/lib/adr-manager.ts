@@ -6,6 +6,7 @@ import { slugify } from './spec-manager';
 import { epicRefValue } from './epic-manager';
 import { inspectAllStatusClaims, claimParagraphText } from './status-parity';
 import { ensureDirectory } from './opt-in';
+import { inflightFrontmatter } from './approval-inflight';
 import { prepareText, readDocument, readDocumentText, restoreLineEndings } from './text-io';
 export { slugify };
 
@@ -1422,10 +1423,16 @@ export function listAdrs(rootDir: string, vscodeOverrides?: { decisionsDir?: str
       }
 
       const fm = parseFrontmatterYaml(fmMatch[1]);
+      // #2974: an acceptance whose PR is still open was retired from this working
+      // tree (it lives on its approval branch); the in-flight record carries the
+      // pushed status until the merge lands here, so a just-accepted decision never
+      // reads `proposed` in the meantime.
+      const inflight = inflightFrontmatter(rootDir, filePath)?.match(FRONTMATTER_RE);
+      const status = inflight ? parseFrontmatterYaml(inflight[1]).status : fm.status;
       results.push({
         id: (fm.id as string) ?? entry.match(ADR_ID_RE)?.[0] ?? entry,
         title: (fm.title as string) ?? '',
-        status: ADR_STATUSES.has(fm.status) ? fm.status as AdrStatus : 'proposed',
+        status: ADR_STATUSES.has(status) ? status as AdrStatus : 'proposed',
         date: (fm.date as string) ?? '',
         filePath,
         epic: epicRefValue(fm.epic as string),

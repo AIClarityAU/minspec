@@ -45,8 +45,10 @@ vi.mock('../src/lib/approve-commit', () => ({
 }));
 
 const recoverMock = vi.fn();
+const settleMock = vi.fn();
 vi.mock('../src/lib/approval-recover', () => ({
   recoverProtectedBranchApproval: (...a: unknown[]) => recoverMock(...a),
+  settleRecoveredApproval: (...a: unknown[]) => settleMock(...a),
 }));
 
 const pushApprovalMock = vi.fn();
@@ -126,6 +128,7 @@ beforeEach(() => {
     branch: 'approvals/from-push-seam',
     compareUrl: 'https://github.com/O/R/compare/approvals%2Ffrom-push-seam?expand=1',
   });
+  settleMock.mockReset().mockResolvedValue({ restored: [], kept: [], reasons: {} });
   recoverMock.mockReset().mockResolvedValue({
     outcome: 'recovered',
     branch: 'approvals/spec-099-x',
@@ -317,6 +320,55 @@ describe('protected-branch recovery wiring — #1115', () => {
     expect(resolveHeadShaMock).toHaveBeenCalledTimes(1);
     expect(bodyArgs).toHaveLength(1);
     expect(bodyArgs[0].sha).toBe('BASE_TIP_NOT_THE_APPROVAL');
+  });
+
+  // ── #2974 — once the PR is open, the primary's copies are retired ───────────
+
+  it('T3 #2974: a recovered approval with its PR CREATED settles the primary, against the refused base', async () => {
+    CONFIG.pushOnApprove = 'always';
+    commitApprovalMock.mockResolvedValue({
+      outcome: 'protected-branch',
+      branch: { current: 'master', default: 'master' },
+    });
+    await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+    expect(settleMock).toHaveBeenCalledTimes(1);
+    const [root, res, opts] = settleMock.mock.calls[0] as [string, { sha?: string }, { baseBranch?: string }];
+    expect(root).toBe('/root');
+    expect(res.sha).toBe('RECOVERYCOMMIT');
+    expect(opts.baseBranch).toBe('master');
+  });
+
+  it('T3 #2974: an ADOPTED PR settles too', async () => {
+    CONFIG.pushOnApprove = 'always';
+    openPullRequestMock.mockResolvedValue({ outcome: 'adopted', url: 'https://github.com/O/R/pull/7' });
+    await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+    expect(settleMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('T3 #2974: with NO PR opened, nothing is settled — the dirty files are the prompt to open one', async () => {
+    CONFIG.pushOnApprove = 'always';
+    openPullRequestMock.mockResolvedValue({ outcome: 'gh-absent' });
+    await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+    expect(settleMock).not.toHaveBeenCalled();
+  });
+
+  it('T3 #2974: files the settle step had to keep are named in the suffix, never silent', async () => {
+    CONFIG.pushOnApprove = 'always';
+    settleMock.mockResolvedValue({
+      restored: [],
+      kept: ['specs/x/requirements.md'],
+      reasons: { 'specs/x/requirements.md': 'working bytes differ from the pushed blob' },
+    });
+    const r = await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+    expect(r.suffix).toContain('PR opened');
+    expect(r.suffix).toContain('1 file(s) left in your working tree');
+  });
+
+  it('T3 #2974: a THROWING settle step never costs the approval toast', async () => {
+    CONFIG.pushOnApprove = 'always';
+    settleMock.mockRejectedValue(new Error('boom'));
+    const r = await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+    expect(r.suffix).toContain('PR opened');
   });
 
   it('a THROWING seam still degrades to the warning — commitApprovalIfEnabled never rejects', async () => {

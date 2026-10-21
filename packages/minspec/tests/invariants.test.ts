@@ -244,6 +244,12 @@ describe('Invariant 2: No backend — no network calls', () => {
     // module's own MUTATION SAFETY / TIER-0 doc comment. See
     // lib/tidy-primary.ts gitOut/gitOutRaw.
     'lib/tidy-primary.ts',
+    // #2974: the in-flight approval reader shells local, read-only `git show
+    // <rev>:<sidecar>` and `git rev-parse --verify` against HEAD and the
+    // remote-tracking refs `origin/<branch>` / `origin/<base>` — reading a
+    // remote-tracking ref is offline. Never fetches, never writes. See
+    // lib/approval-inflight.ts gitOut.
+    'lib/approval-inflight.ts',
     // #2456: scaffold's recoverable-commit offer loads `simple-git` via a lazy
     // dynamic import (`defaultCommitter`) and runs `git rev-parse
     // --is-inside-work-tree`, `checkIgnore`, `add`, `commit`, `raw(['rev-parse',

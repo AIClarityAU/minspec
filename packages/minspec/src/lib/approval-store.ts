@@ -23,6 +23,7 @@ import type { ApprovalRecord } from './approval';
 import type { Tier } from './config';
 import { classifyApprovablePath } from './approvable';
 import { ensureDirectory } from './opt-in';
+import { inflightFile, readLiveInflight } from './approval-inflight';
 
 const APPROVALS_DIR = '.minspec/approvals';
 
@@ -147,13 +148,42 @@ function normalizeRecord(v: unknown): ApprovalRecord {
  * (undefined when absent, which is correct for the optional field).
  */
 export function readRecord(rootDir: string, specRelPath: string): ApprovalRecord | undefined {
+  return readApprovalState(rootDir, specRelPath).record;
+}
+
+/** What the store knows about one document's approval, and where it came from. */
+export interface ApprovalState {
+  readonly record?: ApprovalRecord;
+  /**
+   * Present only when the record is IN FLIGHT (#2974) and the document on disk is
+   * still the copy the settle step restored: the hash of the document the approval
+   * covers, which is the pushed one, not the restored one on disk.
+   */
+  readonly coveredHash?: string;
+}
+
+/**
+ * Read a document's approval: the in-flight record while its approval PR is open
+ * (`approval-inflight.ts` — it is newer than any committed sidecar it replaced),
+ * otherwise the working-tree sidecar. A malformed in-flight record is ignored, never
+ * an error, so the committed sidecar still speaks.
+ */
+export function readApprovalState(rootDir: string, specRelPath: string): ApprovalState {
+  const file = inflightFile(rootDir, specRelPath);
+  if (file && fs.existsSync(file)) {
+    const live = readLiveInflight(rootDir, specRelPath);
+    if (live && isValidRecord(live.data.record)) {
+      const record = normalizeRecord(live.data.record);
+      return live.docRestored ? { record, coveredHash: live.specHash } : { record };
+    }
+  }
   const p = sidecarPath(rootDir, specRelPath);
-  if (!fs.existsSync(p)) return undefined;
+  if (!fs.existsSync(p)) return {};
   try {
     const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')) as unknown;
-    return isValidRecord(parsed) ? normalizeRecord(parsed) : undefined;
+    return isValidRecord(parsed) ? { record: normalizeRecord(parsed) } : {};
   } catch {
-    return undefined;
+    return {};
   }
 }
 

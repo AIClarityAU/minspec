@@ -30,6 +30,7 @@ import { assertOwnershipDeclaredForAdvance } from './ownership-advance-guard';
 import { assertOptedIn, ensureDirectory } from './opt-in';
 import {
   readRecord,
+  readApprovalState,
   writeRecord,
   removeRecord,
   listRecords,
@@ -498,7 +499,11 @@ export function resolveStatus(
 /** Read approval status for a spec from its committed sidecar. */
 export function getApprovalStatus(rootDir: string, specFilePath: string): ApprovalStatus {
   const rel = specRelPath(rootDir, specFilePath);
-  return resolveStatus(readRecord(rootDir, rel), canonicalSpecHash(specFilePath));
+  // #2974: while the approval is in flight and the document is still the copy the
+  // settle step restored (HEAD's, differing only in lifecycle), the approval covers
+  // the PUSHED document, so that is the hash it is judged against.
+  const { record, coveredHash } = readApprovalState(rootDir, rel);
+  return resolveStatus(record, coveredHash ?? canonicalSpecHash(specFilePath));
 }
 
 /** Read the raw approval record for a spec (or undefined), for callers needing `migrated`. */

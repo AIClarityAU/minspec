@@ -6,6 +6,7 @@ import { parseSpec } from './spec';
 import type { SpecFrontmatter } from './spec';
 import type { SpecSummary } from './spec-manager';
 import { isSpecKitDirEntry, readSpecKitDir } from './spec-layout';
+import { inflightFrontmatter } from './approval-inflight';
 
 // SPEC-040 FR-4: the recursive spec catalog is Tier-0 (`lib`) — the `approve`,
 // `approve-active`, and `validate` flows depend on it, so it must not ride along
@@ -86,8 +87,16 @@ export function listSpecs(rootDir: string): SpecSummary[] {
     rolesById.set(id, roles);
   };
 
-  const consider = (fm: SpecFrontmatter, displayPath: string): void => {
-    if (!fm.id) return;
+  const consider = (parsedFm: SpecFrontmatter, displayPath: string): void => {
+    if (!parsedFm.id) return;
+    // #2974: an approval whose PR is still open was retired from this working tree;
+    // the in-flight record carries the pushed lifecycle (status + phases) until the
+    // merge lands here, so a just-approved spec never reads as not yet approved.
+    const inflight = inflightFrontmatter(rootDir, displayPath);
+    const lifecycle = inflight ? parseSpec(inflight).frontmatter : undefined;
+    const fm: SpecFrontmatter = lifecycle
+      ? { ...parsedFm, status: lifecycle.status, phases: lifecycle.phases }
+      : parsedFm;
     const { done, total } = phaseProgress(fm, config);
     const summary: SpecSummary = {
       id: fm.id,

@@ -152,6 +152,7 @@ const LOCAL_ONLY: Readonly<Record<string, string>> = {
   'lib/scaffold.ts': 'git ls-files, git rm --cached, git config --local core.hooksPath',
   'lib/presence.ts': 'git worktree list, branch --show-current, rev-parse --show-toplevel',
   'lib/tidy-primary.ts': 'git status, rev-parse, rev-list, cat-file, show, checkout -- <path>; never fetches',
+  'lib/approval-inflight.ts': 'git show and rev-parse --verify against HEAD and remote-tracking refs; never fetches',
   'commands/init.ts': 'git rev-parse, check-ignore, add, commit, checkout -b, status through simple-git; never pushes',
 };
 
