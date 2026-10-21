@@ -28,8 +28,8 @@ phases:
 Materializes **[#1252](https://github.com/AIClarityAU/minspec/issues/1252)** - *"validate
 file:line citations in specs/DRs - four artifacts cite rotted line numbers."*
 
-**Id note.** The highest spec directory on this checkout is `SPEC-136`; `SPEC-201` was chosen
-as a deliberately high id and is not derived from a measured maximum. Open pull requests are
+**Id note.** The highest spec directory on this checkout is `SPEC-211`; `SPEC-201` was chosen
+without deriving it from a measured maximum and sits below existing work. Open pull requests are
 invisible from this checkout, and no spec-id collision script exists (only
 `scripts/check-dr-id-collision.ts`, DR-only), so the id is unchecked against in-flight work. If it
 collides or a lower id is preferred, renumber at the approval gate.
@@ -45,7 +45,7 @@ at all - warn-first, instead of only checking that the path exists.
 
 ### What exists today (observed, not inferred)
 
-- `scripts/validate-frontmatter.ts:415-441` (Rule 9, non-fatal, #161) runs
+- `scripts/validate-frontmatter.ts:496-527` (Rule 9, non-fatal, #161) runs
   `checkReferences` over every spec and DR and **warns** per violation.
 - `packages/minspec/src/lib/reference-checker.ts:181-189` resolves a `file` reference with
   `registry.fileExists(path)` and nothing else. The line number is carried on the `Reference`
@@ -139,7 +139,7 @@ should exist at all.
 many citations were extracted, how many were *checkable* (path resolved and, for FR-3, a
 symbol paired), and how many were skipped and why. A pass that cannot run (unreadable corpus,
 unparsable file) says so as a warning that it validated nothing, and never reports green by
-catching and ignoring - the bare `catch {}` in Rule 9 (`validate-frontmatter.ts:443-445`) is
+catching and ignoring - the bare `catch {}` in Rule 9 (`validate-frontmatter.ts:525-527`) is
 exactly the shape this must **not** copy. A zero-extracted-citations result on a corpus known
 to contain citations is itself reported.
 
