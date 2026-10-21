@@ -64,6 +64,18 @@ vi.mock('../src/lib/adr-manager', () => ({
   ADR_STATUS_VALUES: ['proposed', 'accepted', 'deprecated', 'superseded'],
 }));
 
+// SPEC-041 Slice 1 (#1066): Accept ADR runs the human-approver gate and writes a sidecar.
+// Keep the real gate; stub the git/fs edges (see adr-command.test.ts).
+vi.mock('../src/lib/approval', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/approval')>()),
+  gitConfigEmail: vi.fn(() => 'human@example.com'),
+  canonicalSpecHash: vi.fn(() => 'hash-of-accepted-dr'),
+}));
+vi.mock('../src/lib/approval-store', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/approval-store')>()),
+  writeRecord: vi.fn(),
+}));
+
 vi.mock('../src/lib/active-spec', () => ({
   findActiveSpec: vi.fn(),
   summarizeActiveSpec: vi.fn(),
@@ -319,6 +331,7 @@ describe('commands', () => {
       expect(scaffold).toHaveBeenCalledWith('/tmp/test-workspace');
       expect(generateHarnessFiles).toHaveBeenCalledWith(
         '/tmp/test-workspace',
+        [],
       );
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
         'MinSpec: Initialized .minspec/ and generated harness files.',
@@ -397,7 +410,26 @@ describe('commands', () => {
       );
       expect(vscode.window.showTextDocument).toHaveBeenCalledWith(mockDoc);
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-        'MinSpec: Created DR-001 — Use PostgreSQL for persistence',
+        'MinSpec: Created DR-001 — Use PostgreSQL for persistence. Tip: if this decision could be undone in under a day, a DR is probably not needed.',
+      );
+    });
+
+    it('ADR filter (#296) is advisory: no extra prompt, DR always created, hint on the toast', async () => {
+      vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce('Rename a helper');
+      vi.mocked(createAdr).mockReturnValueOnce({
+        id: 'DR-009',
+        title: 'Rename a helper',
+        status: 'proposed',
+        date: '2026-05-27',
+        filePath: '/tmp/test-workspace/docs/decisions/DR-009.md',
+      });
+
+      await createAdrCommand();
+
+      expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+      expect(createAdr).toHaveBeenCalled();
+      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+        expect.stringContaining('undone in under a day'),
       );
     });
 

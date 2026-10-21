@@ -547,10 +547,11 @@ month of dangling references.
 The check runs through the best validator actually present: a Node validator if one is
 already installed, else the bundled \`python3\` script, else a pure-shell fallback. Each tier
 is used only if it can run and falls through otherwise, so a missing runtime degrades the
-check instead of bricking the commit. Know the limit of the lower tiers: the \`python3\` and
-shell tiers match paths under \`specs/\` literally, so if \`{{specsDir}}/\` differs from that,
-only the Node tier sees your specs and a clean commit is not evidence the frontmatter is
-valid (#2684).
+check instead of bricking the commit. Know the limit of what's actually shipped: the
+\`python3\` and shell tiers match paths under \`specs/\` literally, and the Node validator
+(\`@aiclarity/minspec-validator\`) is not yet published, so it is never the one that runs. If
+\`{{specsDir}}/\` differs from \`specs/\`, no tier that exists today sees your specs, and a
+clean commit is not evidence the frontmatter is valid (#2684).
 
 ### Decision frontmatter
 
@@ -1791,6 +1792,12 @@ FATAL checks, modelled on MinSpec's Node validate-frontmatter:
     with an \`implements_reason:\`. FAIL when .minspec/config.json sets
     "ownershipDeclaration": "error", otherwise WARN. An \`implements:\` or
     \`affects:\` path that escapes the repo always FAILs.
+  - a spec/DR/domain file that cannot be read at all (decode error, permission
+    error, a pre-commit \`git show\` failure) FAILs as \`unreadable (<reason>)\`;
+    it is counted and reported, never skipped in silence (invariant 2, #2630).
+    The same applies one level up: if the pre-commit git call that LISTS staged
+    files itself errors, that is also a FAIL, not an empty — and therefore
+    passing — run.
 
 The id/type checks split frontmatter the way the Node validator does (first
 --- ... --- block, split each line on the first colon, trim); the ownership rule
@@ -1813,6 +1820,9 @@ DR_ID_RE = re.compile(r"^DR-\\d+$")
 # A DR is any .md under the decisions dir except the register's own listing
 # (no id: of its own) and a conventional README (prose, not a record) — #1908.
 DR_EXEMPT_FILENAMES = {"INDEX.md", "README.md"}
+# The section the founder reads to accept a DR. A hand-written DR skipped it because
+# only the generator template carried it (#2921). WARN until the corpus is backfilled.
+DR_PLAIN_TERMS_RE = re.compile(r"^#{1,6}[ \\t]+In plain terms\\b", re.IGNORECASE | re.MULTILINE)
 
 
 def clean_frontmatter_value(raw):
@@ -1882,27 +1892,33 @@ def parse_frontmatter(content):
 
 
 def staged_files(root):
-    """Staged added/copied/modified files (pre-commit scope). [] on any git error."""
+    """Staged added/copied/modified files (pre-commit scope). Returns the
+    Exception itself on any git error — never \`[]\` — so a git failure cannot
+    be read as "nothing staged" and validate zero files while still exiting 0
+    (invariant 2: an errored witness fails the gate closed, visibly, never by
+    going quiet)."""
     try:
         out = subprocess.run(
             ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
             cwd=root, capture_output=True, text=True, check=True,
         )
         return [f for f in out.stdout.splitlines() if f.strip()]
-    except Exception:
-        return []
+    except Exception as exc:
+        return exc
 
 
 def staged_content(root, rel):
-    """Content of the staged blob (what is ACTUALLY being committed)."""
+    """Content of the staged blob (what is ACTUALLY being committed). Returns
+    the Exception itself on failure — never \`None\` — so the caller can tell
+    "nothing to read" apart from "could not read it" (invariant 2)."""
     try:
         out = subprocess.run(
             ["git", "show", ":" + rel],
             cwd=root, capture_output=True, text=True, check=True,
         )
         return out.stdout
-    except Exception:
-        return None
+    except Exception as exc:
+        return exc
 
 
 def all_md(root, rel_dir):
@@ -2122,6 +2138,12 @@ def main():
 
     if pre_commit:
         targets = staged_files(root)
+        if isinstance(targets, Exception):
+            sys.stderr.write(
+                "FAIL pre-commit: could not list staged files (" + str(targets) + "). "
+                "Refusing to treat an unknown staged set as an empty one.\\n"
+            )
+            return 1
         reader = lambda rel: staged_content(root, rel)
     else:
         targets = (
@@ -2133,8 +2155,8 @@ def main():
             try:
                 with open(os.path.join(root, rel), "r", encoding="utf-8") as fh:
                     return fh.read()
-            except Exception:
-                return None
+            except Exception as exc:
+                return exc
 
     errors = 0
     # Read on the first spec, not up front: a commit that stages no spec never
@@ -2159,7 +2181,11 @@ def main():
             continue
 
         content = reader(rel)
-        if content is None:
+        if isinstance(content, Exception):
+            sys.stderr.write(
+                "FAIL " + norm + ": unreadable (" + str(content) + ")\\n"
+            )
+            errors += 1
             continue
         fm = parse_frontmatter(content)
 
@@ -2202,6 +2228,11 @@ def main():
                     "FAIL " + norm + ": invalid \`id: DR-NNN\` frontmatter (got \`" + dr_id + "\`)\\n"
                 )
                 errors += 1
+
+            if not DR_PLAIN_TERMS_RE.search(FM_RE.sub("", content, count=1)):
+                sys.stderr.write(
+                    "WARN " + norm + ": decision record lacks a \`## In plain terms\` section (#2921)\\n"
+                )
 
         if is_domain:
             if clean_frontmatter_value(fm.get("type", "")) != "domain":

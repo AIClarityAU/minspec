@@ -65,6 +65,42 @@ describe('the autonomy setting is a boundary file', () => {
   });
 });
 
+describe('the delegation records are a boundary file too (DR-108)', () => {
+  // An agent may tighten or suspend a delegation, never widen one. That holds
+  // only if no edit to the record can auto-merge: the founder's merge keystroke
+  // is the witness, the same as for the autonomy setting.
+  it('.minspec/delegations.json is a boundary path, however spelled', () => {
+    for (const p of ['.minspec/delegations.json', './.minspec/delegations.json', '.minspec\\delegations.json']) {
+      expect(isBoundaryPath(p)).toBe(true);
+    }
+  });
+
+  it('a delegations-only diff is INELIGIBLE for auto-merge, end-to-end', () => {
+    const changed: ChangedFile[] = [cf('.minspec/delegations.json')];
+    const sig = detectBoundaryChange(changed);
+    expect(sig).toBeDefined();
+    const d = decideAutoMerge({
+      reviewSignals: {
+        rootCause: 'widen a delegation',
+        changedFiles: ['.minspec/delegations.json'],
+        rootCauseFiles: ['.minspec/delegations.json'],
+        regressionTest: 'x.test.ts > y',
+        gate: { test: 'pass', lint: 'pass', build: 'pass', validate: 'pass' },
+      },
+      hollowFindings: [],
+      consequenceSignals: sig ? [sig] : [],
+      mode: 'consequence-hybrid',
+      proverResult: { regressionProvenBaseRed: true, regressionGreenOnHead: true, note: 'proven' },
+    });
+    expect(d.eligible).toBe(false);
+    expect(d.failed).toContain('high-blast');
+  });
+
+  it('does not sweep a same-named file elsewhere', () => {
+    expect(isBoundaryPath('docs/delegations.json')).toBe(false);
+  });
+});
+
 describe('the rule is PRECISE — a boundary that fires constantly gets routed around', () => {
   it('does not sweep the approval sidecars', () => {
     // A `.minspec/` prefix rule would classify every routine approval HIGH.

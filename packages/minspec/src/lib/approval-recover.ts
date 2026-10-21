@@ -52,6 +52,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { compareUrlFor, approvalBranchName } from './approve-push';
+import { spliceDrIndexEntry } from './dr-index-splice';
 
 const execFileAsync = promisify(execFile);
 
@@ -132,6 +133,37 @@ function isNetworkError(message: string): boolean {
   return /could ?n'?t? resolve host|resolve host|network is unreachable|temporary failure in name resolution|failed to connect|could not connect|connection (refused|reset|timed out)|unable to access|operation timed out|timed out|no route to host|dial tcp|proxy|ssl|tls/i.test(
     message,
   );
+}
+
+/**
+ * For a register INDEX.md in the approval set, write into `dst` the base INDEX
+ * (already checked out in the worktree) with only the target decision's entry
+ * applied. The target id comes from the sibling `DR-NNN*.md` path(s) in the same
+ * set. Returns false (caller copies the file as before) when no single target id,
+ * no base INDEX, or no matching entry can be found — never throws.
+ */
+function spliceTargetEntry(rel: readonly string[], indexRel: string, src: string, dst: string): boolean {
+  try {
+    const dir = path.dirname(indexRel);
+    const ids = new Set<string>();
+    for (const p of rel) {
+      if (path.dirname(p) !== dir) continue;
+      const m = /^(DR-\d+)/.exec(path.basename(p));
+      if (m) ids.add(m[1]);
+    }
+    if (ids.size === 0 || !fs.existsSync(dst)) return false;
+    let text = fs.readFileSync(dst, 'utf-8');
+    const working = fs.readFileSync(src, 'utf-8');
+    for (const id of ids) {
+      const next = spliceDrIndexEntry(text, working, id);
+      if (next === null) return false;
+      text = next;
+    }
+    fs.writeFileSync(dst, text);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export interface RecoverOptions {
@@ -224,7 +256,12 @@ export async function recoverProtectedBranchApproval(
         for (const f of rel) {
           const dst = path.join(wt, f);
           fs.mkdirSync(path.dirname(dst), { recursive: true });
-          fs.copyFileSync(path.join(rootDir, f), dst);
+          const src = path.join(rootDir, f);
+          // #2912: the shared checkout's INDEX.md is regenerated from EVERY DR on
+          // disk, so copying it wholesale drags in other decisions' uncommitted
+          // rows. Splice only the target DR's entry onto origin/<base>'s INDEX.
+          if (path.basename(f) === 'INDEX.md' && spliceTargetEntry(rel, f, src, dst)) continue;
+          fs.copyFileSync(src, dst);
         }
       } catch (err) {
         return { outcome: 'failed', error: describeError(err) };

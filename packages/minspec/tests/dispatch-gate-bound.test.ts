@@ -51,6 +51,9 @@ function findScriptsDir(): string {
 }
 
 const scriptPath = path.join(findScriptsDir(), 'dispatch-issue.sh');
+// The gate starts each check through the environment allowlist program (#1203), which
+// the script gets by sourcing this library. The extracted block gets it the same way.
+const launchEnvLib = path.join(findScriptsDir(), 'lib', 'agent-context.sh');
 const content = fs.readFileSync(scriptPath, 'utf-8');
 
 /**
@@ -85,6 +88,7 @@ function runGateStatus(
     'WORKTREE="${WORKTREE:-/tmp}"',
     'ISSUE=999',
     'BUILD_DEADLINE=${BUILD_DEADLINE:-0}',
+    `source ${JSON.stringify(launchEnvLib)}`,
     gateBlock,
     `gate_status ${cmd}`,
   ].join('\n');

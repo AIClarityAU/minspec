@@ -20,6 +20,11 @@
 #   has `ai-review:pass`), the old greenlight reviewed an older head. This strips
 #   `ai-review:pass` and re-posts `ready-to-merge` as failing, so a stale pass
 #   cannot gate the new, unreviewed head.
+#   One exception (#1688): the strip stands down when the allowlisted reviewer App
+#   has ALREADY recorded a completed pass round on the new head itself - which a
+#   carried verdict can do before this run reaches its strip. The label is then
+#   this head's own, not the old one's, and stripping it would strand a reviewed
+#   commit with no verdict. Any other state strips exactly as before.
 #
 # #397 (provenance): a GitHub label is hand-addable by anyone with write access.
 #   On PR #200 a human hand-set `ai-review:pass` with no review run, turning this
@@ -204,7 +209,68 @@ jobs:
               senderLogin,
               allowlist,
             });
-            const staleness = guard.decideStalenessStrip({ action, labels });
+
+            // ── #1688 — is the pass on this pull request ALREADY this head's own? ──
+            // `labels` is the label set AT THE MOMENT OF THE PUSH, so a pass in it was
+            // earned by the OLD head. But the strip at the bottom of this script runs
+            // later, against the LIVE pull request, and removes whatever
+            // `ai-review:pass` is there by then. While a review took minutes that gap
+            // was harmless. A carried verdict (ai-review.yml, "Verdict carry") lands in
+            // seconds, so this run can now reach its strip AFTER the reviewer has put a
+            // fresh pass on this exact head - and removing that leaves a reviewed
+            // commit with no verdict label and nothing that will put one back.
+            //
+            // So before deciding to strip, ask the one question that settles it: has the
+            // allowlisted reviewer App recorded a COMPLETED pass round on pr.head.sha
+            // itself? The answer comes from that commit's own `ai-review` check-runs,
+            // read by the same guard rule the carry uses (latestHeadRound). Only a yes
+            // stands the strip down. Everything else - no round on this head yet, a
+            // round still running, anything but a recorded pass, a failed read, a base
+            // guard that predates #1688 - leaves `headRound` unset or incomplete and the
+            // strip is byte-for-byte what it was. A real change is therefore still
+            // voided: its new head has no completed round until the panel has finished.
+            let headRound; // undefined ⇒ decideStalenessStrip behaves exactly as before
+            if (
+              action === 'synchronize' &&
+              labels.includes(guard.PASS) &&
+              typeof guard.latestHeadRound === 'function'
+            ) {
+              try {
+                // `filter: 'all'`: the default (`latest`) hides earlier same-name runs,
+                // and which round is the latest is the guard's call, by timestamp.
+                //
+                // ONE request, and its body is handed to the guard UNREAD - not
+                // `github.paginate`, which returns a bare array and so throws away the
+                // `total_count` the guard uses to prove it was given every round. If
+                // this commit has more rounds than one page holds, the guard says the
+                // listing is not the whole list, `headRound` stays incomplete, and the
+                // strip below is what it always was. Never unwrap `.check_runs` here.
+                const headListing = await github.rest.checks.listForRef({
+                  owner,
+                  repo,
+                  ref: pr.head.sha,
+                  check_name: guard.CHECK_NAME,
+                  filter: 'all',
+                  per_page: guard.CHECK_RUNS_PAGE_SIZE,
+                });
+                headRound = guard.latestHeadRound({
+                  listing: headListing.data,
+                  allowlist,
+                  headSha: pr.head.sha,
+                });
+              } catch (e) {
+                core.warning(
+                  `could not read the ai-review rounds on ${pr.head.sha}: ${e.message} — ` +
+                    'treating the pass as stale, as before (#1688)',
+                );
+              }
+            }
+            const staleness = guard.decideStalenessStrip({ action, labels, headRound });
+            if (headRound && headRound.complete === true && !staleness.strip) {
+              core.info(`STALENESS: not stripping ${guard.PASS} — ${staleness.reason}`);
+            } else if (headRound && staleness.strip) {
+              core.info(`STALENESS: stripping as before — ${headRound.reason}`);
+            }
 
             // ── Provenance-recency verification of any *surviving* pass ────
             // Never trust bare presence: a present ai-review:pass greens the gate

@@ -158,3 +158,11 @@ fi
 # rather than by grepping this file (see session-autonomy.sh). Never fatal.
 _AUT=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/session-autonomy.sh
 [ -x "$_AUT" ] && "$_AUT" || true
+
+# ── Git hooks armed? Second witness (#2671) ──────────────────────────────────
+# `prepare`'s own loud-failure check only fires the moment `npm install` runs.
+# This independent witness re-checks the LIVE git config on every session
+# start, so a hooks path that went missing afterward is still reported. Its own
+# side-effect-free file, same reasoning as session-autonomy.sh. Never fatal.
+_HOOKS_WITNESS=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/session-hooks-path.sh
+[ -x "$_HOOKS_WITNESS" ] && "$_HOOKS_WITNESS" || true

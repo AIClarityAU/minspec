@@ -329,6 +329,37 @@ describe('drain-inbox.sh --quota-publish-wall — the reactive producer', () => 
     at("You've hit your session limit · resets 11:59pm (Australia/Sydney)");
     expect(run(['--quota-gate']).code).toBe(42);
   });
+
+  // #1062 — T3: quota_publish_wall read $GUARD, which nothing in the script ever
+  // defined, so under `set -u` every call died with "GUARD: unbound variable" and
+  // published nothing. The script must locate ai-review-guard.js itself.
+  it('does not die on an unbound variable (the guard path is defined under set -u)', () => {
+    const r = at("You've hit your session limit · resets 10:10pm (Australia/Sydney)");
+    expect(r.out).not.toMatch(/unbound variable/);
+    expect(r.code).toBe(0);
+    expect(fs.existsSync(quotaFile)).toBe(true);
+  });
+
+  // #1062 — REGRESSION: extraction now delegates to parseResetInstant (the tested
+  // pure seam in ai-review-guard.js, next to isQuotaExhaustion) instead of a second,
+  // bash-only regex that only ever matched the ABSOLUTE clock form ("resets 8:40am
+  // (Zone)"). isQuotaExhaustion's own pattern (`resets? (at|in)`) already classifies
+  // the RELATIVE form below as quota-exhaustion — is_quota (--is-quota) says so too
+  // — so the old bash-only extractor silently threw the timestamp away on text it
+  // had ALREADY correctly detected as a quota signal, falling back to the flat
+  // QUOTA_BACKOFF guess. Proven base-red/head-green: reverting quota_publish_wall to
+  // its pre-#1062 bash-regex body makes this fail (no clock/ampm/zone token to
+  // match), and the parseResetInstant-backed version passes.
+  it('extracts a RELATIVE reset ("try again in N minutes") — the old bash-only extractor could never parse this shape', () => {
+    const r = at('Claude usage limit reached. Try again in 25 minutes.');
+    expect(r.code).toBe(0);
+    const q = read();
+    const delta = q.resets_at - nowSec();
+    expect(delta).toBeGreaterThan(0);
+    expect(delta).toBeLessThanOrEqual(25 * 60 + 5);
+    expect(delta).toBeGreaterThan(25 * 60 - 30);
+    expect(q.used_percentage).toBeGreaterThanOrEqual(100);
+  });
 });
 
 describe('drain-inbox.sh --quota-health — an inert gate must not be silent', () => {
@@ -522,6 +553,31 @@ describe('drain-inbox.sh --quota-gate — the WEEKLY ceiling, which the 5h readi
     const r = run(['--quota-gate']);
     expect(r.code).toBe(42);
     expect(r.out).toMatch(/no usable reset time/);
+    // The gate's own printed number names what it would actually sleep: the fixed
+    // backoff, not the 6h clamp (#2603 — those used to disagree, 21600 printed here
+    // while the loop slept toward an unrelated 5h reset).
+    expect(r.out).toMatch(/^defer:1800 /);
+  });
+
+  it("T3 regression (#2603): a weekly hold with a PASSED reset sleeps the fixed backoff, not the 5h reset hours away", () => {
+    // Measured case: weekly 97% with its reset 20s in the past, 5h window 2% with
+    // ~4h left to run. _quota_sleep_plan only took the weekly branch when wr > now,
+    // so a weekly hold with no usable reset time fell through to the 5h branch and
+    // slept toward ITS reset — four hours away for a hold that lifts the moment the
+    // producer publishes the new week. The weekly window's own hold must win this
+    // sleep too, exactly as it already wins the gate's admission verdict.
+    write7({ used_percentage: 2, resets_at: nowSec() + 4 * 3600,
+             seven_day_percentage: 97, seven_day_resets_at: nowSec() - 20 });
+    expect(run(['--quota-gate']).code).toBe(42);
+    const secs = Number(run(['--quota-sleep']).out);
+    expect(secs).toBe(1800);
+    // CONTROL: the same 5h reading with the weekly window NOT binding (room to spare)
+    // sleeps toward the 5h reset as usual — so it is the weekly hold, not some other
+    // change, that redirected the sleep above.
+    write7({ used_percentage: 2, resets_at: nowSec() + 4 * 3600,
+             seven_day_percentage: 10, seven_day_resets_at: nowSec() - 20 });
+    const controlSecs = Number(run(['--quota-sleep']).out);
+    expect(controlSecs).toBeGreaterThan(1800);
   });
 
   it('reports the weekly level in health when it is known', () => {
