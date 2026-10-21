@@ -373,6 +373,20 @@ const cronDelete = (sid: string, toolId: string, jobId: string): object[] => [
     message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: `Cancelled job ${jobId}.` }] },
   },
 ];
+const cronList = (sid: string, toolId: string, result: string): object[] => [
+  {
+    type: 'assistant',
+    timestamp: iso(30_000),
+    sessionId: sid,
+    message: { role: 'assistant', content: [{ type: 'tool_use', id: toolId, name: 'CronList', input: {} }] },
+  },
+  {
+    type: 'user',
+    timestamp: iso(29_000),
+    sessionId: sid,
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId, content: result }] },
+  },
+];
 const title = (sid: string, t: string): object => ({ type: 'custom-title', customTitle: t, sessionId: sid });
 const costState = (sid: string): object => ({ type: 'cost-state', sessionId: sid, startTime: Date.now() - 3_600_000, totalDuration: 3_590_000 });
 
@@ -634,6 +648,100 @@ suite('a session is told when its own panel is gone (UserPromptSubmit)', () => {
   });
 });
 
+suite('a session already told once is BLOCKED on its later prompts (#2651)', () => {
+  /**
+   * The advisory above is text in a prompt, and on 2026-10-09 the orphaned supervisor
+   * ran a full tick AFTER that advice was in its context: advice alone does not stop a
+   * session from acting. So the first headless prompt runs (it is the one chance to
+   * act on the advice) and every later one, while the input still has no writer, is
+   * refused outright — a prompt hook CAN block, so nothing has to trust the model to
+   * stop on its own.
+   */
+  it('runs the first headless prompt, then BLOCKS the second on the same synthetic pipe with no writer', async () => {
+    const f = await fake('headless');
+    register({ ...f, sessionId: OTHER });
+    const first = unit('self', promptInput(OTHER));
+    expect(first.status).toBe(0);
+    expect(first.out).toContain(NO_PANEL);
+
+    const second = unit('self', promptInput(OTHER));
+    expect(second.status).toBe(2);
+    expect(second.out).toMatch(/BLOCKED/);
+    expect(second.out).toContain('#2651');
+
+    // And it stays blocked — this is not a one-shot flip back to advisory.
+    const third = unit('self', promptInput(OTHER));
+    expect(third.status).toBe(2);
+    expect(third.out).toMatch(/BLOCKED/);
+  });
+
+  it('never blocks the one handover turn for a session that has not been told yet', async () => {
+    // The control: a session told for the very first time must not be blocked on
+    // that same prompt — only on a LATER one.
+    const f = await fake('headless');
+    register({ ...f, sessionId: OTHER });
+    const { out, status } = unit('self', promptInput(OTHER));
+    expect(status).toBe(0);
+    expect(out).toContain(NO_PANEL);
+    expect(out).not.toMatch(/already used its one/);
+  });
+
+  it('does not block a DIFFERENT session that has never been warned', async () => {
+    const warned = await fake('headless');
+    const fresh = await fake('headless');
+    register({ ...warned, sessionId: OTHER });
+    register({ ...fresh, sessionId: THIRD });
+    unit('self', promptInput(OTHER)); // OTHER uses its one turn
+    expect(unit('self', promptInput(OTHER)).status).toBe(2); // and is now blocked
+
+    const { out, status } = unit('self', promptInput(THIRD));
+    expect(status).toBe(0);
+    expect(out).toContain(NO_PANEL);
+  });
+
+  it('clears the mark once the session is seen attached again, so a later loss gets a fresh turn', async () => {
+    // Simulated reattachment: the marker this unit wrote for an earlier loss must not
+    // survive a prompt observed while the session IS attached, or a loss after that
+    // reattachment would be blocked immediately instead of earning its own handover turn.
+    // Each step removes the PREVIOUS fixture's registry file before registering the
+    // next one under the same session id: the fixture processes stay alive until
+    // afterEach, and own_process must not be left to pick between two "alive" entries
+    // that both claim this session id.
+    const f = await fake('headless');
+    register({ ...f, sessionId: OTHER });
+    unit('self', promptInput(OTHER));
+    expect(unit('self', promptInput(OTHER)).status).toBe(2);
+
+    fs.rmSync(registryFile(f.pid));
+    const reattached = await fake('attached');
+    register({ ...reattached, sessionId: OTHER });
+    expect(unit('self', promptInput(OTHER)).out).toBe('');
+
+    fs.rmSync(registryFile(reattached.pid));
+    const lostAgain = await fake('headless');
+    register({ ...lostAgain, sessionId: OTHER });
+    const { out, status } = unit('self', promptInput(OTHER));
+    expect(status).toBe(0);
+    expect(out).toContain(NO_PANEL);
+  });
+
+  it('wires through scope-check.sh: exit 2, with the block reason on stderr', async () => {
+    const f = await fake('headless');
+    register({ ...f, sessionId: OTHER });
+    const cwd = fs.mkdtempSync(path.join(scratch, 'cwd-'));
+    const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
+    delete env.CLAUDE_CONFIG_DIR;
+    const first = spawnSync('bash', [PROMPT_HOOK], { input: JSON.stringify(promptInput(OTHER)), encoding: 'utf-8', env, cwd, timeout: 20_000 });
+    expect(first.status).toBe(0);
+    expect(first.stdout).toContain(NO_PANEL);
+
+    const second = spawnSync('bash', [PROMPT_HOOK], { input: JSON.stringify(promptInput(OTHER)), encoding: 'utf-8', env, cwd, timeout: 20_000 });
+    expect(second.status).toBe(2);
+    expect(second.stderr).toMatch(/BLOCKED/);
+    expect(second.stdout).not.toMatch(/BLOCKED/);
+  });
+});
+
 suite('a new session is told which sessions lost their panel (SessionStart)', () => {
   let me: Fake;
   beforeEach(async () => {
@@ -774,6 +882,34 @@ suite('a schedule that died with its session is named (#2379)', () => {
     expect(out).not.toMatch(/died with it/);
   });
 
+  it('drops a schedule a later empty CronList shows died with a process restart (#2712)', () => {
+    transcript(
+      OTHER,
+      [humanPrompt(OTHER), ...cronCreate(OTHER, 'toolu_1', 'ae8c3f26', '*/15 * * * *', '/chief-of-staff'), ...cronList(OTHER, 'toolu_2', 'No scheduled jobs.'), costState(OTHER)],
+      30,
+    );
+    const { out } = unit('start', startInput());
+    expect(out).toContain(LOSS);
+    expect(out).not.toContain('/chief-of-staff');
+  });
+
+  it('keeps a schedule created after the empty CronList (#2712)', () => {
+    transcript(
+      OTHER,
+      [
+        humanPrompt(OTHER),
+        ...cronCreate(OTHER, 'toolu_1', 'aaaaaaaa', '*/15 * * * *', '/old-loop'),
+        ...cronList(OTHER, 'toolu_2', 'No scheduled jobs.'),
+        ...cronCreate(OTHER, 'toolu_3', 'bbbbbbbb', '2,17,32,47 * * * *', '/chief-of-staff'),
+        costState(OTHER),
+      ],
+      30,
+    );
+    const { out } = unit('start', startInput());
+    expect(out).toContain('/chief-of-staff');
+    expect(out).not.toContain('/old-loop');
+  });
+
   it('reports only the schedule still armed when one was replaced by another', () => {
     transcript(
       OTHER,
@@ -799,6 +935,122 @@ suite('a schedule that died with its session is named (#2379)', () => {
     expect(out).toMatch(/still holds/);
     expect(out).toContain('/chief-of-staff');
     expect(out).not.toMatch(/died with it/);
+  });
+});
+
+suite('a session killed long before this one started is told about once, not forever (#2633)', () => {
+  // The container-restart case: every panel process dies at once, and the next
+  // session in the folder starts much later - far outside the RECENT_S look-back the
+  // other cases use. The only evidence is the stale registry entry the dead process
+  // left behind (register() with a pid nothing holds proves that: alive() is False
+  // because /proc has no such process), so this path is keyed on the registry, not on
+  // transcript age, and gated by a small state file instead of a time window.
+  const stateFile = (): string => path.join(home, '.cache', 'session-panel', 'announced.json');
+  let me: Fake;
+  beforeEach(async () => {
+    me = await registerMe();
+  });
+
+  it('names it even though its last write was a day ago, far past the 10-minute look-back', () => {
+    register({ pid: 4_100_001, procStart: '987654', sessionId: OTHER });
+    const file = transcript(OTHER, [humanPrompt(OTHER), title(OTHER, 'the old chief of staff')], 24 * 3600);
+    const { out, status } = unit('start', startInput());
+    expect(status).toBe(0);
+    expect(out).toContain(LOSS);
+    expect(out).toContain('the old chief of staff');
+    expect(out).toMatch(/the registry lists no live process for it \(no exit record; last write \d+h ago\)/);
+    expect(out).toContain(file);
+    expect(out).toContain(`claude --resume ${OTHER}`);
+  });
+
+  it('says nothing about a dead entry with no transcript on disk - nothing to read "human panel" from', () => {
+    register({ pid: 4_100_002, procStart: '987655', sessionId: OTHER });
+    expect(unit('start', startInput()).out).toBe('');
+  });
+
+  it('says nothing about a dead entry whose transcript was never a human panel', () => {
+    register({ pid: 4_100_003, procStart: '987656', sessionId: OTHER });
+    transcript(OTHER, [sdkPrompt(OTHER)], 24 * 3600);
+    expect(unit('start', startInput()).out).toBe('');
+  });
+
+  it('never prints a dead entry twice when the recent-transcript path already caught it', () => {
+    // A dead registry entry whose transcript is ALSO recent enough for the ordinary
+    // look-back: both paths would name the same session without the dedupe.
+    register({ pid: 4_100_004, procStart: '987657', sessionId: OTHER });
+    transcript(OTHER, [humanPrompt(OTHER), title(OTHER, 'duplicate check')], 30);
+    const { out } = unit('start', startInput());
+    expect(out.split('duplicate check')).toHaveLength(2); // exactly one occurrence
+  });
+
+  it('records the first sighting in a small state file and announces again within the window', () => {
+    register({ pid: 4_100_005, procStart: '987658', sessionId: OTHER });
+    transcript(OTHER, [humanPrompt(OTHER), title(OTHER, 'the old chief of staff')], 24 * 3600);
+    const first = unit('start', startInput());
+    expect(first.out).toContain(LOSS);
+    const state = JSON.parse(fs.readFileSync(stateFile(), 'utf-8')) as Record<string, number>;
+    expect(typeof state[OTHER]).toBe('number');
+
+    // A second session starting moments later, inside the window, is told too.
+    const second = unit('start', startInput());
+    expect(second.out).toContain(LOSS);
+    expect(second.out).toContain('the old chief of staff');
+  });
+
+  it('falls silent once the announce window has closed, even though the entry is still there', () => {
+    register({ pid: 4_100_006, procStart: '987659', sessionId: OTHER });
+    transcript(OTHER, [humanPrompt(OTHER), title(OTHER, 'the old chief of staff')], 24 * 3600);
+    expect(unit('start', startInput()).out).toContain(LOSS);
+
+    // Back-date the sighting past the 10-minute announce window, standing in for a
+    // session that starts 11 minutes after the loss was first seen rather than
+    // actually waiting 11 minutes in the test.
+    const path_ = stateFile();
+    const state = JSON.parse(fs.readFileSync(path_, 'utf-8')) as Record<string, number>;
+    state[OTHER] = Date.now() / 1000 - 700;
+    fs.writeFileSync(path_, JSON.stringify(state));
+
+    const later = unit('start', startInput());
+    expect(later.out).not.toContain(LOSS);
+    expect(later.out).not.toContain('the old chief of staff');
+  });
+
+  it('is not held up or broken by a corrupt state file - fail-open, never a swallowed loss', () => {
+    fs.mkdirSync(path.join(home, '.cache', 'session-panel'), { recursive: true });
+    fs.writeFileSync(stateFile(), '{ not json');
+    register({ pid: 4_100_007, procStart: '987660', sessionId: OTHER });
+    transcript(OTHER, [humanPrompt(OTHER), title(OTHER, 'the old chief of staff')], 24 * 3600);
+    const { out, status, err } = unit('start', startInput());
+    expect(status).toBe(0);
+    expect(err).not.toMatch(/Traceback/);
+    expect(out).toContain(LOSS);
+    expect(out).toContain('the old chief of staff');
+  });
+
+  it('still says nothing when that same session is simply running fine elsewhere', () => {
+    // The control: a live, non-stale entry in another folder must never feed this path.
+    register({ pid: 4_100_008, procStart: '987661', sessionId: OTHER, cwd: '/home/somebody/code/elsewhere' });
+    transcript(OTHER, [humanPrompt(OTHER), title(OTHER, 'a session in another project')], 24 * 3600);
+    expect(unit('start', startInput()).out).toBe('');
+  });
+
+  it('says nothing about a dead entry when the registry does not provably work (second review)', () => {
+    // alive() reads False whenever proc_stat() cannot read /proc for that pid at all -
+    // not only when the process is genuinely gone (no /proc, a restricted sandbox).
+    // Without registry_works to prove /proc answered truthfully here (the same proof
+    // the recent-transcript path above requires), this entry is not known to be dead,
+    // and must not be announced as one.
+    register({ pid: 4_100_009, procStart: '987662', sessionId: OTHER });
+    transcript(OTHER, [humanPrompt(OTHER), title(OTHER, 'the old chief of staff')], 24 * 3600);
+    fs.rmSync(registryFile(me.pid));
+    expect(unit('start', startInput()).out).toBe('');
+
+    // The control: once the registry vouches for THIS session again, the same dead
+    // entry is announced.
+    register({ ...me, sessionId: ME });
+    const { out } = unit('start', startInput());
+    expect(out).toContain(LOSS);
+    expect(out).toContain('the old chief of staff');
   });
 });
 
@@ -983,6 +1235,22 @@ suite('hook wiring, by execution', () => {
     expect(prompt.stdout).toContain('No scope declared');
   });
 
+  it('does not block a prompt when python cannot even open the unit (exit 2 without the BLOCKED banner)', () => {
+    const hook = isolatedHook();
+    fs.rmSync(path.join(path.dirname(hook), 'session-panel.py'));
+    fs.copyFileSync(PROMPT_HOOK, path.join(path.dirname(hook), 'scope-check.sh'));
+    const cwd = fs.mkdtempSync(path.join(scratch, 'cwd-'));
+    const prompt = spawnSync('bash', [path.join(path.dirname(hook), 'scope-check.sh')], {
+      input: JSON.stringify(promptInput(OTHER)),
+      encoding: 'utf-8',
+      env: hookEnv(),
+      cwd,
+      timeout: 20_000,
+    });
+    expect(prompt.status).toBe(0);
+    expect(prompt.stdout).toMatch(/No-panel check did not run \(exit 2/);
+  });
+
   it('neither hook prints an interpreter warning from a unit that ran', () => {
     // The error stream is captured so a failure can say why. A warning is not a
     // failure, and this runs at every start and before every prompt.
@@ -1009,9 +1277,12 @@ suite('hook wiring, by execution', () => {
   });
 
   it('scope-check.sh tells a headless session at its next prompt, scope file or not', async () => {
-    const f = await fake('headless');
-    register({ ...f, sessionId: OTHER });
+    // Two DISTINCT sessions (a second prompt to the SAME session is now its second
+    // turn, which #2651 blocks — see the dedicated suite below) so this stays a test
+    // of "scope file or not", unaffected by the handover-turn state.
     const cwd = fs.mkdtempSync(path.join(scratch, 'cwd-'));
+    const withoutScope = await fake('headless');
+    register({ ...withoutScope, sessionId: OTHER });
     // No .claude/.session-scope here: that branch exits early, and the notice must
     // not depend on which branch the scope reminder takes.
     const without = spawnSync('bash', [PROMPT_HOOK], { input: JSON.stringify(promptInput(OTHER)), encoding: 'utf-8', env: hookEnv(), cwd, timeout: 20_000 });
@@ -1019,9 +1290,11 @@ suite('hook wiring, by execution', () => {
     expect(without.stdout).toContain(NO_PANEL);
     fs.mkdirSync(path.join(cwd, '.claude'));
     fs.writeFileSync(path.join(cwd, '.claude', '.session-scope'), 'scope: a test\n');
-    const withScope = spawnSync('bash', [PROMPT_HOOK], { input: JSON.stringify(promptInput(OTHER)), encoding: 'utf-8', env: hookEnv(), cwd, timeout: 20_000 });
-    expect(withScope.status).toBe(0);
-    expect(withScope.stdout).toContain(NO_PANEL);
+    const withScope = await fake('headless');
+    register({ ...withScope, sessionId: THIRD });
+    const withScopeRun = spawnSync('bash', [PROMPT_HOOK], { input: JSON.stringify(promptInput(THIRD)), encoding: 'utf-8', env: hookEnv(), cwd, timeout: 20_000 });
+    expect(withScopeRun.status).toBe(0);
+    expect(withScopeRun.stdout).toContain(NO_PANEL);
   });
 
   it('scope-check.sh still does its own job, and adds nothing for an attached session', async () => {

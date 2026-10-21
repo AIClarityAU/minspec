@@ -115,10 +115,19 @@ export interface DrainFixture {
   inbox?: number[];
   /** Open pull requests. Listing any turns the remediation sweep on. */
   openPrs?: number[];
+  /**
+   * What GitHub answers when the drain counts the drain's own open pull requests held for
+   * a human (`needs-human-review` on an `agent/issue-*` branch, #2939). A number is the
+   * count; `'fail'` makes that one query exit 1. Unset reads as 0, so every fixture that
+   * predates the count keeps its spec-writing on.
+   */
+  heldPrs?: number | 'fail';
   /** The reading on disk when the drain starts. `null` = no file at all. */
   reading: Reading | null;
   /** What the meter reads once the dispatch of that issue has finished. */
   readingAfterIssue?: Record<number, Reading>;
+  /** What the meter reads once the remediation of that pull request has finished. */
+  readingAfterPr?: Record<number, Reading>;
   /**
    * What the meter reads once the ranker has run: after the cycle's own gate has
    * admitted it, before the first dispatch.
@@ -199,6 +208,8 @@ export interface Drain {
   triaged(): number[];
   /** Pull requests the remediator was run for. */
   remediated(): number[];
+  /** How many times the drain counted its held pull requests (#2939). */
+  heldAsked(): number;
   /** Did anything try to run `claude`? It never should. */
   claudeCalled(): boolean;
 }
@@ -290,7 +301,17 @@ if [[ "$1" == "issue" && "$2" == "view" ]]; then
   [[ -f "${dir}/issue.$3.json" ]] && cat "${dir}/issue.$3.json"
   exit 0
 fi
-if [[ "$1" == "pr" && "$2" == "list" && " $* " == *" --state open "* ]]; then cat "${dir}/queue.prs"; exit 0; fi
+if [[ "$1" == "pr" && "$2" == "list" && "$label" == "needs-human-review" ]]; then
+  echo "pr list --label needs-human-review" >> "${dir}/held-asked"
+  ${f.heldPrs === 'fail' ? 'echo "HTTP 502: Bad Gateway (https://api.github.com/graphql)" >&2; exit 1' : `echo ${f.heldPrs ?? 0}; exit 0`}
+fi
+if [[ "$1" == "pr" && "$2" == "list" && " $* " == *" --state open "* ]]; then
+  # Honour --limit the way gh does (default 30), and answer in the row shape the drain's
+  # --jq template produces, so a drain that omits --limit sees only 30 PRs (#2975).
+  lim=30; prev=""
+  for a in "$@"; do [[ "$prev" == "--limit" ]] && lim="$a"; prev="$a"; done
+  head -n "$lim" "${dir}/queue.prs" | sed 's/$/ false/'; exit 0
+fi
 exit 0
 `,
   );
@@ -368,7 +389,7 @@ exit ${STATUS_DECLINED}
   stub('triage.sh', `echo "$1" >> "${dir}/triaged"\necho "triaged #$1"\nexit 0\n`);
   stub(
     'remediate.sh',
-    `echo "$1" >> "${dir}/remediated"\necho "remediated PR #$1"\n[[ -f "${dir}/says-pr.$1" ]] && cat "${dir}/says-pr.$1"\nexit 0\n`,
+    `echo "$1" >> "${dir}/remediated"\necho "remediated PR #$1"\n[[ -f "${dir}/after-pr.$1.sh" ]] && bash "${dir}/after-pr.$1.sh"\n[[ -f "${dir}/says-pr.$1" ]] && cat "${dir}/says-pr.$1"\nexit 0\n`,
   );
   // The ranker's stdout IS the order, so the hook must stay off it. `tac` reverses the
   // numeric order it is handed, which is what makes rank and issue number disagree.
@@ -380,6 +401,9 @@ exit ${STATUS_DECLINED}
 
   for (const [issue, reading] of Object.entries(f.readingAfterIssue ?? {})) {
     fs.writeFileSync(path.join(dir, `after-issue.${issue}.sh`), writeReadingBash(reading, quota));
+  }
+  for (const [pr, reading] of Object.entries(f.readingAfterPr ?? {})) {
+    fs.writeFileSync(path.join(dir, `after-pr.${pr}.sh`), writeReadingBash(reading, quota));
   }
   for (const [issue, secs] of Object.entries(f.issueSecs ?? {})) {
     fs.writeFileSync(path.join(dir, `secs-issue.${issue}`), `${secs}\n`);
@@ -446,6 +470,7 @@ exit ${STATUS_DECLINED}
     forgeries: () => lines(path.join(dir, 'forgeries')),
     triaged: () => numbers(path.join(dir, 'triaged')),
     remediated: () => numbers(path.join(dir, 'remediated')),
+    heldAsked: () => lines(path.join(dir, 'held-asked')).length,
     claudeCalled: () => fs.existsSync(path.join(dir, 'claude-called')),
   };
   return { drain, env, logFile };

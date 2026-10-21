@@ -14,13 +14,21 @@ in the comment of 2026-10-09 on #2380.) Neither side was told. This unit is that
 statement, made to both sides:
 
   self   (UserPromptSubmit) - "THIS session has no panel": its own input has no writer.
+                              The first such prompt is advice, printed, never blocked,
+                              so the session can act on it (#2651 calls this its ONE
+                              handover turn). Every later prompt while the input still
+                              has no writer is refused outright - see mode_self.
   start  (SessionStart)     - "these sessions in this folder lost their panel": the ones
                               still running headless, the ones that ended in the last
-                              few minutes without being re-attached, and any schedule
-                              (/loop) they held. That last part is the dead-loop
-                              backstop of #2379, keyed on the record the CLI itself
-                              writes (CronCreate / CronDelete in the transcript) instead
-                              of a marker file that nothing ever wrote.
+                              few minutes without being re-attached, one whose registry
+                              entry was found dead long before this session started (a
+                              container restart, announced once via a small state file
+                              rather than re-announced for as long as the stale entry
+                              sits there - #2633), and any schedule (/loop) they held.
+                              That last part is the dead-loop backstop of #2379, keyed
+                              on the record the CLI itself writes (CronCreate /
+                              CronDelete in the transcript) instead of a marker file
+                              that nothing ever wrote.
 
 It cannot give the conversation back to a panel; only the editor can. It makes the
 loss impossible to miss and names the way back (the transcript path, `--resume`).
@@ -41,8 +49,20 @@ WHAT IT CANNOT SEE, stated rather than hidden:
     a person typed into, so it is not named once it has ended. While it still runs
     headless it IS named: that path reads the process, not the transcript.
   * A session killed long before this one started (a container restart after an idle
-    night). Only the last RECENT_S seconds are examined, so a stale loss is not
-    re-announced at every start for days. Tracked as #2633.
+    night) IS named (#2633), by its dead registry entry rather than by transcript age:
+    alive() says its process is gone, with no RECENT_S limit - but only when
+    registry_works (the same proof the recent-transcript path above requires), since
+    alive() also reads False whenever /proc cannot be read at all (no /proc, a
+    restricted sandbox), which is not evidence the process is gone. What this path
+    still cannot do: call a dead entry with no transcript on disk a panel loss (there is
+    nothing to read "human" from, so it is skipped), or tell the difference between a
+    loss nobody has seen yet and one this folder has already been told about - that is
+    what the small state file under ${XDG_CACHE_HOME:-~/.cache}/session-panel/ is for:
+    it remembers the first session that saw a given dead entry and stays quiet after
+    ANNOUNCE_WINDOW_S, forever, even though the registry entry itself is never cleaned
+    up (measured 2026-10-09: 80 of them, the oldest from 2026-09-17). A corrupt or
+    unwritable state file is read as empty, which means "announce it" - the fail-open
+    side costs one repeat announcement, never a silently swallowed loss.
   * A session that is still running, is absent from the registry and has written no
     exit record. The registry is the only witness for such a process, so at start it
     is named, in those words: "the registry lists no live process for it". The
@@ -86,6 +106,9 @@ HEAD_BYTES = 512 * 1024   # where a transcript's first prompt is looked for
 TAIL_BYTES = 256 * 1024   # where its exit record and title are looked for
 INPUT_WAIT_S = 2.0        # never hold a session start on an input that does not close
 NAME_MAX = 80
+ANNOUNCE_WINDOW_S = 600   # a stale registry entry (#2633) is announced only to sessions
+                          # starting this soon after it is FIRST seen, never again after
+STATE_LOCK_WAIT_S = 2.0   # never hold a session start on the announce-state lock either
 UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z")
 
 
@@ -136,6 +159,51 @@ def parse_envelope(chunks):
 
 def config_dir():
     return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+
+
+# ----------------------------------------------------------------- handover state (#2651)
+
+def handover_state_dir():
+    """Where the ONE-handover-turn marker lives: beside the registry, not inside it, so
+    registry() (which parses every *.json entry in sessions/ as a registry record) never
+    has to recognise or skip this unit's own file."""
+    return os.path.join(config_dir(), "session-panel-state")
+
+
+def handover_marker_path(session_id):
+    return os.path.join(handover_state_dir(), session_id + ".warned")
+
+
+def handover_already_used(session_id):
+    """True once THIS session has already had its one no-panel prompt advised. A write
+    failure below (read-only HOME, no disk) means this always reads False, which is the
+    fail-open choice for a worse outcome: a session that cannot be blocked for lack of
+    a marker still gets the advisory every turn, which is what happened before #2651;
+    treating a write failure as 'already used' would instead block on the very first
+    headless turn, which is the one turn this exists to GUARANTEE runs unblocked."""
+    try:
+        return os.path.isfile(handover_marker_path(session_id))
+    except OSError:
+        return False
+
+
+def mark_handover_used(session_id):
+    try:
+        os.makedirs(handover_state_dir(), exist_ok=True)
+        with open(handover_marker_path(session_id), "w") as f:
+            f.write(str(time.time()))
+    except OSError:
+        pass
+
+
+def clear_handover_used(session_id):
+    """Called once this session is seen attached again: a loss AFTER that reattachment
+    is a new loss and earns its own single handover turn, rather than an immediate
+    block from a marker a previous, already-handled loss left behind."""
+    try:
+        os.remove(handover_marker_path(session_id))
+    except OSError:
+        pass
 
 
 # ------------------------------------------------------------------------ processes
@@ -290,6 +358,97 @@ def own_process(session_id, entries):
     return None
 
 
+# ---------------------------------------------------------------- announce-once state
+
+def state_paths():
+    """(state directory, state file, lock file) for the #2633 announce-once record.
+    Same base session-identity.sh already uses for its own per-machine state."""
+    base = os.environ.get("XDG_CACHE_HOME") or os.path.join(os.path.expanduser("~"), ".cache")
+    directory = os.path.join(base, "session-panel")
+    return directory, os.path.join(directory, "announced.json"), os.path.join(directory, "announced.lock")
+
+
+def decide_announcements(candidate_sids, known_sids, now):
+    """Which of candidate_sids (dead registry entries whose panel transcript was just
+    found) get announced NOW: ones never seen before (first sight - and now recorded as
+    seen), and ones seen within the last ANNOUNCE_WINDOW_S. Never one seen longer ago
+    than that: the registry entry itself is never cleaned up (measured 2026-10-09: 80
+    of them, the oldest from 2026-09-17), so without this cutoff the same loss would be
+    re-announced at every session start in the folder for as long as the entry sits
+    there.
+
+    known_sids prunes the state file to sessions the registry still lists at all, so
+    it stays bounded by the registry's own size rather than growing forever on top of it.
+
+    Two sessions starting at once must reach the SAME answer for a given sid, or one
+    would announce a loss the other just silently recorded as seen. The read-decide
+    -write below runs under a lock for that reason - but a lock that cannot be taken
+    quickly is not worth holding a session start for: on timeout, this proceeds WITHOUT
+    the lock, still reading and deciding from the real state file (racy under
+    concurrent starts, but not wrong on its own). Only an actual error reading or
+    writing the file degrades to treating the state as empty, which means "announce
+    it" for every candidate. Fail-open on that side costs one repeat announcement,
+    which is cheap; fail-closed would risk a loss nobody is ever told about, which is
+    exactly what this unit exists to prevent (see 'Never fatal' at the bottom of the
+    file).
+    """
+    directory, state_path, lock_path = state_paths()
+    try:
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+    except OSError:
+        pass
+
+    lock_fd = None
+    try:
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        import fcntl
+        deadline = time.monotonic() + STATE_LOCK_WAIT_S
+        while time.monotonic() < deadline:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                time.sleep(0.02)
+    except (OSError, ImportError):
+        pass  # no lock taken: still correct, just not race-safe under concurrent starts
+
+    try:
+        try:
+            with open(state_path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            if not isinstance(state, dict):
+                state = {}
+        except (OSError, ValueError):
+            state = {}
+
+        state = {sid: seen for sid, seen in state.items() if sid in known_sids and isinstance(seen, (int, float))}
+        announce = set()
+        for sid in candidate_sids:
+            first_seen = state.get(sid)
+            if first_seen is None:
+                state[sid] = now
+                announce.add(sid)
+            elif now - first_seen <= ANNOUNCE_WINDOW_S:
+                announce.add(sid)
+
+        try:
+            tmp = "%s.tmp.%d" % (state_path, os.getpid())
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(state, f)
+            os.replace(tmp, state_path)
+        except OSError:
+            pass
+        return announce
+    finally:
+        if lock_fd is not None:
+            try:
+                import fcntl
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+            os.close(lock_fd)
+
+
 # ----------------------------------------------------------------------- transcripts
 
 def clean(text, limit=NAME_MAX):
@@ -391,6 +550,9 @@ def tail_facts(path, size):
 
 
 JOB_ID = re.compile(r"\bjob ([0-9A-Za-z_-]{4,64})\b")
+# A CronList result that says nothing is scheduled. Plural "jobs" on purpose: the
+# CronDelete error "No scheduled job with id" must not read as an empty list.
+NO_JOBS = re.compile(r"\bno (?:scheduled |cron |active )?jobs\b", re.I)
 
 
 def result_text(block):
@@ -403,15 +565,17 @@ def result_text(block):
 def armed_schedules(path):
     """Schedules this session created and never cancelled: [(cron, prompt, job id)].
     Schedules are held in the process only, so this record in the transcript is the
-    one durable trace that a loop was armed."""
-    pending, created, cancelled = {}, {}, set()
+    one durable trace that a loop was armed. A process restart ends every schedule
+    without a cancel record, so a later CronList that reports no jobs cancels every
+    schedule created before it (#2712)."""
+    pending, created, cancelled, listing = {}, {}, set(), set()
     try:
         handle = open(path, "rb")
     except OSError:
         return []
     with handle:
         for line in handle:
-            if b"Cron" not in line and not pending:
+            if b"Cron" not in line and not pending and not listing:
                 continue
             try:
                 record = json.loads(line.decode("utf-8", "replace"))
@@ -428,8 +592,14 @@ def armed_schedules(path):
                     args = block.get("input") if isinstance(block.get("input"), dict) else {}
                     if block.get("name") == "CronCreate":
                         pending[block.get("id")] = (args.get("cron"), args.get("prompt"))
+                    elif block.get("name") == "CronList":
+                        listing.add(block.get("id"))
                     elif block.get("name") == "CronDelete" and isinstance(args.get("id"), str):
                         cancelled.add(args["id"])
+                elif block.get("type") == "tool_result" and block.get("tool_use_id") in listing:
+                    listing.discard(block["tool_use_id"])
+                    if not block.get("is_error") and NO_JOBS.search(result_text(block)):
+                        created.clear()
                 elif block.get("type") == "tool_result" and block.get("tool_use_id") in pending:
                     cron, prompt = pending.pop(block["tool_use_id"])
                     found = JOB_ID.search(result_text(block))
@@ -447,19 +617,19 @@ def schedule_lines(path, verb):
 
 # ----------------------------------------------------------------------------- self
 
-def mode_self(hook):
-    entries = registry()
-    pid = own_process(hook.get("session_id"), entries)
-    if pid is None or not is_stream_driven(pid) or probe(pid) != "headless":
-        return
-    mine = next((e for e in entries if e.get("pid") == pid and alive(e)), None)
-    folder = hook.get("cwd") or (mine or {}).get("cwd")
+def live_peers(pid, folder, entries):
+    """Other live, attached, stream-driven sessions in the same folder: who this
+    session could hand over to."""
     peers = []
     for entry in entries:
         if entry["pid"] == pid or entry.get("cwd") != folder or not alive(entry):
             continue
         if is_stream_driven(entry["pid"]) and probe(entry["pid"]) == "attached":
             peers.append(entry)
+    return peers
+
+
+def handover_lines(peers):
     out = [
         "⚠️  THIS SESSION HAS NO PANEL (%s). Its input stream has no writer: a window reload" % ISSUE,
         "    or an editor restart replaced its panel with a new, blank session. Nobody can read",
@@ -477,8 +647,59 @@ def mode_self(hook):
         "    2. Cancel every schedule you hold: CronList, then CronDelete each id. A schedule",
         "       left armed here keeps firing with nobody watching.",
         "    3. Stop. This process exits by itself once it is idle.",
+        "    THIS IS THE ONLY TURN THAT RUNS. Every later prompt is BLOCKED (#2651) while",
+        "    this input still has no writer - there is no second chance to act instead of",
+        "    handing over.",
     ]
-    print("\n".join(out))
+    return out
+
+
+def blocked_lines():
+    return [
+        "⛔ BLOCKED (%s, #2651): this session already used its one no-panel handover turn," % ISSUE,
+        "    and its input still has no writer. Nothing runs here - the earlier prompt told",
+        "    you to hand over; that was the only turn allowed. This process exits by itself",
+        "    once it is idle.",
+    ]
+
+
+def mode_self(hook):
+    """UserPromptSubmit. Returns the process exit code: 0 (nothing to say, or the one
+    advisory turn ran) or 2, which the caller must turn into a BLOCKING decision (a
+    prompt hook can refuse a turn; see scope-check.sh).
+
+    Why a turn is blocked at all (#2651, second diagnosis of #2380). The advisory this
+    prints is text in a prompt, and text does not stop a session from acting on later
+    prompts: at the 2026-10-09 07:58Z reload it reached the orphaned supervisor 3.5
+    minutes late, after a full tick as a second supervisor that held a schedule for six
+    minutes. So the first headless prompt - the one that can still act on the advice -
+    is never blocked, and is the ONLY one that is not: every prompt after it, for as
+    long as this session's input still has no writer, is refused outright. One marker
+    file per session id (handover_marker_path) is what tells the second prompt from the
+    first; "attached" clears it (see clear_handover_used), so a session that is
+    reattached and later loses its panel again earns a fresh single turn rather than an
+    immediate block from a stale marker.
+    """
+    sid = hook.get("session_id")
+    sid_known = isinstance(sid, str) and bool(UUID.match(sid))
+    entries = registry()
+    pid = own_process(sid, entries)
+    if pid is None or not is_stream_driven(pid):
+        return 0
+    state = probe(pid)
+    if state != "headless":
+        if state == "attached" and sid_known:
+            clear_handover_used(sid)
+        return 0
+    if sid_known and handover_already_used(sid):
+        print("\n".join(blocked_lines()))
+        return 2
+    if sid_known:
+        mark_handover_used(sid)
+    mine = next((e for e in entries if e.get("pid") == pid and alive(e)), None)
+    folder = hook.get("cwd") or (mine or {}).get("cwd")
+    print("\n".join(handover_lines(live_peers(pid, folder, entries))))
+    return 0
 
 
 # ---------------------------------------------------------------------------- start
@@ -495,8 +716,11 @@ def mode_start(hook):
         return
     live = {}
     headless = []
+    dead_sids = set()  # #2633: registry entries for THIS folder whose process is gone
     for entry in entries:
         if not alive(entry):
+            if entry.get("sessionId") != me and entry.get("cwd") == folder:
+                dead_sids.add(entry["sessionId"])
             continue
         live[entry["sessionId"]] = entry
         if entry["sessionId"] == me or entry.get("cwd") != folder:
@@ -506,6 +730,14 @@ def mode_start(hook):
     # The registry is an internal file. It is only trusted to say "that process is
     # gone" when it demonstrably works, and the proof is that it lists THIS session.
     registry_works = bool(me) and me in live
+    if not registry_works:
+        # alive() returns False whenever proc_stat() cannot read /proc for that pid -
+        # which includes a process that is still very much alive on a machine with no
+        # /proc, or a sandbox that blocks the read. Without registry_works to prove
+        # /proc answers truthfully here, a "dead" entry is not known to be dead, and
+        # announcing it would risk crying "SESSION LOSS" about a session that is
+        # simply still running (#2633 second review).
+        dead_sids = set()
 
     directory = project_dir(hook, folder)
     ended = []
@@ -540,6 +772,42 @@ def mode_start(hook):
             continue
         when = ended_at if ended_at is not None and info.st_mtime - 3600 <= ended_at <= now + 60 else info.st_mtime
         ended.append((when, sid, title, clean_exit, item.path))
+
+    # #2633: a session whose registry entry died long before this one started (a
+    # container restart after an idle night) - not caught above, which only looks back
+    # RECENT_S seconds. dead_sids already carries only entries alive() calls gone AND
+    # (per the registry_works check above) that the registry demonstrably proved it
+    # that way, not merely an unreadable /proc; what is still needed is a transcript to
+    # tell a human panel from anything else, and the once-only announce gate so the
+    # stale entry (never cleaned up) is not re-announced at every start for as long as
+    # it sits in the registry.
+    ended_sids = {sid for _, sid, _, _, _ in ended}
+    stale = []
+    for sid in dead_sids:
+        if sid in ended_sids:
+            continue  # already reported above; no duplicate line for the same session
+        path = os.path.join(directory, sid + ".jsonl")
+        try:
+            info = os.stat(path)
+        except OSError:
+            continue  # no transcript on disk: nothing to read "human panel" from
+        if not stat.S_ISREG(info.st_mode):
+            continue
+        prompt_seen, origin_seen, panel = head_facts(path)
+        prompts_seen += prompt_seen
+        origins_seen += origin_seen
+        if not panel:
+            continue
+        stale.append((sid, path, info))
+    if stale:
+        known_sids = {e.get("sessionId") for e in entries if isinstance(e.get("sessionId"), str)}
+        to_announce = decide_announcements([sid for sid, _, _ in stale], known_sids, now)
+        for sid, path, info in stale:
+            if sid not in to_announce:
+                continue
+            clean_exit, ended_at, title = tail_facts(path, info.st_size)
+            when = ended_at if ended_at is not None and info.st_mtime - 3600 <= ended_at <= now + 60 else info.st_mtime
+            ended.append((when, sid, title, clean_exit, path))
     ended.sort()
 
     out = []
@@ -607,7 +875,13 @@ def main():
         return 0
     try:
         hook = read_hook_input()
-        (mode_start if mode == "start" else mode_self)(hook)
+        if mode == "start":
+            mode_start(hook)
+            return 0
+        # mode == "self": its return value (0 or 2) IS the block decision (#2651) - the
+        # caller (scope-check.sh) must propagate exit 2 as its own exit, never swallow it
+        # into the "check did not run" path that every other non-zero exit here means.
+        return mode_self(hook)
     except Exception as error:  # noqa: BLE001 - a hook must never wedge a session
         print(
             "⚠️  Lost-panel check failed (%s) - a session that lost its panel is NOT being reported (%s)."
