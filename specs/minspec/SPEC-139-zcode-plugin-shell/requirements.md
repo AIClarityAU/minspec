@@ -25,7 +25,7 @@ implements: [packages/zcode-plugin/src/plugin-table.ts, packages/zcode-plugin/sr
 affects: [package.json]
 phases:
   specify: done
-  clarify: done
+  clarify: in-progress
   plan: in-progress
   tasks: pending
   implement: pending
