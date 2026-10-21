@@ -99,8 +99,22 @@ fi
 # not a correctness bug). Removing either as a side effect of a thrash fix would
 # be an unrelated silent change.
 #
-# Kill-switch: MINSPEC_AGENT_ENV_SCRUB=0 inherits the environment verbatim.
-AGENT_ENV_SCRUB=()
+# Kill-switch: MINSPEC_AGENT_ENV_SCRUB=0 inherits the environment verbatim. It disables the
+# SCRUB only; the headless marker below is not a scrub and is stamped either way.
+#
+# ── Headless marker (#1914) ───────────────────────────────────────────────────
+# MINSPEC_HEADLESS_AGENT=1 tells project hooks that no human is on the other end of this
+# run. scripts/hooks/scope-check.sh needs it because the harness does not say so itself:
+# MEASURED 2026-09-12 on harness 2.1.263, a real `claude -p` UserPromptSubmit envelope
+# carries no `source` field, even though the schema declares an optional
+# source: ["user","sdk",...] with "sdk" meaning the non-interactive entrypoint. Without the
+# marker the hook told all 149 of 149 measured drain agents to write a file their fresh
+# worktree cannot hold; 30 tried and 24 were denied it as a sensitive-file edit.
+#
+# It rides on THIS array, rather than a second one, precisely because every launcher already
+# expands "${AGENT_ENV_SCRUB[@]}" and agent-context-slim.test.ts already pins that. A new
+# array would be one more thing a launcher could forget, which is the failure mode.
+AGENT_ENV_SCRUB=(env MINSPEC_HEADLESS_AGENT=1)
 if [[ "${MINSPEC_AGENT_ENV_SCRUB:-1}" != "0" ]]; then
-  AGENT_ENV_SCRUB=(env -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE)
+  AGENT_ENV_SCRUB=(env -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE MINSPEC_HEADLESS_AGENT=1)
 fi
