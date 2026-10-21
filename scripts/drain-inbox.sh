@@ -1163,6 +1163,76 @@ record_delegated_approvals() {
   return 0
 }
 
+# arm_delegated_spec_merges: Step 0c of a cycle (#2981, DR-108). Spec PRs that step 6b
+# held as needs-human-review merge without the founder once delegation DLG-001 covers
+# them (queue item dlg2981, 2026-10-21: "y - my aproval is already the Alt-A"). For each
+# open, held PR whose files are all under specs/, this runs dispatch-issue.sh's
+# `--delegated-spec-merge <pr> --arm` seam, which owns EVERY decision (the delegation
+# judge, then mayProceed on the classes left over) and arms auto-merge bound to the head
+# it judged, as minspec-sdd[bot]. The prefilter here only saves a judge run on PRs that
+# could never qualify; it admits nothing. Never --admin, never a merge of its own.
+#
+# Not a gate, so it never fails the cycle. A denial is the expected answer for most PRs
+# and is printed as one line with its reason; an arm that failed after admission, an
+# unreadable PR list, or a list cut off at its limit is printed LOUDLY on stderr.
+# Off: MINSPEC_DRAIN_DELEGATED_MERGE=0. Per-cycle cap: MINSPEC_DRAIN_DELEGATED_MERGE_MAX.
+arm_delegated_spec_merges() {
+  if [[ "${MINSPEC_DRAIN_DELEGATED_MERGE:-1}" == "0" ]]; then
+    echo "[drain] delegated spec merge: off (MINSPEC_DRAIN_DELEGATED_MERGE=0)."
+    return 0
+  fi
+  local max="${MINSPEC_DRAIN_DELEGATED_MERGE_MAX:-10}" limit=500
+  if [[ ! "$max" =~ ^[1-9][0-9]*$ ]]; then
+    echo "[drain] WARNING: delegated spec merge NOT run: MINSPEC_DRAIN_DELEGATED_MERGE_MAX='${max}' is not a positive integer." >&2
+    return 0
+  fi
+  local rows count candidates pr out rc armed=0 tried=0
+  if ! rows=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit "$limit" \
+       --json number,isDraft,autoMergeRequest,files 2>/dev/null); then
+    echo "[drain] WARNING: delegated spec merge NOT run: the held PR list could not be read. This is not an empty queue." >&2
+    return 0
+  fi
+  if ! count=$(printf '%s' "$rows" | jq 'length' 2>/dev/null); then
+    echo "[drain] WARNING: delegated spec merge NOT run: the held PR list did not parse." >&2
+    return 0
+  fi
+  if (( count >= limit )); then
+    echo "[drain] WARNING: delegated spec merge NOT run: the held PR list returned ${count}, its limit; it may be cut off." >&2
+    return 0
+  fi
+  # Already-armed PRs are skipped (the arm stands); so are drafts and any PR with a
+  # file outside specs/. Oldest first, so the longest-held spec goes first.
+  candidates=$(printf '%s' "$rows" | jq -r '[.[]
+      | select(.isDraft | not) | select(.autoMergeRequest == null)
+      | select((.files | length) > 0 and all(.files[]; .path | startswith("specs/")))
+      | .number] | sort | .[]' 2>/dev/null) || {
+    echo "[drain] WARNING: delegated spec merge NOT run: could not filter the held PR list." >&2
+    return 0
+  }
+  if [[ -z "$candidates" ]]; then
+    echo "[drain] delegated spec merge: no held spec-only PRs."
+    return 0
+  fi
+  while read -r pr; do
+    [[ -n "$pr" ]] || continue
+    if (( tried >= max )); then
+      echo "[drain] delegated spec merge: per-cycle cap ${max} reached; the rest wait for the next cycle."
+      break
+    fi
+    tried=$((tried + 1))
+    out=$(bash "$DISPATCH" --delegated-spec-merge "$pr" --arm 2>/dev/null) && rc=0 || rc=$?
+    out=$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -n 1 || true)  # swallow-ok: grep -v exits 1 when the seam printed nothing, which is reported below as an unreadable result
+    case "$rc" in
+      0) armed=$((armed + 1))
+         echo "[drain] delegated spec merge: #${pr} armed - $(printf '%s' "$out" | jq -r '"\(.delegationId) at \(.headSha)"' 2>/dev/null || echo "$out")" ;;
+      1) echo "[drain] delegated spec merge: #${pr} held - $(printf '%s' "$out" | jq -r '"\(.reason): \(.detail)"' 2>/dev/null || echo "unreadable verdict: ${out:-<none>}")" ;;
+      *) echo "[drain] WARNING: delegated spec merge: #${pr} was admitted but NOT armed (seam exit ${rc}): ${out:-<no output>}" >&2 ;;
+    esac
+  done <<< "$candidates"
+  echo "[drain] delegated spec merge: ${armed} armed of ${tried} judged."
+  return 0
+}
+
 # sweep_open_prs: Step 3 of a cycle. Sweep open PRs for FIXABLE problems and
 # auto-remediate them (conflicts are surfaced, not touched). remediate-pr.sh owns ALL
 # the decision-making — branch-prefix scope, classification, attempt caps — so the
@@ -1500,6 +1570,10 @@ run_cycle() {
   # runs every cycle whatever the queue holds (the empty-queue return below skips the
   # PR sweep, and approvals must not wait on it).
   record_delegated_approvals
+
+  # Step 0c: delegated merges of held spec PRs (#2981, DR-108). Beside 0b and for the
+  # same reason: it must run every cycle, including the empty-queue ones.
+  arm_delegated_spec_merges
 
   # Step 1: triage inbox issues → labels T1/T2 as agent-ready
   # A failed inbox query must not read as an empty inbox (#1855). Triage is not
