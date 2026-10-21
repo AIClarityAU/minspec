@@ -49,7 +49,12 @@
 #                                    builds and pull request remediation carry on, and
 #                                    each cycle says how many such issues it left.
 #                                    Default 1. Anything else is read as 0, and said so.
-#   MINSPEC_DRAIN_INTERVAL=1200    — seconds between cycles (default 20 min).
+#   MINSPEC_DRAIN_SPECIFY_MAX_HELD=10 — with spec-writing on, pause it for any cycle in
+#                                    which this many or more of the drain's own PRs
+#                                    (`agent/issue-*`) sit at `needs-human-review` (#2939).
+#                                    An unreadable count pauses too. Anything but a whole
+#                                    number is read as 0, and said so.
+#   MINSPEC_DRAIN_INTERVAL=1200   — seconds between cycles (default 20 min).
 #   MINSPEC_DRAIN_QUOTA_BACKOFF=1800 — seconds to pause after a quota signal (30 min).
 #                  Now only a FALLBACK: when ~/.claude/quota.json carries a live
 #                  reset time, the loop sleeps to that instead of guessing, or to
@@ -1136,9 +1141,22 @@ sweep_open_prs() {
     # refresh: the sweep's own enumeration is a read, and remediate-pr.sh is a child
     # that inherits this token.
     gh_bot_warm_read
-    local open_prs pr rcap rout sweep_quota_verdict
-    open_prs=$(gh pr list --repo "$REPO" --state open --json number,isDraft \
-      --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
+    local open_prs open_rows open_count pr rcap rout sweep_quota_verdict
+    # An explicit --limit (#2975): gh's default is 30, so without one the sweep silently
+    # saw half of a 61-PR pile. One row per open PR, drafts included, so the count below
+    # is the count gh RETURNED and can be compared with the limit.
+    local pr_limit="${MINSPEC_DRAIN_PR_SWEEP_LIMIT:-500}"
+    open_rows=$(gh pr list --repo "$REPO" --state open --limit "$pr_limit" --json number,isDraft \
+      --jq '.[] | "\(.number) \(.isDraft)"' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
+    open_count=0
+    [[ -n "$open_rows" ]] && open_count=$(printf '%s\n' "$open_rows" | wc -l | tr -d ' ')
+    # Fail closed (#2975): a read that came back exactly at the limit may have been cut
+    # off, and a capped read is not "all open PRs".
+    if (( open_count >= pr_limit )); then
+      echo "[drain] CYCLE FAILED: the open-PR read returned ${open_count} rows, the limit (${pr_limit}) — it may be truncated, so the sweep would silently skip PRs (#2975). Raise MINSPEC_DRAIN_PR_SWEEP_LIMIT." >&2
+      return 1
+    fi
+    open_prs=$(awk '$2=="false"{print $1}' <<<"$open_rows")
     if [[ -n "$open_prs" ]]; then
       echo "[drain] sweeping $(echo "$open_prs" | wc -l | tr -d ' ') open PR(s) for fixable problems..."
       for pr in $open_prs; do
@@ -1303,6 +1321,31 @@ fi
 # a value nobody can interpret; `off` or `false` quietly meaning "on" would be a knob
 # that lies about what it is doing.
 DRAIN_SPECIFY="${MINSPEC_DRAIN_SPECIFY:-1}"
+
+# SPECIFY_MAX_HELD — backpressure on spec-writing (#2939). The switch above is manual and
+# lives in a launcher's environment, so every restart of the drain turned spec-writing
+# back on: the same pile of held drafts formed three times (2026-10-07, 2026-10-16,
+# 2026-10-18, the last at 62). Every spec draft is withheld from auto-merge as
+# approval-or-acceptance, so writing more while that many already wait on a human spends
+# quota on work nothing can land. With the switch on, each cycle counts the drain's own
+# open pull requests held for a human (`needs-human-review` on an `agent/issue-*`
+# branch) and leaves the spec-writing queue alone while that count is at or above this
+# cap. Builds, triage and remediation are untouched. Anything but a whole number is read
+# as 0, which pauses spec-writing: the reading that spends nothing.
+SPECIFY_MAX_HELD="${MINSPEC_DRAIN_SPECIFY_MAX_HELD:-10}"
+
+# _held_drain_prs <varname> — count the drain's open pull requests held for a human INTO
+# a named variable. Returns gh's status: a failed read is not a count of zero, and the
+# caller pauses spec-writing on it rather than guess (invariant 2).
+_held_drain_prs() {
+  local -n _held_out="$1"
+  local _held_val _held_rc=0
+  _held_val=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit 1000 \
+    --json headRefName --jq '[.[] | select(.headRefName | startswith("agent/issue-"))] | length') || _held_rc=$?
+  if (( _held_rc != 0 )); then return "$_held_rc"; fi
+  [[ "$_held_val" =~ ^[0-9]+$ ]] || return 1
+  _held_out="$_held_val"
+}
 
 # _specify_only <agent-ready numbers> <agent-ready-specify numbers>: the issues that are
 # queued for spec-writing and NOT also queued for a build, one per line. An issue in
@@ -1492,6 +1535,31 @@ run_cycle() {
     fi
   fi
 
+  # Backpressure (#2939, see SPECIFY_MAX_HELD). Asked only when the switch is on and there
+  # is spec-writing to decide, so a quiet queue costs no read. specify_on is what the
+  # narrowing below reads: the switch and the backpressure are one decision there.
+  local specify_on=0
+  [[ "$DRAIN_SPECIFY" == "1" ]] && specify_on=1
+  if (( specify_on )); then
+    mapfile -t spec_left < <(_specify_only "$ready_full" "$ready_spec")
+    if (( ${#spec_left[@]} > 0 )); then
+      local held=0 held_rc=0
+      if [[ ! "$SPECIFY_MAX_HELD" =~ ^[0-9]+$ ]]; then
+        specify_on=0
+        echo "[drain] spec-writing is PAUSED: MINSPEC_DRAIN_SPECIFY_MAX_HELD=$(printf '%q' "$SPECIFY_MAX_HELD") is not a whole number, so it is read as 0, the setting that spends nothing: ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+      else
+        _held_drain_prs held || held_rc=$?
+        if (( held_rc != 0 )); then
+          specify_on=0
+          echo "[drain] spec-writing is PAUSED: the drain pull requests held for a human could not be counted (exit ${held_rc}; see the gh error above), and a count nobody read is not zero (#2939): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+        elif (( 10#$held >= 10#$SPECIFY_MAX_HELD )); then
+          specify_on=0
+          echo "[drain] spec-writing is PAUSED: ${held} drain pull request(s) held for a human (needs-human-review on agent/issue-*), at or above the cap ${SPECIFY_MAX_HELD} (MINSPEC_DRAIN_SPECIFY_MAX_HELD, #2939): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+        fi
+      fi
+    fi
+  fi
+
   if [[ -z "$all_ready" ]]; then
     # The contradiction is reported ALONGSIDE "cycle done", not instead of it: the
     # query itself succeeded (ready_rc==0, checked above), so this is not the #1855
@@ -1505,11 +1573,11 @@ run_cycle() {
     return 0
   fi
 
-  # With spec-writing off, what is dispatched is the build queue alone. Narrowed HERE,
+  # With spec-writing off or paused (#2939), what is dispatched is the build queue alone. Narrowed HERE,
   # before ranking and before the dispatch cap: capped first and skipped afterwards, a
   # cap of 2 whose top two were spec-writing issues would dispatch nothing at all, on
   # every cycle, with builds queued behind them.
-  if [[ "$DRAIN_SPECIFY" != "1" ]]; then
+  if (( ! specify_on )); then
     all_ready="$(printf '%s\n' "$ready_full" | sed '/^$/d' | sort -un)"
     if [[ -z "$all_ready" ]]; then
       # Everything ready is spec-writing. There is nothing to rank or dispatch, but this
