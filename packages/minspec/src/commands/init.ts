@@ -1283,12 +1283,13 @@ export async function initCommand(
   // drift detector then reports false drift). Catch any failure, surface exactly
   // what went wrong, and do NOT report a misleading "Initialized" success (#153).
   let untrackedOnInit: string[] = [];
+  const indexNoticesOnInit: ManagedRegionWarning[] = [];
   try {
     scaffold(folder);
     // `?? []` — a stubbed generateHarnessFiles (several suites mock it) returns
     // undefined, and an un-iterable here would turn a reporting nicety into an
     // init-breaking TypeError. Reporting must never be able to fail the command.
-    untrackedOnInit = generateHarnessFiles(folder) ?? [];
+    untrackedOnInit = generateHarnessFiles(folder, indexNoticesOnInit) ?? [];
   } catch (err) {
     vscode.window.showErrorMessage(
       `MinSpec: Initialization failed — ${describeError(err)}. ` +
@@ -1308,6 +1309,22 @@ export async function initCommand(
       outputPath,
       message: untrackedNoticeMessage(outputPath),
       kind: 'untracked',
+    });
+  }
+  // Hooks init staged into the index as 100755 (#2399) — same notice refresh shows.
+  // A first init stages every executable template at once, so ONE notice names them
+  // all — a dialog per file would be a 7-9 dismissal storm on the onboarding path.
+  if (indexNoticesOnInit.length === 1) {
+    await surfaceManagedRegionWarning(folder, indexNoticesOnInit[0]);
+  } else if (indexNoticesOnInit.length > 1) {
+    const paths = indexNoticesOnInit.map((n) => n.outputPath);
+    await surfaceManagedRegionWarning(folder, {
+      outputPath: paths[0],
+      outputPaths: paths,
+      message:
+        `${paths.length} hooks/scripts were recorded in the git index as executable (100755) ` +
+        `so they run on every checkout: ${paths.join(', ')}. Commit them with the rest of the scaffold.`,
+      kind: 'exec-bit-recorded',
     });
   }
   if (isFirstInit) {
@@ -1378,7 +1395,7 @@ export async function surfaceManagedRegionWarning(
   // "Re-scaffold" would be meaningless (nothing was scaffolded) and actively
   // misleading, so this kind gets its own surface: state what changed to the index
   // and offer the place to review and commit it (#1146).
-  if (w.kind === 'untracked') {
+  if (w.kind === 'untracked' || w.kind === 'exec-bit-recorded') {
     const choice = await vscode.window.showInformationMessage(
       `[${label}] ${w.message}`,
       SHOW_SCM_ACTION,
