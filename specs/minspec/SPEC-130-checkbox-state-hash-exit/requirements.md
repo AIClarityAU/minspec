@@ -22,7 +22,7 @@ implements: [packages/minspec/tests/checkbox-basis-corpus.test.ts, packages/mins
 # requires.
 affects: [packages/shared/src/canonical.ts, scripts/hooks/canonical.py, packages/minspec/src/lib/scaffold.ts]
 phases:
-  specify: in-progress
+  specify: done
   clarify: done
   plan: pending
   tasks: pending
@@ -33,10 +33,11 @@ phases:
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. The founder
 > answered the four questions under
-> [Resolved Decisions (Clarify)](#resolved-decisions-clarify) on 2026-10-22; the spec is
-> approved through the normal spec-approval gate before any code changes. Every requirement
-> below is written under the chosen option of each question (Option A in all four), so no
-> requirement text changed when the answers were recorded.
+> [Resolved Decisions (Clarify)](#resolved-decisions-clarify) (Option A in all four). The
+> spec is NOT yet approved: it stays `status: specifying` until it passes the normal
+> spec-approval gate, and no code changes before that. Every requirement below is written
+> under the chosen option of each question, so no requirement text changed when the answers
+> were recorded.
 
 Materializes **[#224](https://github.com/AIClarityAU/minspec/issues/224)** - *"normalize
 checkbox state before hashing approved spec files."* Rests on
@@ -341,7 +342,7 @@ Function signatures do not change: `canonicalizeSpec(raw: string): string`,
 
 ## Resolved Decisions (Clarify)
 
-Four questions, answered by the founder on 2026-10-22: Option A for all four. Each keeps
+Four questions, answered by the founder: Option A for all four (answers recorded here; approval is a separate, later gate). Each keeps
 its options and costs below as the record of what was weighed, with the resolution first.
 The requirements were already written under Option A, so none changed.
 
