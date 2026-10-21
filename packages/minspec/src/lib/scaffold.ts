@@ -668,7 +668,8 @@ export interface ManagedRegionWarning {
     | 'missing-markers'
     | 'untracked'
     | 'project-name-mismatch'
-    | 'preserved-without-baseline';
+    | 'preserved-without-baseline'
+    | 'exec-bit-recorded';
 }
 
 /** The notice raised when a declared machine-local path is removed from the index. */
@@ -685,6 +686,23 @@ export function projectNameMismatchMessage(recorded: string, basename: string): 
     'using it would have renamed the project in every generated file. To rename ' +
     'deliberately, set "projectName" in .minspec/config.json.'
   );
+}
+
+/**
+ * The notice raised when refresh changed a hook's git INDEX entry to `100755`
+ * (#2399). Informational: it is the repair of a silently-skipped gate, reported so
+ * the staged change is not an invisible git action (G-8).
+ */
+export function executableBitIndexNoticeMessage(
+  outputPath: string,
+  change: ExecutableBitIndexChange,
+): string {
+  return change === 'mode-fixed'
+    ? `${outputPath} was committed without the executable bit, so git skipped it as a hook on ` +
+        'Linux and macOS. Its git index entry is now 100755 (staged content untouched). ' +
+        'Commit this mode change to make the gate run everywhere.'
+    : `${outputPath} was added to the git index as an executable (100755) so the hook runs ` +
+        'on every checkout. Commit it with the rest of the scaffold.';
 }
 
 export function untrackedNoticeMessage(outputPath: string): string {
@@ -867,7 +885,8 @@ function missingMarkersMessage(outputPath: string): string {
  * boundary Refresh later uses to update only MinSpec's region. The user is expected
  * to add any custom content OUTSIDE the markers.
  */
-function generateManagedRegionTemplates(rootDir: string, tools: DetectedTools): void {
+function generateManagedRegionTemplates(rootDir: string, tools: DetectedTools): ManagedRegionWarning[] {
+  const notices: ManagedRegionWarning[] = [];
   for (const tpl of MANAGED_REGION_TEMPLATES) {
     // Tool-gated templates (the slash-command shims, #241) are only scaffolded for a
     // tool the project actually uses; tool-independent templates (CI workflow, git
@@ -875,9 +894,18 @@ function generateManagedRegionTemplates(rootDir: string, tools: DetectedTools): 
     if (tpl.condition && !tpl.condition(tools)) continue;
     const fullPath = path.join(rootDir, tpl.outputPath);
     if (!fs.existsSync(fullPath)) {
-      writeManagedFile(fullPath, tpl);
+      // An index change is REPORTED (G-8), with the same notice refresh raises.
+      const change = writeManagedFile(fullPath, tpl, rootDir);
+      if (change) {
+        notices.push({
+          outputPath: tpl.outputPath,
+          message: executableBitIndexNoticeMessage(tpl.outputPath, change),
+          kind: 'exec-bit-recorded',
+        });
+      }
     }
   }
+  return notices;
 }
 
 /**
@@ -885,8 +913,16 @@ function generateManagedRegionTemplates(rootDir: string, tools: DetectedTools): 
  * marked block) and, for executable templates (the git hooks), set the execute bit
  * so git will actually run the hook. Single place both scaffold and the deleted-file
  * re-scaffold path go through, so the bytes and the mode never diverge.
+ *
+ * `rootDir` is needed (not just `fullPath`) so the git-index fix below
+ * ({@link recordExecutableBitInIndex}) can run `git update-index` scoped to the
+ * right repository and pathspec (#2399).
  */
-function writeManagedFile(fullPath: string, tpl: ManagedRegionTemplate): void {
+function writeManagedFile(
+  fullPath: string,
+  tpl: ManagedRegionTemplate,
+  rootDir: string,
+): ExecutableBitIndexChange | null {
   ensureDirectory(path.dirname(fullPath));
   fs.writeFileSync(fullPath, renderManagedFile(tpl));
   if (tpl.executable) {
@@ -894,8 +930,79 @@ function writeManagedFile(fullPath: string, tpl: ManagedRegionTemplate): void {
       fs.chmodSync(fullPath, 0o755);
     } catch {
       // chmod can fail on filesystems without POSIX modes (e.g. some Windows
-      // mounts). Git on those platforms ignores the bit anyway — best-effort.
+      // mounts) — recordExecutableBitInIndex below is what actually gates
+      // execution on a POSIX checkout, so a failure here is not fatal on its own.
     }
+    return recordExecutableBitInIndex(rootDir, fullPath, true);
+  }
+  return null;
+}
+
+/**
+ * What {@link recordExecutableBitInIndex} did to the git index, so the caller can
+ * REPORT it (G-8, as {@link untrackDeclaredMachineLocalPaths} does for its own index
+ * change): `'staged-new'` — the file was not in the index and was added (content +
+ * `100755`); `'mode-fixed'` — a tracked file's entry was flipped from `100644` to
+ * `100755`, its staged content untouched.
+ */
+export type ExecutableBitIndexChange = 'staged-new' | 'mode-fixed';
+
+/**
+ * Record the execute bit in the git INDEX for a freshly scaffolded executable
+ * template (#2399) — not just the filesystem, which is what `fs.chmodSync` above
+ * sets and what the old comment it replaced relied on ("git ignores the bit
+ * anyway").
+ *
+ * That was true only on the machine running the scaffold. The filesystem mode is
+ * NOT what git commits — the index entry's own mode is — and on a filesystem
+ * without POSIX modes (Windows, some mounts) the chmod above is a silent no-op,
+ * so a new hook file lands in the index at git's default `100644`. A commit made
+ * from that machine then carries `100644` hooks forever: git never changes the
+ * mode of a file already in the index just because a later commit runs on a
+ * POSIX machine. Every other checkout of that commit — Linux, macOS, CI — then
+ * SKIPS the hook, printing only a disableable hint, never a failure, so
+ * `.minspec/hooks/pre-commit` and `commit-msg` (the secret scan, the protected-
+ * branch guard, the RCDD root-cause gate) stop running with nothing else
+ * reporting it: exactly the silent-gate shape constitution invariant 2 forbids.
+ *
+ * `git update-index` sets the index mode directly, independent
+ * of what the filesystem supports, so it fixes the one platform where the chmod
+ * above cannot. It is a no-op when the bit is already `100755` (the common,
+ * already-correct case elsewhere), and best-effort/silent when there is no repo
+ * or no git on PATH — mirroring `ensureHooksPath` above: scaffolding must never
+ * fail because of this, and a repo with no git backstop is covered by the DR-037
+ * CI workflow instead.
+ */
+function recordExecutableBitInIndex(
+  rootDir: string,
+  fullPath: string,
+  addIfUntracked: boolean,
+): ExecutableBitIndexChange | null {
+  try {
+    // git pathspecs want forward slashes even when `path.relative` gives back
+    // platform separators (backslashes on win32).
+    const relPath = path.relative(rootDir, fullPath).split(path.sep).join('/');
+    const run = (args: string[]): string =>
+      execFileSync('git', args, { cwd: rootDir, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+    // `<mode> <sha> <stage>\t<path>` — empty when the path is not in the index.
+    const entry = run(['ls-files', '-s', '--', relPath]).split('\n')[0].trim();
+    if (!entry) {
+      if (!addIfUntracked) return null;
+      run(['update-index', '--add', '--chmod=+x', '--', relPath]);
+      return 'staged-new';
+    }
+    const [mode, sha] = entry.split(/\s+/);
+    if (mode === '100755') return null;
+    // A tracked file: re-assert ONLY the mode, on the blob already staged.
+    // `update-index --chmod=+x <path>` would also re-hash and stage the working-
+    // tree content, silently staging a user's unstaged edits to the hook.
+    run(['update-index', '--cacheinfo', `100755,${sha},${relPath}`]);
+    return 'mode-fixed';
+  } catch {
+    // Not a git repo, no git on PATH, a gitignored path, or the index update
+    // failed — leave the filesystem bit (if the platform honours it) as the only
+    // fallback.
+    return null;
   }
 }
 
@@ -1099,6 +1206,14 @@ function tryAutoHealManagedRegion(
  */
 function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): ManagedRegionWarning[] {
   const warnings: ManagedRegionWarning[] = [];
+  const noteExecutableBitChange = (outputPath: string, change: ExecutableBitIndexChange | null): void => {
+    if (!change) return;
+    warnings.push({
+      outputPath,
+      message: executableBitIndexNoticeMessage(outputPath, change),
+      kind: 'exec-bit-recorded',
+    });
+  };
 
   for (const tpl of MANAGED_REGION_TEMPLATES) {
     // Skip a tool-gated template whose tool the project does not use (#241): never
@@ -1110,8 +1225,25 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
 
     if (!fs.existsSync(fullPath)) {
       // Re-scaffold a deleted managed file, shebang + markers and all.
-      writeManagedFile(fullPath, tpl);
+      noteExecutableBitChange(tpl.outputPath, writeManagedFile(fullPath, tpl, rootDir));
       continue;
+    }
+
+    if (tpl.executable) {
+      // Self-heal an EXISTING hook/script too (#2399), not just a freshly
+      // (re-)scaffolded one: a repo first initialized or last re-scaffolded on
+      // Windows already has this file on disk with a correct body but a `100644`
+      // index entry, and nothing about its content differs from the template, so
+      // the marker-diff logic below would never touch it again. Refresh is the
+      // one path every such repo eventually runs, so it is where this actually
+      // gets fixed. No-op when the bit is already `100755`; a fix is REPORTED.
+      try {
+        fs.chmodSync(fullPath, 0o755);
+      } catch {
+        // Filesystem without POSIX modes — recordExecutableBitInIndex below is
+        // what actually matters there.
+      }
+      noteExecutableBitChange(tpl.outputPath, recordExecutableBitInIndex(rootDir, fullPath, false));
     }
 
     const { text: onDisk, original } = readDocument(fullPath);
@@ -1162,7 +1294,7 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
 export function rescaffoldManagedRegionFile(rootDir: string, outputPath: string): boolean {
   const tpl = MANAGED_REGION_TEMPLATES.find((t) => t.outputPath === outputPath);
   if (!tpl) return false;
-  writeManagedFile(path.join(rootDir, tpl.outputPath), tpl);
+  writeManagedFile(path.join(rootDir, tpl.outputPath), tpl, rootDir);
   return true;
 }
 
@@ -1544,8 +1676,14 @@ export function recordVerifyAndSaveManifest(
  * `seedConstitution` and `generateSlashCommandShims` run after it and can write to a
  * file that was already there.
  * Stores initial section hashes for future merge-on-refresh.
+ *
+ * Returns the paths removed from the git index by the machine-local reconcile. When
+ * `indexNotices` is passed, a notice is appended for each hook staged into the index.
  */
-export function generateHarnessFiles(rootDir: string): string[] {
+export function generateHarnessFiles(
+  rootDir: string,
+  indexNotices?: ManagedRegionWarning[],
+): string[] {
   // Ensure .minspec/ exists
   scaffold(rootDir);
   // Returned, not discarded. `initCommand` is re-runnable and is NOT gated on
@@ -1611,7 +1749,10 @@ export function generateHarnessFiles(rootDir: string): string[] {
   // to update only MinSpec's region. Tools are detected here, AFTER the Markdown
   // templates are written, so freshly-written CLAUDE.md / .cursorrules gate the shims.
   const tools = detectTools(rootDir);
-  generateManagedRegionTemplates(rootDir, tools);
+  // Hooks staged into the git index are handed back through `indexNotices` (G-8) so the
+  // init caller can show them as refresh does; an out-param keeps the `string[]` return.
+  const execBitNotices = generateManagedRegionTemplates(rootDir, tools);
+  indexNotices?.push(...execBitNotices);
 
   // Wire the just-scaffolded Claude Code hooks into .claude/settings.json (#1093) —
   // the hook files are inert until the event lists them.

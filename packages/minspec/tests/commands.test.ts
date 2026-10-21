@@ -331,6 +331,7 @@ describe('commands', () => {
       expect(scaffold).toHaveBeenCalledWith('/tmp/test-workspace');
       expect(generateHarnessFiles).toHaveBeenCalledWith(
         '/tmp/test-workspace',
+        [],
       );
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
         'MinSpec: Initialized .minspec/ and generated harness files.',
