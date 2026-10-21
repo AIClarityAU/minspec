@@ -406,4 +406,48 @@ describe('scripts/facts.ts — the read-only facts oracle CLI (#1050)', () => {
     expect(status).toBe(0);
     expect(output).toContain('none — no spec declares this path in implements:/affects:');
   });
+
+  // #2465 — FRONTMATTER_BLOCK_RE anchored on a bare `\n`, so a CRLF spec file (a
+  // Windows checkout; this repo's .gitattributes doesn't LF-pin every directory
+  // `facts` reads) made `rawField`/`listField` read the frontmatter block as
+  // absent entirely — `owns` would report no `id:` and no `implements:`/`affects:`
+  // for a file that plainly declares both.
+  it('owns: finds the declaring spec even when its frontmatter is CRLF (#2465, base-red before the \\r?\\n fix)', () => {
+    const root = tempRoot();
+    writeSpecFile(root, 'specs/demo/SPEC-100/requirements.md', SPEC_100.replace(/\n/g, '\r\n'));
+
+    const { status, output } = run(root, ['owns', 'packages/demo/src/lib/widget.ts']);
+    expect(status).toBe(0);
+    expect(output).toContain('SPEC-100');
+    expect(output).toContain('via implements:');
+  });
+
+  // The block-list (`- item`) path of listField, distinct from the inline `[a, b]` form.
+  it('owns: reads a CRLF block-list implements:/affects: (#2465)', () => {
+    const root = tempRoot();
+    const spec = [
+      '---',
+      'id: SPEC-101',
+      'title: Block list',
+      'type: requirements',
+      'tier: T2',
+      'status: implementing',
+      'implements:',
+      '  - packages/demo/src/lib/blocky.ts',
+      'affects:',
+      '  - packages/demo/src/lib/blocky-helper.ts',
+      '---',
+      '',
+      '# Block list',
+      '',
+    ].join('\r\n');
+    writeSpecFile(root, 'specs/demo/SPEC-101/requirements.md', spec);
+
+    const impl = run(root, ['owns', 'packages/demo/src/lib/blocky.ts']);
+    expect(impl.status).toBe(0);
+    expect(impl.output).toContain('SPEC-101');
+    expect(impl.output).toContain('via implements:');
+    const aff = run(root, ['owns', 'packages/demo/src/lib/blocky-helper.ts']);
+    expect(aff.output).toContain('via affects:');
+  });
 });
