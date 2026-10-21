@@ -7,17 +7,19 @@
  * the opt-in marker (constitution invariant 3), so a writer that created it would
  * make every folder the extension is ever opened on look opted in (#2328). Every
  * write and delete in `SessionPresenceManager` is therefore gated on `isOptedIn()`,
- * and the one directory this module creates (`sessions/`) is made NON-recursively,
- * so it cannot bring `.minspec/` into existence even if the gate were bypassed.
+ * and the one directory this module creates (`sessions/`) is made through the
+ * shared guard (`ensureDirectory` in `./opt-in`, SPEC-096), which cannot bring
+ * `.minspec/` into existence even if the gate were bypassed.
  * Other sessions read the directory to know who else is live (FR-4/FR-5), and the
  * drain's gated fast-forward (`scripts/drain-inbox.sh sync_shared_checkouts`) keys
  * on `isCheckoutOccupied` to decide whether a checkout is safe to advance.
  *
  * Tier-0 / offline (INV-5): this module imports ONLY `fs`, `path`, `crypto`,
  * `child_process` (git, local), the `vscode` TYPE (compile-time only), and two
- * sibling Tier-0 modules (`./session`, and `./preferences` for the shared
- * `hasOptInMarker` opt-in predicate — the dependency-free leaf module, not
- * `./auto-bootstrap`'s re-export, which would drag that orchestrator's whole
+ * sibling Tier-0 modules (`./session`, and `./opt-in` for the shared
+ * `hasOptInMarker` predicate and the guarded directory operation - the leaf
+ * module that imports only `fs` and `path`, not `./auto-bootstrap`'s re-export,
+ * which would drag that orchestrator's whole
  * scaffold/template-registry/epic-backfill/epic-manager/merge-refresh graph
  * into this lean Layer-1 primitive; #2363). It makes zero network calls. The
  * Tier-0 import-ban gate (tier0-import-ban.test.ts) forbids http/https/fetch/net
@@ -33,7 +35,7 @@ import { execFileSync } from 'child_process';
 import type * as vscode from 'vscode';
 
 import { loadSession, saveSession, type SessionType } from './session';
-import { hasOptInMarker } from './preferences';
+import { ensureDirectory, hasOptInMarker } from './opt-in';
 
 // ── Paired named constants (FR-3) — the ONE place these numbers live in TS ──────
 // STALE_SECS = 4 × HEARTBEAT_SECS. They are PAIRED: drift one without the other and
@@ -549,7 +551,7 @@ export class SessionPresenceManager {
    * The single opt-in gate for every write and delete below (constitution
    * invariant 3): a folder is open AND it already carries the `.minspec/` marker.
    * Reuses the project-wide predicate (`hasOptInMarker`, in the dependency-free
-   * `./preferences` leaf module) rather than a second definition of "is this a
+   * `./opt-in` leaf module) rather than a second definition of "is this a
    * MinSpec project" (#2363 — `hasOptInMarker` already treats an empty root as
    * not opted in, so this does not need its own empty-root special case).
    *
@@ -571,7 +573,8 @@ export class SessionPresenceManager {
     }
     // 1. Persist sessionId into the singular .minspec/session.json so a shell
     //    agent's trailer + $MINSPEC_SESSION_ID resolve identically (FR-11).
-    //    Opted-in folders only: saveSession() creates .minspec/ when it is absent.
+    //    Opted-in folders only. saveSession() no longer creates .minspec/ (it
+    //    refuses, SPEC-096), so this gate now spares a refusal, not a marker.
     if (this.isOptedIn()) {
       try {
         const s = loadSession(this.rootDir);
@@ -700,13 +703,14 @@ export class SessionPresenceManager {
   private writeHeartbeat(): void {
     if (!this.isOptedIn()) return; // never the thing that creates the opt-in marker
     try {
-      // Deliberately NOT `{ recursive: true }`: this may create `sessions/` inside
-      // an existing `.minspec/`, and must fail (ENOENT) rather than create
-      // `.minspec/` itself if the marker vanished between the check above and here.
-      fs.mkdirSync(this.sessionsDir);
-    } catch (e: unknown) {
-      // Already there is the normal case; anything else ⇒ nothing to write to.
-      if ((e as NodeJS.ErrnoException | undefined)?.code !== 'EEXIST') return;
+      // Through the shared guard (SPEC-096 FR-4). It may create `sessions/` inside
+      // an existing `.minspec/`, and it refuses rather than create `.minspec/`
+      // itself if the marker vanished between the check above and here.
+      ensureDirectory(this.sessionsDir);
+    } catch {
+      // No directory to write to (the marker went, or the filesystem said no).
+      // Ambient path: stay silent and write nothing; the next tick tries again.
+      return;
     }
     const s = loadSession(this.rootDir);
     const record: SessionPresenceRecord = {

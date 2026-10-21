@@ -195,7 +195,6 @@ describe('backfillEpicsCommand()', () => {
   // (4) choice === 'AI-enhanced', proposeAI returns a proposal → uses it
   it('uses AI proposal when choice is AI-enhanced and proposeAI returns a result', async () => {
     const aiProposal = makeProposal(3, 4);
-    aiProposal.source; // just accessing to confirm shape
     vi.mocked(isClaudeAvailable).mockResolvedValue(true);
     vi.mocked(proposeAI).mockResolvedValue({ proposal: { ...aiProposal, source: 'ai' } as BackfillProposal });
     // First call: AI/heuristic choice
@@ -491,8 +490,8 @@ describe('backfillEpicsCommand()', () => {
   });
 
   // #2506: Backfill Epics is reachable in a folder that has never opted in
-  // (it writes into docs/, which is allowed pre-opt-in) — unlike Approve Spec,
-  // nothing earlier in this command creates `.minspec/` for it. Before this
+  // (it writes into docs/, which is allowed pre-opt-in) and creates no
+  // `.minspec/` there; Approve Spec, by contrast, refuses. Before this
   // fix, a `savePreferences` refusal there reached only `console.warn`, which
   // a user never sees, so the toast's "Always" looked accepted when it silently
   // remembered nothing.

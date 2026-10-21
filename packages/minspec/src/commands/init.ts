@@ -13,6 +13,7 @@ import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS, MANAGED_REGION_TEMPLATES } from 
 import { CLAUDE_SETTINGS_PATH } from '../lib/claude-settings';
 import { resolveTargetFolder, workspaceFolderLabel } from '../lib/resolve-folder';
 import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
+import { hasOptInMarker, notOptedInMessage } from '../lib/opt-in';
 import { getRepoFromRemote } from '../lib/github';
 import { resolveRemotes, renameToOriginCandidate } from '../lib/git-remotes';
 import { resolveBranchDestination, defaultGitRun } from '../lib/approve-commit';
@@ -22,7 +23,7 @@ import {
   DEFAULT_REQUIRED_CHECK_CONTEXTS,
   createRequiredChecksRuleset,
   defaultCommandRunner,
-  isGhReady,
+  probeGhAvailability,
   resolveCheckContexts,
   listRequiredCheckContexts,
   probeReviewerConfigured,
@@ -858,9 +859,14 @@ async function linkRulesetDocs(
  * READ-ONLY CONFIG PROBE runs AUTONOMOUSLY; only the MUTATING create is
  * consent-gated.
  *   - not a git repo → return (zero process, zero toast).
- *   - `gh` missing/unauthed → info toast linking the docs. Zero `gh api`. Done.
- *   - `gh` ready + no GitHub remote (or a malformed slug) → docs link. Zero
- *     `gh api`. Done.
+ *   - `gh` not installed → info toast reporting that MinSpec could not check
+ *     (never an imperative about repo state it never read). Zero `gh api`. Done.
+ *   - `gh` installed but NOT authenticated → info toast reporting the limit
+ *     ("could not check... not authenticated"), never a claim about what the
+ *     repo needs. Zero `gh api` (no anonymous probe — DR-050 authorises only the
+ *     user's own authenticated `gh`; #1889). Done.
+ *   - `gh` ready (installed + authenticated) + no GitHub remote (or a malformed
+ *     slug) → docs link. Zero `gh api`. Done.
  *   - `gh` ready + repo resolves → AUTO-PROBE (read-only `gh api .../rulesets`
  *     GET of the repo's OWN settings, no consent toast):
  *       - a qualifying ruleset ALREADY EXISTS → SILENT. No toast at all.
@@ -871,16 +877,16 @@ async function linkRulesetDocs(
  *           - "Not now"/dismiss → nothing.
  *           - "Learn more"     → open the rulesets docs.
  *
- * Why the probe is autonomous: `isGhReady`, `hasRequiredChecksRuleset` /
- * `listRequiredCheckContexts`, and the reviewer-secret-NAMES probe
- * ({@link probeReviewerConfigured}, via {@link resolveWantedChecks}) are a
- * read-only capability probe + GETs of the repo's OWN configuration — they
- * egress no user artifacts, spec content, secret VALUES, or telemetry (the same
- * class as MinSpec shelling `git fetch`). Per DR-050 they need no prior consent
- * toast: the rulesets read under Amendment 2026-07-01, and the `actions/secrets`
- * NAMES read under Amendment 2026-07-16 (materialising the founder's decision on
- * #796). Only the CREATE/ADD mutates the repo, so it is the one action gated on
- * an explicit click.
+ * Why the probes are autonomous: `probeGhAvailability`, `hasRequiredChecksRuleset`
+ * / `listRequiredCheckContexts`, and the
+ * reviewer-secret-NAMES probe ({@link probeReviewerConfigured}, via
+ * {@link resolveWantedChecks}) are all read-only capability probes + GETs of the
+ * repo's OWN configuration — they egress no user artifacts, spec content, secret
+ * VALUES, or telemetry (the same class as MinSpec shelling `git fetch`). Per
+ * DR-050 they need no prior consent toast: the rulesets read under Amendment
+ * 2026-07-01 and the `actions/secrets` NAMES read under Amendment 2026-07-16
+ * (materialising the founder's decision on #796). Only the CREATE/ADD
+ * mutates the repo, so it is the one action gated on an explicit click.
  *
  * The created ruleset's required checks come from
  * {@link resolveRequiredChecks} (the `minspec.ruleset.requiredChecks` setting,
@@ -905,12 +911,31 @@ export async function offerRulesetAdvisory(
   if (!isRepo(folder)) return;
 
   try {
-    // gh unavailable/unauthed → zero-network docs link. Done.
-    if (!(await isGhReady(run))) {
+    const availability = await probeGhAvailability(run);
+    if (!availability.authenticated) {
+      if (!availability.installed) {
+        // No `gh` binary at all → nothing left to try. Report the LIMIT, not a
+        // claim about the repo (#1889): this branch has read nothing about the
+        // default branch's rules, so it must never assert the branch needs
+        // protecting — that reads as observed fact when it is unverified.
+        await linkRulesetDocs(
+          "MinSpec could not check whether your default branch's rules already " +
+            `require CI (${DEFAULT_REQUIRED_CHECK_CONTEXTS.join(', ')}) status checks — ` +
+            'the `gh` CLI is not installed. Install/authenticate `gh` to let MinSpec check ' +
+            'and offer to create a ruleset, or see the GitHub docs.',
+          openExternal,
+        );
+        return;
+      }
+
+      // `gh` is installed but has no usable token → nothing MinSpec is
+      // authorised to read (DR-050 covers only the user's own authenticated
+      // `gh`). Report the limit, not a claim about the repo (#1889).
       await linkRulesetDocs(
-        'MinSpec: protect your default branch with a ruleset that requires CI ' +
-          `(${DEFAULT_REQUIRED_CHECK_CONTEXTS.join(', ')}) status checks. ` +
-          'Install/authenticate the `gh` CLI to let MinSpec offer to create one, or see the GitHub docs.',
+        "MinSpec could not check whether your default branch's rules already " +
+          `require CI (${DEFAULT_REQUIRED_CHECK_CONTEXTS.join(', ')}) status checks — ` +
+          'the `gh` CLI is not authenticated. Authenticate `gh` to let MinSpec check ' +
+          'and offer to create a ruleset, or see the GitHub docs.',
         openExternal,
       );
       return;
@@ -1071,6 +1096,23 @@ export function resolveGitHubPrExtensionLearnMoreUrl(appName: string): string {
     : GITHUB_PR_EXTENSION_OPEN_VSX_URL;
 }
 
+/** The one install path: the host's own `workbench.extensions.installExtension` command. */
+async function defaultInstallExtension(id: string): Promise<void> {
+  await vscode.commands.executeCommand('workbench.extensions.installExtension', id);
+}
+
+/**
+ * Install the GitHub PR extension with no prompt of its own (SPEC-042 FR-17). The caller
+ * must already hold the user's explicit click: the Getting Started page's "Install" button
+ * is that click, so asking again through the advisory toast would be a second consent for
+ * one action. Same id, same command as {@link offerGitHubPrExtensionAdvisory}'s "Install".
+ */
+export async function installGitHubPrExtension(
+  install: (id: string) => Promise<void> = defaultInstallExtension,
+): Promise<void> {
+  await install(GITHUB_PR_EXTENSION_ID);
+}
+
 /** Dependencies for {@link offerGitHubPrExtensionAdvisory}, injectable for tests. */
 export interface GitHubPrExtAdvisoryDeps {
   /** Whether `folder` is a git working tree. Defaults to the same `.git`-existence check the other advisories use. */
@@ -1114,11 +1156,7 @@ export async function offerGitHubPrExtensionAdvisory(
       deps.isInstalled ?? ((id: string) => vscode.extensions.getExtension(id) !== undefined);
     if (isInstalled(GITHUB_PR_EXTENSION_ID)) return; // already have it — nothing to do
 
-    const install =
-      deps.install ??
-      (async (id: string) => {
-        await vscode.commands.executeCommand('workbench.extensions.installExtension', id);
-      });
+    const install = deps.install ?? defaultInstallExtension;
     const openExternal =
       deps.openExternal ?? ((url: string) => vscode.env.openExternal(vscode.Uri.parse(url)));
 
@@ -1487,6 +1525,15 @@ export async function initRefreshCommand(
 ): Promise<void> {
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
+  // SPEC-096 FR-3 / DQ-1: Refresh is not a second Initialize. In a folder with no
+  // `.minspec/` it refuses - one message, no button, nothing written - and points
+  // at the command that does opt a folder in. `refreshHarnessFiles` refuses too;
+  // checking here is what lets the message be the plain refusal rather than a
+  // "refresh failed" wrapped around it.
+  if (!hasOptInMarker(folder)) {
+    vscode.window.showErrorMessage(notOptedInMessage(folder));
+    return;
+  }
   // Same all-or-nothing concern as initCommand: a mid-sequence write failure
   // must surface, not silently leave a partial/inconsistent harness (#153).
   let warnings: ReturnType<typeof refreshHarnessFiles>;

@@ -1,7 +1,7 @@
 ---
 id: SPEC-095
 type: requirements
-status: planning
+status: implementing
 tier: T4
 product: minspec
 epic: EPIC-002  # Signpost Integrity - on a CRLF checkout the signpost's inputs read every decision as proposed, and the writers behind them damage or refuse the files they are derived from
@@ -31,9 +31,9 @@ affects: [packages/minspec/src/lib/adr-manager.ts, packages/minspec/src/lib/epic
 phases:
   specify: done
   clarify: done
-  plan: in-progress
-  tasks: pending
-  implement: pending
+  plan: done
+  tasks: done
+  implement: in-progress
 ---
 
 # SPEC-095: MinSpec reads a CRLF file the same as an LF one, and writes it back as it found it

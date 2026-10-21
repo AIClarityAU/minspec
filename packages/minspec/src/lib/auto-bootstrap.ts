@@ -21,6 +21,9 @@
  *   - In a folder that has NOT, answers go to the host's per-workspace memory
  *     (`BootstrapVsCode.preOptInMemory`) and nothing is written into the folder,
  *     because the write would itself create the opt-in marker (#2355)
+ *   - Once a folder opts in, its pre-opt-in memory entry (if any) is deleted on
+ *     the next read - it is unreachable from then on, so leaving it in place
+ *     would just be dead data in `workspaceState` (#2367)
  *   - Master toggle: `minspec.autoBootstrap.enabled` setting (default: true)
  */
 
@@ -31,6 +34,7 @@ import { computeTemplateBaseline } from './template-registry';
 import { collectArtifacts } from './epic-backfill';
 import { listEpics } from './epic-manager';
 import { findSpecDirsMissingTasksMd, scaffoldTasksMd } from './scaffold';
+import { ensureDirectory } from './opt-in';
 
 // ---------------------------------------------------------------------------
 // Preferences (persisted in .minspec/preferences.json)
@@ -209,7 +213,11 @@ export function hasUnclassifiedChanges(rootDir: string): boolean {
   // Ensure the classifications dir exists so the user can collect results
   const classificationsDir = path.join(rootDir, '.minspec', 'classifications');
   try {
-    fs.mkdirSync(classificationsDir, { recursive: true });
+    // Through the shared guard (SPEC-096 FR-4): it creates `classifications/`
+    // below an existing `.minspec/` and can never create `.minspec/` itself, so
+    // the marker vanishing after the check above ends in the `catch`, not in a
+    // recreated marker.
+    ensureDirectory(classificationsDir);
   } catch {
     // If we can't create it, skip the prompt rather than spamming
     return false;
@@ -335,20 +343,45 @@ export const PRE_OPT_IN_MEMORY_KEY_PREFIX = 'minspec.bootstrap.preOptIn:';
  *   - opted in  → `.minspec/preferences.json`, as always. The pre-opt-in memory
  *     is NOT merged in: once a project has its own file, that file is the single
  *     authority, and a stale "don't ask" from before it opted in must not
- *     outrank it.
+ *     outrank it. Once unreachable like this, the pre-opt-in entry (if any) is
+ *     also deleted (#2367) - see `clearPreOptInMemory`.
  *   - not opted in → the host's per-workspace memory (the file cannot exist).
  */
-function loadBootstrapPreferences(
+async function loadBootstrapPreferences(
   rootDir: string,
   vscode: BootstrapVsCode,
-): BootstrapPreferences {
-  if (isMinspecInitialized(rootDir)) return loadPreferences(rootDir);
+): Promise<BootstrapPreferences> {
+  if (isMinspecInitialized(rootDir)) {
+    await clearPreOptInMemory(rootDir, vscode);
+    return loadPreferences(rootDir);
+  }
   const stored = vscode.preOptInMemory?.get<unknown>(
     PRE_OPT_IN_MEMORY_KEY_PREFIX + rootDir,
   );
   return stored && typeof stored === 'object'
     ? (stored as BootstrapPreferences)
     : {};
+}
+
+/**
+ * Remove a folder's pre-opt-in memory entry once it has opted in (#2367).
+ *
+ * `loadBootstrapPreferences` stops reading this entry the moment `.minspec/`
+ * exists - the file becomes the sole authority, per its own comment above -
+ * but nothing previously deleted the now-unreachable entry, so it stayed in
+ * `workspaceState` as dead data forever. Guarded on a `get` first so an
+ * opted-in folder that never had a pre-opt-in entry does not pay a write on
+ * every read.
+ */
+async function clearPreOptInMemory(
+  rootDir: string,
+  vscode: BootstrapVsCode,
+): Promise<void> {
+  const memory = vscode.preOptInMemory;
+  if (!memory) return;
+  const key = PRE_OPT_IN_MEMORY_KEY_PREFIX + rootDir;
+  if (memory.get<unknown>(key) === undefined) return;
+  await memory.update(key, undefined);
 }
 
 /**
@@ -371,7 +404,7 @@ async function saveBootstrapPreferences(
   const memory = vscode.preOptInMemory;
   if (!memory) return;
   await memory.update(PRE_OPT_IN_MEMORY_KEY_PREFIX + rootDir, {
-    ...loadBootstrapPreferences(rootDir, vscode),
+    ...(await loadBootstrapPreferences(rootDir, vscode)),
     ...update,
   });
 }
@@ -659,8 +692,14 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
       !prefs.skipBackfillPrompt &&
       isMinspecInitialized(rootDir) &&
       hasUnbackfilledEpics(rootDir),
+    // This offer's button IS the consent for the AI pass: `commandArg` below makes the
+    // command skip its own consent prompt (#213), so this text is all the user reads
+    // before `claude` runs. It therefore says what is sent, in the same sentence as that
+    // prompt (#2568). It used to say only "AI-enhanced if Claude Code is installed".
+    // Pinned, with the prompt, the setting description and the README, by
+    // tests/readme-network-claims.test.ts.
     message:
-      'MinSpec: Several specs/decisions have no epic. Backfill epics now? (AI-enhanced if Claude Code is installed.)',
+      'MinSpec: Several specs/decisions have no epic. Backfill epics now? (AI-enhanced if Claude Code is installed: Backfill then runs your own `claude` command, which sends the ids and titles of your specs, decisions and epics, and the first paragraph of each spec or decision that has no epic yet, to the model provider it is set up with.)',
     primaryAction: 'Backfill',
     commandId: 'minspec.backfillEpics',
     skipPrefKey: 'skipBackfillPrompt',
@@ -809,7 +848,7 @@ async function recordAnsweredSignature(
 ): Promise<void> {
   if (!step.signature) return;
   const sig = step.signature(rootDir);
-  const current = loadBootstrapPreferences(rootDir, vscode);
+  const current = await loadBootstrapPreferences(rootDir, vscode);
   await saveBootstrapPreferences(rootDir, vscode, {
     answeredSignatures: {
       ...(current.answeredSignatures ?? {}),
@@ -877,7 +916,7 @@ export async function runBootstrap(
     return { enabled: true, offered: null, choice: null };
   }
 
-  const prefs = loadBootstrapPreferences(rootDir, vscode);
+  const prefs = await loadBootstrapPreferences(rootDir, vscode);
 
   for (const step of steps) {
     if (!step.shouldRun(rootDir, prefs)) continue;
