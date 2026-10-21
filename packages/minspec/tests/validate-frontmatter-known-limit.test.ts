@@ -172,6 +172,16 @@ describe('#2684 Rule 24 — known limit must cite a tracked issue', () => {
     });
   }, 30000);
 
+  it('does not scan node_modules/ or dist/ trees nested under packages/ (vendored and built output)', () => {
+    withTmp(dir => {
+      const uncited = '// Known limit: vendored text this repo does not own.\nexport const probe = 1;\n';
+      writeSrcFile(dir, 'x/node_modules/dep/src/probe.ts', uncited);
+      writeSrcFile(dir, 'x/dist/src/probe.ts', uncited);
+      const { output } = runValidate(dir);
+      expect(output).not.toContain('admits a known limit');
+    });
+  }, 30000);
+
   it('warns rather than passing silently when it scans nothing (invariant 2)', () => {
     withTmp(dir => {
       // No packages/ directory at all — a zero-file scan means the root moved,

@@ -1082,7 +1082,10 @@ try {
   let limitFilesScanned = 0;
   for (const file of safeGlob(join(ROOT, 'packages'), '.ts')) {
     const rel = relative(ROOT, file).split(sep).join('/');
-    if (!rel.includes('/src/')) continue; // shipped product source only — never tests/
+    // Shipped product source only: packages/<pkg>/src/, never tests/, and never a
+    // vendored or built tree (node_modules/, dist/) that merely contains a src/ folder.
+    if (!/^packages\/[^/]+\/src\//.test(rel)) continue;
+    if (rel.split('/').some(seg => seg === 'node_modules' || seg === 'dist')) continue;
     limitFilesScanned++;
 
     const lines = readFileSync(file, 'utf-8').split('\n');
