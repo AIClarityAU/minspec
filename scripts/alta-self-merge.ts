@@ -161,9 +161,9 @@ export function readRequiredChecks(gh: Gh, repo: string, branch: string): Requir
 
 /**
  * The required checks NOT green on `sha`. A check-run counts when completed with
- * `success` (from the required App when the ruleset names one, newest run wins); for a
- * check the ruleset does not scope to an App, a commit status also counts when its latest
- * state is `success`.
+ * `success` (from the required App when the ruleset names one, newest run wins). A commit
+ * status counts when its latest state is `success` and, for a check the ruleset scopes to
+ * an App, it was posted by that App's bot account.
  */
 export function failingRequiredChecks(gh: Gh, repo: string, sha: string, required: readonly RequiredCheck[]): string[] {
   const runs = pages(
@@ -183,12 +183,30 @@ export function failingRequiredChecks(gh: Gh, repo: string, sha: string, require
       .sort((a, b) => Number(b.id) - Number(a.id));
     const newestRun = matching[0];
     const runOk = newestRun !== undefined && newestRun.status === 'completed' && newestRun.conclusion === 'success';
-    // A check the ruleset scopes to an App is satisfied only by that App's check-run, as
-    // GitHub enforces it; a commit status of the same name can be posted by anyone with
-    // `statuses: write` and must not stand in for it. GitHub documents the statuses
-    // listing as newest-first, so the first entry for a context is its current state.
-    const newestStatus = req.integrationId === undefined ? statuses.find((s) => s.context === req.context) : undefined;
-    const statusOk = newestStatus !== undefined && newestStatus.state === 'success';
+    // GitHub documents the statuses listing as newest-first, so the first entry for a
+    // context is its current state. A check the ruleset scopes to an App (`ready-to-merge`
+    // is a commit status scoped to GitHub Actions) counts only when that status was posted
+    // by the App's own bot account. The statuses API names the creator but not the App,
+    // so the App's slug is read from a check-run of that App on the same commit; with no
+    // such check-run the producer cannot be proven and the status does not count.
+    const newestStatus = statuses.find((s) => s.context === req.context);
+    let producerOk = req.integrationId === undefined;
+    if (!producerOk && newestStatus !== undefined) {
+      const slugs = new Set(
+        runs
+          .map((r) => (r.app == null ? undefined : obj(r.app, 'check-run.app')))
+          .filter((a): a is Record<string, unknown> => a !== undefined && a.id === req.integrationId)
+          .map((a) => a.slug),
+      );
+      const creator = newestStatus.creator == null ? undefined : obj(newestStatus.creator, 'status.creator');
+      producerOk =
+        slugs.size === 1 &&
+        creator !== undefined &&
+        creator.type === 'Bot' &&
+        typeof [...slugs][0] === 'string' &&
+        creator.login === `${String([...slugs][0])}[bot]`;
+    }
+    const statusOk = newestStatus !== undefined && newestStatus.state === 'success' && producerOk;
     if (!runOk && !statusOk) failing.push(req.context);
   }
   return failing;

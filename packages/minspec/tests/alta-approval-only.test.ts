@@ -184,17 +184,69 @@ describe('approval-only judge — the one passing shape', () => {
     expect(v).toMatchObject({ decision: 'eligible', records: [DR, SPEC] });
   });
 
-  it('admits a base-update merge commit by another account (its content is judged by the diff)', () => {
+  it('admits a base-update merge commit by another account that touches none of the PR files', () => {
+    const f = fixture();
+    const alta = altA(f);
+    f.git(['checkout', '-q', '-b', 'main2', f.base]);
+    const newBase = f.commit({ 'README.md': 'main moved\n' });
+    f.git(['checkout', '-q', '--detach', alta]);
+    f.git(['merge', '-q', '--no-ff', '--no-edit', newBase]);
+    const merge = f.git(['rev-parse', 'HEAD']).toString().trim();
+    const v = judge(
+      f,
+      merge,
+      {
+        commitCount: 2,
+        commits: [
+          { sha: alta, parentCount: 1, authorLogin: 'harvest316' },
+          { sha: merge, parentCount: 2, authorLogin: 'minspec-sdd[bot]' },
+        ],
+      },
+      CFG,
+      newBase,
+    );
+    expect(v).toMatchObject({ decision: 'eligible', records: [SPEC] });
+  });
+
+  it('refuses a merge commit that itself changes a file the PR changes (a smuggled record)', () => {
+    const f = fixture();
+    const alta = altA(f);
+    f.git(['checkout', '-q', '-b', 'main2', f.base]);
+    const newBase = f.commit({ 'README.md': 'main moved\n' });
+    f.git(['checkout', '-q', '--detach', alta]);
+    f.git(['merge', '-q', '--no-ff', '--no-commit', newBase]);
+    const other = 'specs/minspec/SPEC-900-fixture/requirements.md';
+    fs.writeFileSync(path.join(f.dir, SIDECAR), record(other, HEAD_SPEC, { approvedAt: '2026-10-22T00:00:00.000Z' }));
+    f.git(['add', '-A']);
+    f.git(['commit', '-q', '--no-verify', '-m', 'merge']);
+    const merge = f.git(['rev-parse', 'HEAD']).toString().trim();
+    const v = judge(
+      f,
+      merge,
+      {
+        commitCount: 2,
+        commits: [
+          { sha: alta, parentCount: 1, authorLogin: 'harvest316' },
+          { sha: merge, parentCount: 2, authorLogin: 'minspec-sdd[bot]' },
+        ],
+      },
+      CFG,
+      newBase,
+    );
+    expectDeny(v, `changes ${SIDECAR}, a file this PR changes`);
+  });
+
+  it('a merge commit with an unreadable SHA is an error', () => {
     const f = fixture();
     const head = altA(f);
     const v = judge(f, head, {
       commitCount: 2,
       commits: [
         { sha: head, parentCount: 1, authorLogin: 'harvest316' },
-        { sha: 'b'.repeat(40), parentCount: 2, authorLogin: 'minspec-sdd[bot]' },
+        { sha: 'not-a-sha', parentCount: 2, authorLogin: 'minspec-sdd[bot]' },
       ],
     });
-    expect(v.decision).toBe('eligible');
+    expectDeny(v, 'error: merge commit SHA is unreadable');
   });
 
   it('matches founder logins and emails case-insensitively', () => {

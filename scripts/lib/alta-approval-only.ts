@@ -17,8 +17,8 @@
  * A PR is eligible only when ALL of these hold:
  *   - it is open, not a draft, targets the default branch, and comes from this repo
  *     (no fork);
- *   - its author is the founder, and every non-merge commit on it is attributed by
- *     GitHub to the founder;
+ *   - its author is the founder, every non-merge commit on it is attributed by GitHub
+ *     to the founder, and no merge commit touches a file the PR changes;
  *   - it carries `ai-review:pass`, and no `ai-review:changes`, `ai-review:blocked` or
  *     `hold:*` label;
  *   - the base tip is an ancestor of the head (so the squash lands exactly the diff
@@ -301,8 +301,10 @@ function judge(facts: PrFacts, baseSha: string, cfg: GateConfig, git: GitBytes):
   if (facts.commits.length === 0 || facts.commits.length !== facts.commitCount) {
     return deny(`commit listing is incomplete (${facts.commits.length} of ${facts.commitCount})`);
   }
+  // GitHub's commit listing stops at 250; the PR's own count does not, so a longer PR
+  // shows as a mismatch above and is denied.
   for (const c of facts.commits) {
-    if (c.parentCount > 1) continue; // a base-branch update merge; its content is judged by the diff below
+    if (c.parentCount > 1) continue; // a base-branch update merge; checked below against the diff
     if (!c.authorLogin || !cfg.founderLogins.includes(c.authorLogin.toLowerCase())) {
       return deny(`commit ${c.sha.slice(0, 12)} is not attributed to the founder`);
     }
@@ -351,6 +353,21 @@ function judge(facts: PrFacts, baseSha: string, cfg: GateConfig, git: GitBytes):
   }
   // No "at least one record" guard is needed: a non-empty diff with no record has an
   // artifact entry, and every artifact entry must have a record (below).
+
+  // A merge commit is exempt from founder attribution only because it brings in base
+  // content. So it may not touch any file this PR changes: if it did, it could carry a
+  // record or a lifecycle edit no founder-attributed commit made.
+  const changed = new Set(entries.map((e) => e.path));
+  for (const c of facts.commits) {
+    if (c.parentCount < 2) continue;
+    if (!SHA_RE.test(c.sha)) throw new Error('merge commit SHA is unreadable');
+    const touched = git(['diff', '--name-only', '-z', '--no-renames', `${c.sha}^1`, c.sha])
+      .toString('utf-8')
+      .split('\0')
+      .filter(Boolean);
+    const overlap = touched.find((p) => changed.has(p));
+    if (overlap) return deny(`merge commit ${c.sha.slice(0, 12)} changes ${overlap}, a file this PR changes`);
+  }
 
   for (const e of artifacts) {
     if (!sidecars.has(e.path)) return deny(`${e.path}: changed without an approval record for it`);

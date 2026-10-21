@@ -111,7 +111,7 @@ function stubGh(head: string, base: string, api: Api = {}): { gh: Gh; calls: str
           { type: 'deletion' },
           {
             type: 'required_status_checks',
-            parameters: { required_status_checks: [{ context: 'test' }, { context: 'ai-review', integration_id: 4212099 }, { context: 'ready-to-merge' }] },
+            parameters: { required_status_checks: [{ context: 'test' }, { context: 'ai-review', integration_id: 4212099 }, { context: 'ready-to-merge', integration_id: 15368 }] },
           },
         ],
       );
@@ -121,15 +121,15 @@ function stubGh(head: string, base: string, api: Api = {}): { gh: Gh; calls: str
         api.checkRuns ?? [
           {
             check_runs: [
-              { id: 1, name: 'test', status: 'completed', conclusion: 'success', app: { id: 15368 } },
-              { id: 2, name: 'ai-review', status: 'completed', conclusion: 'success', app: { id: 4212099 } },
+              { id: 1, name: 'test', status: 'completed', conclusion: 'success', app: { id: 15368, slug: 'github-actions' } },
+              { id: 2, name: 'ai-review', status: 'completed', conclusion: 'success', app: { id: 4212099, slug: 'minspec-sdd' } },
             ],
           },
         ],
       );
     }
     if (route.startsWith(`repos/${REPO}/commits/${head}/statuses`)) {
-      return JSON.stringify(api.statuses ?? [[{ context: 'ready-to-merge', state: 'success' }]]);
+      return JSON.stringify(api.statuses ?? [[{ context: 'ready-to-merge', state: 'success', creator: GHA }]]);
     }
     if (route === `repos/${REPO}/git/ref/heads/main`) return JSON.stringify({ object: { sha: api.baseTip ?? base } });
     if (route === `repos/${REPO}/pulls/7/merge`) return JSON.stringify({ merged: true });
@@ -140,6 +140,11 @@ function stubGh(head: string, base: string, api: Api = {}): { gh: Gh; calls: str
   return { gh, calls };
 }
 
+const GHA = { login: 'github-actions[bot]', type: 'Bot' };
+const GREEN_RUNS = [
+  { id: 1, name: 'test', status: 'completed', conclusion: 'success', app: { id: 15368, slug: 'github-actions' } },
+  { id: 2, name: 'ai-review', status: 'completed', conclusion: 'success', app: { id: 4212099, slug: 'minspec-sdd' } },
+];
 const writes = (calls: string[][]): string[][] => calls.filter((c) => c.includes('-X'));
 const deps = (gh: Gh, git: GitBytes, over: Partial<RunDeps> = {}): RunDeps => ({ gh, git, cfg: CFG, merge: true, token: 'ghs_test', ...over });
 
@@ -183,8 +188,13 @@ describe('alta-self-merge seam — merges only the judged head, only when green'
     ['a run reporting success while not completed', { checkRuns: [{ check_runs: [{ id: 1, name: 'test', status: 'in_progress', conclusion: 'success', app: { id: 1 } }, { id: 2, name: 'ai-review', status: 'completed', conclusion: 'success', app: { id: 4212099 } }] }] }, 'test'],
     ['a newer failing run supersedes an older pass', { checkRuns: [{ check_runs: [{ id: 1, name: 'test', status: 'completed', conclusion: 'success', app: { id: 1 } }, { id: 9, name: 'test', status: 'completed', conclusion: 'failure', app: { id: 1 } }, { id: 2, name: 'ai-review', status: 'completed', conclusion: 'success', app: { id: 4212099 } }] }] }, 'test'],
     ['ai-review passed by the wrong App', { checkRuns: [{ check_runs: [{ id: 1, name: 'test', status: 'completed', conclusion: 'success', app: { id: 1 } }, { id: 2, name: 'ai-review', status: 'completed', conclusion: 'success', app: { id: 666 } }] }] }, 'ai-review'],
-    ['an App-scoped check satisfied only by a same-named commit status', { checkRuns: [{ check_runs: [{ id: 1, name: 'test', status: 'completed', conclusion: 'success', app: { id: 1 } }] }], statuses: [[{ context: 'ai-review', state: 'success' }, { context: 'ready-to-merge', state: 'success' }]] }, 'ai-review'],
-    ['a failing required status', { statuses: [[{ context: 'ready-to-merge', state: 'failure' }, { context: 'ready-to-merge', state: 'success' }]] }, 'ready-to-merge'],
+    ['an App-scoped check satisfied only by a same-named commit status from another bot', { checkRuns: [{ check_runs: [GREEN_RUNS[0]] }], statuses: [[{ context: 'ai-review', state: 'success', creator: GHA }, { context: 'ready-to-merge', state: 'success', creator: GHA }]] }, 'ai-review'],
+    ['an App-scoped status posted by a human', { statuses: [[{ context: 'ready-to-merge', state: 'success', creator: { login: 'github-actions[bot]', type: 'User' } }]] }, 'ready-to-merge'],
+    ['an App-scoped status posted by another bot', { statuses: [[{ context: 'ready-to-merge', state: 'success', creator: { login: 'minspec-sdd[bot]', type: 'Bot' } }]] }, 'ready-to-merge'],
+    ['an App-scoped status with no creator', { statuses: [[{ context: 'ready-to-merge', state: 'success' }]] }, 'ready-to-merge'],
+    ['an App-scoped status whose App has no check-run to name it', { checkRuns: [{ check_runs: [{ ...GREEN_RUNS[0], app: { id: 1, slug: 'other' } }, GREEN_RUNS[1]] }] }, 'ready-to-merge'],
+    ['an App id that maps to two slugs', { checkRuns: [{ check_runs: [...GREEN_RUNS, { id: 3, name: 'x', status: 'completed', conclusion: 'success', app: { id: 15368, slug: 'imposter' } }] }] }, 'ready-to-merge'],
+    ['a failing required status', { statuses: [[{ context: 'ready-to-merge', state: 'failure', creator: GHA }, { context: 'ready-to-merge', state: 'success', creator: GHA }]] }, 'ready-to-merge'],
     ['a missing required status', { statuses: [[]] }, 'ready-to-merge'],
   ] as [string, Api, string][])('%s → waiting, no merge', (_n, api, ctx) => {
     const { git, base, head } = repoWithAltA();
@@ -265,7 +275,7 @@ describe('alta-self-merge seam — merges only the judged head, only when green'
 describe('alta-self-merge readers', () => {
   it('readRequiredChecks keeps integration ids and throws on a malformed rule', () => {
     const { gh } = stubGh('a'.repeat(40), 'b'.repeat(40));
-    expect(readRequiredChecks(gh, REPO, 'main')).toEqual([{ context: 'test' }, { context: 'ai-review', integrationId: 4212099 }, { context: 'ready-to-merge' }]);
+    expect(readRequiredChecks(gh, REPO, 'main')).toEqual([{ context: 'test' }, { context: 'ai-review', integrationId: 4212099 }, { context: 'ready-to-merge', integrationId: 15368 }]);
     const bad: Gh = () => JSON.stringify([{ type: 'required_status_checks', parameters: {} }]);
     expect(() => readRequiredChecks(bad, REPO, 'main')).toThrow('not an array');
     expect(() => readRequiredChecks(() => '{}', REPO, 'main')).toThrow('not an array');
@@ -274,7 +284,7 @@ describe('alta-self-merge readers', () => {
   it('failingRequiredChecks accepts a green check-run or a green status for a context', () => {
     const head = 'a'.repeat(40);
     const { gh } = stubGh(head, 'b'.repeat(40));
-    expect(failingRequiredChecks(gh, REPO, head, [{ context: 'test' }, { context: 'ready-to-merge' }])).toEqual([]);
+    expect(failingRequiredChecks(gh, REPO, head, [{ context: 'test' }, { context: 'ready-to-merge' }, { context: 'ready-to-merge', integrationId: 15368 }])).toEqual([]);
   });
 
   it('prsForHead lists open PRs whose head is the SHA', () => {

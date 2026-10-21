@@ -867,7 +867,7 @@ The core-tenets review proposed one voter for docs and T1, and four for machiner
 The verdict-carry record ("A pass is carried across a push that changes nothing the voters are given", accepted 2026-10-13, #2701; it is the record named in this one's supersedes_partial:, and bodies here do not spell local ids of that range out, per the parent-register reference gate, #2148) carries an ai-review pass across a push when the bytes the voters are given are identical, and it explicitly rejected a position-insensitive identity.
 <!-- /dr-summary:DR-110 -->
 
-## [DR-111 — A pull request that carries only the founder's own editor approval is merged by the bot - the approval is the keystroke, a fail-closed check proves nothing else rides along](DR-111.md)
+## [DR-111 — A pull request that carries only the founder's own editor approval is merged by the bot - the approval is the keystroke, and a fail-closed check refuses anything else](DR-111.md)
 
 *Status: proposed · Date: 2026-10-22*
 
