@@ -22,6 +22,7 @@ import {
 } from '../lib/git-remotes';
 import {
   type CommandRunner,
+  type CommandResult,
   RULESET_DOCS_URL,
   REPO_CREATE_DOCS_URL,
   DEFAULT_REQUIRED_CHECK_CONTEXTS,
@@ -34,7 +35,6 @@ import {
   updateRulesetRequiredChecks,
   resolveTieredRequiredChecks,
   detectCodeChecks,
-  classifyForbidden,
   AI_REVIEW_CHECK,
   READY_TO_MERGE_CHECK,
   probeOwnerCandidates,
@@ -45,8 +45,13 @@ import {
   MAX_REPO_SEGMENT_LENGTH,
   type GhReadiness,
   type ForbiddenShape,
+  type ForbiddenWitness,
+  type RulesetUpdateBlocker,
   type RepoOwnerCandidate,
+  type OrgMembershipRole,
   type CreateRepoResult,
+  type CreatedRepo,
+  type UnwiredOrigin,
   type CreateRepoFailure,
   type OwnerProbe,
 } from '../lib/ruleset-advisor';
@@ -1063,12 +1068,9 @@ async function resolveWantedChecks(
  * it did, its own words win. `detail` is the raw stdout/stderr both outcome
  * shapes already carry, so nothing new is plumbed to get here.
  */
-function describeRulesetFailure(outcome: {
-  forbidden: boolean;
-  planLimited: boolean;
-  reason: string | null;
-  detail?: string;
-}): string {
+function describeRulesetFailure(
+  outcome: { planLimited: boolean; reason: string | null } & ForbiddenWitness,
+): string {
   if (outcome.planLimited) {
     return (
       outcome.reason ??
@@ -1076,8 +1078,68 @@ function describeRulesetFailure(outcome: {
     );
   }
   if (outcome.reason) return `GitHub said: ${outcome.reason}`;
-  if (outcome.forbidden) return describeForbiddenShape(classifyForbidden(outcome.detail ?? ''));
+  // THE SHAPE IS CARRIED, NOT RE-DERIVED (seventh correctness review,
+  // 2026-08-30). This read `classifyForbidden(outcome.detail ?? '')`, and
+  // `detail` was `stderr || stdout` — a PROJECTION of the `stdout + stderr`
+  // haystack `forbidden` was computed from. So a refusal printed on stdout with
+  // anything at all on stderr took this branch with a re-derived shape of `null`,
+  // and the specific remedy (`must have admin` → the role; `resource not
+  // accessible` → the token) was lost to the generic sentence.
+  //
+  // ...AND `detail` IS NOW GONE FROM THE OUTCOME ENTIRELY (eighth correctness
+  // review, 2026-08-30). Carrying the shape stopped this site re-deriving it; it
+  // did nothing about the projection still sitting on the type with no reader,
+  // which is the shape of every one of these defects the moment the NEXT sentence
+  // needs a string. And BRANCHING ON THE BIT NO LONGER LOSES THE MEMBER: `forbidden`
+  // is a discriminant of {@link ForbiddenWitness}, so the shape is non-null here by
+  // construction rather than by the producer's good behaviour.
+  if (outcome.forbidden) return describeForbiddenShape(outcome.forbiddenShape);
   return 'the request failed';
+}
+
+/**
+ * The sentence for a blocker MinSpec's OWN read established — the two states that
+ * used to travel as free text inside the deleted `detail` field and were rendered,
+ * by a site that never read it, as "the request failed".
+ *
+ * `never`-typed default, so a blocker added to {@link RulesetUpdateBlocker}
+ * without a sentence of its own fails `npm run typecheck`.
+ */
+function describeRulesetUpdateBlocker(blocker: RulesetUpdateBlocker): string {
+  switch (blocker) {
+    case 'unparseable-ruleset':
+      return (
+        "MinSpec could not parse the ruleset GitHub returned, so it had nothing to merge " +
+        'the missing checks into'
+      );
+    case 'no-required-checks-rule':
+      return (
+        'the ruleset MinSpec read carries no required-status-checks rule, so there was ' +
+        'nothing to add the missing checks to'
+      );
+    default: {
+      const _unhandled: never = blocker;
+      void _unhandled;
+      return 'MinSpec could not use the ruleset it read';
+    }
+  }
+}
+
+/**
+ * The sentence for a failed ADD, which has one more way to fail than a create:
+ * MinSpec's own read of the existing ruleset.
+ *
+ * The blocker is asked FIRST because it is the only answer established locally —
+ * when it is set, no request was made, so every GitHub-shaped explanation below it
+ * would be describing a call that never happened.
+ */
+function describeRulesetUpdateFailure(
+  outcome: { planLimited: boolean; reason: string | null; blocker: RulesetUpdateBlocker | null } &
+    ForbiddenWitness,
+): string {
+  return outcome.blocker !== null
+    ? describeRulesetUpdateBlocker(outcome.blocker)
+    : describeRulesetFailure(outcome);
 }
 
 /**
@@ -1088,14 +1150,16 @@ function describeRulesetFailure(outcome: {
  * "(HTTP 403)" for both — so `{"error":"Forbidden"}`, which carries no status
  * code anywhere, was reported as a 403 nobody had seen.
  *
- * `null` HAS AN ARM TOO, and it is not the same observation as either. It is
- * reachable because {@link CreateRulesetOutcome} computes `forbidden` from
- * `stdout + stderr` and carries `detail = stderr || stdout` — so a refusal
- * printed only on stdout, alongside anything at all on stderr, is a state where
- * the refusal was established from output this sentence is not reading. Saying
- * "(HTTP 403)" there would be quoting a string that does not contain it.
+ * `null` NO LONGER HAS AN ARM, AND CANNOT REACH ONE (eighth correctness review,
+ * 2026-08-30). It had one because the outcome carried `forbidden: boolean` beside
+ * `forbiddenShape: ForbiddenShape | null`, which made `{ forbidden: true,
+ * forbiddenShape: null }` a representable value — a refusal with no shape, for
+ * which this function had to invent a fifth sentence. {@link ForbiddenWitness}
+ * makes that pair unrepresentable, so the arm went with the state: the parameter
+ * is a shape, not a maybe-shape, and every caller reaches here having narrowed on
+ * the discriminant.
  */
-function describeForbiddenShape(shape: ForbiddenShape | null): string {
+function describeForbiddenShape(shape: ForbiddenShape): string {
   switch (shape) {
     case 'not-admin':
       return (
@@ -1122,13 +1186,6 @@ function describeForbiddenShape(shape: ForbiddenShape | null): string {
         'the request was refused and GitHub gave no reason MinSpec could quote — check ' +
         'that the account `gh` is signed in as can administer this repository'
       );
-    case null:
-      // A refusal established from output this sentence does not carry. Name that,
-      // and the one command that shows what the account may actually do.
-      return (
-        'the request was refused, and the output MinSpec could quote carries no reason ' +
-        'for it — check that the account `gh` is signed in as can administer this repository'
-      );
     default: {
       // EXHAUSTIVENESS. A shape added to {@link ForbiddenShape} without a sentence
       // of its own narrows to something other than `never` and fails typecheck,
@@ -1154,21 +1211,85 @@ function describeForbiddenShape(shape: ForbiddenShape | null): string {
  *
  * `ready` is not a rejection and has no sentence — it is a compile error to ask
  * for one, which is the point of taking {@link GhReadiness} rather than a bool.
+ *
+ * IT RETURNS THE REMEDY ONLY, not the purpose (seventh correctness review,
+ * 2026-08-30). It used to end "...to let MinSpec offer to create one", and "one"
+ * meant a RULESET at its only call site — which is how the same sentence came to
+ * be shown to a project with no repository to put a ruleset on. Each caller now
+ * supplies the object of its own sentence; see {@link UnreadyTopic}.
  */
 function describeGhUnready(readiness: Exclude<GhReadiness, 'ready'>): string {
   switch (readiness) {
     case 'not-installed':
-      return 'Install the `gh` CLI to let MinSpec offer to create one';
+      return 'Install the `gh` CLI';
     case 'not-signed-in':
-      return 'Sign in with `gh auth login` to let MinSpec offer to create one';
+      return 'Sign in with `gh auth login`';
     default: {
       // EXHAUSTIVENESS: a readiness state added without copy of its own fails
       // typecheck here rather than borrowing a sentence about a different one.
       const _unhandled: never = readiness;
       void _unhandled;
-      return 'Set up the `gh` CLI to let MinSpec offer to create one';
+      return 'Set up the `gh` CLI';
     }
   }
+}
+
+/**
+ * WHAT a `gh`-unready advisory is advising ABOUT — decided from the remote state,
+ * which that branch used never to consult.
+ *
+ * `probeGhReadiness` ran BEFORE `classifyRemoteDestination`, and its toast
+ * returned without ever asking whether there was a repository — so ONE message
+ * and ONE docs URL served the whole cross product {not-installed, not-signed-in}
+ * x {has a repository, has none}. Reproduced with no `gh` binary AND no remote:
+ *
+ *     "MinSpec: protect your default branch with a ruleset that requires CI
+ *      (MinSpec SDD validation) status checks. Install the `gh` CLI ..."
+ *     docs button -> RULESET_DOCS_URL
+ *
+ * A ruleset is something you put ON a repository. That is the exact dead end
+ * #1694 was written to delete, and the reason {@link REPO_CREATE_DOCS_URL} is in
+ * this file at all — re-created in the one branch #1694 never touched.
+ *
+ * THREE topics, because "has a repository" is itself two observations: a usable
+ * GitHub slug RESOLVED, versus remotes that exist or could not be read and name
+ * no usable GitHub repository. Only the first licenses the ruleset sentence; the
+ * third may not borrow it, for the same reason {@link describeUnusableRemote}
+ * exists on the ready path.
+ */
+type UnreadyTopic =
+  /** A usable GitHub repository resolves, so a ruleset is a thing that can exist here. */
+  | { kind: 'ruleset' }
+  /** POSITIVELY no remote at all — there is no repository to put a ruleset on. */
+  | { kind: 'no-repository' }
+  /** Remotes exist, or could not be read, and none names a usable GitHub repository. */
+  | { kind: 'unusable-remote'; destination: UnusableRemote };
+
+/**
+ * {@link UnreadyTopic} for this project, from LOCAL git reads only.
+ *
+ * Tier-0 and network-free: `resolveRepo` is `git config`, and
+ * {@link classifyRemoteDestination} is the same two-or-three local reads the
+ * ready path makes. The ACCOUNT read is deliberately NOT made here and must not
+ * be — DR-050's 2026-08-25 amendment scopes it to the branch where `gh` is ready,
+ * and `gh` is by definition not ready on this path.
+ *
+ * The slug is re-checked with {@link REPO_SLUG_RE} exactly as the ready path does,
+ * so "resolved" means the same thing in both places.
+ */
+async function classifyUnreadyTopic(
+  folder: string,
+  resolveRepo: (f: string) => Promise<string | null>,
+  classifyRemotes: (f: string) => Promise<RemoteDestination>,
+): Promise<UnreadyTopic> {
+  const repo = await resolveRepo(folder);
+  if (repo && REPO_SLUG_RE.test(repo)) return { kind: 'ruleset' };
+  // A slug that resolved but failed the charset assertion needs no classifying:
+  // resolution produced something, so a remote demonstrably exists.
+  const destination: RemoteDestination = repo ? { kind: 'other-remote' } : await classifyRemotes(folder);
+  return destination.kind === 'none'
+    ? { kind: 'no-repository' }
+    : { kind: 'unusable-remote', destination };
 }
 
 /**
@@ -1349,38 +1470,84 @@ async function classifyRemoteDestination(
   // charset assertion. Either way a remote demonstrably EXISTS.
   if (state.kind === 'resolved') return { kind: 'other-remote' };
 
+  // ONE `try` PER READ (seventh correctness review, 2026-08-30). These two reads
+  // shared a `catch`, so a REJECTION from the SECOND was attributed to the FIRST:
+  // the handler returned `unreadable` — "could not read this project's git
+  // remotes" — about a project whose remotes had just been listed successfully.
+  // Reproduced against a `.git/config` carrying `[remote "foo"]` with a `fetch`
+  // line and no `url`, with the URL read made to reject:
+  //
+  //     git remote                                -> code=0  out="foo\n"  (ANSWERED)
+  //     git config --get-regexp ^remote\..*\.url$ -> REJECTED
+  //     toast: "could not read this project's git remotes"   <- the names WERE read
+  //
+  // That is the same false sentence the fifth review split `remote-without-url`
+  // and `remote-url-unreadable` out of `unreadable` to delete, reached again
+  // through the exception path rather than the exit-code one — the exit-code
+  // sibling of this scenario (exit 128 with stderr) has been correct throughout.
+  // So the listing owns one `try`, the URL read owns another, and once the names
+  // are known nothing below may answer `unreadable`.
+  let listed: CommandResult;
   try {
-    const listed = await run('git', ['-C', folder, 'remote']);
-    // The LISTING failed: not even the names are known. This is the only state
-    // that earns "could not read this project's git remotes".
-    if (listed.code !== 0) return { kind: 'unreadable' };
-    const names = listed.stdout.split('\n').filter((line) => line.trim() !== '');
-    // Exit 0 printing nothing IS the positive observation of zero remotes — the
-    // one state that may be offered a repository.
-    if (names.length === 0) return { kind: 'none' };
-
-    // Names exist while `resolveRemotes` produced nothing, so no URL was usable.
-    // WHY there was none is a second question, and `resolveRemotes` cannot answer
-    // it: it folds a failed `git config` read and a successful one that found no
-    // usable URL into the same `none`. Ask directly, and report what came back.
-    //
-    // `git config --get-regexp` exits 1 printing nothing when NO key matches —
-    // that is an answer, not a failure, and it is the exact shape a remote with a
-    // `fetch` line and no `url` key produces. A hard failure exits non-zero WITH
-    // something on stderr.
-    const urls = await run('git', ['-C', folder, 'config', '--get-regexp', '^remote\\..*\\.url$']);
-    const urlReadAnswered = urls.code === 0 || urls.stderr.trim() === '';
-    return urlReadAnswered
-      ? { kind: 'remote-without-url', remotes: names.length }
-      : { kind: 'remote-url-unreadable', remotes: names.length };
+    listed = await run('git', ['-C', folder, 'remote']);
   } catch {
     return { kind: 'unreadable' };
   }
+  // The LISTING failed: not even the names are known. This is the only state
+  // that earns "could not read this project's git remotes".
+  if (listed.code !== 0) return { kind: 'unreadable' };
+  const names = listed.stdout.split('\n').filter((line) => line.trim() !== '');
+  // Exit 0 printing nothing IS the positive observation of zero remotes — the
+  // one state that may be offered a repository.
+  if (names.length === 0) return { kind: 'none' };
+
+  // ── THE NAMES ARE KNOWN FROM HERE DOWN ─────────────────────────────────────
+  //
+  // Names exist while `resolveRemotes` produced nothing, so no URL was usable.
+  // WHY there was none is a second question, and `resolveRemotes` cannot answer
+  // it: it folds a failed `git config` read and a successful one that found no
+  // usable URL into the same `none`. Ask directly, and report what came back.
+  //
+  // `git config --get-regexp` exits 1 printing nothing when NO key matches —
+  // that is an answer, not a failure, and it is the exact shape a remote with a
+  // `fetch` line and no `url` key produces. A hard failure exits non-zero WITH
+  // something on stderr; a spawn rejection produces neither, and is the case the
+  // shared `catch` used to mis-attribute.
+  let urls: CommandResult;
+  try {
+    urls = await run('git', ['-C', folder, 'config', '--get-regexp', '^remote\\..*\\.url$']);
+  } catch {
+    // The read that failed is the URL read, and `remote-url-unreadable` is its
+    // kind. Answering `unreadable` here would assert that the LISTING failed,
+    // which this function just watched succeed.
+    return { kind: 'remote-url-unreadable', remotes: names.length };
+  }
+  const urlReadAnswered = urls.code === 0 || urls.stderr.trim() === '';
+  return urlReadAnswered
+    ? { kind: 'remote-without-url', remotes: names.length }
+    : { kind: 'remote-url-unreadable', remotes: names.length };
 }
 
 /**
  * The zero-network docs-link sentence for a project MinSpec cannot address — one
  * per OBSERVATION, each asserting ONLY what that observation established.
+ *
+ * IT STOPS AT THE USER'S OWN REMEDY, AND SAYS NOTHING ABOUT WHAT COMES NEXT
+ * (eighth correctness review, 2026-08-30). Every arm used to END with ", then
+ * create a branch ruleset — see the GitHub docs." — an observation, a remedy AND
+ * a next step fused into one string, which is a projection like any other: the
+ * CALLER could no longer reach the parts. It has two callers with different next
+ * steps, and the second one appended its own after the fused tail:
+ *
+ *     "... Check `git remote -v`, then create a branch ruleset — see the GitHub
+ *      docs. Install the `gh` CLI as well — MinSpec needs it before it can offer
+ *      to do any of this for you."
+ *
+ * The docs pointer lands mid-message, two sentences before the button it names,
+ * and "any of this" reads onto the preceding clause — adding a remote, checking
+ * `git remote -v` — none of which MinSpec offers to do for anybody. So the tail is
+ * gone from here and each call site states the next step ITS branch can actually
+ * promise.
  *
  * The single sentence these replaced ("this project has no GitHub repo") was
  * false in three of the four states: a project with several disagreeing remotes,
@@ -1412,7 +1579,7 @@ function describeUnusableRemote(destination: UnusableRemote): string {
     case 'other-remote':
       return (
         "MinSpec: this project's git remote does not name a GitHub repository MinSpec " +
-        'can use. Add a GitHub remote, then create a branch ruleset — see the GitHub docs.'
+        'can use. Add a GitHub remote.'
       );
     case 'ambiguous':
       // THREE sentences, because `slugs.size !== 1` is reached from both ends and
@@ -1423,16 +1590,14 @@ function describeUnusableRemote(destination: UnusableRemote): string {
         return (
           'MinSpec: this project has several git remotes, none of them named `origin`, ' +
           'and they name different GitHub repositories — so MinSpec will not guess which ' +
-          'one to protect. Name the right one `origin`, then create a branch ruleset — ' +
-          'see the GitHub docs.'
+          'one to protect. Name the right one `origin`.'
         );
       }
       if (destination.githubRepos === 0) {
         return (
           'MinSpec: this project has several git remotes, none of them named `origin`, ' +
           'and none of them names a GitHub repository — so there is nothing here MinSpec ' +
-          'can protect. Add a GitHub remote named `origin`, then create a branch ruleset — ' +
-          'see the GitHub docs.'
+          'can protect. Add a GitHub remote named `origin`.'
         );
       }
       // Unreachable through the shipped resolver (a single GitHub slug resolves
@@ -1440,7 +1605,7 @@ function describeUnusableRemote(destination: UnusableRemote): string {
       return (
         'MinSpec: this project has several git remotes and none of them is named ' +
         '`origin`, so MinSpec cannot tell which GitHub repository to protect. Name the ' +
-        'right one `origin`, then create a branch ruleset — see the GitHub docs.'
+        'right one `origin`.'
       );
     case 'remote-without-url': {
       // BOTH READS SUCCEEDED, so this may not borrow a sentence about a failed
@@ -1451,8 +1616,7 @@ function describeUnusableRemote(destination: UnusableRemote): string {
       return (
         `MinSpec: this project has ${destination.remotes} ${noun}, but none of them has a ` +
         'URL MinSpec can use, so it cannot tell which GitHub repository (if any) this is. ' +
-        'Give the remote a URL with `git remote set-url`, then create a branch ruleset — ' +
-        'see the GitHub docs.'
+        'Give the remote a URL with `git remote set-url`.'
       );
     }
     case 'remote-url-unreadable': {
@@ -1462,8 +1626,7 @@ function describeUnusableRemote(destination: UnusableRemote): string {
       return (
         `MinSpec: this project has ${destination.remotes} ${noun}, but MinSpec could not ` +
         'read their URLs, so it cannot tell which GitHub repository (if any) this is. Check ' +
-        "`git config --get-regexp '^remote\\..*\\.url$'`, then create a branch ruleset — see " +
-        'the GitHub docs.'
+        "`git config --get-regexp '^remote\\..*\\.url$'`."
       );
     }
     case 'unreadable':
@@ -1474,8 +1637,7 @@ function describeUnusableRemote(destination: UnusableRemote): string {
       // own two kinds above.
       return (
         "MinSpec: could not read this project's git remotes, so it cannot tell which " +
-        'GitHub repository (if any) this is. Check `git remote -v`, then create a branch ' +
-        'ruleset — see the GitHub docs.'
+        'GitHub repository (if any) this is. Check `git remote -v`.'
       );
     default: {
       // EXHAUSTIVENESS, both halves.
@@ -1497,8 +1659,7 @@ function describeUnusableRemote(destination: UnusableRemote): string {
       void _unhandled;
       return (
         'MinSpec: could not determine which GitHub repository (if any) this project ' +
-        'should protect. Check `git remote -v`, then create a branch ruleset — see the ' +
-        'GitHub docs.'
+        'should protect. Check `git remote -v`.'
       );
     }
   }
@@ -1551,16 +1712,53 @@ function ownerLabel(candidate: RepoOwnerCandidate): string {
 /**
  * Describe ONE owner candidate for the picker, in installability terms only.
  *
- * "your membership role is owner, so you can create repositories here" is a
+ * "your membership role is admin, so you can create repositories here" is a
  * restatement of the `role: admin` we actually read. Anything stronger — "MinSpec
  * is set up here", "the App is set up here" — would assert something never
  * observed. See the HONESTY BOUND above.
+ *
+ * IT QUOTES THE ROLE THAT WAS READ (eighth correctness review, 2026-08-30). This
+ * branched on `canAdminister`, the BIT `probeOwnerCandidates` computed from
+ * `membership.role === 'admin'` and stored in place of the role — so every falsy
+ * value of the bit rendered "your membership role is member", including a
+ * membership GitHub reported with no role at all, or with one this code has never
+ * been taught. That is a quotation of something nobody read, in the one sentence
+ * whose entire job is to repeat what was read. See {@link OrgMembershipRole}.
  */
 function describeOwnerCandidate(candidate: RepoOwnerCandidate): string {
   if (candidate.kind === 'user') return 'The account your `gh` CLI is signed in as';
-  return candidate.canAdminister
-    ? 'Organisation — your membership role is owner, so you can create repositories here'
-    : 'Organisation — your membership role is member, so creating here may be refused';
+  return `Organisation — ${describeMembershipRole(candidate.role)}`;
+}
+
+/**
+ * ONE CLAUSE PER ROLE, each asserting only what GitHub actually reported.
+ *
+ * `unrecognised` is the member that did not exist while this was a bool, and it is
+ * the whole point of the split: MinSpec did not read `member` there, so it may not
+ * say it did. The CONSEQUENCE is the same as `member`'s — creating may be refused
+ * — because that much IS true of both, and the ranking treats them alike for the
+ * same reason.
+ *
+ * `never`-typed default, so a role added to {@link OrgMembershipRole} without a
+ * clause of its own fails `npm run typecheck` rather than inheriting one that
+ * names a role GitHub did not report.
+ */
+function describeMembershipRole(role: OrgMembershipRole): string {
+  switch (role) {
+    case 'admin':
+      return 'your membership role is admin, so you can create repositories here';
+    case 'member':
+      return 'your membership role is member, so creating here may be refused';
+    case 'unrecognised':
+      return (
+        'MinSpec could not read your membership role there, so creating here may be refused'
+      );
+    default: {
+      const _unhandled: never = role;
+      void _unhandled;
+      return 'MinSpec cannot say what your membership role there is';
+    }
+  }
 }
 
 /**
@@ -1832,7 +2030,23 @@ async function offerRepoCreation(
   // What the toast promises must match what the flow actually opens. A single
   // candidate means the owner picker is SKIPPED below, so promising a choice of
   // owner there would be a small lie told at the moment the user decides.
-  const willPickOwner = candidates.length > 1;
+  //
+  // THE DECISION IS TAKEN ONCE, HERE, AND CARRIED (seventh correctness review,
+  // 2026-08-30). It used to be carried to the OFFER copy and dropped on the way
+  // to the FAILURE copy, which then prescribed "re-run <command> and pick a
+  // different account" on runs where no picker had opened or would. Everything
+  // downstream now derives from this one value — see {@link AccountChoice}.
+  // ...AND IT IS COMPUTED FROM THE WHOLE PROBE, NOT FROM THE COUNT (eighth
+  // correctness review, 2026-08-30). `orgsRead` is the difference between "there
+  // is one account" and "MinSpec saw one account", and the failure copy below
+  // makes a claim that only the first supports.
+  const accountChoice: AccountChoice =
+    candidates.length > 1
+      ? 'picker-opened'
+      : probe.orgsRead
+        ? 'only-account-known'
+        : 'orgs-unread';
+  const willPickOwner = accountChoice === 'picker-opened';
   // ...AND IN THE ORDER IT OPENS THEM (fifth correctness review, 2026-08-29).
   // This said "the owner, name and visibility"; the flow asks visibility, then
   // owner, then name. A promise the user checks against the very next screen is
@@ -1969,9 +2183,11 @@ async function offerRepoCreation(
 
       const result = await createRepo(folder, owner.login, name, visibility, run);
       if (result.ok) {
-        announceRepoCreated(result, name, visibility);
+        announceRepoCreated(result, visibility);
         return;
       }
+      // Past the `ok` guard `result` IS the failure member, so everything below
+      // reads `failure`/`error` as the non-optional fields they are.
 
       const retry = await offerCreateRetry(
         result,
@@ -1979,16 +2195,10 @@ async function offerRepoCreation(
         attempt < MAX_REPO_CREATE_ATTEMPTS,
         deps.invokedBy,
         owner.login,
+        accountChoice,
       );
       if (!retry) return;
-      // WHAT TO SEED DEPENDS ON WHAT FAILED (fifth correctness review,
-      // 2026-08-29). This always seeded the name just attempted, which is right
-      // for a collision and wrong for the other failure that retries:
-      // `unconfirmed` exists precisely because the repository MAY ALREADY EXIST
-      // under exactly that name — `gh repo create --source` creates through the
-      // API and only then wires the remote — so handing it back steers the user
-      // into the collision the failed attempt may itself have created.
-      seed = result.failure === 'unconfirmed' ? nudgeRepoName(name) : name;
+      seed = seedForRetry(result.failure, name);
     }
   } catch (err) {
     // The one place this advisory's blanket `catch {}` is NOT good enough. It
@@ -2007,10 +2217,11 @@ async function offerRepoCreation(
  * Say what was CREATED, claiming only the halves that were observed.
  *
  * Two separate claims live in one sentence, and they used to be one: "created X"
- * and "set it as this project's `origin` remote". {@link CreateRepoResult} now
- * carries them apart — `remoteWired` is a local `git remote get-url origin` read,
- * not an inference from an exit code — so the second half is stated only when it
- * is true, and its absence is reported with the command that settles it.
+ * and "set it as this project's `origin` remote". {@link CreatedRepo} carries them
+ * apart — the origin half is a local `git remote get-url origin` read, not an
+ * inference from an exit code — so the second half is stated only when it is true,
+ * and every other state is reported for what it is
+ * ({@link describeOriginOutcome}).
  *
  * THE NEXT STEP IS THE PUSH, AND NOTHING BEYOND IT (third correctness review,
  * 2026-08-28). This used to end "push your first commit, then re-run MinSpec:
@@ -2031,32 +2242,273 @@ async function offerRepoCreation(
  * back — and this comment is the coupling, so that it comes back deliberately
  * rather than by accident.
  *
- * `requestedName` is the fallback name: `ok: true` with no slug means the
- * repository exists and MinSpec declines to name it (the personal-account path
- * with unrecognised `gh` output), and the slug is re-checked against
- * {@link REPO_SLUG_RE} rather than trusted, on the way back as well as in.
+ * IT NAMES THE REPOSITORY ONLY IN THE STATE THAT HAS A NAME (seventh correctness
+ * review, 2026-08-30). This read
+ *
+ *     result.slug && REPO_SLUG_RE.test(result.slug) ? result.slug : requestedName
+ *
+ * — two arms for the THREE states {@link classifyCreatedName} distinguishes — and
+ * the `requestedName` fallback made the toast name a repository MinSpec had
+ * positively declined to name. Reproduced on the personal path where `gh` exits 0
+ * printing an upgrade notice plus the repository URL, so {@link parseCreatedSlug}
+ * correctly refuses to guess:
+ *
+ *     { ok: true, evidence: 'none', origin: { kind: 'absent' } }
+ *     toast: "MinSpec: created my-app (private) ..."
+ *
+ * {@link CreatedRepo} documents `evidence: 'none'` as "the repository exists, and
+ * MinSpec cannot name it", and `parseCreatedSlug`'s own docstring says echoing the
+ * request back "would then name a repository that does not exist", because GitHub
+ * may normalise a name at creation time. The fallback was the very inference both
+ * comments forbid.
+ *
+ * ...AND THE PRODUCER WAS STILL DOING IT (eighth correctness review, 2026-08-30).
+ * Deleting the fallback HERE left `createGitHubRepo`'s own
+ * `originSlug ?? parseCreatedSlug(...) ?? requested` chain untouched, so the
+ * request-shaped name arrived already wearing the same field as an observed one
+ * and this sentence rendered it exactly as before. The provenance is now in the
+ * type and `requested` is deleted from the code.
+ *
+ * DECLINING TO NAME IT IS NOT A LICENCE TO REPORT A FAILED CREATE, which is why
+ * all three arms still say the repository was created. Saying a create failed when
+ * it succeeded is the false claim this product cannot ship.
  */
-function announceRepoCreated(
-  result: CreateRepoResult,
-  requestedName: string,
-  visibility: 'private' | 'public',
-): void {
-  const named = result.slug && REPO_SLUG_RE.test(result.slug) ? result.slug : requestedName;
-  const wired = result.remoteWired
-    ? " and set it as this project's `origin` remote"
-    : " — but MinSpec could not confirm it is this project's `origin` remote, so check `git remote -v`";
-  vscode.window.showInformationMessage(
-    `MinSpec: created ${named} (${visibility})${wired}. It has no commits yet — push your ` +
-      'first commit when you are ready.',
-  );
+function announceRepoCreated(created: CreatedRepo, visibility: 'private' | 'public'): void {
+  const wired = describeOriginOutcome(created);
+  const tail = 'It has no commits yet — push your first commit when you are ready.';
+  const name = classifyCreatedName(created);
+  switch (name.kind) {
+    case 'named':
+      return void vscode.window.showInformationMessage(
+        `MinSpec: created ${name.slug} (${visibility})${wired}. ${tail}`,
+      );
+    case 'unnamed':
+      // NOTHING named it: no wired `origin` to read it off, and nothing `gh`
+      // printed that {@link parseCreatedSlug} recognises. The honest sentence
+      // says the repository exists and that MinSpec cannot say what it is called.
+      return void vscode.window.showInformationMessage(
+        `MinSpec: created the repository (${visibility})${wired}. MinSpec could not read what ` +
+          `GitHub called it, so it is not named here — check your repositories on GitHub. ${tail}`,
+      );
+    case 'unspellable':
+      // Something DID name it, and the name failed the same charset guard the
+      // create applies. A different observation from `unnamed` — here a name was
+      // read and refused, there none was read at all — so it gets its own
+      // sentence rather than borrowing one that would claim nothing was read.
+      return void vscode.window.showInformationMessage(
+        `MinSpec: created the repository (${visibility})${wired}. The name MinSpec read back ` +
+          `is not one it will print, so it is not repeated here — check your repositories on ` +
+          `GitHub for its name. ${tail}`,
+      );
+    default: {
+      // EXHAUSTIVENESS: a state added to {@link CreatedName} without a sentence
+      // of its own fails `npm run typecheck` rather than inheriting one that
+      // names a repository it may not be able to name.
+      const _unhandled: never = name;
+      void _unhandled;
+      return void vscode.window.showInformationMessage(
+        `MinSpec: created the repository (${visibility})${wired}. ${tail}`,
+      );
+    }
+  }
+}
+
+/**
+ * A create that did NOT produce a repository MinSpec can name — the `ok: false`
+ * member of {@link CreateRepoResult}, named so the failure renderers say so in
+ * their signatures.
+ *
+ * They used to take the whole result and read `result.failure` /
+ * `result.error` through `?`, which is why each carried an arm for `undefined`
+ * describing "a success arriving at a failure toast — a bug in this file". A bug
+ * a type can forbid does not need a sentence.
+ */
+type FailedCreate = Extract<CreateRepoResult, { ok: false }>;
+
+/**
+ * WHAT MinSpec may call the repository it just created — THREE states, not the
+ * two a `slug ? slug : requested` ternary can express.
+ *
+ * The middle state is the one that matters: `ok: true` with no slug is a
+ * SUCCESSFUL create whose name MinSpec did not observe, and it is a documented
+ * state of {@link CreateRepoResult}, not an edge case. Naming it from the request
+ * re-introduces exactly the guess {@link parseCreatedSlug} exists to refuse.
+ */
+type CreatedName =
+  /** A name was read AND it passes the same guard the create applies. */
+  | { kind: 'named'; slug: string }
+  /** Nothing named it. The repository exists; MinSpec cannot say what it is called. */
+  | { kind: 'unnamed' }
+  /** A name was read and MinSpec will not print it. Read, then refused. */
+  | { kind: 'unspellable' };
+
+/**
+ * {@link CreatedName} for a created repository, re-checking the slug with
+ * {@link REPO_SLUG_RE} on the way OUT as well as on the way in — the slug is read
+ * from `gh`'s stdout or from the tree's `origin`, so it is untrusted input in both
+ * directions.
+ *
+ * IT NO LONGER HAS TO ASK WHERE THE NAME CAME FROM. `slug?: string` collapsed
+ * three provenances (observed / parsed / requested) and this function had to
+ * treat the third — a name MinSpec asked for and never read back — as a name it
+ * had read. {@link CreatedRepo} deletes that provenance rather than distinguishing
+ * it, so every slug reaching here is one MinSpec actually read.
+ */
+function classifyCreatedName(created: CreatedRepo): CreatedName {
+  switch (created.evidence) {
+    case 'origin':
+    case 'gh-output':
+      return created.slug !== '' && REPO_SLUG_RE.test(created.slug)
+        ? { kind: 'named', slug: created.slug }
+        : { kind: 'unspellable' };
+    case 'none':
+      return { kind: 'unnamed' };
+    default: {
+      // EXHAUSTIVENESS: an evidence kind added to {@link CreatedRepo} without a
+      // decision here fails `npm run typecheck` rather than defaulting into
+      // "MinSpec read a name" or "MinSpec read none", both of which are claims.
+      const _unhandled: never = created;
+      void _unhandled;
+      return { kind: 'unnamed' };
+    }
+  }
+}
+
+/**
+ * What `origin` says about the repository just created — one clause per
+ * OBSERVATION, appended to whichever name sentence is rendered.
+ *
+ * THREE OBSERVATIONS, NOT TWO (eighth correctness review, 2026-08-30). This was a
+ * ternary on `remoteWired: boolean`, the bit the producer computed from
+ * `readOriginSlug` before throwing the read away — so "there is no `origin`" and
+ * "`origin` exists and names a DIFFERENT repository" shared the clause "MinSpec
+ * could not confirm it is this project's `origin` remote". That clause is not
+ * false; it is an understatement of a state MinSpec had positively read one line
+ * earlier, and the user is sent to run `git remote -v` for an answer MinSpec
+ * already had. See {@link UnwiredOrigin}.
+ */
+function describeOriginOutcome(created: CreatedRepo): string {
+  if (created.evidence === 'origin') return " and set it as this project's `origin` remote";
+  return describeUnwiredOrigin(created.origin);
+}
+
+/** One clause per {@link UnwiredOrigin} state, `never`-typed so a new one must decide. */
+function describeUnwiredOrigin(origin: UnwiredOrigin): string {
+  switch (origin.kind) {
+    case 'absent':
+      return (
+        " — but MinSpec could not confirm it is this project's `origin` remote, so check " +
+        '`git remote -v`'
+      );
+    case 'unaddressable':
+      // AN `origin` MinSpec LOOKED AT. It is not a GitHub repository this code can
+      // reduce to a name, which is a different observation from there being no
+      // remote — and the difference is exactly what the old clause discarded when
+      // `readOriginSlug` answered `null` for both.
+      return (
+        " — but this project's `origin` is not a GitHub repository MinSpec can name, so it " +
+        'does not point at the new one; check `git remote -v`'
+      );
+    case 'elsewhere':
+      // MinSpec READ the other repository's name. Saying only "could not confirm"
+      // withholds the answer it is about to send the user to look up by hand — and
+      // the slug is re-checked here for the same reason the created name is: it
+      // came off a URL in the working tree.
+      if (REPO_SLUG_RE.test(origin.slug)) {
+        return (
+          " — but this project's `origin` names " +
+          `\`${origin.slug}\`` +
+          ' instead, so it does not point at the new repository; check `git remote -v`'
+        );
+      }
+      // A slug MinSpec will not print, for the same reason `unspellable` exists
+      // one function up: it was read, and it is not a name this code repeats.
+      return (
+        " — but this project's `origin` names a different repository, so it does not point " +
+        'at the new one; check `git remote -v`'
+      );
+    default: {
+      const _unhandled: never = origin;
+      void _unhandled;
+      return " — but MinSpec could not confirm it is this project's `origin` remote";
+    }
+  }
+}
+
+/**
+ * The name to SEED the retry box with, decided from the failure member itself.
+ *
+ * EXHAUSTIVE OVER {@link CreateRepoFailure} rather than the two-armed ternary
+ *
+ *     result.failure === 'unconfirmed' ? nudgeRepoName(name) : name
+ *
+ * it replaces (seventh correctness review, 2026-08-30), whose CERTAINTY WAS
+ * INVERTED. `name-taken` is GitHub naming the name outright and took the `: name`
+ * arm; `unconfirmed`, where a collision is merely POSSIBLE, took the nudge.
+ * Reproduced by accepting each seed — the Enter-key path on a pre-filled box:
+ *
+ *     name-taken:  seeds = ["X","X","X"]   createArgv = 3x identical `repo create X`
+ *     unconfirmed: seeds = ["X","X-2","X-3"]
+ *
+ * Three identical creates at a name GitHub had already refused is the same
+ * "N identical mutations at a destination GitHub said no to" that
+ * {@link retryCanChangeOutcome} was written to stop, surviving on the ONE failure
+ * where GitHub named the cause outright.
+ *
+ * Every member is listed, with no shared arm, for the reason `retryCanChangeOutcome`
+ * lists its own: a member added to {@link CreateRepoFailure} must not inherit a
+ * seeding decision by sitting next to one that happens to look like it.
+ *
+ * The seed is a SUGGESTION in an editable box, never a claim — MinSpec has not
+ * established that the nudged name is free either.
+ */
+function seedForRetry(failure: CreateRepoFailure, attempted: string): string {
+  switch (failure) {
+    // GITHUB CERTIFIED THIS NAME AS TAKEN. Handing it straight back makes the
+    // very next create byte-identical to the one that was just refused, and the
+    // Enter key is enough to fire it.
+    case 'name-taken':
+      return nudgeRepoName(attempted);
+    // The repository MAY ALREADY EXIST under exactly this name: `gh repo create
+    // --source` creates through the API and only then wires the remote, so a
+    // non-zero exit is not evidence of absence.
+    case 'unconfirmed':
+      return nudgeRepoName(attempted);
+    // Below here {@link retryCanChangeOutcome} withholds the retry, so the box
+    // never re-opens and the value is never seen. Each still answers for itself:
+    // the seed and the button are decided from the same union, and neither may
+    // acquire a member by default.
+    case 'not-attempted':
+      return attempted;
+    case 'refused-policy':
+      return attempted;
+    case 'refused-sso':
+      return attempted;
+    case 'refused-role':
+      return attempted;
+    case 'refused-token':
+      return attempted;
+    case 'refused-permission':
+      return attempted;
+    case 'plan-limited':
+      return attempted;
+    default: {
+      // THE `undefined` ARM IS GONE WITH THE STATE IT SERVED (eighth correctness
+      // review, 2026-08-30). `CreateRepoResult` carried `failure?:` on a shape that
+      // also carried `ok`, so "a success arriving at the retry seed" was a
+      // representable value and needed an arm of its own. It is now unrepresentable:
+      // only the `ok: false` member has a `failure`, and it is not optional.
+      const _unhandled: never = failure;
+      void _unhandled;
+      return attempted;
+    }
+  }
 }
 
 /**
  * A DIFFERENT name from the one just attempted, seeded into the retry box.
  *
- * Only the `unconfirmed` path uses it, and only because that path's entire
- * premise is that a repository may already exist under the attempted name. A
- * trailing `-<n>` is incremented, otherwise `-2` is appended; the base is trimmed
+ * A trailing `-<n>` is incremented, otherwise `-2` is appended; the base is trimmed
  * so the result stays inside {@link MAX_REPO_SEGMENT_LENGTH}, and anything that
  * still fails the segment rules falls back to the original — a suggestion the
  * create would refuse is worse than a repeated one.
@@ -2086,7 +2538,7 @@ function nudgeRepoName(name: string): string {
  * fails typecheck until someone decides, which is the direction a mutation should
  * fail.
  */
-function retryCanChangeOutcome(failure: CreateRepoFailure | undefined): boolean {
+function retryCanChangeOutcome(failure: CreateRepoFailure): boolean {
   switch (failure) {
     // GitHub named the name as the problem. A different one is the whole remedy.
     case 'name-taken':
@@ -2106,8 +2558,14 @@ function retryCanChangeOutcome(failure: CreateRepoFailure | undefined): boolean 
     case 'refused-policy':
       return false;
     case 'refused-sso':
-      // Least name-shaped of the three: no name, and no ROLE either, changes a
+      // Least name-shaped of the family: no name, and no ROLE either, changes a
       // token's SSO authorisation.
+      return false;
+    case 'refused-role':
+      // GitHub named the caller's role. A role is granted, not renamed.
+      return false;
+    case 'refused-token':
+      // GitHub named the credential. A name cannot change which token `gh` holds.
       return false;
     case 'refused-permission':
       return false;
@@ -2115,9 +2573,9 @@ function retryCanChangeOutcome(failure: CreateRepoFailure | undefined): boolean 
     case 'plan-limited':
       return false;
     default:
-      // Includes `undefined` (a success reaching here would be a bug) and any
-      // member added later: withhold, because a retry offered on a failure nobody
-      // has classified is a mutation fired on a guess.
+      // Any member added later: withhold, because a retry offered on a failure
+      // nobody has classified is a mutation fired on a guess. (`undefined` no
+      // longer reaches here — a success carries no `failure` to pass.)
       return false;
   }
 }
@@ -2159,16 +2617,20 @@ function retryCanChangeOutcome(failure: CreateRepoFailure | undefined): boolean 
  *   can name the destination the user would have to change. Re-checked with
  *   {@link isSafeRepoSegment} before it is rendered: this is the one value in the
  *   sentence that came from a picker.
+ * @param accountChoice whether this run OPENED an owner picker — the same value
+ *   that decided it, not a re-derivation. See {@link AccountChoice}: a remedy that
+ *   prescribes a picker the flow does not open is the defect it exists to stop.
  * @returns whether the user asked to try another name.
  */
 async function offerCreateRetry(
-  result: CreateRepoResult,
+  result: FailedCreate,
   openExternal: (url: string) => void,
   canRetry: boolean,
   invokedBy: string | undefined,
   owner: string | null,
+  accountChoice: AccountChoice,
 ): Promise<boolean> {
-  const message = describeCreateFailure(result, invokedBy, owner);
+  const message = describeCreateFailure(result, invokedBy, owner, accountChoice);
   const actions =
     canRetry && retryCanChangeOutcome(result.failure)
       ? [REPO_RETRY_ACTION, RULESET_DOCS_ACTION]
@@ -2178,6 +2640,122 @@ async function offerCreateRetry(
   // one. A user whose create just failed has no repository to configure a ruleset on.
   if (choice === RULESET_DOCS_ACTION) openExternal(REPO_CREATE_DOCS_URL);
   return choice === REPO_RETRY_ACTION;
+}
+
+/**
+ * WHETHER THIS FLOW OFFERS A CHOICE OF ACCOUNT — the SAME value that decided
+ * whether the owner picker opened, carried to the copy rather than re-derived
+ * from something that has already dropped it.
+ *
+ * {@link askAboutDestination} used to end every refusal remedy with "re-run
+ * <command> and pick a different account", chosen from `owner` alone — a
+ * projection of the candidate list that keeps WHICH account was picked and drops
+ * HOW MANY there were to pick from. Reproduced with a personal-only candidate set
+ * (no orgs, OR an org read that failed):
+ *
+ *     quickPicks opened = 1: ["Visibility for the new repository"]   <- no owner picker
+ *     failToast: "...or re-run MinSpec: Initialize SDD Structure and pick a
+ *                 different account"
+ *     the prescribed re-run, executed: still no account choice on run 2.
+ *
+ * So the remedy named a screen the flow had already decided not to open —
+ * `willPickOwner` (`candidates.length > 1`) is computed one step earlier in
+ * {@link offerRepoCreation} and decides exactly that. This type IS that decision,
+ * threaded to the sentence built on it.
+ *
+ * IT USED TO SAY NOTHING ABOUT WHY there was no choice — a user with no
+ * organisations and a user whose org read FAILED landed on one member — and that
+ * was the second half of the same defect, found one review later. See
+ * `orgs-unread` below.
+ */
+type AccountChoice =
+  /** More than one destination was found, so the owner picker OPENED this run. */
+  | 'picker-opened'
+  /**
+   * ONE destination, AND the org read COMPLETED — so MinSpec established that
+   * there is only one. A re-run will find the same one.
+   */
+  | 'only-account-known'
+  /**
+   * ONE destination, and the org read DID NOT COMPLETE — so MinSpec established
+   * nothing about how many there are.
+   *
+   * SPLIT OUT OF `no-choice-offered` (eighth correctness review, 2026-08-30),
+   * which was one member for two observations and whose sentence asserted the one
+   * it had not made. `AccountChoice` was computed from `candidates.length > 1`
+   * ALONE — a projection of {@link OwnerProbe} that keeps the count and drops
+   * `orgsRead`, the very field the probe carries so that "you belong to no
+   * organisations" and "MinSpec could not read your organisations" stay apart.
+   * Reproduced with a token lacking `read:org`:
+   *
+   *     offer toast:   "MinSpec could not read your organisations, so only your
+   *                     personal account is offered."
+   *     failure toast: "this run found only one account to offer, so a re-run
+   *                     will not present another"
+   *
+   * Two toasts, one flow, flatly contradicting each other — and the second one is
+   * the false one: `gh auth status`, which the first toast tells the user to run,
+   * is exactly how a re-run comes to present another.
+   */
+  | 'orgs-unread';
+
+/**
+ * The "...or pick a different account" clause — rendered ONLY where a picker
+ * actually opens, and empty everywhere else.
+ *
+ * A `switch` with a `never` default rather than a ternary, so a third
+ * {@link AccountChoice} cannot inherit either answer by default. Returns a
+ * CONTINUATION (it starts with a comma), so each caller keeps its own sentence.
+ */
+function orPickAnotherAccount(choice: AccountChoice, invokedBy: string | undefined): string {
+  switch (choice) {
+    case 'picker-opened':
+      return `, or re-run ${reRunPhrase(invokedBy)} and pick a different account`;
+    case 'only-account-known':
+      // Nothing to add. MinSpec found ONE destination this run and established
+      // that it is the only one, so promising a choice on the next one is the
+      // claim the reproduction above falsified.
+      return '';
+    case 'orgs-unread':
+      // MinSpec did NOT establish that there is only one — it failed to read the
+      // organisations. So the account clause survives, pointed at the read rather
+      // than at a picker: this run had no second row to offer, and the reason it
+      // had none is a thing the user can change.
+      return (
+        `, or re-run ${reRunPhrase(invokedBy)} once \`gh\` can read your organisations ` +
+        '(MinSpec could not this run, so it cannot say whether another account is available; ' +
+        `${lowerFirst(checkWhichToken())})`
+      );
+    default: {
+      const _unhandled: never = choice;
+      void _unhandled;
+      return '';
+    }
+  }
+}
+
+/**
+ * Lower-case the first character of a sentence-shaped clause so it can be set
+ * inside a parenthetical without a second copy of the words.
+ *
+ * Exists because {@link checkWhichToken} is quoted in three places and a
+ * hand-lowered duplicate is how one copy stops matching the other.
+ */
+function lowerFirst(text: string): string {
+  return `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
+}
+
+/**
+ * The one diagnostic this code has OBSERVED to answer here.
+ *
+ * `probeGhReadiness` exited 0 on `gh auth status` moments earlier, so that exact
+ * command is known to work — and it reports both the token SOURCE (which exposes
+ * an inherited `GITHUB_TOKEN`) and its scopes. It is named rather than `gh auth
+ * refresh`, which is inert while a `GITHUB_TOKEN` is set (measured against gh
+ * 2.98.0) — the remedy-contradicts-reason defect this file has fixed twice.
+ */
+function checkWhichToken(): string {
+  return 'Check which token `gh` is using and what scopes it carries with `gh auth status`';
 }
 
 /**
@@ -2236,34 +2814,72 @@ function nameCreateDestination(destination: CreateDestination): string {
  *
  * The org arm is the sentence that shipped. The personal arm replaces it with the
  * only thing that can actually change on an account the user already owns: the
- * TOKEN. `gh auth status` is named rather than guessed at, because
- * {@link probeGhReadiness} exited 0 on that exact command moments earlier, so it
- * is known to answer here — the same evidence the failed-org-read note is built
- * on, and the reason neither prescribes `gh auth refresh`.
+ * TOKEN ({@link checkWhichToken}).
+ *
+ * AND THE ACCOUNT-SWITCH HALF IS NO LONGER UNCONDITIONAL (seventh correctness
+ * review, 2026-08-30). Every arm used to end "and pick a different account",
+ * which names a screen the flow opens only when {@link AccountChoice} is
+ * `picker-opened` — see that type for the reproduction. The clause now comes from
+ * {@link orPickAnotherAccount}, which is handed the value that made the decision.
  */
 function askAboutDestination(
   destination: CreateDestination,
   invokedBy: string | undefined,
+  choice: AccountChoice,
 ): string {
+  const orAnother = orPickAnotherAccount(choice, invokedBy);
   switch (destination.kind) {
     case 'personal':
-      return (
-        'Check which token `gh` is using and what scopes it carries with `gh auth status`, or ' +
-        `re-run ${reRunPhrase(invokedBy)} and pick a different account`
-      );
+      return `${checkWhichToken()}${orAnother}`;
     case 'account':
-      return (
-        `Ask an owner of \`${destination.login}\` for repository-creation rights, or re-run ` +
-        `${reRunPhrase(invokedBy)} and pick a different account`
-      );
+      return `Ask an owner of \`${destination.login}\` for repository-creation rights${orAnother}`;
     case 'unnameable':
-      // Nothing to name, so nobody to name asking. The one remedy that survives
-      // is the one that does not depend on spelling the destination.
-      return `Re-run ${reRunPhrase(invokedBy)} and pick a different account`;
+      // Nothing to name, so nobody to name asking. What survives is the check
+      // that says which credential `gh` is holding — the thing that decides the
+      // destination set in the first place.
+      return `${checkWhichToken()}${orAnother}`;
     default: {
       const _unhandled: never = destination;
       void _unhandled;
-      return `Re-run ${reRunPhrase(invokedBy)} and pick a different account`;
+      return `${checkWhichToken()}${orAnother}`;
+    }
+  }
+}
+
+/**
+ * How to REACH an account whose plan allows the create — the plan limit's own
+ * account clause, kept apart from {@link orPickAnotherAccount} because here the
+ * different account is the PRIMARY remedy rather than an afterthought, and must
+ * survive even when no picker opens.
+ *
+ * The `only-account-known` arm states what was observed (the org read completed
+ * and found one destination this run); `orgs-unread` states that the read did not
+ * complete, and therefore claims nothing about how many accounts exist.
+ */
+function reachAnotherAccount(choice: AccountChoice, invokedBy: string | undefined): string {
+  switch (choice) {
+    case 'picker-opened':
+      return ` (re-run ${reRunPhrase(invokedBy)} and pick an account whose plan allows it)`;
+    case 'only-account-known':
+      // OBSERVED: the org read completed and found one destination. "A re-run will
+      // not present another" is a claim about the next run, and this is the ONE
+      // state that supports it.
+      return (
+        ' (this run found only one account to offer, so a re-run will not present another; ' +
+        `${lowerFirst(checkWhichToken())})`
+      );
+    case 'orgs-unread':
+      // NOT OBSERVED. The org read did not complete, so MinSpec knows nothing
+      // about how many accounts there are — and the same sentence that would have
+      // ruled a re-run out is the one that names the way to make it work.
+      return (
+        ' (MinSpec could not read your organisations this run, so it cannot say whether ' +
+        `another account is available; ${lowerFirst(checkWhichToken())})`
+      );
+    default: {
+      const _unhandled: never = choice;
+      void _unhandled;
+      return '';
     }
   }
 }
@@ -2279,11 +2895,16 @@ function askAboutDestination(
  * how three shapes came to be told to try another name.
  */
 function describeCreateFailure(
-  result: CreateRepoResult,
+  result: FailedCreate,
   invokedBy: string | undefined,
   owner: string | null,
+  accountChoice: AccountChoice,
 ): string {
-  const reason = result.error ?? 'gh reported no detail';
+  // NOT `result.error ?? …`. `error` is non-optional on a failed create, so the
+  // `??` was answering for a state the type no longer permits — and a defensive
+  // default that can never fire is a reader's-eye lie about what the producer
+  // guarantees.
+  const reason = result.error;
   // The one value here that came from a picker rather than from `gh`. THREE
   // destinations, not two — see {@link classifyCreateDestination}.
   const destination = classifyCreateDestination(owner);
@@ -2313,7 +2934,8 @@ function describeCreateFailure(
       return (
         `MinSpec: GitHub refused to create a repository under ${where} (${reason}). That is a ` +
         'policy on the destination, not a problem with the name — a different name cannot ' +
-        `change it. ${askAboutDestination(destination, invokedBy)} — see the GitHub docs.`
+        `change it. ${askAboutDestination(destination, invokedBy, accountChoice)} — see the ` +
+        'GitHub docs.'
       );
 
     case 'refused-sso':
@@ -2325,8 +2947,44 @@ function describeCreateFailure(
         `MinSpec: GitHub refused to create a repository under ${where} on single sign-on ` +
         `grounds (${reason}). A different name cannot change that, and neither can a ` +
         "permission grant: the token `gh` is using has to be authorised for the single " +
-        'sign-on GitHub named. Authorise it in your GitHub account settings, or re-run ' +
-        `${reRunPhrase(invokedBy)} and pick a different account — see the GitHub docs.`
+        'sign-on GitHub named. Authorise it in your GitHub account settings' +
+        `${orPickAnotherAccount(accountChoice, invokedBy)} — see the GitHub docs.`
+      );
+
+    case 'refused-role':
+      // GITHUB NAMED THE CALLER'S ROLE, and a role IS grantable — which is the
+      // whole reason this is not `refused-token`, and why "ask an owner" is the
+      // remedy that fits it. It is NOT `refused-policy` either: nothing here
+      // stated a policy, and calling a role "a policy on the destination" asserts
+      // one nobody observed.
+      return (
+        `MinSpec: GitHub refused to create a repository under ${where} (${reason}). GitHub ` +
+        'named the role of the account `gh` is signed in as, not the name — a different name ' +
+        `cannot change it. ${askAboutDestination(destination, invokedBy, accountChoice)} — see ` +
+        'the GitHub docs.'
+      );
+
+    case 'refused-token':
+      // GITHUB NAMED THE CREDENTIAL, and NO OWNER GRANT LIFTS IT — the reason
+      // this is its own member (seventh correctness review, 2026-08-30). It used
+      // to arrive wearing `refused-permission`, whose remedy is "ask an owner of
+      // `X` for repository-creation rights"; nothing an owner can grant changes
+      // which token `gh` is holding, so on this shape that remedy is one nobody
+      // can act on. Reproduced with the shape an inherited `GITHUB_TOKEN`
+      // produces — the credential `gh` PREFERS over its stored one, as this same
+      // file documents:
+      //
+      //     gh: Resource not accessible by integration (HTTP 403)
+      //
+      // So the remedy is about the TOKEN, whatever the destination, and it never
+      // reaches {@link askAboutDestination}'s owner-grant arm.
+      return (
+        `MinSpec: GitHub refused to create a repository under ${where} (${reason}). GitHub ` +
+        'named the token rather than your role, so no permission an owner can grant lifts it ' +
+        `— and a different name cannot either. ${checkWhichToken()}` +
+        `${orPickAnotherAccount(accountChoice, invokedBy)}. A \`GITHUB_TOKEN\` set in your ` +
+        "environment is preferred over `gh`'s stored credentials, which is one way a token you " +
+        'did not choose ends up making this call — see the GitHub docs.'
       );
 
     case 'refused-permission':
@@ -2336,7 +2994,8 @@ function describeCreateFailure(
       return (
         `MinSpec: GitHub refused to create a repository under ${where} (${reason}). A different ` +
         'name cannot change that — the refusal is about where the repository would go, not ' +
-        `what it is called. ${askAboutDestination(destination, invokedBy)} — see the GitHub docs.`
+        `what it is called. ${askAboutDestination(destination, invokedBy, accountChoice)} — see ` +
+        'the GitHub docs.'
       );
 
     case 'plan-limited':
@@ -2352,12 +3011,20 @@ function describeCreateFailure(
       // an org on a paid plan is exactly what lifts it, and the owner picker is
       // one re-run away. Ruling out the remedy most likely to work is the same
       // unestablished-claim defect as prescribing one that cannot.
+      //
+      // ...AND THE ROUTE TO THAT ACCOUNT IS NO LONGER ASSUMED (seventh
+      // correctness review, 2026-08-30). "re-run <command> and pick an account
+      // whose plan allows it" names a picker that opens only when
+      // {@link AccountChoice} is `picker-opened`. The REMEDY survives in both
+      // states — a plan belongs to an account, so another account still lifts it
+      // — and only the route it names is chosen from the value that decides it
+      // ({@link reachAnotherAccount}).
       return (
         `MinSpec: GitHub refused to create a repository under ${where} on plan grounds ` +
         `(${reason}). A different name cannot change that — the limit is on the account and the ` +
         `visibility, not the name. Create it public instead, upgrade the plan on ${where}, or ` +
-        `re-run ${reRunPhrase(invokedBy)} and pick an account whose plan allows it — see the ` +
-        'GitHub docs.'
+        `put it under a different account whose plan allows it` +
+        `${reachAnotherAccount(accountChoice, invokedBy)} — see the GitHub docs.`
       );
 
     case 'unconfirmed':
@@ -2368,20 +3035,6 @@ function describeCreateFailure(
         'another name — see the GitHub docs.'
       );
 
-    case undefined:
-      // A SUCCESS ARRIVING AT A FAILURE TOAST — a bug in this file, not a state
-      // GitHub reported. It gets an arm of its own so the guard below can be
-      // real: `result.failure` is `CreateRepoFailure | undefined`, and while
-      // `undefined` fell through to `default` the assignment there needed an
-      // `as never` cast, which succeeds for EVERY type and made the whole
-      // exhaustiveness check unable to fail (sixth correctness review,
-      // 2026-08-30). The comment beside it promised the opposite, which is what
-      // made the inertness invisible.
-      return (
-        `MinSpec: the create did not complete (${reason}), and MinSpec did not establish ` +
-        'whether the repository exists. Check your repositories on GitHub — see the GitHub docs.'
-      );
-
     default: {
       // EXHAUSTIVENESS, both halves, AND UNCAST. Compile time: a member added to
       // {@link CreateRepoFailure} without a sentence of its own narrows to
@@ -2389,6 +3042,12 @@ function describeCreateFailure(
       // and the copy fail together — that is the coupling, and it only exists
       // because nothing casts here. Runtime: it says the only thing true of every
       // failure, because a throw would take the whole toast with it.
+      //
+      // THE `undefined` ARM ABOVE IT IS GONE (eighth correctness review,
+      // 2026-08-30): it existed for "a success arriving at a failure toast", which
+      // {@link CreateRepoResult}'s optional `failure` made representable. The
+      // discriminated union does not, so both this parameter and the union it
+      // switches on are total.
       const _unhandled: never = result.failure;
       void _unhandled;
       return (
@@ -2509,18 +3168,69 @@ export async function offerRulesetAdvisory(
   if (!isRepo(folder)) return;
 
   try {
-    // gh unavailable/unauthed → zero-network docs link. Done — but SAY WHICH,
+    // gh unavailable/unauthed → zero-NETWORK docs link. Done — but SAY WHICH,
     // because the two remedies are different commands and the sentence used to
-    // hand over both (see {@link describeGhUnready}).
+    // hand over both (see {@link describeGhUnready}) — AND SAY WHAT THE ADVICE IS
+    // FOR, because this branch used to advise a ruleset without ever asking
+    // whether there was a repository to put one on (see {@link UnreadyTopic}).
+    //
+    // The extra reads are LOCAL git. No `gh api`, and specifically no account
+    // read: DR-050's 2026-08-25 amendment scopes that to the `gh`-ready branch.
     const readiness = await probeGhReadiness(run);
     if (readiness !== 'ready') {
-      await linkRulesetDocs(
-        'MinSpec: protect your default branch with a ruleset that requires CI ' +
-          `(${DEFAULT_REQUIRED_CHECK_CONTEXTS.join(', ')}) status checks. ` +
-          `${describeGhUnready(readiness)}, or see the GitHub docs.`,
-        openExternal,
-      );
-      return;
+      const topic = await classifyUnreadyTopic(folder, resolveRepo, classifyRemotes);
+      switch (topic.kind) {
+        case 'ruleset':
+          // The sentence that shipped, now stated only where it is true: a usable
+          // GitHub repository resolved, so a ruleset ON it is a thing that exists.
+          await linkRulesetDocs(
+            'MinSpec: protect your default branch with a ruleset that requires CI ' +
+              `(${DEFAULT_REQUIRED_CHECK_CONTEXTS.join(', ')}) status checks. ` +
+              `${describeGhUnready(readiness)} to let MinSpec offer to create one, or see the ` +
+              'GitHub docs.',
+            openExternal,
+          );
+          return;
+        case 'no-repository':
+          // #1694's own branch, minus the create offer — which needs `gh`, and
+          // `gh` is what is missing. So it says the true thing about the project
+          // and points at the page about CREATING a repository, never the one
+          // about rulesets on a repository that does not exist.
+          await linkRulesetDocs(
+            'MinSpec: this project has no git remote, so nothing links it to a GitHub ' +
+              `repository. ${describeGhUnready(readiness)} to let MinSpec offer to create one, ` +
+              'or see the GitHub docs.',
+            openExternal,
+            REPO_CREATE_DOCS_URL,
+          );
+          return;
+        case 'unusable-remote':
+          // TWO observations, and neither implies the other: MinSpec cannot use
+          // this project's remotes, AND `gh` is not ready. The ruleset sentence
+          // may not be borrowed here — it asserts a repository to protect, which
+          // is exactly what these states did NOT establish.
+          //
+          // AND THE SECOND CLAUSE NAMES WHAT `gh` UNLOCKS, NOT "any of this"
+          // (eighth correctness review, 2026-08-30). The remedy in the first
+          // clause — add a remote, give it a URL, run `git remote -v` — is the
+          // user's own work, which MinSpec has never offered to do; the only thing
+          // `gh` buys is the ruleset offer, and only once BOTH are fixed.
+          await linkRulesetDocs(
+            `${describeUnusableRemote(topic.destination)} ${describeGhUnready(readiness)} as ` +
+              'well — with a GitHub repository MinSpec can address and a signed-in `gh`, it ' +
+              'can offer to create the branch ruleset for you. See the GitHub docs.',
+            openExternal,
+          );
+          return;
+        default: {
+          // EXHAUSTIVENESS: a topic added without copy of its own fails typecheck
+          // rather than falling silently out of a branch that owes the user a
+          // sentence.
+          const _unhandled: never = topic;
+          void _unhandled;
+          return;
+        }
+      }
     }
 
     const repo = await resolveRepo(folder);
@@ -2551,7 +3261,15 @@ export async function offerRulesetAdvisory(
         ? { kind: 'other-remote' }
         : await classifyRemotes(folder);
       if (destination.kind !== 'none') {
-        await linkRulesetDocs(describeUnusableRemote(destination), openExternal);
+        // `gh` IS ready here, so the next step is real and MinSpec can promise it:
+        // give this project a GitHub remote MinSpec can address and the ruleset
+        // offer fires on the next run. The tail is the CALLER's because the other
+        // call site cannot promise it — see {@link describeUnusableRemote}.
+        await linkRulesetDocs(
+          `${describeUnusableRemote(destination)} MinSpec can then offer to protect its ` +
+            'default branch with a branch ruleset — see the GitHub docs.',
+          openExternal,
+        );
         return;
       }
       await offerRepoCreation(folder, run, openExternal, deps);
@@ -2606,16 +3324,29 @@ export async function offerRulesetAdvisory(
     // requiring only `MinSpec SDD validation` read as "configured" and never
     // gained ai-review/ready-to-merge. Fully satisfied ⇒ SILENT.
     const existing = await listRequiredCheckContexts(owner, name, run);
-    const have = new Set(existing?.contexts ?? []);
+    const have = new Set(existing.kind === 'ruleset' ? existing.contexts : []);
     const missing = wanted.filter((c) => !have.has(c));
     if (missing.length === 0) return;
 
-    if (!existing) {
-      // No ruleset at all → offer to CREATE with the full wanted set. The click
-      // IS the consent for the mutation (DR-050).
+    if (existing.kind !== 'ruleset') {
+      // No ruleset — or no ANSWER — so offer to CREATE with the full wanted set.
+      // The click IS the consent for the mutation (DR-050).
+      //
+      // THE SENTENCE IS PICKED FROM WHICH OF THE TWO IT WAS (eighth correctness
+      // review, 2026-08-30). `listRequiredCheckContexts` used to answer `null` for
+      // both, and this copy stated the repository HAS no such ruleset — a positive
+      // claim about the repository — on a read that had failed. The BEHAVIOUR is
+      // deliberately identical (both still offer; failing open is what stops a
+      // flaky read leaving a repo unprotected); only the claim changes.
+      const offer =
+        existing.kind === 'none'
+          ? `MinSpec: ${repo} has no branch ruleset requiring CI checks ` +
+            `(${wanted.join(' + ')}) on its default branch. Create one?`
+          : `MinSpec: could not read ${repo}'s branch rulesets, so it cannot tell whether CI ` +
+            `checks (${wanted.join(' + ')}) are required on its default branch. Create a ` +
+            'ruleset that requires them?';
       const choice = await vscode.window.showInformationMessage(
-        `MinSpec: ${repo} has no branch ruleset requiring CI checks ` +
-          `(${wanted.join(' + ')}) on its default branch. Create one?`,
+        offer,
         RULESET_CREATE_ACTION,
         RULESET_DECLINE_ACTION,
         RULESET_LEARN_MORE_ACTION,
@@ -2663,7 +3394,7 @@ export async function offerRulesetAdvisory(
         );
         return;
       }
-      const why = describeRulesetFailure(outcome);
+      const why = describeRulesetUpdateFailure(outcome);
       await linkRulesetDocs(
         `MinSpec: could not update the ruleset (${why}). Add the checks manually — see the GitHub docs.`,
         openExternal,

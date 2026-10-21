@@ -479,9 +479,18 @@ describe('createRequiredChecksRuleset()', () => {
     expect(outcome).toEqual({
       created: true,
       forbidden: false,
+      // The SHAPE, carried rather than re-derived from `detail` (seventh
+      // correctness review): a success refused nothing, so there is no shape.
+      // `forbidden` and `forbiddenShape` are now ONE discriminated value
+      // (`ForbiddenWitness`), so `{ forbidden: true, forbiddenShape: null }` is not
+      // a state this deep-equality could ever be asked to accept.
+      forbiddenShape: null,
       planLimited: false,
       reason: null,
-      detail: '',
+      // `detail` IS ABSENT, deliberately (eighth correctness review): it held
+      // `stderr || stdout`, a projection of the haystack every classification on
+      // this outcome ran over, and nothing read it. This deep equality is what
+      // makes its removal a decision rather than a drift.
     });
 
     const post = calls.find((c) => c.args.includes('POST'))!;
@@ -562,10 +571,15 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
 
     await offerRulesetAdvisory('/ws', deps(run));
 
-    // Only `gh --version` ran — no `gh api` read, no POST, no repo resolve.
+    // Only `gh --version` ran — no `gh api` read, no POST.
     expect(calls).toHaveLength(1);
     expect(calls[0].args).toEqual(['--version']);
-    expect(resolveRepo).not.toHaveBeenCalled();
+    // `resolveRepo` IS now consulted, and that is the point of the seventh
+    // review's H6: this branch used to advise a branch ruleset without ever
+    // asking whether there was a repository to put one on. It is a local `git
+    // config` read, so the zero-network bound above is unaffected — and here the
+    // repo resolves, so the ruleset sentence and the rulesets page are correct.
+    expect(resolveRepo).toHaveBeenCalledWith('/ws');
     expect(openExternal).toHaveBeenCalledWith(RULESET_DOCS_URL);
   });
 
@@ -1018,21 +1032,69 @@ describe('listRequiredCheckContexts — symmetric detection (which checks, not j
       return undefined;
     });
     expect(await listRequiredCheckContexts('o', 'r', run)).toEqual({
+      kind: 'ruleset',
       rulesetId: 42,
       contexts: ['MinSpec SDD validation'],
     });
   });
 
-  it('null when no branch ruleset guards checks', async () => {
+  // ── `null` USED TO MEAN BOTH (eighth correctness review, 2026-08-30) ──
+  //
+  // The two cases below are DIFFERENT OBSERVATIONS and shared one return value, so
+  // the caller's copy — a positive claim about the repository, "<repo> has no
+  // branch ruleset requiring CI checks" — was rendered for a read that failed.
+  // The behaviour is unchanged (both still offer to create; failing open is what
+  // stops a flaky read leaving a repo unprotected); only the claim is.
+
+  it('`none` when the read COMPLETED and no branch ruleset guards checks', async () => {
     const { run } = makeRunner((_c, args) =>
       apiPath(args) === 'repos/o/r/rulesets' ? ok('[]') : undefined,
     );
-    expect(await listRequiredCheckContexts('o', 'r', run)).toBeNull();
+    expect(await listRequiredCheckContexts('o', 'r', run)).toEqual({ kind: 'none' });
   });
 
-  it('null on a read failure (never suppress provisioning)', async () => {
+  it('`unread` on a read failure — never `none` (and provisioning is still offered)', async () => {
     const { run } = makeRunner(() => fail(1, 'boom'));
-    expect(await listRequiredCheckContexts('o', 'r', run)).toBeNull();
+    expect(await listRequiredCheckContexts('o', 'r', run)).toEqual({ kind: 'unread' });
+  });
+
+  it('`unread` on UNPARSEABLE output — a read that answered with nothing usable', async () => {
+    const { run } = makeRunner((_c, args) =>
+      apiPath(args) === 'repos/o/r/rulesets' ? ok('not json at all') : undefined,
+    );
+    expect(await listRequiredCheckContexts('o', 'r', run)).toEqual({ kind: 'unread' });
+  });
+
+  it('`unread` when a ruleset DETAIL fetch did not answer — that ruleset may have qualified', async () => {
+    // The subtle one: the LIST read succeeded, so the old code walked the loop,
+    // skipped the ruleset whose detail 500'd, fell out of the bottom and answered
+    // "no such ruleset" about a ruleset it had never seen the inside of.
+    const { run } = makeRunner((_c, args) => {
+      const path_ = apiPath(args);
+      if (path_ === 'repos/o/r/rulesets') {
+        return ok(JSON.stringify([{ id: 42, target: 'branch', enforcement: 'active' }]));
+      }
+      if (path_ === 'repos/o/r/rulesets/42') return fail(1, 'HTTP 500');
+      return undefined;
+    });
+    expect(await listRequiredCheckContexts('o', 'r', run)).toEqual({ kind: 'unread' });
+  });
+
+  it('CONTROL: a ruleset that is READ and simply does not qualify still yields `none`', async () => {
+    // The control that keeps the case above from degenerating into "any ruleset at
+    // all means unread": this detail is read perfectly well and just does not
+    // guard the default branch.
+    const { run } = makeRunner((_c, args) => {
+      const path_ = apiPath(args);
+      if (path_ === 'repos/o/r/rulesets') {
+        return ok(JSON.stringify([{ id: 42, target: 'branch', enforcement: 'active' }]));
+      }
+      if (path_ === 'repos/o/r/rulesets/42') {
+        return ok(JSON.stringify({ conditions: { ref_name: { include: [] } }, rules: [] }));
+      }
+      return undefined;
+    });
+    expect(await listRequiredCheckContexts('o', 'r', run)).toEqual({ kind: 'none' });
   });
 });
 
@@ -1238,5 +1300,113 @@ describe('ENFORCE: check-name constants bound to producers (#820)', () => {
     // MUST contain at least one such filter; every one must name AI_REVIEW_CHECK.
     expect(nameFilterLiterals.length).toBeGreaterThan(0);
     for (const lit of new Set(nameFilterLiterals)) expect(lit).toBe(AI_REVIEW_CHECK);
+  });
+});
+
+// =============================================================================
+// EIGHTH CORRECTNESS REVIEW (2026-08-30) — the OUTCOME SHAPE, as an invariant
+// =============================================================================
+//
+// The two ruleset-write outcomes each carried a BIT beside the union it narrows
+// (`forbidden` beside `forbiddenShape`) and a PROJECTION of the haystack every
+// classification ran over (`detail = stderr || stdout`). The bit could disagree
+// with the union, the projection could disagree with the haystack, and both
+// disagreements shipped as sentences. These assert the SHAPE, not any sentence,
+// so no rewording moves them.
+
+describe('P4: the ruleset-write outcomes carry no lossy copy of what they classified', () => {
+  /** Outputs spanning every arm of `classifyForbidden`, plus non-refusals. */
+  const HAYSTACKS: Array<[string, string, string]> = [
+    // label, stdout, stderr
+    ['admin refusal on stderr', '', 'gh: HTTP 403: Must have admin rights to Repository.'],
+    ['token refusal on stdout', '{"message":"Resource not accessible by integration"}', 'notice: gh 2.63 is out'],
+    ['bare 403 split across both', 'HTTP 403', 'gh: request failed'],
+    ['worded refusal, no status code', '{"error":"Forbidden"}', ''],
+    ['a plan limit', '{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature."}', ''],
+    ['a 404, not a refusal at all', '{"message":"Not Found"}', ''],
+    ['nothing quotable', '', 'connection reset by peer'],
+  ];
+
+  it.each(HAYSTACKS)(
+    'create: %s → `forbidden` is exactly `forbiddenShape !== null`, and no `detail` survives',
+    async (_label, stdout, stderr) => {
+      const run: CommandRunner = async () => ({ code: 1, stdout, stderr });
+      const out = await createRequiredChecksRuleset('o', 'r', run);
+
+      // THE INVARIANT the discriminated pair exists to make unrepresentable. It
+      // was a producer convention before, upheld by two hand-written literals per
+      // return — and the sentence downstream had a whole extra arm for the state
+      // where they disagreed.
+      expect(out.forbidden).toBe(out.forbiddenShape !== null);
+      // The projection is gone from the type, so it cannot come back by accident.
+      expect(Object.keys(out).sort()).toEqual(
+        ['created', 'forbidden', 'forbiddenShape', 'planLimited', 'reason'].sort(),
+      );
+    },
+  );
+
+  it.each(HAYSTACKS)(
+    'update: %s → the same invariant holds on the PUT path',
+    async (_label, stdout, stderr) => {
+      // Fail the initial GET so the failure is classified from this haystack.
+      const run: CommandRunner = async () => ({ code: 1, stdout, stderr });
+      const out = await updateRulesetRequiredChecks('o', 'r', run, 42, ['ai-review']);
+
+      expect(out.forbidden).toBe(out.forbiddenShape !== null);
+      expect(Object.keys(out).sort()).toEqual(
+        ['blocker', 'forbidden', 'forbiddenShape', 'planLimited', 'reason', 'updated'].sort(),
+      );
+      // A GitHub-side failure is never dressed up as a local blocker.
+      expect(out.blocker).toBeNull();
+    },
+  );
+
+  it('the two LOCAL blockers are distinct outcomes, not two spellings of "the request failed"', async () => {
+    // These were free-text strings inside `detail`, which nothing read — so both
+    // rendered as "the request failed" about states MinSpec had diagnosed.
+    const unparseable: CommandRunner = async () => ({ code: 0, stdout: 'not json', stderr: '' });
+    const noRule: CommandRunner = async () => ({
+      code: 0,
+      stdout: JSON.stringify({ name: 'x', target: 'branch', rules: [{ type: 'deletion' }] }),
+      stderr: '',
+    });
+
+    const a = await updateRulesetRequiredChecks('o', 'r', unparseable, 42, ['ai-review']);
+    const b = await updateRulesetRequiredChecks('o', 'r', noRule, 42, ['ai-review']);
+
+    expect(a.updated).toBe(false);
+    expect(b.updated).toBe(false);
+    expect(a.blocker).toBe('unparseable-ruleset');
+    expect(b.blocker).toBe('no-required-checks-rule');
+    // THE PROPERTY: two observations, two values.
+    expect(a.blocker).not.toBe(b.blocker);
+    // ...and neither is confused with a refusal by GitHub.
+    expect(a.forbidden).toBe(false);
+    expect(b.forbidden).toBe(false);
+  });
+
+  it('a satisfied ruleset is a SUCCESS with no diagnosis attached', async () => {
+    const run: CommandRunner = async () => ({
+      code: 0,
+      stdout: JSON.stringify({
+        name: 'x',
+        target: 'branch',
+        rules: [
+          {
+            type: 'required_status_checks',
+            parameters: { required_status_checks: [{ context: 'ai-review' }] },
+          },
+        ],
+      }),
+      stderr: '',
+    });
+
+    const out = await updateRulesetRequiredChecks('o', 'r', run, 42, ['ai-review']);
+
+    expect(out.updated).toBe(true);
+    // `detail: 'already satisfied'` used to ride along here, read by nothing and
+    // saying nothing `updated: true` does not.
+    expect(out.blocker).toBeNull();
+    expect(out.forbidden).toBe(false);
   });
 });

@@ -578,7 +578,7 @@ describe('probeOwnerCandidates() — owner defaulting (DR-050 Amendment 2026-08-
     const { candidates } = await probeOwnerCandidates(run);
 
     // The default pick IS the head of the list.
-    expect(candidates[0]).toEqual({ login: 'acme', kind: 'org', canAdminister: true });
+    expect(candidates[0]).toEqual({ kind: 'org', login: 'acme', role: 'admin' });
     // The personal account remains offered (never silently replaced) — and it is
     // identified by KIND, because it carries no login: `login: null` is the
     // instruction to omit the owner prefix, which is how `gh repo create <name>`
@@ -591,7 +591,7 @@ describe('probeOwnerCandidates() — owner defaulting (DR-050 Amendment 2026-08-
     // A member-only org is LISTED but never defaulted.
     const bystander = candidates.find((c) => c.login === 'bystander');
     expect(bystander?.kind).toBe('org');
-    expect(bystander?.canAdminister).toBeFalsy();
+    expect(bystander).toMatchObject({ role: 'member' });
   });
 
   it('TWO active admin orgs → NO auto-pick: the personal account leads, both admin orgs precede member-only ones', async () => {
@@ -603,9 +603,11 @@ describe('probeOwnerCandidates() — owner defaulting (DR-050 Amendment 2026-08-
 
     const { candidates } = await probeOwnerCandidates(run);
 
-    expect(candidates[0]).toEqual({ login: null, kind: 'user' });
+    expect(candidates[0]).toEqual({ kind: 'user', login: null });
     // Ambiguity is not resolved by guessing: no org may take the default slot.
-    expect(candidates.filter((c) => c.canAdminister).map((c) => c.login).sort()).toEqual(['acme', 'zeta']);
+    expect(
+      candidates.filter((c) => c.kind === 'org' && c.role === 'admin').map((c) => c.login).sort(),
+    ).toEqual(['acme', 'zeta']);
     const order = logins(candidates);
     expect(order.indexOf('acme')).toBeLessThan(order.indexOf('bystander'));
     expect(order.indexOf('zeta')).toBeLessThan(order.indexOf('bystander'));
@@ -616,9 +618,9 @@ describe('probeOwnerCandidates() — owner defaulting (DR-050 Amendment 2026-08-
 
     const { candidates } = await probeOwnerCandidates(run);
 
-    expect(candidates[0]).toEqual({ login: null, kind: 'user' });
+    expect(candidates[0]).toEqual({ kind: 'user', login: null });
     expect(logins(candidates)).toContain('bystander');
-    expect(candidates.find((c) => c.login === 'bystander')?.canAdminister).toBeFalsy();
+    expect(candidates.find((c) => c.login === 'bystander')).toMatchObject({ role: 'member' });
   });
 
   it('a non-active membership is filtered out ENTIRELY (never listed, never defaulted)', async () => {
@@ -639,7 +641,7 @@ describe('probeOwnerCandidates() — owner defaulting (DR-050 Amendment 2026-08-
 
     const { candidates } = await probeOwnerCandidates(run);
 
-    expect(candidates).toEqual([{ login: null, kind: 'user' }]);
+    expect(candidates).toEqual([{ kind: 'user', login: null }]);
   });
 
   it('an org login failing the charset guard is DROPPED, never offered as a destination', async () => {
@@ -664,7 +666,7 @@ describe('probeOwnerCandidates() — owner defaulting (DR-050 Amendment 2026-08-
     // able to tell "dropped" from "kept but sorted late": five extra admin orgs
     // would push the personal account into the lead.
     expect(logins(candidates)).toEqual(['acme', null]);
-    expect(candidates[0]).toEqual({ login: 'acme', kind: 'org', canAdminister: true });
+    expect(candidates[0]).toEqual({ kind: 'org', login: 'acme', role: 'admin' });
   });
 
   it('the SAME org listed twice yields ONE row, and is still the sole admin org', async () => {
@@ -678,7 +680,7 @@ describe('probeOwnerCandidates() — owner defaulting (DR-050 Amendment 2026-08-
 
     expect(logins(candidates).filter((l) => l === 'acme')).toHaveLength(1);
     expect(candidates).toHaveLength(2);
-    expect(candidates[0]).toEqual({ login: 'acme', kind: 'org', canAdminister: true });
+    expect(candidates[0]).toEqual({ kind: 'org', login: 'acme', role: 'admin' });
   });
 
   it('INV-4: the probe reads only — no POST/PUT/PATCH, no settings write, nothing on disk', async () => {
@@ -987,9 +989,10 @@ describe('createGitHubRepo() — the mutation', () => {
 // (`my-app` → `renamed-app`). That difference is the whole point: with the two
 // equal, a function that parses gh's output and one that simply echoes the
 // request back are indistinguishable, and the parser is dead weight nobody can
-// break. GitHub really does normalise names at creation time, and the slug is
-// fed straight into `gh api repos/{owner}/{repo}/...`, so echoing the request
-// would aim the fall-through probe at a repository that does not exist.
+// break. GitHub really does normalise names at creation time, so echoing the
+// request back names a repository that does not exist — in the success toast the
+// user reads, which is the only place the slug is used now that the create no
+// longer falls through into the ruleset probe.
 
 describe('createGitHubRepo() — the created slug is read from gh, not assumed', () => {
   /** Run a create whose `gh` prints exactly `stdout`. */
@@ -998,6 +1001,13 @@ describe('createGitHubRepo() — the created slug is read from gh, not assumed',
     owner: string | null = 'acme',
   ): Promise<CreateRepoResult> {
     const { run } = makeRunner((cmd, args) => {
+      // WHAT REAL GIT SAYS when there is no `origin` — exit 2 with a message, not
+      // exit 0 with an empty URL. The blanket `ok('')` this replaces was
+      // indistinguishable from a remote that EXISTS with a blank URL, which is a
+      // remote MinSpec looked at, and the eighth review's `UnwiredOrigin` tells
+      // those two apart. A fixture that cannot express the difference cannot
+      // assert which one the code saw.
+      if (cmd === 'git' && args.includes('get-url')) return fail(2, "error: No such remote 'origin'");
       if (cmd === 'git') return ok('');
       if (isGhRepoCreate(cmd, args)) return ok(stdout);
       return undefined;
@@ -1048,35 +1058,71 @@ describe('createGitHubRepo() — the created slug is read from gh, not assumed',
     expect(result.slug).not.toBe('cli/cli');
   });
 
-  it('REFUSES TO GUESS between two candidate URLs — it falls back to what it requested', async () => {
-    // Two equally-well-formed answers is not a reason to pick one: the next
-    // call after this is a repo-scoped API path, and picking wrong aims it at
-    // somebody else's repository. The requested slug is the honest fallback —
-    // it is the only name this function actually knows.
+  // ── THESE TWO ASSERTED THE DEFECT (eighth correctness review, 2026-08-30) ──
+  //
+  // They pinned `slug === 'acme/my-app'` — THE NAME THIS FUNCTION ASKED FOR — as
+  // the answer for two outputs it had just declined to read a name out of. That is
+  // the request-shaped third provenance of `CreatedRepo`'s docstring, and
+  // `parseCreatedSlug`'s own docstring calls it out one screen up: "echoing our own
+  // request back would then name a repository that does not exist", because GitHub
+  // may normalise a name at creation time.
+  //
+  // The seventh review deleted the same fallback from the CALLER
+  // (`announceRepoCreated`) and left the producer doing it, so the toast was
+  // unchanged; these two tests are why it looked correct. Their SURVIVING property
+  // — refuse to guess — is asserted below, against the value the function now
+  // returns.
+
+  it('REFUSES TO GUESS between two candidate URLs — and does NOT substitute what it requested', async () => {
+    // Two equally-well-formed answers is not a reason to pick one. Nor is it a
+    // reason to answer with the name we typed: that name was never read back, so
+    // it is not evidence of anything.
     const result = await createReporting(
       'https://github.com/acme/one\nhttps://github.com/acme/two\n',
     );
 
-    expect(result.ok).toBe(true);
-    expect(result.slug).toBe('acme/my-app');
+    expect(result).toEqual({ ok: true, evidence: 'none', origin: { kind: 'absent' } });
+    // Anchor: neither candidate was picked either — the refusal is total.
+    expect(JSON.stringify(result)).not.toContain('acme/one');
+    expect(JSON.stringify(result)).not.toContain('acme/two');
   });
 
-  it('falls back to the REQUESTED slug when gh printed nothing recognisable (owner path)', async () => {
+  it('an unrecognisable output yields ok WITHOUT a name on the OWNER path', async () => {
     const result = await createReporting('Repository created.\n');
 
-    expect(result.ok).toBe(true);
-    expect(result.slug).toBe('acme/my-app');
+    // `ok: true` — the repository exists, so reporting a failure would be the
+    // false claim — and `evidence: 'none'`, because nothing named it.
+    expect(result).toEqual({ ok: true, evidence: 'none', origin: { kind: 'absent' } });
   });
 
-  it('on the PERSONAL path an unrecognisable output yields ok WITHOUT a slug — never a false failure', async () => {
-    // `owner: null` means there is no requested slug to fall back on: the owner
-    // half would have to be invented. The repository EXISTS, so reporting a
-    // failure would be the false claim; reporting it unnamed is the true one.
+  it('an `origin` MinSpec cannot address is not the same reading as no `origin` at all', async () => {
+    // The third state `readOriginSlug`'s `string | null` used to swallow: a remote
+    // that EXISTS and is not a GitHub repository this code can name. MinSpec read
+    // it; saying only "could not confirm" sends the user to look up what it saw.
+    const { run } = makeRunner((cmd, args) => {
+      if (cmd === 'git' && args.includes('get-url')) return ok('git@gitlab.com:acme/my-app.git\n');
+      if (cmd === 'git') return ok('');
+      if (isGhRepoCreate(cmd, args)) return ok('https://github.com/acme/renamed-app\n');
+      return undefined;
+    });
+
+    const result = await createGitHubRepo('/ws/my-app', 'acme', 'my-app', 'private', run);
+
+    expect(result).toEqual({
+      ok: true,
+      evidence: 'gh-output',
+      slug: 'acme/renamed-app',
+      origin: { kind: 'unaddressable' },
+    });
+  });
+
+  it('...and identically on the PERSONAL path — the two paths no longer differ', async () => {
+    // They used to: `owner: null` had no requested slug to fall back on, so the
+    // personal path told the truth and the owner path did not. One provenance
+    // deleted, one behaviour.
     const result = await createReporting('Repository created.\n', null);
 
-    expect(result.ok).toBe(true);
-    expect(result.slug).toBeUndefined();
-    expect(result.error).toBeUndefined();
+    expect(result).toEqual({ ok: true, evidence: 'none', origin: { kind: 'absent' } });
   });
 });
 
@@ -1321,12 +1367,22 @@ describe('offerRulesetAdvisory() — INV-7: zero-network fallback', () => {
 
     await offerRulesetAdvisory('/ws/my-app', deps(run));
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0].args).toEqual(['--version']);
+    // THE INVARIANT IS ZERO NETWORK, NOT ZERO LOCAL READS. This asserted
+    // `calls.toHaveLength(1)`, which also pinned "no local `git` runs" — and H6
+    // establishes that this branch MUST read the remote state, because the
+    // sentence it renders ("protect your default branch with a ruleset") asserts
+    // a repository that this project may not have. Local git is Tier-0 and
+    // egresses nothing; the `gh` surface is what INV-7 bounds, so that is what is
+    // asserted, exactly.
+    expect(calls.filter((c) => c.cmd === 'gh').map((c) => c.args)).toEqual([['--version']]);
+    expect(calls.every((c) => c.cmd === 'gh' || c.cmd === 'git')).toBe(true);
     expect(calls.filter((c) => c.args.includes('api'))).toHaveLength(0);
     expect(calls.filter((c) => isMembershipsRead(c.args))).toHaveLength(0);
     expect(calls.filter((c) => isRepoCreateMutation(c.cmd, c.args))).toHaveLength(0);
-    expect(openExternal).toHaveBeenCalledWith(RULESET_DOCS_URL);
+    // ...and the page it opens answers the question the toast asked: this project
+    // has NO remote, so a rulesets page has nothing to be about (H6).
+    expect(openExternal).toHaveBeenCalledWith(REPO_CREATE_DOCS_URL);
+    expect(openExternal).not.toHaveBeenCalledWith(RULESET_DOCS_URL);
     // No offer that the user cannot possibly complete.
     expect(repoOfferCall()).toBeUndefined();
   });
@@ -1342,9 +1398,17 @@ describe('offerRulesetAdvisory() — INV-7: zero-network fallback', () => {
 
     await offerRulesetAdvisory('/ws/my-app', deps(run));
 
-    expect(calls.map((c) => c.args[0])).toEqual(['--version', 'auth']);
+    // Scoped to the `gh` surface for the reason above: the local `git` reads H6
+    // adds egress nothing, and pinning the whole call list would make INV-7 fail
+    // on a Tier-0 read it does not bound.
+    expect(calls.filter((c) => c.cmd === 'gh').map((c) => c.args[0])).toEqual([
+      '--version',
+      'auth',
+    ]);
     expect(calls.filter((c) => c.args.includes('api'))).toHaveLength(0);
     expect(calls.filter((c) => isRepoCreateMutation(c.cmd, c.args))).toHaveLength(0);
+    // This runner refuses every `git` read, so the remote state is UNREADABLE —
+    // not "no repository" — and the docs button keeps the rulesets page.
     expect(openExternal).toHaveBeenCalledWith(RULESET_DOCS_URL);
   });
 
@@ -1694,7 +1758,9 @@ describe('offerRulesetAdvisory() — the owner picker decides where the repo goe
     // Every row carries a description, and the org ones state the ROLE that was
     // actually read — the honest proxy, never an install claim.
     expect(rows.every((r) => r.description.length > 0)).toBe(true);
-    expect(rows.find((r) => r.label === 'acme')!.description).toMatch(/membership role is owner/i);
+    // It QUOTES THE ROLE THE API REPORTED (`admin`), not GitHub's UI word for it.
+    // The sentence claims to repeat what was read, so it repeats what was read.
+    expect(rows.find((r) => r.label === 'acme')!.description).toMatch(/membership role is admin/i);
     expect(rows.find((r) => r.label === 'bystander')!.description).toMatch(/membership role is member/i);
   });
 
@@ -1750,7 +1816,7 @@ describe('offerRulesetAdvisory() — the offer refuses rather than retargets', (
     resolveRepo.mockResolvedValue(null);
     const { run, calls } = noRemoteRunner({});
     const createRepo = vi.fn(
-      async (): Promise<CreateRepoResult> => ({ ok: true, remoteWired: true, slug: 'acme/my-app' }),
+      async (): Promise<CreateRepoResult> => ({ ok: true, evidence: 'origin', slug: 'acme/my-app' }),
     );
     const probeOwners = vi.fn(async () => ({ candidates, orgsRead: true }));
     answerToasts({ repoOffer: REPO_CREATE_ACTION, rulesetOffer: DECLINE_ACTION, docs: DOCS_ACTION });
@@ -1762,7 +1828,7 @@ describe('offerRulesetAdvisory() — the offer refuses rather than retargets', (
 
   it('an owner login failing the charset assertion never reaches the create at all', async () => {
     const { calls, createRepo, probeOwners } = await runWithCandidates([
-      { login: '../../etc', kind: 'org', canAdminister: true },
+      { login: '../../etc', kind: 'org', role: 'admin' },
     ]);
 
     // Anchors: the offer ran, was accepted, and got as far as the visibility pick.
@@ -1779,7 +1845,7 @@ describe('offerRulesetAdvisory() — the offer refuses rather than retargets', (
     // form would silently create the repository somewhere the user never chose,
     // which is the exact retarget the assertion exists to stop.
     const { calls, createRepo } = await runWithCandidates([
-      { login: '' as unknown as string, kind: 'user' },
+      { login: '' as unknown as null, kind: 'user' },
     ]);
 
     expect(visibilityPickCall()).toBeDefined();
@@ -1803,7 +1869,7 @@ describe('offerRulesetAdvisory() — the offer refuses rather than retargets', (
     const { run, calls } = noRemoteRunner({});
     const probeOwners = vi.fn(async () => ({ candidates: [] as RepoOwnerCandidate[], orgsRead: true }));
     const createRepo = vi.fn(
-      async (): Promise<CreateRepoResult> => ({ ok: true, remoteWired: true, slug: 'x/y' }),
+      async (): Promise<CreateRepoResult> => ({ ok: true, evidence: 'origin', slug: 'x/y' }),
     );
     answerToasts({ repoOffer: REPO_CREATE_ACTION, rulesetOffer: DECLINE_ACTION, docs: DOCS_ACTION });
 
@@ -1872,11 +1938,19 @@ describe('offerRulesetAdvisory() — the name box is SEEDED, and the returned sl
     // The slug a create reports is parsed out of `gh`'s stdout. Trusting it would
     // let a traversal-shaped value be repeated back to the user as the repository
     // that now exists, so the caller re-asserts the charset on the way back rather
-    // than only on the way in, and falls back to the name the user typed.
+    // than only on the way in.
+    //
+    // IT NO LONGER FALLS BACK TO THE NAME THE USER TYPED (H5, seventh correctness
+    // review). That half of this test asserted the defect: `gh` may normalise a
+    // name at creation time, so the request is not a name for what now exists —
+    // `parseCreatedSlug`'s own docstring says echoing it back "would then name a
+    // repository that does not exist". The surviving property is the one this
+    // test is named for: the malformed value is never repeated, and the create is
+    // still reported as the success it was.
     resolveRepo.mockResolvedValue(null);
     const { run, calls } = noRemoteRunner({});
     const createRepo = vi.fn(
-      async (): Promise<CreateRepoResult> => ({ ok: true, remoteWired: true, slug: 'o/../../etc' }),
+      async (): Promise<CreateRepoResult> => ({ ok: true, evidence: 'origin', slug: 'o/../../etc' }),
     );
     answerToasts({ repoOffer: REPO_CREATE_ACTION, rulesetOffer: DECLINE_ACTION });
 
@@ -1887,9 +1961,12 @@ describe('offerRulesetAdvisory() — the name box is SEEDED, and the returned sl
     expect(createRepo).toHaveBeenCalledTimes(1);
     // The malformed value is never repeated back...
     expect(everythingSaid()).not.toContain('o/../../etc');
-    // ...and the user is still told the repository exists, under the name they
-    // typed — a refusal to name it is not a licence to report a failed create.
-    expect(everythingSaid()).toMatch(/created my-app/i);
+    // ...and the user is still told the repository EXISTS — a refusal to name it
+    // is not a licence to report a failed create. It is just not named from the
+    // request, which MinSpec never observed to be its name.
+    expect(everythingSaid()).toMatch(/created the repository/i);
+    expect(everythingSaid()).not.toMatch(/created\s+`?my-app/i);
+    expect(everythingSaid()).not.toMatch(/could not create/i);
     expect(calls.filter((c) => isRepoApiCall(c.args))).toHaveLength(0);
   });
 
@@ -1897,7 +1974,7 @@ describe('offerRulesetAdvisory() — the name box is SEEDED, and the returned sl
     resolveRepo.mockResolvedValue(null);
     const { run, calls } = noRemoteRunner({});
     const createRepo = vi.fn(
-      async (): Promise<CreateRepoResult> => ({ ok: true, remoteWired: true, slug: 'acme/my-app' }),
+      async (): Promise<CreateRepoResult> => ({ ok: true, evidence: 'origin', slug: 'acme/my-app' }),
     );
     answerToasts({ repoOffer: REPO_CREATE_ACTION, rulesetOffer: DECLINE_ACTION });
 
@@ -1916,16 +1993,20 @@ describe('offerRulesetAdvisory() — the name box is SEEDED, and the returned sl
     // thing, so the flow says what happened and stops.
     resolveRepo.mockResolvedValue(null);
     const { run, calls } = noRemoteRunner({});
-    const createRepo = vi.fn(async (): Promise<CreateRepoResult> => ({ ok: true, remoteWired: true }));
+    const createRepo = vi.fn(async (): Promise<CreateRepoResult> => ({ ok: true, evidence: 'none', origin: { kind: 'absent' } }));
     answerToasts({ repoOffer: REPO_CREATE_ACTION, rulesetOffer: DECLINE_ACTION });
 
     await offerRulesetAdvisory('/ws/my-app', { ...deps(run), createRepo });
 
     expect(createRepo).toHaveBeenCalledTimes(1);
     expect(calls.filter((c) => isRepoApiCall(c.args))).toHaveLength(0);
-    // The user is told the repository EXISTS — never that the create failed.
+    // The user is told the repository EXISTS — never that the create failed, and
+    // never under a name MinSpec did not observe (H5, seventh correctness review:
+    // `ok: true` with no slug is the state `CreateRepoResult.slug` documents as
+    // "the repository exists, and MinSpec cannot name it").
     const said = collectStrings(showInformationMessage.mock.calls).join(' ');
-    expect(said).toMatch(/created my-app/i);
+    expect(said).toMatch(/created the repository/i);
+    expect(said).not.toMatch(/created\s+`?my-app/i);
     expect(said).not.toMatch(/could not create/i);
   });
 });
@@ -2394,10 +2475,10 @@ describe('C2: a create is reported from what was OBSERVED, never from the exit c
 
     const result = await createGitHubRepo('/ws/my-app', 'acme', 'my-app', 'private', run);
 
-    expect(result.ok).toBe(true);
-    expect(result.remoteWired).toBe(true);
-    // ...and `origin` names the repository authoritatively, so it can be said out loud.
-    expect(result.slug).toBe('acme/my-app');
+    // `evidence: 'origin'` IS the wired state — it was `remoteWired: true` beside a
+    // `slug`, i.e. the bit form of exactly this discriminant, and the pair could
+    // drift. One value now answers both: `origin` named it, so `origin` is wired.
+    expect(result).toEqual({ ok: true, evidence: 'origin', slug: 'acme/my-app' });
   });
 
   it('an exit-0 create whose remote is NOT wired never claims the remote half', async () => {
@@ -2409,8 +2490,15 @@ describe('C2: a create is reported from what was OBSERVED, never from the exit c
 
     const result = await createGitHubRepo('/ws/my-app', 'acme', 'my-app', 'private', run);
 
-    expect(result.ok).toBe(true);
-    expect(result.remoteWired).toBe(false);
+    // NOT wired, and the reason is carried: there is no `origin` at all. The name
+    // still came from gh's own output, which is a different provenance from an
+    // observed remote and is now said so in the type.
+    expect(result).toEqual({
+      ok: true,
+      evidence: 'gh-output',
+      slug: 'acme/my-app',
+      origin: { kind: 'absent' },
+    });
   });
 
   it('an `origin` naming a DIFFERENT repository is not evidence that THIS create succeeded', async () => {
@@ -2426,8 +2514,7 @@ describe('C2: a create is reported from what was OBSERVED, never from the exit c
     const result = await createGitHubRepo('/ws/my-app', 'acme', 'my-app', 'private', run);
 
     expect(result.ok).toBe(false);
-    expect(result.remoteWired).toBe(false);
-    expect(result.slug).toBeUndefined();
+    expect(result).not.toHaveProperty('slug');
   });
 
   it('a create that never ran (the charset guard refused) is distinguishable from one that failed', async () => {
@@ -2458,7 +2545,12 @@ describe('C2: a create is reported from what was OBSERVED, never from the exit c
   it('FLOW: the success toast claims `origin` ONLY when the local read observed it', async () => {
     resolveRepo.mockResolvedValue(null);
     const { run } = noRemoteRunner({});
-    const createRepo = vi.fn(async () => ({ ok: true, slug: 'acme/my-app', remoteWired: false }));
+    const createRepo = vi.fn(async () => ({
+      ok: true,
+      evidence: 'gh-output',
+      slug: 'acme/my-app',
+      origin: { kind: 'absent' },
+    }));
     answerToasts({ repoOffer: REPO_CREATE_ACTION, docs: DOCS_ACTION });
 
     await offerRulesetAdvisory('/ws/my-app', {
@@ -2603,8 +2695,8 @@ describe('C6: the create-failure remedy matches the reason, and leads back to th
     const promptRepoName = vi.fn(async () => names.shift());
     const createRepo = vi
       .fn()
-      .mockResolvedValueOnce({ ok: false, remoteWired: false, failure: 'name-taken', error: 'Name already exists on this account' })
-      .mockResolvedValueOnce({ ok: true, remoteWired: true, slug: 'acme/my-app-2' });
+      .mockResolvedValueOnce({ ok: false, failure: 'name-taken', error: 'Name already exists on this account' })
+      .mockResolvedValueOnce({ ok: true, evidence: 'origin', slug: 'acme/my-app-2' });
     answerToasts({ repoOffer: REPO_CREATE_ACTION, createFailure: REPO_RETRY_ACTION, docs: DOCS_ACTION });
 
     await offerRulesetAdvisory('/ws/my-app', {
@@ -3251,13 +3343,23 @@ describe('F6: the copy names the invoking command, not always the init one', () 
    * the fixture moved to the failure where a re-run is genuinely the remedy —
    * nothing was added to the project, so re-running re-opens THIS offer and the
    * user picks a different account. See the G5 block for the drop itself.
+   *
+   * ...AND THE FIXTURE NOW SUPPLIES A SECOND CANDIDATE (seventh correctness
+   * review, 2026-08-30). It used to run with `memberships: []`, where the owner
+   * picker never opens — and H3 establishes that the re-run clause must NOT be
+   * offered there, because it names a screen a re-run will not show. That is a
+   * change to WHERE the clause exists, not to what it must say when it does, so
+   * these tests keep their subject exactly and only move to a run that has one.
    */
   const ORG_REFUSAL = 'GraphQL: acme has repository creation disabled for members (createRepository)';
+
+  /** Two candidates, so the owner picker opens and the re-run clause is rendered. */
+  const TWO_DESTINATIONS = [membership('acme', 'member')];
 
   async function refusedCreate(invokedBy?: string): Promise<string> {
     resolveRepo.mockResolvedValue(null);
     const { run } = noRemoteRunner({
-      memberships: [],
+      memberships: TWO_DESTINATIONS,
       createReply: fail(1, ORG_REFUSAL),
       originAfterCreate: null,
     });
@@ -3357,7 +3459,7 @@ describe('F6: the copy names the invoking command, not always the init one', () 
     try {
       resolveRepo.mockResolvedValue(null);
       const { run } = noRemoteRunner({
-        memberships: [],
+        memberships: TWO_DESTINATIONS,
         createReply: fail(1, ORG_REFUSAL),
         originAfterCreate: null,
       });
@@ -3382,7 +3484,7 @@ describe('F6: the copy names the invoking command, not always the init one', () 
     try {
       resolveRepo.mockResolvedValue(null);
       const { run } = noRemoteRunner({
-        memberships: [],
+        memberships: TWO_DESTINATIONS,
         createReply: fail(1, ORG_REFUSAL),
         originAfterCreate: null,
       });
@@ -3442,7 +3544,7 @@ describe('F7: after an explicit "Create GitHub repo" click, nothing aborts silen
       // the shipped picker (the probe filters logins) — which is exactly why it
       // must not be the one path that ends in nothing at all.
       probeOwners: async () => ({
-        candidates: [{ login: 'acme/evil', kind: 'org' as const, canAdminister: true }],
+        candidates: [{ login: 'acme/evil', kind: 'org' as const, role: 'admin' as const }],
         orgsRead: true,
       }),
     });
@@ -3905,8 +4007,8 @@ describe('G4: an UNCONFIRMED create never hands the same name back', () => {
     const { run } = noRemoteRunner({ memberships: [] });
     const createRepo = vi
       .fn()
-      .mockResolvedValueOnce({ ok: false, remoteWired: false, failure, error: 'gh reported no detail' })
-      .mockResolvedValueOnce({ ok: true, remoteWired: true, slug: 'octocat/whatever' });
+      .mockResolvedValueOnce({ ok: false, failure, error: 'gh reported no detail' })
+      .mockResolvedValueOnce({ ok: true, evidence: 'origin', slug: 'octocat/whatever' });
     answerToasts({ repoOffer: REPO_CREATE_ACTION, createFailure: REPO_RETRY_ACTION, docs: undefined });
 
     await offerRulesetAdvisory('/ws/my-app', {
@@ -3930,11 +4032,20 @@ describe('G4: an UNCONFIRMED create never hands the same name back', () => {
     expect(isSafeRepoSegment(seeds[1])).toBe(true);
   });
 
-  it('CONTROL: a NAME COLLISION still seeds the attempted name — one keystroke from fixed', async () => {
+  it('a NAME COLLISION is nudged too — GitHub CERTIFIED that name as taken', async () => {
+    // This used to assert the opposite ("still seeds the attempted name — one
+    // keystroke from fixed"), and H2 refutes it: the box is PRE-FILLED, so the
+    // Enter key alone re-fires a byte-identical `gh repo create` at a name GitHub
+    // has just named as taken — three times, up to the attempt cap. `name-taken`
+    // is the failure with the MOST certainty that the name is wrong, so it is the
+    // last one that should hand the name back. The seed is still fully editable,
+    // so nothing is taken away from a user who wants that exact name.
     const seeds = await seedsOnRetry('name-taken');
 
     expect(seeds.length).toBe(2);
-    expect(seeds[1]).toBe('my-app');
+    expect(seeds[0]).toBe('my-app');
+    expect(seeds[1], 'the retry re-offered the name GitHub said was taken').not.toBe('my-app');
+    expect(isSafeRepoSegment(seeds[1])).toBe(true);
   });
 });
 
@@ -4050,8 +4161,8 @@ describe('G6: the offer names the steps in the order it opens them, and never a 
       ...deps(run),
       probeOwners: async () => ({
         candidates: [
-          { login: 'acme/evil', kind: 'org' as const, canAdminister: true },
-          { login: null, kind: 'user' as const, canAdminister: true },
+          { login: 'acme/evil', kind: 'org' as const, role: 'admin' as const },
+          { login: null, kind: 'user' as const },
         ],
         orgsRead: true,
       }),
@@ -4435,13 +4546,17 @@ describe('G11: the create-failure exhaustiveness guard must be able to fail', ()
    * `never` and fails typecheck"), which makes the guard's own documentation the
    * thing that hides its inertness.
    *
-   * The cast was added for a real reason — `result.failure` is
-   * `CreateRepoFailure | undefined`, so `undefined` reaches the default arm and
+   * The cast was added for a real reason — `result.failure` was
+   * `CreateRepoFailure | undefined`, so `undefined` reached the default arm and
    * a bare `never` assignment would not compile. That is one more instance of
    * the rule this review applies: `undefined` (a success arrived at a failure
    * toast) and "a member nobody has taught this function" are two DIFFERENT
-   * observations sharing one arm. Give `undefined` its own arm and the guard can
-   * be real again.
+   * observations sharing one arm.
+   *
+   * The seventh review gave `undefined` its own arm. The EIGHTH deleted the state:
+   * `CreateRepoResult` is a discriminated union, so a success carries no `failure`
+   * field at all and cannot reach this function. Two observations, one of which
+   * no longer exists — which is a stronger answer than two arms.
    */
   const SRC = path.resolve(__dirname, '..', 'src', 'commands', 'init.ts');
 
@@ -4462,14 +4577,33 @@ describe('G11: the create-failure exhaustiveness guard must be able to fail', ()
     );
   });
 
-  it('a success reaching the failure toast has an arm of its own', () => {
+  it('a success can no longer REACH the failure toast — the arm went with the state', () => {
+    // THIS ASSERTED `case undefined:` (eighth correctness review, 2026-08-30). The
+    // arm existed because `CreateRepoResult` carried `failure?:` on the same shape
+    // as `ok`, which made "a success arriving at a failure toast" a representable
+    // value that a `never` guard would otherwise refuse to compile. The union is
+    // now discriminated — only the `ok: false` member has a `failure`, and it is
+    // not optional — so the state is unrepresentable and the guard is real
+    // WITHOUT an arm apologising for it. That is the stronger property, and it is
+    // what this now pins.
     const src = fs.readFileSync(SRC, 'utf8');
     const fn = src.slice(src.indexOf('function describeCreateFailure'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
 
+    // The parameter forbids a success outright...
     expect(
-      /case\s+undefined\s*:/.test(fn.slice(0, fn.indexOf('\n}\n'))),
-      '`undefined` still shares the arm meant for members nobody has taught this function',
+      /function describeCreateFailure\(\s*result: FailedCreate,/.test(fn),
+      'describeCreateFailure no longer takes the failed-create member',
     ).toBe(true);
+    // ...so there is nothing for an `undefined` arm to answer, and the guard that
+    // made one necessary is gone with it.
+    expect(
+      /case\s+undefined\s*:/.test(body),
+      '`undefined` has an arm again, which means the type stopped forbidding it',
+    ).toBe(false);
+    // Anchor: the slice really is the function body and really was read.
+    expect(body.length).toBeGreaterThan(500);
+    expect(body).toContain("case 'name-taken':");
   });
 });
 
@@ -4530,7 +4664,14 @@ describe('G12: a plan limit does not rule out the remedy that actually works', (
   });
 
   it('offers the account choice as a remedy, from either destination', async () => {
-    expect(await planSentence([])).toMatch(/pick an account/i);
+    // THE REMEDY, NOT THE ROUTE. This asserted `/pick an account/i` from both
+    // destinations, and H3 refutes half of it: with one candidate no owner picker
+    // opens, so prescribing one names a screen the re-run will not show. What
+    // this block is actually about survives intact — a plan belongs to an
+    // account, so another account is never ruled out — and only the route named
+    // is chosen from the value that decides whether a picker opens.
+    expect(await planSentence([])).toMatch(/different account|another account/i);
+    expect(await planSentence([])).not.toMatch(/pick a different account|pick an account/i);
     vi.clearAllMocks();
     quickPickCalls.length = 0;
     showInputBox.mockImplementation(async (o?: { value?: string }) => o?.value ?? 'my-app');
@@ -4747,8 +4888,7 @@ describe('H2: the retry seed is decided per failure, and the certainty is not in
     const createRepo = vi.fn(
       async (_f: string, _o: string | null, _name: string): Promise<CreateRepoResult> => ({
         ok: false,
-        remoteWired: false,
-        failure: failure as CreateRepoResult['failure'],
+        failure: failure as Extract<CreateRepoResult, { ok: false }>['failure'],
         error: 'GraphQL: Name already exists on this account (createRepository)',
       }),
     );
@@ -4948,14 +5088,15 @@ describe('H5: the success toast names a repository only in the state that has a 
    * REPRODUCED on the personal path where `gh` exits 0 printing an upgrade notice
    * plus the repository URL, so `parseCreatedSlug` correctly refuses to guess:
    *
-   *     { ok: true, remoteWired: false }   (no slug)
+   *     { ok: true, evidence: 'none', origin: { kind: 'absent' } }
    *     toast: "MinSpec: created my-app (private) ..."
    *
-   * `CreateRepoResult.slug` documents `ok: true` with no slug as "the repository
-   * exists, and MinSpec cannot name it", and `parseCreatedSlug`'s docstring says
-   * echoing the request back "would then name a repository that does not exist"
-   * because GitHub may normalise at creation time. The toast has two arms for
-   * three states.
+   * `CreatedRepo` documents `evidence: 'none'` as "the repository exists, and
+   * MinSpec cannot name it", and `parseCreatedSlug`'s docstring says echoing the
+   * request back "would then name a repository that does not exist" because GitHub
+   * may normalise at creation time. The toast had two arms for three states — and
+   * the PRODUCER went on echoing the request into the `slug` field for one review
+   * longer, which is why the fixture below can no longer even be built.
    */
   async function successToast(result: CreateRepoResult): Promise<string> {
     resolveRepo.mockResolvedValue(null);
@@ -4970,7 +5111,7 @@ describe('H5: the success toast names a repository only in the state that has a 
   }
 
   it('an UNNAMEABLE success never names the repository from the request', async () => {
-    const said = await successToast({ ok: true, remoteWired: false });
+    const said = await successToast({ ok: true, evidence: 'none', origin: { kind: 'absent' } });
 
     expect(
       said,
@@ -4985,7 +5126,7 @@ describe('H5: the success toast names a repository only in the state that has a 
   });
 
   it('a slug that FAILS the charset re-check is not swapped for the request either', async () => {
-    const said = await successToast({ ok: true, remoteWired: true, slug: 'o/../../etc' });
+    const said = await successToast({ ok: true, evidence: 'origin', slug: 'o/../../etc' });
 
     expect(said).not.toContain('o/../../etc');
     expect(said, 'an unspellable slug fell back to naming the request').not.toMatch(
@@ -4995,7 +5136,7 @@ describe('H5: the success toast names a repository only in the state that has a 
   });
 
   it('CONTROL: an OBSERVED slug is still named out loud', async () => {
-    const said = await successToast({ ok: true, remoteWired: true, slug: 'acme/my-app' });
+    const said = await successToast({ ok: true, evidence: 'origin', slug: 'acme/my-app' });
     expect(said).toMatch(/created acme\/my-app/i);
   });
 });
@@ -5100,5 +5241,342 @@ describe('H6: `gh` unready and no repository are two observations, and the dead 
     expect(calls.filter((c) => isMembershipsRead(c.args))).toHaveLength(0);
     expect(calls.filter((c) => isRepoCreateMutation(c.cmd, c.args))).toHaveLength(0);
     expect(repoOfferCall()).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// EIGHTH CORRECTNESS REVIEW (2026-08-30) — THE GENERATOR, PINNED AS A PROPERTY
+// =============================================================================
+//
+// Rounds four, five, six and seven each fixed the sentences that were reported
+// and produced a fresh one AT THE SITE OF THE FIX. Six named sites came back
+// clean each time and every unnamed site of the same shape stayed broken, which
+// is the signature of a test suite that pins sentences instead of the thing that
+// produces them.
+//
+// TWO GENERATORS produce every finding in this family:
+//
+//   (1) a DECISION MADE FROM A PROJECTION that drops the deciding field — the
+//       code computes a rich value, narrows it, and a sentence downstream needs
+//       what the narrowing threw away;
+//   (2) a UNION COLLAPSED BEFORE THE BRANCH THAT NEEDS IT — several distinct
+//       outcomes folded into one member the sentence cannot tell apart.
+//
+// Both reduce to ONE OBSERVABLE PROPERTY, and it is the property this block
+// asserts rather than any particular wording:
+//
+//     TWO DISTINCT OBSERVATIONS MUST NOT PRODUCE ONE SENTENCE.
+//
+// Every row below is a pair of runs that differ in exactly one observation which
+// the code had ALREADY MADE and then discarded. A regression re-introducing the
+// projection makes the pair's two outputs identical again, whatever the copy has
+// been reworded to say — so these survive rewording, which the sentence-shaped
+// tests above do not.
+
+describe('P1: two distinct observations never share one sentence', () => {
+  /** Drive the no-remote create flow and return every string it rendered. */
+  async function flow(
+    opts: Parameters<typeof noRemoteRunner>[0],
+    answers: Parameters<typeof answerToasts>[0] = { repoOffer: REPO_CREATE_ACTION },
+  ): Promise<string> {
+    resolveRepo.mockResolvedValue(null);
+    const { run } = noRemoteRunner(opts);
+    answerToasts({ rulesetOffer: DECLINE_ACTION, docs: undefined, ...answers });
+    await offerRulesetAdvisory('/ws/my-app', deps(run));
+    return renderedStrings().join(' ');
+  }
+
+  it('F-B: an org read that FAILED is not the same account state as an org read that found none', async () => {
+    // The projection: `AccountChoice` was computed from `candidates.length > 1`
+    // alone — a view of `OwnerProbe` that keeps the count and drops `orgsRead`.
+    // Both runs below end with ONE candidate, and only one of them established
+    // that there is only one.
+    const planLimit = fail(1, 'Upgrade to GitHub Pro to create private repositories');
+
+    const readFailed = await flow({ membershipsReply: fail(1, 'HTTP 403'), createReply: planLimit });
+    vi.clearAllMocks();
+    quickPickCalls.length = 0;
+    const readEmpty = await flow({ memberships: [], createReply: planLimit });
+
+    // Anchor: both runs really reached the plan-limited failure sentence.
+    expect(readFailed).toMatch(/on plan grounds/i);
+    expect(readEmpty).toMatch(/on plan grounds/i);
+    // THE PROPERTY.
+    expect(
+      readFailed,
+      'a failed org read and an empty one produce the same account advice',
+    ).not.toEqual(readEmpty);
+    // ...and each says the thing its own observation supports. Only the completed
+    // read may rule a re-run out.
+    expect(readEmpty).toMatch(/a re-run will not present another/i);
+    expect(readFailed).not.toMatch(/a re-run will not present another/i);
+  });
+
+  it('F-F: a membership role MinSpec could not read is not the role `member`', async () => {
+    // The projection: `canAdminister = role === 'admin'`, a bit standing in for a
+    // field the picker's own sentence QUOTES. Every falsy value rendered "your
+    // membership role is member".
+    const asMember = await flow({ memberships: [membership('acme', 'member')] });
+    const rowMember = ownerPickRows().find((r) => r.label === 'acme')?.description ?? '';
+    vi.clearAllMocks();
+    quickPickCalls.length = 0;
+    await flow({
+      memberships: [{ state: 'active', organization: { login: 'acme' } }],
+    });
+    const rowUnknown = ownerPickRows().find((r) => r.label === 'acme')?.description ?? '';
+
+    // Anchor: both runs opened an owner picker that offered the org.
+    expect(asMember).toContain('acme');
+    expect(rowMember, 'the member row never rendered').not.toBe('');
+    expect(rowUnknown, 'the unrecognised-role row never rendered').not.toBe('');
+    // THE PROPERTY.
+    expect(rowUnknown, 'an unread role is described as `member`').not.toEqual(rowMember);
+    expect(rowMember).toMatch(/membership role is member/i);
+    expect(rowUnknown).not.toMatch(/membership role is member/i);
+    // ...and neither claims MinSpec detected anything about the App (INV-6).
+    expect(rowUnknown).not.toMatch(/installed|set up here/i);
+  });
+
+  it('an `origin` naming SOMEONE ELSE is not the same observation as no `origin` at all', async () => {
+    // The projection: `remoteWired = originSlug !== null`, computed AFTER
+    // `readOriginSlug` had already read the other repository's name — and the
+    // one clause served both, sending the user to run `git remote -v` for an
+    // answer MinSpec was holding.
+    const noOrigin = await flow({ originAfterCreate: null });
+    vi.clearAllMocks();
+    quickPickCalls.length = 0;
+    const otherOrigin = await flow({ originAfterCreate: 'https://github.com/someone/else.git' });
+
+    // Anchor: both created something and said so.
+    expect(noOrigin).toMatch(/created/i);
+    expect(otherOrigin).toMatch(/created/i);
+    // THE PROPERTY.
+    expect(otherOrigin, 'a foreign `origin` reads as an absent one').not.toEqual(noOrigin);
+    // ...and the one MinSpec actually read is named, rather than looked up by hand.
+    expect(otherOrigin).toContain('someone/else');
+    expect(noOrigin).not.toContain('someone/else');
+  });
+
+  it('a rulesets read that FAILED is not the same as a repository with no ruleset', async () => {
+    // The projection: `listRequiredCheckContexts` answered `null` for both, and
+    // the offer copy is a POSITIVE CLAIM about the repository.
+    function probeRunner(rulesets: Reply) {
+      return makeRunner((cmd, args) => {
+        if (cmd === 'git') return ok('');
+        if (cmd !== 'gh') return undefined;
+        if (args[0] === '--version') return ok('gh version 2.62.0');
+        if (args[0] === 'auth') return ok('Logged in');
+        const p = apiPath(args) ?? '';
+        if (p === 'repos/o/r/rulesets' && !args.includes('POST')) return rulesets;
+        if (p === 'repos/o/r/actions/secrets') return ok('[]');
+        return undefined;
+      });
+    }
+    async function offerText(rulesets: Reply): Promise<string> {
+      resolveRepo.mockResolvedValue('o/r');
+      answerToasts({ rulesetOffer: DECLINE_ACTION });
+      await offerRulesetAdvisory('/ws/my-app', deps(probeRunner(rulesets).run));
+      return String(rulesetOfferCall()?.[0] ?? '');
+    }
+
+    const noRuleset = await offerText(ok('[]'));
+    vi.clearAllMocks();
+    const unread = await offerText(fail(1, 'HTTP 500'));
+
+    // Anchor: BOTH still offer to create — failing open is the deliberate
+    // behaviour, and only the CLAIM was ever at issue.
+    expect(noRuleset, 'the offer never fired for a repo with no ruleset').not.toBe('');
+    expect(unread, 'the offer stopped firing on a failed read').not.toBe('');
+    // THE PROPERTY.
+    expect(unread, 'a failed rulesets read reads as "there is no ruleset"').not.toEqual(noRuleset);
+    // ...and only the completed read may state what the repository has.
+    expect(noRuleset).toMatch(/has no branch ruleset/i);
+    expect(unread).not.toMatch(/has no branch ruleset/i);
+    expect(unread).toMatch(/could not read/i);
+  });
+});
+
+describe('P1b: a locally-diagnosed blocker reaches the sentence, it does not just reach the type', () => {
+  /**
+   * The failure mode every previous round shared is not "the type lost the field"
+   * — it is "the type carried the field and the sentence read something else". So
+   * this drives the WHOLE add-checks flow and reads the toast, rather than
+   * asserting the outcome union again (`P4` in ruleset-advisor.test.ts does that).
+   */
+  /** The detection read that makes the "add checks" offer fire. */
+  const QUALIFYING = JSON.stringify({
+    conditions: { ref_name: { include: ['~DEFAULT_BRANCH'] } },
+    rules: [{ type: 'required_status_checks', parameters: { required_status_checks: [] } }],
+  });
+
+  /**
+   * Answer the FIRST `rulesets/42` read with a qualifying ruleset (so the offer
+   * fires) and every read after it with `secondBody` — which is the GET
+   * `updateRulesetRequiredChecks` makes, and the one under test.
+   */
+  async function addFailureToast(secondBody: string): Promise<string> {
+    resolveRepo.mockResolvedValue('o/r');
+    let detailReads = 0;
+    const { run } = makeRunner((cmd, args) => {
+      if (cmd === 'git') return ok('');
+      if (cmd !== 'gh') return undefined;
+      if (args[0] === '--version') return ok('gh version 2.62.0');
+      if (args[0] === 'auth') return ok('Logged in');
+      const p = apiPath(args) ?? '';
+      if (p === 'repos/o/r/actions/secrets') return ok('[]');
+      if (p === 'repos/o/r/rulesets' && !args.includes('POST')) {
+        return ok(JSON.stringify([{ id: 42, target: 'branch', enforcement: 'active' }]));
+      }
+      if (p === 'repos/o/r/rulesets/42') {
+        detailReads += 1;
+        return ok(detailReads === 1 ? QUALIFYING : secondBody);
+      }
+      return undefined;
+    });
+    answerToasts({ rulesetOffer: RULESET_ADD_ACTION, docs: undefined });
+    await offerRulesetAdvisory('/ws/my-app', deps(run));
+    return everythingSaid();
+  }
+
+  it('an unparseable ruleset and a ruleset with no checks rule do not share "the request failed"', async () => {
+    // Both used to travel as free text inside `detail`, which the sentence never
+    // read — so a state MinSpec had positively diagnosed was reported as an
+    // unexplained failure.
+    const NO_RULE = JSON.stringify({
+      conditions: { ref_name: { include: ['~DEFAULT_BRANCH'] } },
+      rules: [{ type: 'deletion' }],
+    });
+
+    const unparseable = await addFailureToast('not json at all');
+    vi.clearAllMocks();
+    const noRule = await addFailureToast(NO_RULE);
+
+    // Anchor: both really reached the could-not-update sentence.
+    expect(unparseable).toMatch(/could not update the ruleset/i);
+    expect(noRule).toMatch(/could not update the ruleset/i);
+    // THE PROPERTY.
+    expect(unparseable, 'the two blockers share one sentence').not.toEqual(noRule);
+    // ...and neither falls back to the contentless phrase they both used to get.
+    expect(unparseable).not.toMatch(/\(the request failed\)/i);
+    expect(noRule).not.toMatch(/\(the request failed\)/i);
+    expect(unparseable).toMatch(/could not parse/i);
+    expect(noRule).toMatch(/no required-status-checks rule/i);
+  });
+});
+
+describe('P2: the quoted reason comes from the string the decision was made on', () => {
+  it('F-E: a refusal on STDOUT is quoted, even when stderr carries a banner', async () => {
+    // THE GENERATOR, VERBATIM. `failure` is classified over `stdout + stderr`;
+    // `error`'s fallback was `stderr || stdout` — a projection of that very
+    // haystack — so a refusal printed on stdout beside any banner at all was
+    // classified correctly and then explained with the banner.
+    const POLICY = 'GraphQL: acme has repository creation disabled for members (createRepository)';
+    const BANNER = 'A new release of gh is available: 2.62.0 → 2.63.0';
+    const { run } = makeRunner((cmd, args) => {
+      if (cmd === 'git') return ok('');
+      if (isGhRepoCreate(cmd, args)) return { code: 1, stdout: POLICY, stderr: BANNER };
+      return undefined;
+    });
+
+    const result = await createGitHubRepo('/ws/my-app', 'acme', 'my-app', 'private', run);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    // Anchor: the CLASSIFICATION saw the refusal, which is what makes the
+    // explanation's disagreement with it the defect.
+    expect(result.failure).toBe('refused-policy');
+    // THE PROPERTY: the explanation is drawn from the same observation.
+    expect(result.error, 'the quoted reason is the banner, not the refusal').toContain(
+      'repository creation disabled',
+    );
+  });
+
+  it('CONTROL: a refusal on STDERR alone is still quoted — the fix is not "prefer stdout"', async () => {
+    const { run } = makeRunner((cmd, args) => {
+      if (cmd === 'git') return ok('');
+      if (isGhRepoCreate(cmd, args)) return fail(1, 'gh: Resource protected by organization SAML enforcement (HTTP 403)');
+      return undefined;
+    });
+
+    const result = await createGitHubRepo('/ws/my-app', 'acme', 'my-app', 'private', run);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('unreachable');
+    expect(result.failure).toBe('refused-sso');
+    expect(result.error).toMatch(/SAML/i);
+  });
+
+  it('neither source file narrows a command result to `stderr || stdout` at all', () => {
+    // The TEXTUAL form of the generator, banned outright. It was written five
+    // times across the two outcome producers and read by nothing, which is how it
+    // survived three rounds of fixing the sentences it fed.
+    const PROJECTION = /\b(?:stdout|stderr)\s*\|\|\s*(?:res|got|put|result)?\.?(?:stdout|stderr)\b/;
+    for (const file of [
+      path.join(__dirname, '..', 'src', 'commands', 'init.ts'),
+      path.join(__dirname, '..', 'src', 'lib', 'ruleset-advisor.ts'),
+    ]) {
+      const text = fs.readFileSync(file, 'utf8');
+      const code = text
+        .split('\n')
+        .filter((l) => {
+          const t = l.trim();
+          return !t.startsWith('//') && !t.startsWith('*') && !t.startsWith('/*');
+        })
+        .join('\n');
+      expect(code.length, `${file} stripped to nothing`).toBeGreaterThan(500);
+      expect(PROJECTION.test(code), `${file} narrows a command result to one stream`).toBe(false);
+    }
+    // Not inert: the pattern really does match the shape it bans.
+    expect(PROJECTION.test('detail: result.stderr || result.stdout,')).toBe(true);
+    expect(PROJECTION.test('const haystack = `${res.stdout}\\n${res.stderr}`;')).toBe(false);
+  });
+});
+
+describe('P3: a created repository is never named from the request', () => {
+  /**
+   * F-D AS A PROPERTY over gh outputs rather than as two fixtures. The requested
+   * name appears in NONE of these outputs, so any result carrying it came from
+   * the request — which is the one provenance MinSpec never observed.
+   */
+  const REQUESTED = 'requested-name';
+  const OUTPUTS: Array<[string, string]> = [
+    ['nothing recognisable', 'Repository created.\n'],
+    ['two candidate URLs (refuses to guess)', 'https://github.com/acme/one\nhttps://github.com/acme/two\n'],
+    ['a URL inside prose only', 'See https://github.com/cli/cli/releases/tag/v2.63.0 for news\n'],
+    ['empty output', ''],
+  ];
+
+  it.each(OUTPUTS)('%s → the result never contains the requested name', async (_label, stdout) => {
+    const { run } = makeRunner((cmd, args) => {
+      if (cmd === 'git') return fail(2, "error: No such remote 'origin'");
+      if (isGhRepoCreate(cmd, args)) return ok(stdout);
+      return undefined;
+    });
+
+    const result = await createGitHubRepo('/ws/x', 'acme', REQUESTED, 'private', run);
+
+    // Anchor: the create SUCCEEDED — this property is about a success that cannot
+    // be named, never about reporting a failure instead.
+    expect(result.ok).toBe(true);
+    expect(JSON.stringify(result), 'the result echoed the name MinSpec asked for').not.toContain(
+      REQUESTED,
+    );
+  });
+
+  it('CONTROL: a name gh DID report is carried, so the property is not "never name anything"', async () => {
+    const { run } = makeRunner((cmd, args) => {
+      if (cmd === 'git') return fail(2, "error: No such remote 'origin'");
+      if (isGhRepoCreate(cmd, args)) return ok('https://github.com/acme/renamed-app\n');
+      return undefined;
+    });
+
+    const result = await createGitHubRepo('/ws/x', 'acme', REQUESTED, 'private', run);
+
+    expect(result).toEqual({
+      ok: true,
+      evidence: 'gh-output',
+      slug: 'acme/renamed-app',
+      origin: { kind: 'absent' },
+    });
   });
 });

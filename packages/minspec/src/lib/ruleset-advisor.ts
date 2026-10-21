@@ -269,6 +269,9 @@ export async function probeGhReadiness(run: CommandRunner): Promise<GhReadiness>
  * Returns `false` (offer to create) on ANY read/parse failure or non-zero exit
  * — we never want a flaky read to suppress the advisory, and a wrong "already
  * configured" is the worse error (it would silently leave the repo unprotected).
+ * A caller that must tell "the read failed" from "there is no such ruleset" is
+ * asking a question this bit cannot answer and must call
+ * {@link listRequiredCheckContexts} instead.
  *
  * READ-ONLY CONFIG PROBE — a `gh api .../rulesets` GET of the repo's OWN
  * settings. It egresses no user artifacts, spec content, or telemetry (the same
@@ -283,42 +286,19 @@ export async function hasRequiredChecksRuleset(
   repo: string,
   run: CommandRunner,
 ): Promise<boolean> {
-  const list = await runSafe(run, 'gh', [
-    'api',
-    `repos/${owner}/${repo}/rulesets`,
-  ]);
-  if (list.code !== 0) return false;
-
-  let rulesets: Array<{ id?: number; target?: string; enforcement?: string }>;
-  try {
-    const parsed = JSON.parse(list.stdout);
-    if (!Array.isArray(parsed)) return false;
-    rulesets = parsed;
-  } catch {
-    return false;
-  }
-
-  for (const rs of rulesets) {
-    if (rs.target !== 'branch') continue;
-    if (rs.enforcement === 'disabled') continue;
-    if (typeof rs.id !== 'number') continue;
-
-    const detail = await runSafe(run, 'gh', [
-      'api',
-      `repos/${owner}/${repo}/rulesets/${rs.id}`,
-    ]);
-    if (detail.code !== 0) continue;
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(detail.stdout);
-    } catch {
-      continue;
-    }
-    if (rulesetGuardsDefaultBranchChecks(parsed)) return true;
-  }
-
-  return false;
+  // DEFINED IN TERMS OF THE RICHER PROBE (eighth correctness review, 2026-08-30).
+  // This was a SECOND COPY of {@link listRequiredCheckContexts}'s loop — the same
+  // list read, the same detail reads, the same `rulesetGuardsDefaultBranchChecks`
+  // test — reduced to a bit. Two copies of one rule is the drift this module
+  // already deleted twice (`isForbidden`, and the inline 403 regexes in
+  // {@link createRequiredChecksRuleset}), and this one had no reader in `src/` at
+  // all, so the divergence would have shipped unnoticed.
+  //
+  // It also inherits the DISTINCTION rather than re-losing it: `unread` answers
+  // `false`, which is this predicate's documented fail-open direction, and a
+  // caller that needs to tell a failed read from a positively-absent ruleset must
+  // ask the probe — which is the point of the probe existing.
+  return (await listRequiredCheckContexts(owner, repo, run)).kind === 'ruleset';
 }
 
 /** Shape of the bits of a ruleset detail we inspect. */
@@ -555,23 +535,69 @@ export function createRulesetPayload(checks?: readonly string[]): Record<string,
   };
 }
 
-/** Outcome of an attempt to create the ruleset via `gh`. */
-export interface CreateRulesetOutcome {
+/**
+ * The refusal half of a ruleset-write outcome, as a DISCRIMINATED PAIR rather
+ * than a bit standing next to a union.
+ *
+ * `forbidden` IS the bit form of `forbiddenShape`, and a bit form stored beside
+ * the value it narrows is the generator this module has now been bitten by three
+ * times: {@link classifyForbidden} computed four members, a `boolean` was written
+ * down next to them, and every sentence downstream that needed the member reached
+ * for the bit and re-derived the shape from whatever string was to hand. The
+ * module already DELETED the free-function version of this reducer (`isForbidden`
+ * — see the tombstone below {@link classifyForbidden}); this is the same reducer
+ * living on as a FIELD.
+ *
+ * It cannot be deleted outright — `tests/ruleset-failure-honesty.test.ts` pins
+ * `outcome.forbidden` as the contract that a genuine permission failure is not
+ * reported as a plan limit — so it is made IMPOSSIBLE TO CONSUME LOSSILY instead:
+ * `forbidden` is a DISCRIMINANT, so `{ forbidden: true, forbiddenShape: null }`
+ * is not a representable value, and any site that branches on the bit has the
+ * non-null shape in hand on the taken branch. Reading the bit can no longer lose
+ * the member, because narrowing hands it back.
+ */
+export type ForbiddenWitness =
+  /** An authorization refusal, and WHICH one — never one without the other. */
+  | { readonly forbidden: true; readonly forbiddenShape: ForbiddenShape }
+  /** Not an authorization refusal at all. There is no shape to carry. */
+  | { readonly forbidden: false; readonly forbiddenShape: null };
+
+/**
+ * The ONE place a {@link ForbiddenShape} becomes a {@link ForbiddenWitness}, so
+ * the bit is never written by hand anywhere. Every producer classifies once, over
+ * the WHOLE `stdout + stderr` haystack, and hands the answer here.
+ */
+function forbiddenWitness(shape: ForbiddenShape | null): ForbiddenWitness {
+  return shape === null
+    ? { forbidden: false, forbiddenShape: null }
+    : { forbidden: true, forbiddenShape: shape };
+}
+
+/**
+ * Outcome of an attempt to create the ruleset via `gh`.
+ *
+ * `detail` WAS DELETED (eighth correctness review, 2026-08-30). It held
+ * `stderr || stdout` — a PROJECTION of the `stdout + stderr` haystack every
+ * classification on this outcome was computed from — and after the seventh review
+ * made {@link CreateRulesetOutcome.forbiddenShape} carry the shape, NOTHING read
+ * it. A projection with no reader is not harmless: it is the lossy copy sitting
+ * beside the real one, waiting for the next sentence that needs a string and
+ * reaches for the nearest. That is exactly how it was used before, and how it
+ * came back at the site of its own fix twice. So it is gone rather than
+ * documented.
+ */
+export type CreateRulesetOutcome = {
   /** Whether the POST succeeded (HTTP 2xx / exit 0). */
-  created: boolean;
-  /** True when the failure was an authorization problem (403 / missing admin scope). */
-  forbidden: boolean;
+  readonly created: boolean;
   /**
    * True when the 403 is GitHub reporting the FEATURE as unavailable on this repo's
    * plan (private repo on the free plan), not a permission problem. Same status code,
    * opposite remedy — see {@link isPlanLimited}.
    */
-  planLimited: boolean;
+  readonly planLimited: boolean;
   /** GitHub's own explanation, when it returned one. Null rather than a guess. */
-  reason: string | null;
-  /** Captured stderr for diagnostics (empty on success). */
-  detail: string;
-}
+  readonly reason: string | null;
+} & ForbiddenWitness;
 
 /**
  * Create the ruleset by POSTing {@link createRulesetPayload} through the user's
@@ -602,22 +628,23 @@ export async function createRequiredChecksRuleset(
   );
 
   if (result.code === 0) {
-    return { created: true, forbidden: false, planLimited: false, reason: null, detail: '' };
+    return { created: true, planLimited: false, reason: null, ...forbiddenWitness(null) };
   }
 
+  // ONE STRING, AND EVERY ANSWER ON THIS OUTCOME COMES OUT OF IT. The refusal
+  // shape, the plan limit and the quoted reason are all read off `haystack`;
+  // nothing narrows it and stores the narrowing, so no later sentence can quote a
+  // different observation from the one the decision was made on.
   const haystack = `${result.stdout}\n${result.stderr}`;
 
   return {
     created: false,
-    // ONE copy of the rule, not two. This was an inline duplicate of
-    // {@link isForbidden}'s four regexes, so widening one and not the other was a
-    // silent drift waiting to happen — and the caller now derives its SENTENCE
-    // from {@link classifyForbidden}, which must be reading the same shapes this
-    // bool was computed from.
-    forbidden: isForbidden(haystack),
     planLimited: isPlanLimited(haystack),
     reason: githubReason(haystack),
-    detail: result.stderr || result.stdout,
+    // ONE copy of the rule, not two. This was an inline duplicate of
+    // {@link classifyForbidden}'s four regexes, so widening one and not the other
+    // was a silent drift waiting to happen.
+    ...forbiddenWitness(classifyForbidden(haystack)),
   };
 }
 
@@ -730,21 +757,44 @@ export function classifyForbidden(haystack: string): ForbiddenShape | null {
   return null;
 }
 
-/**
- * Whether a `gh api` failure haystack indicates an authorization problem.
- *
- * The BIT form of {@link classifyForbidden}, defined in terms of it so the
- * decision and the explanation can never disagree about what counts.
- */
-function isForbidden(haystack: string): boolean {
-  return classifyForbidden(haystack) !== null;
-}
+// `isForbidden` — the BIT form of {@link classifyForbidden} — WAS DELETED here
+// (seventh correctness review, 2026-08-30), because it had no reader left. Every
+// site that used to call it now carries the SHAPE instead: the two ruleset
+// outcomes classify once and store `forbiddenShape`, and
+// {@link classifyCreateRefusal} asks {@link classifyForbidden} directly. Each of
+// those was the same defect — a four-member union computed, reduced to a bool,
+// and a sentence downstream that needed the member back. Keeping the reducer
+// around invites the next one.
 
-/** The default-branch ruleset that guards checks: its id + the contexts it requires. */
-export interface ExistingRequiredChecks {
-  readonly rulesetId: number;
-  readonly contexts: string[];
-}
+/**
+ * What the rulesets read ESTABLISHED — three states, not the two a
+ * `ExistingRequiredChecks | null` can express.
+ *
+ * `null` USED TO MEAN BOTH "there is no such ruleset" AND "MinSpec could not find
+ * out" (eighth correctness review, 2026-08-30). Every read failure in the probe —
+ * a non-zero `gh api`, unparseable JSON, a per-ruleset detail fetch that did not
+ * answer — folded into the same value as a completed read that found nothing, and
+ * the caller's sentence is a POSITIVE CLAIM ABOUT THE REPOSITORY:
+ *
+ *     MinSpec: acme/app has no branch ruleset requiring CI checks
+ *              (MinSpec SDD validation) on its default branch. Create one?
+ *
+ * A rate-limited or 404-ing read produced that sentence verbatim. It is the same
+ * plausible-inference-as-observation defect `probeOwnerCandidates` carries
+ * `orgsRead` to avoid, one probe over.
+ *
+ * The BEHAVIOUR is deliberately unchanged: `unread` still offers to create, for
+ * the reason this probe has always failed OPEN — a wrong "already configured"
+ * silently leaves the repository unprotected, which is the worse error. Only the
+ * SENTENCE changes, because only the sentence was making a claim.
+ */
+export type ExistingChecksProbe =
+  /** A ruleset guarding the default branch was READ: its id and required contexts. */
+  | { readonly kind: 'ruleset'; readonly rulesetId: number; readonly contexts: string[] }
+  /** The read COMPLETED and no active branch ruleset guards checks. Positively absent. */
+  | { readonly kind: 'none' }
+  /** The read did NOT complete. MinSpec established nothing about this repository. */
+  | { readonly kind: 'unread' };
 
 /** Permissive view of a ruleset PUT/GET body — only the fields we read/preserve. */
 interface RulesetFull {
@@ -775,44 +825,66 @@ function extractRequiredContexts(detail: RulesetFull): string[] {
 
 /**
  * The default-branch ruleset's id + the status-check contexts it CURRENTLY
- * requires, or `null` when no active branch ruleset guards checks. Unlike
+ * requires — or WHICH of the two negative answers applies. Unlike
  * {@link hasRequiredChecksRuleset} (a bare exists-bool), this returns WHICH
  * contexts are required, so the caller can add any missing to an existing ruleset
- * (the sealbox case). Read-only config probe (DR-050). `null` on any read/parse
- * failure ⇒ the caller treats it as "none" and offers to create.
+ * (the sealbox case). Read-only config probe (DR-050).
+ *
+ * FAILS OPEN, AND SAYS WHICH FAILURE IT WAS. Any read or parse that does not
+ * answer — the list call, its JSON, or a per-ruleset detail fetch — yields
+ * `unread`, and the caller still offers to create (a wrong "already configured"
+ * would silently leave the repository unprotected). What it may no longer do is
+ * tell the user their repository HAS no such ruleset, which is a claim only a
+ * completed read supports. See {@link ExistingChecksProbe}.
+ *
+ * A DETAIL FETCH THAT DID NOT ANSWER IS A FAILED READ, not a ruleset that does
+ * not qualify. It is remembered across the loop rather than skipped silently: a
+ * qualifying ruleset may be sitting behind exactly that unanswered fetch, so the
+ * honest end state is `unread`, never `none`.
  */
 export async function listRequiredCheckContexts(
   owner: string,
   repo: string,
   run: CommandRunner,
-): Promise<ExistingRequiredChecks | null> {
+): Promise<ExistingChecksProbe> {
   const list = await runSafe(run, 'gh', ['api', `repos/${owner}/${repo}/rulesets`]);
-  if (list.code !== 0) return null;
+  if (list.code !== 0) return { kind: 'unread' };
   let rulesets: Array<{ id?: number; target?: string; enforcement?: string }>;
   try {
     const parsed = JSON.parse(list.stdout);
-    if (!Array.isArray(parsed)) return null;
+    if (!Array.isArray(parsed)) return { kind: 'unread' };
     rulesets = parsed;
   } catch {
-    return null;
+    return { kind: 'unread' };
   }
+  // A ruleset whose DETAIL did not answer. It may or may not have qualified —
+  // which is precisely why the loop may not end on `none` once one is seen.
+  let someDetailUnread = false;
   for (const rs of rulesets) {
     if (rs.target !== 'branch') continue;
     if (rs.enforcement === 'disabled') continue;
     if (typeof rs.id !== 'number') continue;
     const detail = await runSafe(run, 'gh', ['api', `repos/${owner}/${repo}/rulesets/${rs.id}`]);
-    if (detail.code !== 0) continue;
+    if (detail.code !== 0) {
+      someDetailUnread = true;
+      continue;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(detail.stdout);
     } catch {
+      someDetailUnread = true;
       continue;
     }
     if (rulesetGuardsDefaultBranchChecks(parsed)) {
-      return { rulesetId: rs.id, contexts: extractRequiredContexts(parsed as RulesetFull) };
+      return {
+        kind: 'ruleset',
+        rulesetId: rs.id,
+        contexts: extractRequiredContexts(parsed as RulesetFull),
+      };
     }
   }
-  return null;
+  return someDetailUnread ? { kind: 'unread' } : { kind: 'none' };
 }
 
 /**
@@ -911,22 +983,50 @@ export async function probeReviewerConfigured(
   return REVIEWER_SECRETS.every((name) => set.has(name));
 }
 
-/** Outcome of adding missing contexts to an existing ruleset. */
-export interface UpdateRulesetOutcome {
+/**
+ * What stopped an update BEFORE any write was attempted — established by
+ * MinSpec's OWN read of the ruleset, not reported by GitHub.
+ *
+ * THESE TWO USED TO TRAVEL INSIDE `detail` (eighth correctness review,
+ * 2026-08-30), as the free-text strings `'could not parse the existing ruleset'`
+ * and `'ruleset has no required_status_checks rule'`. `detail` was ALSO the
+ * `stderr || stdout` projection on every other return of the same function, and
+ * the sentence downstream read neither — so two states MinSpec had positively
+ * diagnosed were rendered as "the request failed". Deleting the projection is
+ * what forced them into the open: a field doing two jobs hides the one nobody is
+ * reading behind the one everybody ignores.
+ */
+export type RulesetUpdateBlocker =
+  /** The existing ruleset's JSON did not parse, so there was nothing to merge into. */
+  | 'unparseable-ruleset'
+  /** The ruleset carries no `required_status_checks` rule to add contexts to. */
+  | 'no-required-checks-rule';
+
+/**
+ * Outcome of adding missing contexts to an existing ruleset.
+ *
+ * `detail` WAS DELETED here for the same reason as on
+ * {@link CreateRulesetOutcome} — it was `stderr || stdout`, a projection of the
+ * haystack every classification ran over, and no sentence read it. What it was
+ * ALSO smuggling now has a name of its own ({@link RulesetUpdateBlocker}).
+ */
+export type UpdateRulesetOutcome = {
   /** Whether the ruleset now requires all wanted contexts (PUT ok, or already satisfied). */
-  updated: boolean;
-  /** True on an authorization failure (403 / missing admin). */
-  forbidden: boolean;
+  readonly updated: boolean;
   /**
    * True when the 403 is a plan limitation rather than a permission problem —
    * same status code, opposite remedy. See {@link isPlanLimited}.
    */
-  planLimited: boolean;
+  readonly planLimited: boolean;
   /** GitHub's own explanation, when it returned one. Null rather than a guess. */
-  reason: string | null;
-  /** Captured diagnostics (empty on success). */
-  detail: string;
-}
+  readonly reason: string | null;
+  /**
+   * What MinSpec's OWN read established, when THAT is what stopped the update.
+   * `null` whenever the update got as far as asking GitHub — including on
+   * success, where nothing blocked it at all.
+   */
+  readonly blocker: RulesetUpdateBlocker | null;
+} & ForbiddenWitness;
 
 /**
  * Add `addContexts` to an existing ruleset's `required_status_checks` rule
@@ -946,38 +1046,52 @@ export async function updateRulesetRequiredChecks(
 ): Promise<UpdateRulesetOutcome> {
   const got = await runSafe(run, 'gh', ['api', `repos/${owner}/${repo}/rulesets/${rulesetId}`]);
   if (got.code !== 0) {
-    const gotAll = got.stdout + got.stderr;
+    // ONE STRING, as on the create path: shape, plan limit and quoted reason all
+    // read off the SAME haystack, and nothing narrows it into a field.
+    const gotAll = `${got.stdout}\n${got.stderr}`;
     return {
       updated: false,
-      forbidden: isForbidden(gotAll),
       planLimited: isPlanLimited(gotAll),
       reason: githubReason(gotAll),
-      detail: got.stderr || got.stdout,
+      blocker: null,
+      ...forbiddenWitness(classifyForbidden(gotAll)),
     };
   }
-  let detail: RulesetFull;
+  let existingRuleset: RulesetFull;
   try {
-    detail = JSON.parse(got.stdout) as RulesetFull;
+    existingRuleset = JSON.parse(got.stdout) as RulesetFull;
   } catch {
-    return { updated: false, forbidden: false, planLimited: false,
-    reason: null,
-    detail: 'could not parse the existing ruleset' };
+    return {
+      updated: false,
+      planLimited: false,
+      reason: null,
+      blocker: 'unparseable-ruleset',
+      ...forbiddenWitness(null),
+    };
   }
-  const rules = Array.isArray(detail.rules) ? detail.rules : [];
+  const rules = Array.isArray(existingRuleset.rules) ? existingRuleset.rules : [];
   const rule = rules.find((r) => r?.type === 'required_status_checks');
   if (!rule) {
-    return { updated: false, forbidden: false, planLimited: false,
-    reason: null,
-    detail: 'ruleset has no required_status_checks rule' };
+    return {
+      updated: false,
+      planLimited: false,
+      reason: null,
+      blocker: 'no-required-checks-rule',
+      ...forbiddenWitness(null),
+    };
   }
   const existing = Array.isArray(rule.parameters?.required_status_checks)
     ? rule.parameters!.required_status_checks!
     : [];
   const have = new Set(existing.map((c) => c?.context));
   const missing = addContexts.filter((c) => !have.has(c));
-  if (missing.length === 0) return { updated: true, forbidden: false, planLimited: false,
-    reason: null,
-    detail: 'already satisfied' };
+  // ALREADY SATISFIED IS A SUCCESS, not a diagnosis: the ruleset requires every
+  // wanted context, which is the whole of what `updated` claims. The
+  // `detail: 'already satisfied'` string that used to ride along here was read by
+  // nothing and said nothing `updated: true` does not.
+  if (missing.length === 0) {
+    return { updated: true, planLimited: false, reason: null, blocker: null, ...forbiddenWitness(null) };
+  }
 
   const newRules = rules.map((r) =>
     r?.type === 'required_status_checks'
@@ -991,12 +1105,12 @@ export async function updateRulesetRequiredChecks(
       : r,
   );
   const body = JSON.stringify({
-    name: detail.name,
-    target: detail.target ?? 'branch',
-    enforcement: detail.enforcement ?? 'active',
-    conditions: detail.conditions,
+    name: existingRuleset.name,
+    target: existingRuleset.target ?? 'branch',
+    enforcement: existingRuleset.enforcement ?? 'active',
+    conditions: existingRuleset.conditions,
     rules: newRules,
-    ...(detail.bypass_actors ? { bypass_actors: detail.bypass_actors } : {}),
+    ...(existingRuleset.bypass_actors ? { bypass_actors: existingRuleset.bypass_actors } : {}),
   });
   const put = await runSafe(
     run,
@@ -1004,16 +1118,16 @@ export async function updateRulesetRequiredChecks(
     ['api', '-X', 'PUT', `repos/${owner}/${repo}/rulesets/${rulesetId}`, '--input', '-'],
     body,
   );
-  if (put.code === 0) return { updated: true, forbidden: false, planLimited: false,
-    reason: null,
-    detail: '' };
-  const putAll = put.stdout + put.stderr;
+  if (put.code === 0) {
+    return { updated: true, planLimited: false, reason: null, blocker: null, ...forbiddenWitness(null) };
+  }
+  const putAll = `${put.stdout}\n${put.stderr}`;
   return {
     updated: false,
-    forbidden: isForbidden(putAll),
     planLimited: isPlanLimited(putAll),
     reason: githubReason(putAll),
-    detail: put.stderr || put.stdout,
+    blocker: null,
+    ...forbiddenWitness(classifyForbidden(putAll)),
   };
 }
 
@@ -1087,32 +1201,75 @@ export async function updateRulesetRequiredChecks(
  * pre-ranked and `candidates[0]` IS the default pick, so the caller can seed the
  * picker without re-deriving the rule (and cannot derive it differently).
  */
-export interface RepoOwnerCandidate {
+export type RepoOwnerCandidate =
   /**
-   * GitHub login the repository would be created under (`login/<name>`), or
-   * `null` for the authenticated user's OWN account.
+   * The authenticated user's OWN account.
    *
-   * `null` is not "unknown" — it is the positive instruction to omit the owner
-   * prefix, which is how `gh repo create <name>` already creates under whichever
-   * account `gh` is signed in as. MinSpec therefore never has to LEARN the
-   * personal login, and DR-050's 2026-08-25 amendment authorises exactly one new
-   * read (`/user/memberships/orgs`) and enumerates no other account endpoint. A
-   * `gh api user` read to put a name on this row would be an unenumerated widening
-   * of the boundary bought for a label; the label says "your personal account"
-   * instead. See {@link createGitHubRepo}, which turns `null` into the bare name.
-   */
-  login: string | null;
-  /** Whether this is the authenticated user's own account or one of their orgs. */
-  kind: 'user' | 'org';
-  /**
-   * Orgs only: the user's membership `role` is `admin`, i.e. they could create a
-   * repository there (and could install an App there).
+   * `login: null` is not "unknown" — it is the positive instruction to omit the
+   * owner prefix, which is how `gh repo create <name>` already creates under
+   * whichever account `gh` is signed in as. MinSpec therefore never has to LEARN
+   * the personal login, and DR-050's 2026-08-25 amendment authorises exactly one
+   * new read (`/user/memberships/orgs`) and enumerates no other account endpoint.
+   * A `gh api user` read to put a name on this row would be an unenumerated
+   * widening of the boundary bought for a label; the label says "your personal
+   * account" instead. See {@link createGitHubRepo}, which turns `null` into the
+   * bare name.
    *
-   * A PROXY for installability — NEVER evidence that MinSpec is installed in that
-   * org, which a Tier-0 extension cannot establish at all (see the HONESTY BOUND
-   * above). Absent or false means "listed and selectable, but never auto-picked".
+   * It carries NO role, because there is no membership to have one: a
+   * `{ kind: 'user'; role: … }` value is now unrepresentable rather than merely
+   * undocumented.
    */
-  canAdminister?: boolean;
+  | { readonly kind: 'user'; readonly login: null }
+  /** One of the user's organisations, carrying the membership role GitHub reported. */
+  | { readonly kind: 'org'; readonly login: string; readonly role: OrgMembershipRole };
+
+/**
+ * The membership role GitHub reported for one org — CARRIED, never reduced to a
+ * bit.
+ *
+ * `canAdminister?: boolean` WAS THE FIELD HERE (eighth correctness review,
+ * 2026-08-30), computed as `membership.role === 'admin'` and consumed by TWO
+ * different kinds of site: a DECISION (the ranking rule, which only needs the
+ * bit) and a SENTENCE that QUOTES THE ROLE —
+ *
+ *     'Organisation — your membership role is member, so creating here may be refused'
+ *
+ * — rendered for every falsy value of the bit. A membership whose `role` is
+ * absent, or is a value this code does not know, is not a membership GitHub
+ * called `member`; the picker asserted it anyway, in the one sentence whose
+ * entire job is to repeat what was read. The optional `?` compounded it: "not
+ * observed" and "observed as non-admin" were the same value.
+ *
+ * The ranking still wants a bit, and derives one AT THE POINT OF DECISION
+ * (`role === 'admin'`) rather than storing it, so no sentence can reach for the
+ * narrowed copy — there is no longer one to reach for.
+ *
+ * `admin` is a PROXY for installability — NEVER evidence that MinSpec is
+ * installed in that org, which a Tier-0 extension cannot establish at all (see
+ * the HONESTY BOUND above).
+ */
+export type OrgMembershipRole =
+  /** GitHub reported `admin`: the user can create repositories in that org. */
+  | 'admin'
+  /** GitHub reported `member`. */
+  | 'member'
+  /** GitHub reported no role, or one this code has never been taught. NOT `member`. */
+  | 'unrecognised';
+
+/**
+ * The ORG half of {@link RepoOwnerCandidate} — the only rows that HAVE a role.
+ *
+ * Named so the org read's return type is the org rows rather than "candidates,
+ * some of which might be the personal account", which is what let the ranking
+ * reach `.canAdminister` on a value that never had a membership.
+ */
+export type OrgOwnerCandidate = Extract<RepoOwnerCandidate, { kind: 'org' }>;
+
+/** The role GitHub reported, or `unrecognised` — never a guess dressed as a reading. */
+function readMembershipRole(role: unknown): OrgMembershipRole {
+  if (role === 'admin') return 'admin';
+  if (role === 'member') return 'member';
+  return 'unrecognised';
 }
 
 /**
@@ -1298,7 +1455,7 @@ export function isSafeRepoSegment(value: unknown): value is string {
  * would offer a destination that cannot work. That is a filtered ROW, not a
  * failed read, so it still answers with an array.
  */
-async function readActiveOrgMemberships(run: CommandRunner): Promise<RepoOwnerCandidate[] | null> {
+async function readActiveOrgMemberships(run: CommandRunner): Promise<OrgOwnerCandidate[] | null> {
   const res = await runSafe(run, 'gh', ['api', 'user/memberships/orgs?per_page=100']);
   if (res.code !== 0) return null;
 
@@ -1311,7 +1468,7 @@ async function readActiveOrgMemberships(run: CommandRunner): Promise<RepoOwnerCa
   if (!Array.isArray(parsed)) return null;
 
   const seen = new Set<string>();
-  const orgs: RepoOwnerCandidate[] = [];
+  const orgs: OrgOwnerCandidate[] = [];
   for (const entry of parsed) {
     const membership = entry as {
       state?: unknown;
@@ -1323,7 +1480,9 @@ async function readActiveOrgMemberships(run: CommandRunner): Promise<RepoOwnerCa
     if (!isSafeRepoSegment(login)) continue;
     if (seen.has(login)) continue;
     seen.add(login);
-    orgs.push({ login, kind: 'org', canAdminister: membership.role === 'admin' });
+    // THE ROLE, AS READ. The ranking derives its bit from this below; nothing
+    // stores the bit, so nothing downstream can quote it as if it were the role.
+    orgs.push({ kind: 'org', login, role: readMembershipRole(membership.role) });
   }
   return orgs;
 }
@@ -1369,12 +1528,15 @@ async function readActiveOrgMemberships(run: CommandRunner): Promise<RepoOwnerCa
  * amendment's bounds, which are about the org LIST.
  */
 export async function probeOwnerCandidates(run: CommandRunner): Promise<OwnerProbe> {
-  const personal: RepoOwnerCandidate = { login: null, kind: 'user' };
+  const personal: RepoOwnerCandidate = { kind: 'user', login: null };
 
   const read = await readActiveOrgMemberships(run);
   const orgs = read ?? [];
-  const adminOrgs = orgs.filter((o) => o.canAdminister);
-  const memberOrgs = orgs.filter((o) => !o.canAdminister);
+  // THE BIT IS DERIVED HERE AND NOWHERE ELSE. The ranking is a DECISION and a
+  // decision may narrow; what it may not do is write the narrowing down, because
+  // the next sentence would read it instead of the role.
+  const adminOrgs = orgs.filter((o) => o.role === 'admin');
+  const memberOrgs = orgs.filter((o) => o.role !== 'admin');
 
   // Exactly one place the user could obviously mean → default to it.
   const candidates =
@@ -1512,8 +1674,8 @@ export type CreateRepoFailure =
  * WHICH way the DESTINATION refused this create — as opposed to the create
  * failing for a reason nobody established.
  *
- * Built on {@link isForbidden}, the predicate that already existed in this module
- * and was never consulted on the create path, so no 403 was classifiable at all.
+ * Built on {@link classifyForbidden}, the predicate that already existed in this
+ * module and was never consulted on the create path, so no 403 was classifiable at all.
  * It is NOT sufficient on its own, and the measured evidence is why: of the two
  * refusals reproduced against real orgs, only the SAML one carries a status code
  * (`(HTTP 403)`), while GitHub's org-policy refusal is a bare GraphQL sentence —
@@ -1521,7 +1683,7 @@ export type CreateRepoFailure =
  *     GraphQL: acme has repository creation disabled for members (createRepository)
  *
  * — with no 403, no "forbidden" and no "must have admin" anywhere in it. Matching
- * only the shapes {@link isForbidden} knows would leave that one classified as
+ * only the shapes {@link classifyForbidden} knows would leave that one classified as
  * `unconfirmed` and retried, which is the defect these members exist to stop.
  * So the policy phrasings are named explicitly, each one a refusal GitHub states
  * in words rather than in a status line.
@@ -1532,8 +1694,8 @@ export type CreateRepoFailure =
  * otherwise swallow it.
  *
  * ...AND `permission` WAS ITSELF A BIT (seventh correctness review, 2026-08-30).
- * Its arm read `/\bnot authorized\b/ || isForbidden(haystack)`, and
- * {@link isForbidden} is the BIT FORM of {@link classifyForbidden} — a
+ * Its arm read `/\bnot authorized\b/ || isForbidden(haystack)`, and `isForbidden`
+ * was the BIT FORM of {@link classifyForbidden} (since deleted) — a
  * four-member union computed and discarded one line before the decision that
  * needed it. FIVE observations therefore arrived at the caller wearing one
  * member whose sentence prescribed an owner grant, and one of them cannot be
@@ -1626,54 +1788,98 @@ export function isCreateRefused(haystack: string): boolean {
   return classifyCreateRefusal(haystack) !== null;
 }
 
-/** Outcome of an attempt to create a repository via `gh`. */
-export interface CreateRepoResult {
+/**
+ * What `origin` was OBSERVED to say when it does NOT name the repository this
+ * create asked for.
+ *
+ * TWO OBSERVATIONS, NOT ONE (eighth correctness review, 2026-08-30). The producer
+ * computed `readOriginSlug(...)` and then threw the answer away whenever
+ * {@link originNames} said no — folding "there is no `origin`" into "`origin`
+ * names something else" — and the one sentence downstream said "MinSpec could not
+ * confirm it is this project's `origin` remote" for both. That sentence is not
+ * false, and it is the whole tell: MinSpec had READ the other repository's name
+ * one line earlier and reported the state as unestablished.
+ */
+export type UnwiredOrigin =
+  /** `git remote get-url origin` did not answer: no such remote, or the read failed. */
+  | { readonly kind: 'absent' }
+  /** An `origin` EXISTS and MinSpec cannot reduce it to a GitHub repository it can name. */
+  | { readonly kind: 'unaddressable' }
+  /** `origin` EXISTS and names a DIFFERENT repository. Read, then discarded — no longer. */
+  | { readonly kind: 'elsewhere'; readonly slug: string };
+
+/**
+ * The repository a successful create produced, AND THE EVIDENCE FOR ITS NAME.
+ *
+ * `slug?: string` WAS THE FIELD HERE (eighth correctness review, 2026-08-30), and
+ * it was three provenances collapsed into one string:
+ *
+ *     const slug = originSlug ?? parseCreatedSlug(res.stdout) ?? requested;
+ *
+ * OBSERVED on the wired remote, PARSED out of gh's own output, or MERELY
+ * REQUESTED — and `announceRepoCreated` rendered all three as
+ * `MinSpec: created ${slug}`. The third is a name MinSpec asked for and never
+ * read back, which is exactly the guess {@link parseCreatedSlug}'s own docstring
+ * refuses ("GitHub may normalise a name at creation time; echoing our own request
+ * back would then name a repository that does not exist"). The seventh review
+ * deleted that fallback from the CALLER; the producer kept doing it one level
+ * down, so the sentence was unchanged.
+ *
+ * The fix is not a fourth arm downstream: `requested` IS DELETED from the code.
+ * There is no longer a lossy value for any site to reach for, and the
+ * personal-account path (which never had a requested slug) and the org path now
+ * behave identically — as {@link CreateRepoResult} always documented they should.
+ *
+ * `remoteWired: boolean` WAS ALSO DELETED, for the same reason `forbidden` was
+ * made a discriminant: it was `originSlug !== null`, i.e. the BIT FORM of
+ * `evidence === 'origin'`, stored beside the value it narrows. It is now the
+ * discriminant itself, so the wired case and the named-by-origin case cannot
+ * drift apart — they are one state.
+ */
+export type CreatedRepo =
   /**
-   * The repository EXISTS — OBSERVED, never inferred from the exit code alone.
+   * `origin` names it. The strongest evidence there is: it is what this working
+   * tree will actually push to, and it was read from the tree, not from gh's
+   * stdout.
+   */
+  | { readonly evidence: 'origin'; readonly slug: string }
+  /**
+   * gh's own success output named it, and `origin` does NOT point at it. Both
+   * halves are needed: the name is real, and the remote wire-up is not confirmed.
+   */
+  | { readonly evidence: 'gh-output'; readonly slug: string; readonly origin: UnwiredOrigin }
+  /**
+   * NOTHING named it. The repository exists — a caller must not read this as a
+   * failed create — and MinSpec declines to say what it is called.
+   */
+  | { readonly evidence: 'none'; readonly origin: UnwiredOrigin };
+
+/**
+ * Outcome of an attempt to create a repository via `gh`.
+ *
+ * A DISCRIMINATED UNION, so a failure cannot carry a name and a success cannot
+ * carry a `failure` member. The optional-field shape it replaces made
+ * `{ ok: true, failure: 'name-taken' }` representable, which is why
+ * `describeCreateFailure` and `retryCanChangeOutcome` each had to grow an arm for
+ * `undefined` — "a success arriving at a failure toast", their own comments say,
+ * "a bug in this file". A state that cannot be built needs no arm.
+ */
+export type CreateRepoResult =
+  /** The repository EXISTS — OBSERVED, never inferred from the exit code alone. */
+  | ({ readonly ok: true } & CreatedRepo)
+  /**
+   * The create did not produce a repository we can name.
    *
-   * `true` when `gh` exited 0, and ALSO when it did not but `git remote get-url
-   * origin` afterwards names a GitHub repository: `gh repo create --source`
-   * creates through the API and then adds the remote, so a wired `origin` proves
-   * the create already happened. This is the half that used to be assumed — see
-   * {@link createGitHubRepo}'s VERIFY note.
+   * `failure` says which — see {@link CreateRepoFailure}; in particular, only
+   * `not-attempted` licenses saying the repository was not created. `error` is
+   * GitHub's or `gh`'s OWN words wherever they said anything, and our own refusal
+   * message when the call was never made. Never a guessed cause.
    */
-  ok: boolean;
-  /**
-   * `origin` was OBSERVED to name a GitHub repository after the call.
-   *
-   * The SECOND half of what `ok` used to claim on its own, kept separate because
-   * the two can genuinely disagree: a create that succeeds and then fails to add
-   * the remote leaves a repository with no `origin`, and a toast saying MinSpec
-   * "set it as this project's origin remote" would then be false.
-   */
-  remoteWired: boolean;
-  /**
-   * `owner/name` of the repository, from the strongest evidence available: the
-   * wired `origin` first, then what `gh` printed, then what we requested.
-   *
-   * Absent on failure — and ALSO absent in one success case: a create under the
-   * personal account (`owner: null`, so there is no requested slug to fall back
-   * on) whose output {@link parseCreatedSlug} did not recognise and whose remote
-   * was not wired. `ok: true` with no `slug` therefore means "the repository
-   * exists, and MinSpec cannot name it"; a caller must not read the missing slug
-   * as a failed create, because saying the create failed when it succeeded is the
-   * false claim this product cannot ship.
-   */
-  slug?: string;
-  /**
-   * Which failure this was, so the caller's REMEDY can match the reason it
-   * quotes. Absent on success. See {@link CreateRepoFailure} — in particular,
-   * only `not-attempted` licenses saying the repository was not created.
-   */
-  failure?: CreateRepoFailure;
-  /**
-   * Why it failed — GitHub's or `gh`'s OWN words wherever they said anything, and
-   * our own refusal message when the call was never made. Absent on success. Never
-   * a guessed cause: reporting a cause we have not established is the defect
-   * {@link githubReason} exists to prevent.
-   */
-  error?: string;
-}
+  | {
+      readonly ok: false;
+      readonly failure: CreateRepoFailure;
+      readonly error: string;
+    };
 
 /**
  * Pull `owner/name` out of what `gh repo create` printed on success. `null` when
@@ -1681,8 +1887,10 @@ export interface CreateRepoResult {
  *
  * Preferring what `gh` REPORTED over what we requested matters because GitHub may
  * normalise a name at creation time; echoing our own request back would then name
- * a repository that does not exist — and the caller feeds this slug straight into
- * the ruleset probe, where a wrong name is a 404 blamed on the wrong thing.
+ * a repository that does not exist. That is why there is no request-shaped
+ * fallback left in {@link createGitHubRepo} at all: an unrecognised output is
+ * reported as `evidence: 'none'` — the repository exists and MinSpec declines to
+ * name it — rather than answered with the string we typed.
  *
  * MATCHES ONLY gh's TWO DOCUMENTED SHAPES, both WHOLE-LINE, and both anchored:
  *
@@ -1742,19 +1950,44 @@ const ORIGIN_GITHUB_SLUG_RE =
   /^(?:git@|ssh:\/\/git@|https?:\/\/(?:[^@/]+@)?)github\.com[:/]([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+?)(?:\.git)?\/?$/;
 
 /**
- * Read `origin`'s URL and reduce it to `owner/name`; `null` when there is no
- * `origin`, when the read fails, or when it is not a github.com URL.
+ * WHAT the local `origin` read saw — three answers, because the sentence built on
+ * it distinguishes them.
+ *
+ * `string | null` WAS THE RETURN TYPE (eighth correctness review, 2026-08-30) and
+ * its `null` covered three observations: there is no `origin`, there IS one and
+ * its URL is not a github.com repository MinSpec can reduce to a slug, and the
+ * read itself did not answer. Two of those are a remote MinSpec LOOKED AT, and
+ * the clause downstream said only "MinSpec could not confirm it is this project's
+ * `origin` remote" — then sent the user to run `git remote -v` for a fact the
+ * read had already produced.
+ */
+type OriginReading =
+  /** A github.com `origin` whose `owner/name` both pass the segment guard. */
+  | { readonly kind: 'github'; readonly slug: string }
+  /** An `origin` EXISTS and MinSpec cannot reduce it to a GitHub repository. */
+  | { readonly kind: 'unaddressable' }
+  /** `git remote get-url origin` did not answer — no such remote, or the read failed. */
+  | { readonly kind: 'none' };
+
+/**
+ * Read `origin`'s URL and say what it is.
  *
  * ONE LOCAL git read, through the injected runner — no network, nothing new at the
  * Tier-0 boundary. It is the witness {@link createGitHubRepo} uses instead of
  * inferring both halves of its claim from an exit code.
+ *
+ * A URL that is a github.com repository but whose segments fail the charset guard
+ * is `unaddressable` rather than `github`: MinSpec read a remote and will not
+ * print what it read, which is a remote it saw — not the absence of one.
  */
-async function readOriginSlug(folder: string, run: CommandRunner): Promise<string | null> {
+async function readOrigin(folder: string, run: CommandRunner): Promise<OriginReading> {
   const res = await runSafe(run, 'git', ['-C', folder, 'remote', 'get-url', 'origin']);
-  if (res.code !== 0) return null;
+  if (res.code !== 0) return { kind: 'none' };
   const match = ORIGIN_GITHUB_SLUG_RE.exec(res.stdout.trim());
-  if (!match) return null;
-  return isSafeRepoSegment(match[1]) && isSafeRepoSegment(match[2]) ? `${match[1]}/${match[2]}` : null;
+  if (!match) return { kind: 'unaddressable' };
+  return isSafeRepoSegment(match[1]) && isSafeRepoSegment(match[2])
+    ? { kind: 'github', slug: `${match[1]}/${match[2]}` }
+    : { kind: 'unaddressable' };
 }
 
 /**
@@ -1806,10 +2039,11 @@ function isNameTaken(haystack: string): boolean {
  * That is why MinSpec never needs to read the user's login: the only account read
  * DR-050's 2026-08-25 amendment enumerates is `/user/memberships/orgs`, and a
  * `gh api user` call to learn a login MinSpec does not need would be an
- * unenumerated widening of the Tier-0 boundary. On this path there is no
- * requested slug to fall back on, so an unrecognised gh output yields
- * `{ ok: true }` with NO slug — the repository exists and we decline to name it,
- * rather than assert a name we did not read.
+ * unenumerated widening of the Tier-0 boundary. An unrecognised gh output yields
+ * `evidence: 'none'` — the repository exists and we decline to name it, rather
+ * than assert a name we did not read — and that is now true on BOTH paths, not
+ * just the personal one, because the request-shaped fallback the org path used to
+ * take is deleted (see {@link CreatedRepo}).
  *
  * VISIBILITY NEVER WIDENS SILENTLY. Anything other than an explicit `'public'`
  * yields `--private`, so a malformed or unexpected value fails CLOSED (private) —
@@ -1834,13 +2068,17 @@ function isNameTaken(haystack: string): boolean {
  * normalises that to `{ code: 127 }` — and the user was told the create failed
  * about a repository sitting on GitHub, with a remedy ("create it yourself") that
  * answers "Name already exists on this account". So ONE local read,
- * {@link readOriginSlug}, settles both halves after the call: a wired `origin`
+ * {@link readOrigin}, settles both halves after the call: a wired `origin`
  * proves the create happened AND names it, and its absence is reported as an
- * unconfirmed create rather than as a failed one.
+ * unconfirmed create rather than as a failed one. What that read says when it is
+ * NOT our repository is carried too ({@link UnwiredOrigin}) — it was previously
+ * read and dropped.
  *
  * NEVER THROWS. A non-zero exit or a spawn rejection comes back as
  * `{ ok: false, failure, error }`, quoting GitHub's own message where there is
- * one, so the caller can render a real reason and a remedy that matches it.
+ * one — and, where there is none, the WHOLE `stdout + stderr` haystack the
+ * failure was classified from rather than a `stderr || stdout` slice of it — so
+ * the caller can render a real reason and a remedy that matches it.
  */
 export async function createGitHubRepo(
   folder: string,
@@ -1851,7 +2089,6 @@ export async function createGitHubRepo(
 ): Promise<CreateRepoResult> {
   const refuse = (error: string): CreateRepoResult => ({
     ok: false,
-    remoteWired: false,
     failure: 'not-attempted',
     error,
   });
@@ -1889,10 +2126,10 @@ export async function createGitHubRepo(
   }
 
   // `owner === null` → the bare name, which `gh` creates under the signed-in
-  // account. `requested` is the fallback slug, and there is deliberately none on
-  // that path: we would have to invent the owner half.
+  // account. THERE IS NO `requested` FALLBACK SLUG ANY MORE: it was the third
+  // provenance {@link CreatedRepo} exists to have deleted — a name MinSpec asked
+  // for, never read back, and rendered as the repository GitHub made.
   const target = owner === null ? name : `${owner}/${name}`;
-  const requested = owner === null ? null : target;
   const visibilityFlag = visibility === 'public' ? '--public' : '--private';
   const res = await runSafe(run, 'gh', [
     'repo',
@@ -1914,22 +2151,43 @@ export async function createGitHubRepo(
   // stranger's repository as "created". The caller reaches this function only
   // where no remote exists, so in practice the check never rejects a real wire-up;
   // it is here because `ok` must be true only of what was actually observed.
-  const observed = await readOriginSlug(folder, run);
-  const originSlug = observed !== null && originNames(observed, owner, name) ? observed : null;
+  const observed = await readOrigin(folder, run);
+  const ours = observed.kind === 'github' && originNames(observed.slug, owner, name);
+  // WHAT `origin` SAYS, EVERY ANSWER KEPT. `elsewhere` and `unaddressable` used to
+  // be folded into `absent` here — read, then discarded one line later, while the
+  // clause downstream sent the user to look up what had just been read. See
+  // {@link UnwiredOrigin}.
+  const origin: UnwiredOrigin =
+    observed.kind === 'none'
+      ? { kind: 'absent' }
+      : observed.kind === 'unaddressable'
+        ? { kind: 'unaddressable' }
+        : { kind: 'elsewhere', slug: observed.slug };
 
-  if (res.code === 0 || originSlug !== null) {
+  if (res.code === 0 || ours) {
     // `origin` is the strongest evidence there is — it is what this working tree
-    // will actually push to — so it outranks gh's stdout, which in turn outranks
-    // the name we asked for.
-    const slug = originSlug ?? parseCreatedSlug(res.stdout) ?? requested;
-    const wired = originSlug !== null;
-    return slug ? { ok: true, remoteWired: wired, slug } : { ok: true, remoteWired: wired };
+    // will actually push to — so it outranks gh's stdout. There is no third rank:
+    // the name we asked for is not evidence of anything.
+    if (ours && observed.kind === 'github') {
+      return { ok: true, evidence: 'origin', slug: observed.slug };
+    }
+    const parsed = parseCreatedSlug(res.stdout);
+    return parsed === null
+      ? { ok: true, evidence: 'none', origin }
+      : { ok: true, evidence: 'gh-output', slug: parsed, origin };
   }
 
+  // ONE STRING, AND BOTH ANSWERS COME OUT OF IT (eighth correctness review,
+  // 2026-08-30). `error`'s fallback was `(res.stderr || res.stdout)` — a
+  // PROJECTION of this very haystack — while `failure` was classified over the
+  // whole of it. So a refusal printed on stdout with any banner at all on stderr
+  // produced `failure: 'refused-policy'` beside a quoted reason that was the
+  // banner, and the toast reads "GitHub refused ... (<banner>)". Nothing narrows
+  // the haystack now, so the reason and the classification cannot be about
+  // different observations.
   const haystack = `${res.stdout}\n${res.stderr}`;
   return {
     ok: false,
-    remoteWired: false,
     // NOT "the repository was not created": nothing here established that. The
     // create may have succeeded and the process died before wiring the remote.
     //
@@ -1945,7 +2203,7 @@ export async function createGitHubRepo(
     // permission wording swallows it and sends the user to ask an admin for
     // permission they already have.
     failure: classifyCreateFailure(haystack),
-    error: githubReason(haystack) ?? ((res.stderr || res.stdout).trim() || 'gh reported no detail'),
+    error: githubReason(haystack) ?? (haystack.trim() || 'gh reported no detail'),
   };
 }
 
