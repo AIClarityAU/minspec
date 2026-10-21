@@ -86,8 +86,8 @@ for them. Issues are fetched separately, over the network, through `fetchIssues`
 (`packages/minspec/src/lib/backlog.ts`) — a call the Backlog pane already makes with no
 consent gate in front of it. That gap is a named, open, release-blocking defect: DR-100 §P2
 records it as "open" against constitution invariant 1 and names
-[SPEC-085](../SPEC-085-backlog-fetch-consent/requirements.md) (`status: specifying`, not
-built) as the fix in flight. There is no pull-request data source in the extension at all
+[SPEC-085](../SPEC-085-backlog-fetch-consent/requirements.md) (`status: implementing`, consent
+gate not yet shipped) as the fix in flight. There is no pull-request data source in the extension at all
 today (searched `packages/minspec/src` for a PR fetch; none exists). Adding issue or PR
 nodes to a new pane now would add a second unconsented-network surface on top of one the
 project already has open as a release blocker. §Decisions needed DQ-1 addresses this
@@ -285,8 +285,8 @@ changes only the FRs that name it.
   decision, which is itself the kind of inconsistency invariant 2 (no silent gate) warns
   about when one of the two can be satisfied without the other.
 - **Option C — wait for SPEC-085 to land, then build this spec as one unit including
-  issues/PRs.** *Cost:* this spec cannot proceed to Plan until an unrelated spec, not
-  currently in progress, ships first — an open-ended wait with no date, for a feature
+  issues/PRs.** *Cost:* this spec cannot proceed to Plan until an unrelated spec, still
+  `status: implementing`, ships first — an open-ended wait with no date, for a feature
   already named Phase 2.
 
 ### DQ-2 — What renders the minimap, and what renders the expanded view?
@@ -364,7 +364,7 @@ Recorded because this spec was written without a live conversation (DR-086 §4).
   a file this spec does not own and couple the resolver's contract to a UI pane's needs.
 - **Building issue/PR support first, visualisation second.** Rejected: the issue's own
   idea is the visual map; the issue/PR data source is a separate, already-tracked gap
-  (SPEC-085) with its own consent design still open. Sequencing the map behind it (DQ-1
+  (SPEC-085, `status: implementing`) with its own consent design still open. Sequencing the map behind it (DQ-1
   Option C) was considered and rejected as an open-ended wait on unrelated work.
 - **A single webview for both the minimap and the expanded view (DQ-2 Option B).**
   Considered for visual consistency with the issue's sketch; rejected as the
