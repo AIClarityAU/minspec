@@ -83,6 +83,7 @@ function stubGh(): string {
     path.join(bin, 'gh'),
     '#!/usr/bin/env bash\n' +
       'case "$*" in\n' +
+      '  *"--label needs-human-review"*) echo 0 ;; # #2939 held-PR count: none held\n' +
       '  *"--label agent-ready-specify"*) printf "%s\\n" 77 ;;\n' +
       '  *"--label agent-ready"*)         printf "%s\\n" 42 7 ;;\n' +
       '  *"--label inbox"*)               : ;;\n' +
