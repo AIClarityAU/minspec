@@ -38,6 +38,22 @@ export const SPEC_STATUSES = [
 export type SpecStatus = (typeof SPEC_STATUSES)[number];
 
 /**
+ * Terminal statuses: past the approve-before-implement gate, so no surface offers
+ * approval for them (#440). Every SPEC_STATUSES member MUST appear in exactly one of
+ * TERMINAL_SPEC_STATUSES / ACTIVE_SPEC_STATUSES — a parity test enforces it, so a new
+ * status is decided explicitly rather than silently defaulting to "active".
+ */
+export const TERMINAL_SPEC_STATUSES = ['done', 'archived', 'superseded'] as const satisfies readonly SpecStatus[];
+
+/** Non-terminal statuses: still subject to the approval gate. */
+export const ACTIVE_SPEC_STATUSES = ['new', 'specifying', 'planning', 'implementing'] as const satisfies readonly SpecStatus[];
+
+/** True when `status` is terminal (done / archived / superseded). */
+export function isTerminalStatus(status: SpecStatus): boolean {
+  return (TERMINAL_SPEC_STATUSES as readonly SpecStatus[]).includes(status);
+}
+
+/**
  * Split-layout phase-file kinds. A spec split across sibling files carries one of these
  * in its `type:` frontmatter (one phase per file); a single-file spec carries no `type`
  * at all.

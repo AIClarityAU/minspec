@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { listSpecs, type SpecSummary } from '../lib/spec-catalog';
 import { readSpecFile, advanceSpecToImplementing } from '../lib/spec';
+import { isTerminalStatus, type SpecStatus } from '../lib/spec-vocabulary';
 import { loadConfig } from '../lib/config';
 import { validateSpec, violationsIntroducedByApproval } from '../lib/spec-validator';
 import { epicRefSet } from '../lib/epic-manager';
@@ -32,9 +33,27 @@ interface SpecNodeLike {
   readonly spec?: SpecSummary;
 }
 
+/** Already-approved specs have nothing to do; stale ones (edited since approval) still need re-approval. */
+export const APPROVE_INCLUDE = (status: ApprovalStatus): boolean => status !== 'approved';
+
+/**
+ * Is a spec offered by the approve QuickPick? Terminal specs never are (#440) — the
+ * Specs tree hides approval on them via the same `isTerminalStatus`, so the two
+ * surfaces cannot disagree.
+ */
+export function isOfferedInApprovalPicker(
+  specStatus: SpecStatus,
+  approval: ApprovalStatus,
+  include: (status: ApprovalStatus) => boolean,
+): boolean {
+  return !isTerminalStatus(specStatus) && include(approval);
+}
+
 interface PickOptions {
   /** Keep a spec in the list only when its approval status passes this. */
   include: (status: ApprovalStatus) => boolean;
+  /** Also drop terminal-lifecycle specs (done/archived/superseded) — same rule as the Specs tree. */
+  skipTerminal?: boolean;
   /** Shown when specs exist but none survive the `include` filter. */
   emptyMessage: string;
 }
@@ -63,7 +82,11 @@ async function pickSpec(
   const openId = resolveActiveSpecId();
   const items = specs
     .map((s) => ({ spec: s, status: getApprovalStatus(rootDir, s.filePath) }))
-    .filter((x) => opts.include(x.status))
+    .filter((x) =>
+      opts.skipTerminal
+        ? isOfferedInApprovalPicker(x.spec.status, x.status, opts.include)
+        : opts.include(x.status),
+    )
     .map(({ spec, status }) => ({
       label: `${spec.id}: ${spec.title}`,
       description: `${spec.tier} · ${status}${spec.id === openId ? ' · open' : ''}`,
@@ -207,7 +230,8 @@ export async function approveSpecCommand(
   const spec = await pickSpec(rootDir, node, 'Select a spec to approve for implementation', {
     // Already-approved specs have nothing to do here; stale ones (edited since
     // approval) still need re-approval, so keep them.
-    include: (status) => status !== 'approved',
+    include: APPROVE_INCLUDE,
+    skipTerminal: true,
     emptyMessage: 'MinSpec: No specs awaiting approval — all are already approved.',
   });
   if (!spec) return;

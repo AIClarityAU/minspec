@@ -3,6 +3,7 @@ import * as path from 'path';
 import { allWorkspaceRoots } from '../lib/resolve-folder';
 import type { SpecStatus } from '../lib/spec';
 import type { ApprovalStatus } from '../lib/approval';
+import { isTerminalStatus } from '../lib/spec-vocabulary';
 
 /**
  * Approval lookup, injected so the provider has no hard runtime dependency on
@@ -167,7 +168,7 @@ export class SpecNode extends vscode.TreeItem {
     const phaseLabel = spec.currentPhase ?? 'complete';
     const pct = spec.phasesTotal > 0 ? Math.round((spec.phasesDone / spec.phasesTotal) * 100) : 100;
     const meter = progressMeter(spec.phasesDone, spec.phasesTotal);
-    const terminal = spec.status === 'done' || spec.status === 'archived';
+    const terminal = isTerminalStatus(spec.status);
 
     // Approval state shows on the ALWAYS-VISIBLE left icon, not the description.
     // The description is dimmed + truncated-first, so a trailing badge vanished
@@ -458,7 +459,7 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
    */
   private getNeedsReapprovalGroup(root: string, allSpecs: SpecSummary[]): SpecGroupNode | null {
     const stale = allSpecs.filter(
-      s => s.status !== 'done' && s.status !== 'archived' && this.safeApproval(root, s) === 'stale',
+      s => !isTerminalStatus(s.status) && this.safeApproval(root, s) === 'stale',
     );
     if (stale.length === 0) return null; // FR-4: non-empty-only
     return new SpecGroupNode(
