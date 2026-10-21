@@ -35,6 +35,7 @@ import {
   loadPreferences,
   savePreferences,
   preferencesPath,
+  PRE_OPT_IN_MEMORY_KEY_PREFIX,
   type BootstrapMemory,
   type BootstrapStep,
   type BootstrapVsCode,
@@ -61,8 +62,12 @@ function listTree(dir: string, rel = ''): string[] {
  */
 function makeMemory() {
   const data = new Map<string, unknown>();
+  // Mirrors real `Memento.update`: writing `undefined` REMOVES the key, it
+  // doesn't just store an undefined value under it (#2367 relies on this to
+  // actually clear a stale pre-opt-in entry rather than leave it present).
   const update = vi.fn(async (key: string, value: unknown) => {
-    data.set(key, value);
+    if (value === undefined) data.delete(key);
+    else data.set(key, value);
   });
   const memory: BootstrapMemory = {
     get: <T,>(key: string) => data.get(key) as T | undefined,
@@ -386,6 +391,27 @@ describe('control: an opted-in folder behaves exactly as before (#2355)', () => 
     const after = makeHost(undefined, memory);
     await runBootstrap(root, after.host, [anyFolderStep()]);
     expect(after.showPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('a stale pre-opt-in entry is deleted, not merely ignored, once the folder has opted in (#2367)', async () => {
+    const { memory, update, data } = makeMemory();
+    const key = PRE_OPT_IN_MEMORY_KEY_PREFIX + root;
+    data.set(key, { skipClassifyPrompt: true });
+    // A second folder's entry must survive - this is per-folder cleanup, not a wipe.
+    const otherKey = PRE_OPT_IN_MEMORY_KEY_PREFIX + '/some/other/folder';
+    data.set(otherKey, { skipInitPrompt: true });
+
+    await runBootstrap(root, makeHost(undefined, memory).host, [anyFolderStep()]);
+
+    expect(data.has(key)).toBe(false);
+    expect(update).toHaveBeenCalledWith(key, undefined);
+    expect(data.get(otherKey)).toEqual({ skipInitPrompt: true });
+  });
+
+  it('does not write to memory at all when the folder never had a pre-opt-in entry', async () => {
+    const { memory, update } = makeMemory();
+    await runBootstrap(root, makeHost(undefined, memory).host, [anyFolderStep()]);
+    expect(update).not.toHaveBeenCalled();
   });
 });
 

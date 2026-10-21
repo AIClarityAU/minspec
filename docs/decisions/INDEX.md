@@ -802,4 +802,60 @@ MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull req
 <!-- dr-summary:DR-100 auto=2c0bfd94dcb0 -->
 The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, and asked on 2026-10-01 for the extension to be published just before the visualiser work, about a week out. The constitution puts a Marketplace publish in Phase 2 and says Phase 2 work may not displace unfinished Phase 1 work, so publishing now needs a recorded exception, with its scope and preconditions stated.
 <!-- /dr-summary:DR-100 -->
+
+## [DR-103 — New MinSpec versions reach the Marketplace through a release workflow that holds no stored credential - automatic to the pre-release channel, the founder's approval for everyone else](DR-103.md)
+
+*Status: accepted · Date: 2026-10-07*
+
+<!-- dr-summary:DR-103 auto=46c85ea2201e -->
+The founder asked on 2026-10-05 for the published MinSpec version to be kept current, and on 2026-10-07 offered to give agents the Marketplace token. This record decides how new versions reach the VS Code Marketplace from now on: through a release workflow that signs in with no stored credential, publishes to the pre-release channel by itself, and needs the founder's approval before it publishes to everyone.
+<!-- /dr-summary:DR-103 -->
+
+## [DR-104 — An ai-review pass is carried across a push that changes nothing the voters are given - the whole-panel reuse DR-097 recorded as refused, now taken on a larger measurement](DR-104.md)
+
+*Status: accepted · Date: 2026-10-09*
+
+<!-- dr-summary:DR-104 auto=554666865cf7 -->
+main requires a pull request to be up to date before it merges, and the staleness guard (#359) voids ai-review:pass on any push. An update from main is a push, so the whole four-voter panel re-runs on a change it has already passed (#1688). This record decides that a pass is carried across a push when the text the voters would be given is byte-identical and the reviewer is unchanged, and it records what that costs: on a carried commit…
+<!-- /dr-summary:DR-104 -->
+
+## [DR-105 — An agent's environment is built from a list of names, and an issue reaches one only when listed accounts wrote all of it - the trust boundary for dispatch under scripts/](DR-105.md)
+
+*Status: accepted · Date: 2026-10-10*
+
+<!-- dr-summary:DR-105 auto=7c01ad0c26da -->
+scripts/ holds the dev-time automation that starts headless agents: issue dispatch, triage, the review scripts, pull request remediation and the tooling radar. DR-008 (dispatch security) decided, for that automation, that credentials are kept out of the agent's reach, and that unattended runs are for issues whose text is trusted. Neither was held by code. This record decides how far each is now held, and names what is not.
+<!-- /dr-summary:DR-105 -->
+
+## [DR-107 — Decision records split in two - direction records the founder accepts, engineering records accepted on an AI review pass and listed in a weekly digest](DR-107.md)
+
+*Status: accepted · Date: 2026-10-17*
+
+<!-- dr-summary:DR-107 auto=24170a0e8b9b -->
+DR-086 §2.2 (the approval-or-acceptance stop class) makes every DR acceptance a founder stop. The register held 105 records by 2026-10-10, about five a week (core-tenets-review-1017), and many decide mechanism rather than direction: DR-095 (socket bind-mount), DR-094 (token lifetime), DR-077 (hook parity test), DR-097 and its successor on whole-panel vote reuse (2026-10). Under the core-tenets record core tenet 1 (make the founder's job smaller) a gate must name the error only it catches. For an engineering record that error is already…
+<!-- /dr-summary:DR-107 -->
+
+## [DR-108 — Agents may approve under a delegation the founder gives once, recorded under the bot's own name and never his - impersonation stays banned, delegation is allowed](DR-108.md)
+
+*Status: accepted · Date: 2026-10-17*
+
+<!-- dr-summary:DR-108 auto=9ca2b32c25d7 -->
+The approval-or-acceptance stop class (DR-086 §2.2) says, in code (scripts/lib/autonomy.ts, STOP_CLASSES): "The agent cannot sign these without forging the human." That is true only while the approval record has no field for *who acted, on whose delegation*. The rules-consent review (rules-consent-review-1017) separated two acts:
+<!-- /dr-summary:DR-108 -->
+
+## [DR-109 — The AI review panel scales by risk, but specs are never the low tier - specs get at least the machinery voter count, and one voter is allowed only for non-spec prose](DR-109.md)
+
+*Status: accepted · Date: 2026-10-17*
+
+<!-- dr-summary:DR-109 auto=01ee89682199 -->
+The core-tenets review proposed one voter for docs and T1, and four for machinery and T3/T4 (DR-033 §6, DR-047), to save tokens under core tenet 2. The founder accepted it with an amendment: specs are "the pointy end, where you have to get it right, as everything downstream depends on it". The recommendation also said to measure voter disagreement before landing it.
+<!-- /dr-summary:DR-109 -->
+
+## [DR-110 — The ai-review verdict carry ignores where the base put the change - text hunks lose their blob ids and start line numbers, binary files keep theirs](DR-110.md)
+
+*Status: accepted · Date: 2026-10-18*
+
+<!-- dr-summary:DR-110 auto=be6169d668c2 -->
+The verdict-carry record ("A pass is carried across a push that changes nothing the voters are given", accepted 2026-10-13, #2701; it is the record named in this one's supersedes_partial:, and bodies here do not spell local ids of that range out, per the parent-register reference gate, #2148) carries an ai-review pass across a push when the bytes the voters are given are identical, and it explicitly rejected a position-insensitive identity.
+<!-- /dr-summary:DR-110 -->
 <!-- minspec:dr-index:end -->

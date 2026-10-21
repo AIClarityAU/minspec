@@ -144,6 +144,42 @@ vi.mock('../src/lib/spec-layout', () => ({
   readShardIdFiles: vi.fn(() => []),
 }));
 
+// The shared ownership guard locates its repo root by walking up to a real `.minspec/`
+// directory, which the fake root `/tmp/ws` does not have — so the real guard would fail
+// open here and never consult the mocked validator. This stand-in keeps the guard's
+// contract (throw when the advance introduces errors) over the mocked
+// `violationsIntroducedByApproval`; the REAL guard on a real tree is driven end to end by
+// approve-command-ownership-guard.test.ts.
+vi.mock('../src/lib/ownership-advance-guard', async () => {
+  const validator = await import('../src/lib/spec-validator');
+  return {
+    assertOwnershipDeclaredForAdvance: (_file: string, parsed: never) => {
+      const introduced = (validator.violationsIntroducedByApproval as unknown as (p: unknown) => {
+        message: string;
+        fixHint: string;
+      }[])(parsed);
+      if (introduced.length > 0) {
+        throw new Error(
+          'Approval refused:\n' + introduced.map((v) => `${v.message}\n${v.fixHint}`).join('\n'),
+        );
+      }
+    },
+  };
+});
+
+// ─── The folder has opted in (SPEC-096) ─────────────────────────────────────
+// Every test here drives a command against the fake root `/tmp/ws`, and has always treated it
+// as an initialized project. The commands now check for the `.minspec/` opt-in
+// marker before they do anything. The fake root is not a real folder, and a path
+// under /tmp can be left behind by some other run, so the precondition is stated
+// here instead of being read from whatever the disk happens to hold. What these
+// commands do in a folder that has NOT opted in is pinned, on real folders, by
+// commands-opt-in-invariant.test.ts.
+vi.mock('../src/lib/opt-in', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/opt-in')>()),
+  hasOptInMarker: vi.fn(() => true),
+}));
+
 // ─── Imports ───────────────────────────────────────────────────────────────
 
 import * as vscode from 'vscode';
@@ -308,7 +344,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
   it('includes non-Error throw message in the error', async () => {
     pickFirst();
     vi.mocked(readSpecFile).mockImplementationOnce(() => {
-      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
       throw 'plain string error';
     });
 
@@ -771,6 +807,39 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
         'alt-a-toast',
       );
     });
+
+    it('a refused "Always" pref write (not opted in) still enqueues, and warns visibly (#2506)', async () => {
+      pickFirst();
+      vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
+      vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+      vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce('Always' as never);
+      // Simulates `savePreferences` refusing in a folder with no `.minspec/`
+      // (NotOptedInError, preferences.ts) — the narrow race this guard is for:
+      // `.minspec/` existed when the command started (Approve Spec refuses
+      // otherwise, SPEC-096) and was removed before this call.
+      vi.mocked(savePreferences).mockImplementationOnce(() => {
+        throw new Error('MinSpec: /tmp/ws has no .minspec/ directory (it has not opted in)');
+      });
+
+      await expect(approveSpecCommand(undefined)).resolves.toBeUndefined();
+      expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+      const successCall = vi
+        .mocked(vscode.window.showInformationMessage)
+        .mock.calls.find((c) => String(c[0]).includes('✓ Approved SPEC-001'));
+      expect(successCall).toBeTruthy();
+      // The refused write must not block the one-time enqueue the user asked for.
+      expect(enqueuePhaseAdvance).toHaveBeenCalledWith(
+        '/tmp/ws',
+        '/tmp/ws/specs/minspec/SPEC-001/spec.md',
+        'alt-a-toast',
+      );
+      // Before #2506 this reached only `console.warn`, invisible to an Alt+A
+      // toast user — the user was told nothing while the "Always" they clicked
+      // silently remembered nothing.
+      expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+        expect.stringContaining('"Always" was not remembered'),
+      );
+    });
   });
 
   it('shows error when approveSpec throws (catch path)', async () => {
@@ -799,7 +868,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
     vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce('Approve' as never);
     vi.mocked(approveSpec).mockImplementationOnce(() => {
-      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
       throw 42;
     });
 
@@ -1035,11 +1104,16 @@ describe('approveSpecCommand — target-status gate (#1317)', () => {
     expect(advanceSpecToImplementing).not.toHaveBeenCalled();
     expect(approveSpec).not.toHaveBeenCalled();
 
-    // And the human is told what, specifically, is unsatisfied.
+    // And the human is told what, specifically, is unsatisfied. #1806: the check now
+    // runs through the SHARED guard (`assertOwnershipDeclaredForAdvance`), whose thrown
+    // message bundles the violation + fixHint into one string that lands in the modal's
+    // `detail` — the short title (`call[0]`) stays generic on purpose, matching the
+    // "spec is not complete" refusal a few lines above it in approve.ts.
     const call = vi.mocked(vscode.window.showErrorMessage).mock.calls[0];
     expect(call[0]).toContain('SPEC-001');
-    expect(call[0]).toContain('implements:');
-    expect((call[1] as { modal?: boolean } | undefined)?.modal).toBe(true);
+    const options = call[1] as { modal?: boolean; detail?: string } | undefined;
+    expect(options?.modal).toBe(true);
+    expect(options?.detail).toContain('implements:');
   });
 
   it('approves normally when the advance introduces nothing', async () => {

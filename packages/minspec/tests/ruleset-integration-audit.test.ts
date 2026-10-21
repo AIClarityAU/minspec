@@ -13,6 +13,8 @@ import {
   extractObservedCheckRuns,
   auditRequiredCheckPins,
   hasIntegrationIdMismatch,
+  isShortCheckRunsPage,
+  CHECK_RUNS_PAGE_SIZE,
   type RequiredCheckPin,
   type ObservedCheckRun,
 } from '../src/lib/ruleset-integration-audit';
@@ -94,6 +96,54 @@ describe('extractObservedCheckRuns', () => {
     expect(extractObservedCheckRuns([{ check_runs: [{ name: 'build' }] }])).toEqual([
       { name: 'build', appId: undefined },
     ]);
+  });
+});
+
+// ─── isShortCheckRunsPage ────────────────────────────────────────────────────
+
+describe('isShortCheckRunsPage', () => {
+  it('flags a response where fewer runs came back than total_count says exist (#2639)', () => {
+    // GitHub's default page is 30: a commit with 45 check-runs but no per_page
+    // override reports total_count 45 while only returning 30.
+    expect(isShortCheckRunsPage({ total_count: 45, check_runs: new Array(30).fill({ name: 'x' }) })).toBe(
+      true,
+    );
+  });
+
+  it('does not flag a response where the full count came back', () => {
+    expect(isShortCheckRunsPage({ total_count: 2, check_runs: [{ name: 'a' }, { name: 'b' }] })).toBe(
+      false,
+    );
+  });
+
+  it('does not flag an empty response (0 total, 0 returned)', () => {
+    expect(isShortCheckRunsPage({ total_count: 0, check_runs: [] })).toBe(false);
+  });
+
+  it.each([
+    ['null', null],
+    ['a string', 'nope'],
+    ['check_runs missing', { total_count: 5 }],
+    ['check_runs not an array', { total_count: 5, check_runs: 'nope' }],
+    ['total_count missing, partial page', { check_runs: [{ name: 'a' }] }],
+    ['total_count not a number, partial page', { total_count: 'nope', check_runs: [{ name: 'a' }] }],
+    ['total_count negative, partial page', { total_count: -1, check_runs: [] }],
+  ])('tolerates malformed input, reporting not-short: %s', (_label, input) => {
+    expect(isShortCheckRunsPage(input)).toBe(false);
+  });
+
+  it.each([
+    ['total_count missing', undefined],
+    ['total_count not a number', 'nope'],
+    ['total_count negative', -1],
+  ])('fails closed on a FULL page whose count is unusable: %s (#2665)', (_label, total) => {
+    // A page the size of the request may have a next page; with no usable
+    // total_count there is no way to show it is whole, so it counts as short.
+    const response: Record<string, unknown> = {
+      check_runs: new Array(CHECK_RUNS_PAGE_SIZE).fill({ name: 'x' }),
+    };
+    if (total !== undefined) response.total_count = total;
+    expect(isShortCheckRunsPage(response)).toBe(true);
   });
 });
 

@@ -29,6 +29,7 @@ import {
   parseSections,
   type Section,
 } from './merge-refresh';
+import { prepareText, restoreLineEndings } from './text-io';
 import type {
   ContextManifest,
   ConstitutionSection,
@@ -323,6 +324,11 @@ function appendCandidates(
  * content. Idempotent: re-running adds nothing already present. Never overwrites
  * human content (INV-2). Injects a `## Goals` section if absent.
  *
+ * Works on the LF form of `existing`, and `merged` is given back the line endings
+ * `existing` had (SPEC-095 FR-2/FR-3), so an unchanged constitution comes back byte for
+ * byte and a caller's "did it change" comparison stays true. On a CRLF constitution no
+ * heading used to parse, so every schema heading was appended again on each run.
+ *
  * @param existing  current `.minspec/constitution.md` content
  * @param proposal  the provider's proposal (seed or LLM)
  */
@@ -330,7 +336,8 @@ export function integrateProposal(existing: string, proposal: Proposal): Integra
   const added: Candidate[] = [];
   const skipped: Candidate[] = [];
 
-  const sections = parseSections(existing && existing.trim() ? existing : '# Constitution\n');
+  const text = prepareText(existing ?? '');
+  const sections = parseSections(text.trim() ? text : '# Constitution\n');
 
   // Index sections by lowercased heading for lookup; keep array for ordering.
   const headingIndex = new Map<string, number>();
@@ -376,7 +383,7 @@ export function integrateProposal(existing: string, proposal: Proposal): Integra
   }
 
   return {
-    merged: sectionsToMarkdown(merged),
+    merged: restoreLineEndings(sectionsToMarkdown(merged), existing ?? ''),
     added,
     skipped,
   };

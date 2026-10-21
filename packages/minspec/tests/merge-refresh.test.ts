@@ -3448,6 +3448,9 @@ Fresh template log.
       // 4. The behavioural half: whatever it is handed, what lands is stamped, and
       //    a caller cannot smuggle in a different stamp.
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-newa2-writer-'));
+      // SPEC-096: the manifest lives in `.minspec/`, which `saveHashes` no longer
+      // creates. Its callers run after Initialize has; so does this fixture.
+      fs.mkdirSync(path.join(dir, '.minspec'));
       try {
         saveHashes(dir, { 'CLAUDE.md': { Overview: 'abc123' } });
         const raw = JSON.parse(

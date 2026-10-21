@@ -1,7 +1,7 @@
 ---
 id: SPEC-095
 type: requirements
-status: specifying
+status: implementing
 tier: T4
 product: minspec
 epic: EPIC-002  # Signpost Integrity - on a CRLF checkout the signpost's inputs read every decision as proposed, and the writers behind them damage or refuse the files they are derived from
@@ -30,10 +30,10 @@ implements: [packages/minspec/src/lib/text-io.ts, packages/minspec/tests/text-ro
 affects: [packages/minspec/src/lib/adr-manager.ts, packages/minspec/src/lib/epic-manager.ts, packages/minspec/src/lib/spec.ts, packages/minspec/src/lib/spec-manager.ts, packages/minspec/src/lib/spec-layout.ts, packages/minspec/src/lib/merge-refresh.ts, packages/minspec/src/lib/scaffold.ts, packages/minspec/src/lib/constitution.ts, packages/minspec/src/lib/constitution-compaction.ts, packages/minspec/src/lib/constitution-proposer.ts, packages/minspec/src/lib/constitution-nudge.ts, packages/minspec/src/lib/status-parity.ts, packages/minspec/src/lib/epic-backfill.ts, packages/minspec/src/lib/slash-commands.ts, packages/minspec/src/lib/context-injector.ts, packages/minspec/src/lib/parking-lot.ts, packages/minspec/src/lib/artifact-graph.ts, packages/minspec/src/lib/auto-bootstrap.ts, packages/minspec/src/lib/reference-checker.ts, packages/minspec/src/lib/template-engine.ts, packages/minspec/src/views/spec-panel.ts, packages/minspec/src/commands/constitution.ts, packages/minspec/src/commands/adr.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
-  tasks: pending
-  implement: pending
+  clarify: done
+  plan: done
+  tasks: done
+  implement: in-progress
 ---
 
 # SPEC-095: MinSpec reads a CRLF file the same as an LF one, and writes it back as it found it

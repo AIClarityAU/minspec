@@ -217,6 +217,107 @@ export function findSwallowedGateSignals(file: string, source: string): Swallowe
   return findings;
 }
 
+/**
+ * ── package.json scripts: the OTHER place a swallow hides (#2671) ───────────────
+ * The shell-statement model above needs a variable capture and a later control-flow
+ * read, because that is what "a decision made from a swallowed value" means on the
+ * command line. An npm script has no variables, but it has an equivalent: `&&`
+ * itself is the decision — `cmd1 && cmd2` means "only run cmd2 if cmd1 succeeded".
+ * `cmd1 || true && cmd2` defeats that decision by forcing cmd1's exit to 0
+ * regardless of its real outcome, so cmd2 (and the whole script's own exit code)
+ * can no longer distinguish "cmd1 worked" from "cmd1 failed and nobody noticed" —
+ * DR-066 clause 1's definition of load-bearing, just expressed through `&&` instead
+ * of a variable read. #2671 is exactly this:
+ * `git config core.hooksPath .githooks || true && npm run build ...` — a failed
+ * hook install was indistinguishable from a successful one to every later
+ * consumer, including a human reading a green `npm install`.
+ *
+ * Only a swallow in a NON-FINAL `&&` segment is flagged: a swallow in the last
+ * segment (`rm -f "$tmp" || true` with nothing after it) has nothing downstream to
+ * mislead — the same shape as the shell checker's own `rm -f` example. Splitting
+ * is quote-aware only to the extent of not breaking on a `&&` inside a quoted
+ * string; npm scripts are simple one-liners in practice, and under-reporting a
+ * pathological one is the safe direction (see the module doc above).
+ */
+
+/** Split a script string on top-level `&&`, leaving `&&` inside quotes alone. */
+function splitChain(script: string): string[] {
+  const parts: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  for (let i = 0; i < script.length; i += 1) {
+    const ch = script[i];
+    if (quote) {
+      current += ch;
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === '&' && script[i + 1] === '&') {
+      parts.push(current);
+      current = '';
+      i += 1;
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current);
+  return parts;
+}
+
+/**
+ * One flagged npm script: a non-final `&&` segment whose failure is swallowed.
+ * Markers apply to the WHOLE script value — package.json scripts are one-liners,
+ * so there is nowhere finer to hang a per-segment comment — read from the end of
+ * the script string exactly like the shell form (`# swallow-ok: <reason>` /
+ * `# swallow-known: #NNNN <reason>`); this works because npm hands the string to
+ * a real shell, where a trailing `#` is a genuine comment to end-of-line.
+ *
+ * @param file    repo-relative path of the package.json, echoed back on findings
+ * @param scripts the parsed `scripts` object
+ * @param source  the raw file text, used only to resolve a finding's line number
+ */
+export function findPackageJsonScriptSwallows(
+  file: string,
+  scripts: Record<string, string>,
+  source: string,
+): SwallowedSignal[] {
+  const findings: SwallowedSignal[] = [];
+
+  for (const [name, script] of Object.entries(scripts)) {
+    if (typeof script !== 'string') continue;
+    if (OK.test(script)) continue;
+    const known = KNOWN.exec(script);
+
+    const segments = splitChain(script);
+    const hasNonFinalSwallow = segments.slice(0, -1).some((segment) => SWALLOW.test(segment));
+    if (!hasNonFinalSwallow) continue;
+
+    // Best-effort line number: where this script's own key sits in the raw file.
+    // Falls back to 1 rather than throwing — a wrong line number is a UX papercut,
+    // not a false pass, and this check must never let a lookup failure suppress a
+    // real finding.
+    const marker = `"${name}"`;
+    const idx = source.indexOf(marker);
+    const line = idx === -1 ? 1 : source.slice(0, idx).split('\n').length;
+
+    findings.push({
+      file,
+      line,
+      variable: name,
+      text: script,
+      decidesAt: [line],
+      ...(known ? { knownIssue: Number(known[1]) } : {}),
+    });
+  }
+
+  return findings;
+}
+
 /** Findings with no marker. These are what fail the build. */
 export const unannotated = (findings: SwallowedSignal[]): SwallowedSignal[] =>
   findings.filter((f) => f.knownIssue === undefined);

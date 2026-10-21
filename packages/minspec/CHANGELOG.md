@@ -5,11 +5,13 @@ All notable changes to the MinSpec extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.27] - 2026-10-04
 
-Everything in this section is on `main`, and in any build made from it, but has not been published. The version in `package.json` has stayed at 0.1.26 since 2026-07-31, so a build made today is numbered 0.1.26 and already contains all of it. The release either bumps the version and renames this heading, or folds this section into 0.1.26.
+The preview release for the VS Code Marketplace, and the first version built for publishing since 0.1.16. Versions 0.1.17 to 0.1.26, below, were local builds, so an update from 0.1.16 brings everything from 0.1.17 on. This section lists what changed after 0.1.26.
 
 Numbers in parentheses, here and below, are pull requests or issues at github.com/AIClarityAU/minspec.
+
+**A `.minspec/` folder you never asked for.** A `.minspec/` folder that holds only `preferences.json`, in a project you never initialised, is left over from an old bug: declining or closing the setup toast used to create it. An empty `classifications` folder or a `sessions` folder beside that file is MinSpec's too, not yours. MinSpec reads any `.minspec/` folder as "this project is initialised", so delete that folder. The setup toast can then appear once more, and declining or closing it no longer creates anything in the project (#2355, #2365).
 
 ### Added
 
@@ -27,19 +29,45 @@ Numbers in parentheses, here and below, are pull requests or issues at github.co
 ### Changed
 
 - **The listing is marked as a preview** (`"preview": true` in the manifest).
+- **The Backlog pane contacts GitHub only when you ask.** It loads nothing until you run **MinSpec: Refresh Backlog (contacts GitHub through your gh CLI)** from the Command Palette, the pane's title bar or its "Backlog not loaded" row. It no longer fetches when it is drawn, when the window regains focus or when the pane becomes visible, and a loaded list shows when it was loaded (#2329).
+- **The README's account of the network was wrong and has been replaced.** It said that three commands run your local `gh` CLI and that nothing else contacts a network, and the 0.1.6 and 0.1.9 entries below, left as written, repeat the three-command count. In fact the Backlog pane fetched without being asked, and other features run `gh`, `git` and `claude` too. The README section "What MinSpec Does on Your Network" now lists every case (#2329, #2457).
+- **The AI pass of Backfill Epics says what it sends.** Its consent prompt, and the description of the setting that skips the prompt, used to say "the extension makes no network calls". They now say that the AI pass runs your own `claude` command, which sends the ids and titles of your specs, decisions and epics, and the first paragraph of each spec or decision that has no epic yet, to the model provider it is set up with. The README says the same, and so does the offer to backfill that MinSpec makes when several specs or decisions have no epic: accepting that offer starts the AI pass without the prompt, and its text used to say only "AI-enhanced if Claude Code is installed" (#2457, #2568).
+- The descriptions of `minspec.autoBackfillUseAi` and `minspec.advancePhaseOnApprove` say where an "Always" answer is saved: for the one project, in `.minspec/preferences.json`. They still said it was set globally and followed you across projects, which stopped being true with #1405 (#2457).
+- The listing's summary line calls MinSpec scope-adaptive: it classifies a change by how far it reaches. It used to say "Complexity-adaptive", which the tier does not measure (#2564).
 - **Licence: everything is MIT.** The bundled `@aiclarity/shared` package moved from MPL-2.0 to MIT, so the extension no longer ships a second licence (#1435).
 - MinSpec stopped writing machine-wide configuration (#1405).
 - Files MinSpec declares machine-local are removed from the git index when they were already tracked, not only added to `.gitignore`, and MinSpec says so when it does it (#1146).
 - `minspec.ruleset.requiredChecks` now defaults to empty. It used to default to `lint` and `test`, and a required check that nothing reports blocks every pull request (#1671).
+- The getting-started walkthrough explains the way of working (why ceremony follows scope, what you are asked to verify, the next-task signpost) where it used to tour the buttons (#156).
+- Setting descriptions no longer cite internal decision-record and issue numbers (#2408).
+- A new project's `.minspec/config.json` has an `autonomy` key, set to `ask`. MinSpec checks the value when it reads the file and does nothing else with it (#1795).
+- Correction to the 0.1.7 entry below: publishing never ran the supply-chain scan, only packaging did. The scan was attached to a script name (`prepublish`) that the publishing tool does not run. That script is removed, and the documented release steps now package first and publish the packaged file (#2411).
 
 ### Removed
 
 - **The ScroogeLLM install prompt is gone**, and so are the two settings and the command that existed for it: `minspec.scroogellmNudge.enabled`, `minspec.conformance.enabled`, and **MinSpec: Export Traceability for ScroogeLLM**, which wrote `.minspec/traceability-export.json`. ScroogeLLM is not published, so the prompt recommended an extension nobody could install. MinSpec also no longer looks in your home directory and at your installed extensions for other AI tools, which it did only to word that prompt. If either setting is in your `settings.json` it now does nothing and can be deleted (#2205).
+- **Two screenshots that showed an older interface are gone from the listing**: the sidebar (used twice) and the Decisions pane. They showed a pane titled MINSPEC with lanes Active, Done and Archived, a status bar item that no longer exists, and a title-bar glitch fixed in 0.1.11. Their image files are no longer shipped, and neither are two the page had already stopped using, one of them a toast reading "Classification engine coming in Phase 2". The sidebar and Decisions sections have no picture until new ones are taken (#2394).
 
 ### Fixed
 
+- **A checkout with Windows line endings (CRLF) now works like any other.** Accept Decision no longer puts a second frontmatter block in front of a decision record, Refresh Harness Files no longer appends every section of `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, the constitution and the labels file a second time, and Approve Spec no longer fails with "No frontmatter block". The decision and epic lists, the Next Task signpost and the status checks read a CRLF file the same as its LF copy. A file MinSpec edits keeps its own line endings, so git sees only the lines that changed; files MinSpec creates are written LF, and a hook or script under MinSpec's LF pin that a CRLF checkout broke runs again after one Refresh (#2397).
 - **The presence heartbeat no longer creates `.minspec/` in a folder that never opted in.** It used to create `.minspec/sessions/` in any folder you opened (#2357).
+- **Only Initialize creates `.minspec/`.** Refresh Harness Files no longer sets up a folder that was never initialized; it says so and points you at **MinSpec: Initialize SDD Structure**. Declare Session Scope, Link Code to Spec Requirement, Propose Constitution (draft) and Approve Spec for Implementation used to create `.minspec/` as a side effect in such a folder; they now ask for Initialize first, and write nothing. Park Topic can still create a GitHub issue there, but no longer writes a local parking lot: if the issue cannot be created it says the topic was not saved and hands your text back in an untitled editor (#2364).
+- Declining or closing a setup toast no longer creates `.minspec/preferences.json` in a project that was never initialised. The answer is kept in VS Code's own per-workspace storage (#2355).
+- The `MINSPEC_SESSION_ID` terminal variable is set only in an initialised project. It used to be added to the terminals of every window (#2356).
+- The decision index (`docs/decisions/INDEX.md`) is no longer rewritten in a project that was never initialised when a file in the decisions folder changes (#2461).
+- Choosing "Always" on the AI-backfill, push or phase-advance prompt now warns when the choice could not be saved, as in a project that was never initialised. It used to look saved, and the question came back (#2506).
+- **Windows:** the hooks, scripts and workflows Initialize writes are pinned to LF line endings by a `.gitattributes` block, which Initialize and Refresh Harness Files add. With `core.autocrlf` set to `true`, a later checkout used to turn the hooks into CRLF files that no shell could run, and every commit failed (#2398).
+- **Windows:** the pre-commit hook no longer takes a Python that is on the PATH for a Python that runs. It starts `python3`, `python` and `py -3` in turn and falls back to its shell checks when none starts, so the Microsoft Store placeholder `python3.exe` no longer blocks a commit (#2400).
+- **Windows:** Accept Decision no longer takes a decision record that is already committed for a new one. An uncommitted edit to it could be committed first, under a `chore(adr): add ...` message, ahead of the acceptance (#2402).
+- **Windows:** Tidy Checkout's check for another window on the same checkout compares folders by their real path, so two spellings of one folder (drive-letter case, short names) no longer read as two folders (#2403).
+- The four Windows fixes above and the CRLF fix were tested on Linux, by imitating Windows. MinSpec's automated tests do not run on Windows.
+- A failed GitHub fetch is reported as a failure, with the reason. The Backlog pane, Score Issue (WSJF) and Quick Triage Inbox Issue used to report no issues when `gh` was missing, signed out, offline or rate limited, and a failure that only mentioned "auth" was reported as not signed in (#2247, #2459).
+- An open issue labelled `done` is listed in the Backlog pane, under "Done, still open". It used to be left out of the pane (#2460).
+- The Next Task signpost no longer asks you to approve a spec that is already `done` and that no approve command will act on (#2370).
+- Frontmatter keys MinSpec does not model (`implements:`, `depends_on:` and the like) survive when it rewrites a spec. Ticking a task in the spec panel and Migrate Spec Layout used to drop them (#2324).
 - Refresh Harness Files no longer deletes content you wrote yourself, and no longer renames the project after the folder it happens to run in (#1755, #1536).
+- One Refresh Harness Files is enough to carry a new draft entry of the constitution into `.cursorrules`. It used to take a second Refresh (#2520).
 - Approving a spec is refused when the spec cannot satisfy the status the approval would give it, and finished or superseded specs are no longer offered for approval (#1364, #2117).
 - "Always" on the classify prompt is honoured. It used to be written to a store the prompt never read (#2096).
 - A frontmatter key written as a block list (for example `implements:` followed by `- path` lines) is read in full; only its first item used to be read. Status writes touch only the top-level `status:` key (#1976, #2282).
@@ -52,9 +80,13 @@ Numbers in parentheses, here and below, are pull requests or issues at github.co
 - The generated harness passes the checks it generates, and the secret check prints the finding it tells you to review (#1539, #1551).
 - A second toast repeating the approval message is gone (#1701).
 
+### Security
+
+- **The AI pass of Backfill Epics can no longer be made to read your files.** It hands titles and first paragraphs from your specs and decisions to your own `claude` command, and it used to start that command with its tools switched on, in whatever folder the editor was running in. Text in a spec or decision could make it read a file, either by asking the model to or directly, because Claude Code attaches any file written as `@path` in a prompt. The command is now started with every tool switched off, no MCP servers, no file references (an `@` in a spec or decision is sent as `(at)`) and an empty temporary folder. An older Claude Code that does not know these switches is reported as such, and the heuristic result is used (#2570).
+
 ## [0.1.26] - 2026-07-31
 
-Versions 0.1.17 to 0.1.26 were built and installed locally and were never published. 0.1.16 is the newest version the VS Code Marketplace holds.
+Versions 0.1.17 to 0.1.26 were built and installed locally and were never published. The VS Code Marketplace held nothing newer than 0.1.16 while they were built.
 
 ### Added
 
@@ -213,7 +245,7 @@ The largest step in this list: seven weeks of work, built and installed locally.
 
 ## [0.1.16] - 2026-05-29
 
-The newest version the VS Code Marketplace holds. The listing was later unpublished.
+The newest version the VS Code Marketplace held when the listing was unpublished.
 
 ### Changed
 
