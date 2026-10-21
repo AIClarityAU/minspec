@@ -1275,8 +1275,20 @@ export async function initCommand(
     });
   }
   // Hooks init staged into the index as 100755 (#2399) — same notice refresh shows.
-  for (const notice of indexNoticesOnInit) {
-    await surfaceManagedRegionWarning(folder, notice);
+  // A first init stages every executable template at once, so ONE notice names them
+  // all — a dialog per file would be a 7-9 dismissal storm on the onboarding path.
+  if (indexNoticesOnInit.length === 1) {
+    await surfaceManagedRegionWarning(folder, indexNoticesOnInit[0]);
+  } else if (indexNoticesOnInit.length > 1) {
+    const paths = indexNoticesOnInit.map((n) => n.outputPath);
+    await surfaceManagedRegionWarning(folder, {
+      outputPath: paths[0],
+      outputPaths: paths,
+      message:
+        `${paths.length} hooks/scripts were recorded in the git index as executable (100755) ` +
+        `so they run on every checkout: ${paths.join(', ')}. Commit them with the rest of the scaffold.`,
+      kind: 'exec-bit-recorded',
+    });
   }
   if (isFirstInit) {
     await offerCoverageThresholdPrompt(folder);

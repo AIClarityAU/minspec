@@ -139,6 +139,23 @@ describe('initCommand() — write-failure surfacing (#153)', () => {
     const shown = vi.mocked(vscode.window.showInformationMessage).mock.calls.map((c) => String(c[0]));
     expect(shown.some((m) => m.includes('STAGED-NOTICE-TEXT'))).toBe(true);
   });
+
+  it('coalesces several staged-hook notices into ONE dialog naming every path', async () => {
+    vi.mocked(generateHarnessFiles).mockImplementationOnce((_dir, notices) => {
+      for (const p of ['.minspec/hooks/pre-commit', '.minspec/hooks/commit-msg', 'scripts/validate.py']) {
+        notices?.push({ outputPath: p, message: `per-file ${p}`, kind: 'exec-bit-recorded' });
+      }
+      return [];
+    });
+
+    await initCommand('/tmp/ws');
+
+    const shown = vi.mocked(vscode.window.showInformationMessage).mock.calls.map((c) => String(c[0]));
+    const combined = shown.filter((m) => m.includes('executable (100755)'));
+    expect(combined).toHaveLength(1);
+    for (const p of ['pre-commit', 'commit-msg', 'validate.py']) expect(combined[0]).toContain(p);
+    expect(shown.some((m) => m.includes('per-file'))).toBe(false);
+  });
 });
 
 describe('initRefreshCommand() — write-failure surfacing (#153)', () => {
