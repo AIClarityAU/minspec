@@ -24,9 +24,13 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
+import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
 
 // Module scope, never a hook: vitest resolves timeouts before beforeAll runs (#1399).
 useShellTimeout();
+// Module scope: nothing in this file may depend on drain or quota knobs in the surrounding
+// environment, so it runs with hostile ones planted there (#2574, helpers/drain-env.ts).
+useHostileAmbientDrainKnobs();
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const DRAIN_SRC = path.join(REPO_ROOT, 'scripts', 'drain-inbox.sh');
@@ -62,7 +66,44 @@ beforeEach(() => {
   fs.writeFileSync(gh, '#!/usr/bin/env bash\nprintf "101\\n102\\n"\nexit 0\n', { mode: 0o755 });
 });
 
-afterEach(() => {
+// Background drivers the script under test announced ("... in background (PID n ...").
+// A one-shot run ALSO forks its cycle into a disowned subshell and returns at once, so
+// `execFileSync` coming back says nothing about whether that subshell is still writing
+// its lock and log into `ws`. Removing `ws` under it is what flaked with ENOTEMPTY (#2820).
+let spawned: number[] = [];
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Wait for each announced driver to exit on its own; a driver still running at the
+// deadline is killed (a hung one must not leak past the test). The rm below is NOT
+// retried: retrying would hide a leak, and this makes sure there is none to hide.
+async function reapSpawned(): Promise<void> {
+  const pids = spawned;
+  spawned = [];
+  const deadline = Date.now() + 20_000;
+  for (const pid of pids) {
+    while (alive(pid) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    if (alive(pid)) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        /* exited between the check and the kill */
+      }
+    }
+  }
+}
+
+afterEach(async () => {
+  await reapSpawned();
   fs.rmSync(ws, { recursive: true, force: true });
 });
 
@@ -72,12 +113,18 @@ interface Run {
   stderr: string;
 }
 
-function run(args: string[]): Run {
+function trackBackgroundDriver(stdout: string): void {
+  const m = /in background \(PID (\d+)/.exec(stdout);
+  if (m) spawned.push(Number(m[1]));
+}
+
+function run(args: string[], env: NodeJS.ProcessEnv = {}): Run {
   try {
     const stdout = execFileSync('bash', [drain, ...args], {
       encoding: 'utf-8',
-      env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
+      env: { ...drainBaseEnv(), PATH: `${binDir}:${process.env.PATH}`, ...env },
     });
+    trackBackgroundDriver(stdout);
     return { status: 0, stdout, stderr: '' };
   } catch (e: unknown) {
     const err = e as { status?: number; stdout?: string; stderr?: string };
@@ -128,7 +175,26 @@ describe('#1591 — every argument is parsed, not just $1', () => {
     // be able to override an earlier one), not as evidence the bug is fixed. The two
     // cases that actually go red pre-fix are the #1591 case and the second-position
     // unknown flag.
-    const r = run(['--continuous', '--once']);
+    //
+    // This is the ONE case in this file that reaches a real --once cycle (every other
+    // case here exits before run_cycle). Left on the script's defaults it takes the
+    // LIVE drain's own lock/log/run-dir/quota-file — harmless in CI (nothing else is
+    // there), but on a machine running a real drain it either stops at the lock (if
+    // one is held) or writes into that drain's log and run dir (#2012, #2583). Give
+    // it its own of each so the result never depends on what else is running.
+    const quota = path.join(ws, 'quota.json');
+    fs.writeFileSync(quota, JSON.stringify({
+      used_percentage: 1,
+      resets_at: Math.floor(Date.now() / 1000) + 3600,
+      observed_at: Math.floor(Date.now() / 1000),
+    }));
+    const r = run(['--continuous', '--once'], {
+      MINSPEC_DRAIN_LOCK: path.join(ws, 'lock'),
+      MINSPEC_DRAIN_LOG: path.join(ws, 'log'),
+      MINSPEC_DRAIN_RUN_DIR: '',
+      MINSPEC_DRAIN_SELF_REFRESH: '0',
+      MINSPEC_QUOTA_FILE: quota,
+    });
     expect(r.status).toBe(0);
     expect(r.stdout).not.toMatch(/Continuous drain in background/);
   });

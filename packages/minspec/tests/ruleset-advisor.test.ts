@@ -54,6 +54,7 @@ import {
   createRequiredChecksRuleset,
   hasRequiredChecksRuleset,
   isGhReady,
+  probeGhAvailability,
   resolveCheckContexts,
   detectCodeChecks,
   resolveTieredRequiredChecks,
@@ -150,6 +151,34 @@ describe('isGhReady()', () => {
       return undefined;
     });
     expect(await isGhReady(run)).toBe(true);
+  });
+});
+
+describe('probeGhAvailability() — split installed/authenticated (#1889)', () => {
+  it('{ installed: false, authenticated: false } when gh cannot spawn, short-circuiting before auth status', async () => {
+    const { run, calls } = makeRunner((_c, a) =>
+      a[0] === '--version' ? { throws: 'ENOENT' } : ok(''),
+    );
+    expect(await probeGhAvailability(run)).toEqual({ installed: false, authenticated: false });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('{ installed: true, authenticated: false } when gh is installed but has no usable token', async () => {
+    const { run } = makeRunner((_c, a) => {
+      if (a[0] === '--version') return ok('gh version 2.50.0');
+      if (a[0] === 'auth') return fail(1, 'not logged in');
+      return undefined;
+    });
+    expect(await probeGhAvailability(run)).toEqual({ installed: true, authenticated: false });
+  });
+
+  it('{ installed: true, authenticated: true } when both probes succeed', async () => {
+    const { run } = makeRunner((_c, a) => {
+      if (a[0] === '--version') return ok('gh version 2.50.0');
+      if (a[0] === 'auth') return ok('Logged in to github.com');
+      return undefined;
+    });
+    expect(await probeGhAvailability(run)).toEqual({ installed: true, authenticated: true });
   });
 });
 
@@ -561,6 +590,37 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
 
     expect(calls).toHaveLength(1);
     expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('CASE 1c (#1889): gh ABSENT → the toast reports the LIMIT ("could not check"), never an imperative claim about the repo', async () => {
+    const { run } = makeRunner((_c, a) => (a[0] === '--version' ? { throws: 'ENOENT' } : ok('')));
+    showInfo.mockResolvedValueOnce(undefined);
+
+    await offerRulesetAdvisory('/ws', deps(run));
+
+    const [message] = showInfo.mock.calls[0] as [string, ...unknown[]];
+    expect(message).toContain('could not check');
+    expect(message).not.toMatch(/^MinSpec: protect your default branch/);
+  });
+
+  it('CASE 1d (#1889): gh installed but NOT authenticated → "could not check" toast, never an imperative claim, zero `gh api`, no POST/create prompt', async () => {
+    const { run, calls } = makeRunner((_c, a) => {
+      if (a[0] === '--version') return ok('gh 2');
+      if (a[0] === 'auth') return fail(1, 'not logged in');
+      return undefined;
+    });
+    showInfo.mockResolvedValueOnce(undefined);
+
+    await offerRulesetAdvisory('/ws', deps(run));
+
+    expect(calls.some((c) => c.args[0] === 'api')).toBe(false);
+    const [message] = showInfo.mock.calls[0] as [string, ...unknown[]];
+    expect(message).toContain('could not check');
+    expect(message).toContain('not authenticated');
+    expect(message).not.toMatch(/^MinSpec: protect your default branch/);
+    // Never the create-offer toast (which carries "Create ruleset" as an action,
+    // not asserted here directly, but there must be exactly one toast total).
+    expect(showInfo).toHaveBeenCalledTimes(1);
   });
 
   it('AUTO-PROBE: the read-only rulesets GET fires on init WITHOUT any consent toast', async () => {

@@ -46,7 +46,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import * as vscode from 'vscode';
 
 // ─── Hoisted mutable state the mock factories read ───────────────────────────
 // `vi.mock` factories are hoisted above the imports, so anything they close over

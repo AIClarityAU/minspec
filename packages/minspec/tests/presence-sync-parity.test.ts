@@ -128,7 +128,7 @@ const FIXTURES: Fixture[] = [
   },
   {
     name: 'corrupt record ⇒ occupied (cannot attribute), even with a live peer elsewhere',
-    records: (r) => [baseRecord({ worktreeRoot: '/other' }), { __corrupt: '{ not json' }],
+    records: (_r) => [baseRecord({ worktreeRoot: '/other' }), { __corrupt: '{ not json' }],
     candidate: (r) => r,
     expected: true,
   },

@@ -4,7 +4,7 @@
 # Scans the repo with perplexityai/bumblebee and fails the build if any
 # bundled package matches an entry in the local exposure catalog.
 #
-# Wired into packages/<ext>/package.json as a "prepackage" / "prepublish" hook.
+# Wired into packages/<ext>/package.json as the "prepackage" lifecycle script; the gate runs via `npm run package` — not through `vsce package`/`vsce publish` directly, nor via `prepublish` (vsce runs only `vscode:prepublish`).
 # Bypass with SKIP_SUPPLY_CHAIN_CHECK=1 (use only for known-good emergency cuts).
 #
 # Catalogs live in ~/.cache/bumblebee/catalogs/*.json. Empty catalog dir =

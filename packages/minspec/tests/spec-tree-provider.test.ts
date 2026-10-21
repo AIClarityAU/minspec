@@ -38,7 +38,6 @@ vi.mock('vscode', () => ({
 import type { ApprovalLookupFn } from '../src/views/spec-tree-provider';
 import type { SpecSummary } from '../src/lib/spec-manager';
 import { SpecTreeProvider, SpecGroupNode, SpecNode, RollupNode, STATUS_GROUPS, compressSpecId, stripProductPrefix } from '../src/views/spec-tree-provider';
-import { listSpecs } from '../src/lib/spec-catalog';
 import { EpicGroupNode } from '../src/views/epic-grouping';
 import { TreeExpansionMemory } from '../src/views/tree-expansion-memory';
 import type { EpicSummary } from '../src/lib/epic-manager';

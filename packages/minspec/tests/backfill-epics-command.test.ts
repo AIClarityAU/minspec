@@ -195,7 +195,6 @@ describe('backfillEpicsCommand()', () => {
   // (4) choice === 'AI-enhanced', proposeAI returns a proposal → uses it
   it('uses AI proposal when choice is AI-enhanced and proposeAI returns a result', async () => {
     const aiProposal = makeProposal(3, 4);
-    aiProposal.source; // just accessing to confirm shape
     vi.mocked(isClaudeAvailable).mockResolvedValue(true);
     vi.mocked(proposeAI).mockResolvedValue({ proposal: { ...aiProposal, source: 'ai' } as BackfillProposal });
     // First call: AI/heuristic choice

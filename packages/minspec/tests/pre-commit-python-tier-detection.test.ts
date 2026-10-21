@@ -133,8 +133,8 @@ describe('pre-commit Python tier: PATH presence is not proof of execution (#2400
     () => {
       // `docs/domain/*.md` missing `type: domain` is validate.py's own check —
       // the shell gate (the fall-through target) only inspects `specs/*.md` and
-      // `docs/decisions/DR-*.md`, so a refusal here can only have come from the
-      // python tier actually running and finding a real violation.
+      // `docs/decisions/*.md` (#2280), so a refusal here can only have come from
+      // the python tier actually running and finding a real violation.
       write('docs/domain/glossary.md', '---\nstatus: draft\n---\n# terms\n');
       git('add', 'docs/domain/glossary.md');
 
