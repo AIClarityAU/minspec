@@ -219,8 +219,12 @@ if [[ -n "$(shadow_key)" ]] && ! shadow_key_wellformed "$(shadow_key)"; then
   note "the configured z.ai key is not well-formed (quote, newline or control character) — skipped."
   exit 0
 fi
+if [[ -z "${MINSPEC_ZAI_API_KEY:-}${MINSPEC_SHADOW_TRIAGE_KEY:-}" && "$(shadow_key_file_problem)" == "insecure" ]]; then
+  note "refusing the z.ai key file $(shadow_key_file): group/world-readable — chmod 600 it. Skipped."
+  exit 0
+fi
 if [[ -z "$(shadow_key)" ]]; then
-  note "no z.ai key configured (MINSPEC_ZAI_API_KEY) — skipped; real triage is unaffected."
+  note "no z.ai key configured (MINSPEC_ZAI_API_KEY, or a mode-600 file at $(shadow_key_file)) — skipped; real triage is unaffected."
   exit 0
 fi
 
