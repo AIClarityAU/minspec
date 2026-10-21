@@ -1820,6 +1820,9 @@ DR_ID_RE = re.compile(r"^DR-\\d+$")
 # A DR is any .md under the decisions dir except the register's own listing
 # (no id: of its own) and a conventional README (prose, not a record) — #1908.
 DR_EXEMPT_FILENAMES = {"INDEX.md", "README.md"}
+# The section the founder reads to accept a DR. A hand-written DR skipped it because
+# only the generator template carried it (#2921). WARN until the corpus is backfilled.
+DR_PLAIN_TERMS_RE = re.compile(r"^#{1,6}[ \\t]+In plain terms\\b", re.IGNORECASE | re.MULTILINE)
 
 
 def clean_frontmatter_value(raw):
@@ -2225,6 +2228,11 @@ def main():
                     "FAIL " + norm + ": invalid \`id: DR-NNN\` frontmatter (got \`" + dr_id + "\`)\\n"
                 )
                 errors += 1
+
+            if not DR_PLAIN_TERMS_RE.search(FM_RE.sub("", content, count=1)):
+                sys.stderr.write(
+                    "WARN " + norm + ": decision record lacks a \`## In plain terms\` section (#2921)\\n"
+                )
 
         if is_domain:
             if clean_frontmatter_value(fm.get("type", "")) != "domain":

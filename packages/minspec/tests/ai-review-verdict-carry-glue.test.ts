@@ -366,7 +366,7 @@ function recordedRound(dir: string, base: string, head: string, o: { reviewedSha
   const check = GUARD.decideReviewCheck(PASS, false);
   const rec = GUARD.renderRoundRecord({
     label: PASS,
-    inputHash: GUARD.patchFingerprint(input),
+    inputHash: GUARD.reviewInputFingerprint(input),
     panelKey: GUARD.reviewPanelKey({ lsTree, coverage: '' }),
     reviewedSha: o.reviewedSha ?? head,
   });
