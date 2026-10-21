@@ -594,8 +594,10 @@ Named, not numbered, and each independently shippable:
 - **Root-cause framing:** [DR-003](../../../docs/decisions/DR-003.md) (root-cause-driven
   development) — the false warning was first "fixed" by skipping the check for typed files
   (#93), which removed the symptom and the gate together. This spec restores the gate.
-- **Spec id.** This spec's id is one above the highest spec number visible in this
-  checkout's base branch and locally-known remote branches (number 086, on an unmerged
-  branch). Open pull requests newer than those refs are invisible offline, so the id is a
-  best reading, not a guarantee — at least twenty unmerged branches currently all claim
-  number 080.
+- **Spec id.** SPEC-087 is not "highest + 1": the spec corpus is sparse (this base
+  carries 095, 096, 130, 134-136, 139, 140 and 211, with 088-094 unused). 087 is the
+  first free number above 086 on this base, and no locally-known branch or ref carries
+  another `SPEC-087`. Open pull requests newer than those refs are invisible offline, so
+  the id is a best reading, not a guarantee — at least twenty unmerged branches currently
+  all claim number 080. Take the final id from the collision gate (`Next free id`), and
+  renumber if it reports a clash.
