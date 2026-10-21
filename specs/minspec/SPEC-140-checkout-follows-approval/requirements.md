@@ -65,8 +65,9 @@ recovery copies the written files into a throwaway worktree and pushes from ther
 copies. The comment that says a later `git pull --rebase` drops them "by patch-id"
 (`packages/minspec/src/lib/approve-push.ts:20-26`) describes the older commit-on-main path;
 under recovery no local commit exists, so nothing drops them. The same seam serves Approve
-Spec, Accept ADR and epic approval (`commands/approve.ts`, `commands/adr.ts`,
-`commands/epic.ts` all route through `commit-on-approve.ts`).
+Spec, Accept ADR and Accept Epic (`commands/approve.ts`, `commands/adr.ts`,
+`commands/epic.ts` all route through `commit-on-approve.ts`). Accept Epic writes no
+approval sidecar, so it is out of this spec's scope (see Limitations).
 
 **Why nothing clears them.** The drain's G2 (content-clean) skips any dirty checkout, and
 its G3 (presence) skips any occupied one (DR-065 section 2). Your editor writes a live
@@ -139,10 +140,12 @@ the index and FR-8 checks every path before staging any.
   serves both the pre-merge overlay (FR-20) and the follow pass (FR-6); there is no second
   record for the same state.
 - **The approval landed**: the checkout's `HEAD` holds the approval's sidecar with the
-  same `specHash` the record carries. `specHash` is the hash field of every approval
-  sidecar (SPEC-038), whatever was approved: a spec, an accepted decision record and an
-  epic approval all write it under the same name, so this test and FR-6's trigger read the
-  same field for all three.
+  same `specHash` the record carries. `specHash` is the hash field of the approval
+  sidecar that Approve Spec (`lib/approval.ts:597`) and Accept ADR (`commands/adr.ts:289`)
+  write under the same name, so this test and FR-6's trigger read the same field for both.
+  Accept Epic (`commands/epic.ts:17-52`) writes no sidecar and no `specHash`; it flips the
+  epic's status and commits the epic file and its index, so "the approval landed" is not
+  defined for it and epics are out of scope (Limitations).
 
 ## Requirements
 
@@ -168,8 +171,8 @@ the index and FR-8 checks every path before staging any.
   editor window, at the next successful approval push through that path. It is never shown
   on a timer.
 - **FR-4 - Record what the push wrote.** After every successful approval push through
-  the protected-branch recovery arm of `commit-on-approve.ts` (Approve Spec, Accept ADR,
-  epic approval), the extension records a pending approval: each written path with its
+  the protected-branch recovery arm of `commit-on-approve.ts` (Approve Spec, Accept ADR),
+  the extension records a pending approval: each written path with its
   object id and mode, the approval commit, the base branch the recovery pushed against,
   the branch it was pushed to, the sidecar's path and contents (its `specHash` among
   them, the hash FR-6 and FR-21 compare), and the time; plus, when
@@ -400,6 +403,11 @@ All on real git fixtures (a bare origin and a clone), not stubbed git.
   names `INDEX.md`. When FR-19 has already retired the leftover index (its bytes matched
   the pushed blob), there is no leftover and this case does not arise. The one clean-up
   command stays the fallback otherwise; issue 2021 is the producer-side fix.
+- **Accept Epic is not covered.** It writes no approval sidecar, so there is no
+  `specHash` for FR-4 to record or for the landed test to compare, and a leftover epic file
+  from a protected-branch accept is not followed. Covering it needs the producer to write a
+  sidecar (new behaviour in `commands/epic.ts`) or a different landed test; neither is
+  specified here. Tracked as issue 2993 (Accept Epic writes no approval sidecar).
 - **Two approvals in flight.** Leftovers from an approval that has not merged differ from
   main, so a merged approval's follow waits until both have landed.
 - **The move brings in all of main, code included.** The stale-build warning (SPEC-060) can
