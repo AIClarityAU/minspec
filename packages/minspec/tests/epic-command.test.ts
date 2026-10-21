@@ -227,6 +227,29 @@ describe('acceptEpicCommand()', () => {
     );
   });
 
+  it('gates the approver even when folderForFile returns undefined (#2993)', async () => {
+    const node = {
+      epic: {
+        id: 'EPIC-005',
+        slug: 'gate',
+        title: 'Gate',
+        status: 'proposed' as const,
+        order: 5,
+        filePath: '/tmp/ws/docs/epics/EPIC-005.md',
+      },
+    };
+    vi.mocked(folderForFile).mockReturnValue(undefined);
+    vi.mocked(assertHumanApprover).mockImplementationOnce(() => {
+      throw new Error('denied');
+    });
+
+    await acceptEpicCommand(node);
+
+    expect(assertHumanApprover).toHaveBeenCalled();
+    expect(setEpicStatus).not.toHaveBeenCalled();
+    expect(vscode.window.showErrorMessage).toHaveBeenCalled();
+  });
+
   it('success path: swallows writeEpicIndex throws (best-effort index regen)', async () => {
     const node = {
       epic: {

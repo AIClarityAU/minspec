@@ -37,19 +37,17 @@ export async function acceptEpicCommand(node?: EpicNodeLike): Promise<void> {
     const folder = folderForFile(epic.filePath);
     // Accepting an epic is a human act: gate on the approver identity BEFORE any
     // write, exactly as Accept Decision does (#2993).
-    let approver: string | undefined;
-    if (folder) {
-      approver = gitConfigEmail(folder);
-      assertHumanApprover(approver);
-    }
+    const approver = gitConfigEmail(folder ?? path.dirname(epic.filePath));
+    assertHumanApprover(approver);
     setEpicStatus(epic.filePath, 'active');
     // Hash-locked sidecar (`.minspec/approvals/<epic path>.json`), hashed AFTER the
     // flip so it covers the committed bytes. Records the acceptance as a
-    // human-attributed, hash-locked artifact, like Accept Decision (#2993).
+    // human-attributed, hash-locked artifact, like Accept Decision (#2993); the
+    // review-side provenance witness reads it (see adr.ts applyStatus).
     // Epics declare no `tier:`, but the store's reader rejects a record without
     // one, so fall back to 'T1' (an epic is not tier-classified work).
     let sidecarAbs: string | undefined;
-    if (folder && approver !== undefined) {
+    if (folder) {
       const hash = canonicalSpecHash(epic.filePath);
       if (hash === null) throw new Error(`cannot read ${epic.id} to hash its acceptance`);
       const tier = (declaredTier(epic.filePath) ?? 'T1') as Tier;
