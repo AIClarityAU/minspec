@@ -4,6 +4,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { isGhAvailable, getRepoFromRemote } from './github';
 import { ensureDirectory } from './opt-in';
+import { readDocument, restoreLineEndings } from './text-io';
 export { isGhAvailable, getRepoFromRemote };
 
 const execFileAsync = promisify(execFile);
@@ -197,8 +198,11 @@ export function appendToParkingLotFile(rootDir: string, entry: ParkingLotEntry):
   ensureDirectory(minspecDir);
 
   const filePath = path.join(minspecDir, 'parking-lot.md');
-  const existingContent = fs.existsSync(filePath)
-    ? fs.readFileSync(filePath, 'utf-8')
+  // An existing parking lot is read through `text-io` and written back in its own line
+  // endings (SPEC-095); a new one is written LF.
+  const prior = fs.existsSync(filePath) ? readDocument(filePath) : null;
+  const existingContent = prior
+    ? prior.text
     : '# Parking Lot\n\nTopics parked during MinSpec sessions for later triage.\n';
 
   const entryBlock = [
@@ -215,7 +219,8 @@ export function appendToParkingLotFile(rootDir: string, entry: ParkingLotEntry):
     '',
   ].join('\n');
 
-  fs.writeFileSync(filePath, existingContent + entryBlock, 'utf-8');
+  const updated = existingContent + entryBlock;
+  fs.writeFileSync(filePath, prior ? restoreLineEndings(updated, prior.original) : updated, 'utf-8');
   return filePath;
 }
 

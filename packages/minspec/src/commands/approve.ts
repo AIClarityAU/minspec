@@ -1,10 +1,12 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { listSpecs, type SpecSummary } from '../lib/spec-catalog';
 import { isTerminalSpecStatus } from '../lib/spec-vocabulary';
 import { readSpecFile, advanceSpecToImplementing } from '../lib/spec';
 import { loadConfig } from '../lib/config';
-import { validateSpec, violationsIntroducedByApproval } from '../lib/spec-validator';
+import { validateSpec } from '../lib/spec-validator';
+import { assertOwnershipDeclaredForAdvance } from '../lib/ownership-advance-guard';
 import { epicRefSet } from '../lib/epic-manager';
 import { readShardIdFiles } from '../lib/spec-layout';
 import {
@@ -102,7 +104,7 @@ async function pickSpec(
  * unset/blank, preserving the pre-DR-056 behaviour for repos whose git identity is
  * already the human's. Tier-0/offline: `gitConfigEmail` reads local git config only.
  */
-function resolveApproverEmail(rootDir: string): string {
+export function resolveApproverEmail(rootDir: string): string {
   const configured = (
     vscode.workspace.getConfiguration('minspec').get<string>('approverEmail') ?? ''
   ).trim();
@@ -122,7 +124,7 @@ const ALWAYS = 'Always';
  * asked for; what changed in #1319 is what MinSpec itself WRITES (see
  * {@link enableAdvancePhaseOnApprove}).
  */
-function advancePhaseOnApproveEnabled(rootDir: string): boolean {
+export function advancePhaseOnApproveEnabled(rootDir: string): boolean {
   const setting = vscode.workspace
     .getConfiguration('minspec')
     .get<boolean>('advancePhaseOnApprove', false);
@@ -274,6 +276,9 @@ export async function approveSpecCommand(
     // #439: sibling shard files (design.md/tasks.md/…) in this spec's directory,
     // so a diverging shard id refuses approval as an error.
     siblingShardFiles: readShardIdFiles(path.dirname(spec.filePath)),
+    // #1751: implement.claimed-without-evidence — resolved here, not inside
+    // spec-validator.ts (filesystem-free by design), against this workspace root.
+    pathExists: (relPath) => fs.existsSync(path.join(rootDir, relPath)),
   });
   const errors = result.violations.filter((v) => v.severity === 'error');
   const warnings = result.violations.filter((v) => v.severity === 'warning');
@@ -293,28 +298,28 @@ export async function approveSpecCommand(
     return;
   }
 
-  // #1317: the spec passed validation in the state it is LEAVING. Approval also
-  // ADVANCES its phase map, and some rules are gated on that map — so a spec can be
-  // complete now and violate an error the instant it is advanced. That gap put main
-  // in the red three times (SPEC-051 #1300, SPEC-048 + SPEC-049 #1348), each failing
-  // on an unrelated PR hours later, because nothing validated the state approval
-  // CREATES. Refuse here, before any write, naming only what the advance introduces.
-  const introduced = violationsIntroducedByApproval(parsed, config, {
-    knownEpicRefs: epicRefSet(rootDir),
-    siblingShardFiles: readShardIdFiles(path.dirname(spec.filePath)),
-  });
-  if (introduced.length > 0) {
-    const summary = introduced.map((v) => `• ${v.message}`).join('\n');
+  // #1317 / #1806: the spec passed validation in the state it is LEAVING. Approval
+  // also ADVANCES its phase map, and some rules are gated on that map — so a spec
+  // can be complete now and violate an error the instant it is advanced. That gap
+  // put main in the red three times (SPEC-051 #1300, SPEC-048 + SPEC-049 #1348),
+  // each failing on an unrelated PR hours later, because nothing validated the
+  // state approval CREATES. Refuse here, before any write, naming only what the
+  // advance introduces.
+  //
+  // Delegates to the SHARED guard (`ownership-advance-guard.ts`) — the same
+  // function `approval.ts` and `spec.ts` call — rather than re-running
+  // `violationsIntroducedByApproval` inline. Before #1806 this command carried
+  // its own independent copy of the check, which is the exact duplication shape
+  // #1520 already bit this codebase on: two implementations of "compute what the
+  // advance introduces and refuse" that could silently drift apart. One
+  // enforcement point now, reached from all three actors that cross a spec into
+  // the Plan build band (UI, `approveSpec`, `advanceSpecToImplementing` itself).
+  try {
+    assertOwnershipDeclaredForAdvance(spec.filePath, parsed);
+  } catch (err) {
     const choice = await vscode.window.showErrorMessage(
-      `MinSpec: ${spec.id} is not ready for the status it would be approved into — approval refused.\n\n${summary}`,
-      {
-        modal: true,
-        detail:
-          'Approving advances this spec past Clarify, which arms rules that do not apply to it yet. ' +
-          'Fixing this now costs one edit; approving first means the edit lands on an already-approved ' +
-          'spec, which stales the approval and needs a second human sign-off.\n\n' +
-          introduced.map((v) => `${v.message}\n   ↳ ${v.fixHint}`).join('\n\n'),
-      },
+      `MinSpec: ${spec.id} is not ready for the status it would be approved into — approval refused.`,
+      { modal: true, detail: err instanceof Error ? err.message : String(err) },
       'Open Spec',
     );
     if (choice === 'Open Spec') {
