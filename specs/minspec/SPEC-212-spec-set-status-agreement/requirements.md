@@ -1,5 +1,5 @@
 ---
-id: SPEC-206
+id: SPEC-212
 type: requirements
 status: specifying
 tier: T3
@@ -10,15 +10,15 @@ depends_on: [SPEC-001]
 relates_to: [SPEC-040, SPEC-041, SPEC-042, SPEC-043, SPEC-044, SPEC-046, DR-003, SPEC-059, "#277", "#972", "#971", "#918"]
 ---
 
-# SPEC-206: One status per spec-set - sibling docs must not lag requirements.md
+# SPEC-212: One status per spec-set - sibling docs must not lag requirements.md
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human reads
 > it, answers the Clarify questions, and approves it through the normal spec-approval gate
 > before any code changes.
 
 Materializes **#972** - *"sibling spec docs advertise `status: specifying` under an approved
-requirements.md."* Id `SPEC-206` is the collision-gate shape: one above the highest `SPEC-NNN` found across
-`origin/main` and every remote branch at authoring time (205), not a gap-fill below it. Open
+requirements.md."* Id `SPEC-212` is the collision-gate shape: one above the highest `SPEC-NNN` on `origin/main` at
+revision b6ec4ff6 (`SPEC-211-shipped-guard-test-parity`), not a gap-fill below it. Open
 pull requests are not visible offline, so renumber if it still collides.
 
 ## Problem
@@ -55,7 +55,7 @@ order as FR-2. It does NOT cover this defect, for two measurable reasons:
   comment: "never the literal `status:` line"), deliberately so a stale mirror cannot produce a
   false warning. This defect IS the stale literal: a reader opening `design.md` sees the
   literal line, and derived status is blind to it.
-- **Opposite direction.** #277 flags parent BEHIND child. SPEC-206 flags sibling BEHIND parent
+- **Opposite direction.** #277 flags parent BEHIND child. SPEC-212 flags sibling BEHIND parent
   (the shape every approval creates). The two are mirror images and do not overlap.
 
 SPEC-059 (`status.mirror-drift`, literal vs derived status for ONE file) is also adjacent; it
@@ -112,8 +112,8 @@ phase must confirm no overlap by reading both rules, not by assumption.
   can still drift between approvals until the validator catches it; each approval needs a
   sibling bump (or a follow-up that automates it).
 - Option B: siblings omit `status` (the issue's "(1)-strict", mirroring `tier`). Removes the
-  drifting field. Cost: `status` is required per file today (`spec-validator.ts:540`,
-  "21/21 present"), the parser coerces absent to `new`, and an unknown number of consumers
+  drifting field. Cost: `status` is required per file today (`spec-validator.ts:540`;
+  the "21/21 present" comment at line 535 sits on the `id` entry), the parser coerces absent to `new`, and an unknown number of consumers
   (status views, parity checks, lifecycle writers for design/tasks) read sibling status. That
   consumer audit is unmeasured; adopting B means a larger, riskier change than a validator
   rule. `tier` was easy because it was already `requiredWhen` primary.
