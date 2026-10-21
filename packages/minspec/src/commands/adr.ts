@@ -63,6 +63,10 @@ async function confirmNoDuplicate(
   return choice === CREATE ? 'proceed' : 'cancel';
 }
 
+/** Advisory text only (#296): a hint shown after creation, never a gate. */
+export const ADR_FILTER_HINT =
+  'Tip: if this decision could be undone in under a day, a DR is probably not needed.';
+
 /**
  * Command: Create a new Architecture Decision Record.
  * Prompts for title, creates DR-NNN.md with sequential numbering,
@@ -106,8 +110,12 @@ export async function createAdrCommand(): Promise<void> {
     const doc = await vscode.workspace.openTextDocument(adr.filePath);
     await vscode.window.showTextDocument(doc);
 
+    // ADR filter (#296): the CDD "can this be undone in under a day?" heuristic,
+    // surfaced as an advisory line on the confirmation toast. It is not awaited
+    // and has no buttons, so it never blocks, never asks per ADR, and the DR is
+    // already created either way.
     vscode.window.showInformationMessage(
-      `MinSpec: Created ${adr.id} — ${adr.title}`,
+      `MinSpec: Created ${adr.id} — ${adr.title}. ${ADR_FILTER_HINT}`,
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
