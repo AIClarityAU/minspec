@@ -224,6 +224,58 @@ default **stays `prompt`** (DR-071 condition 1).
 > Filed as [#1266](https://github.com/AIClarityAU/minspec/issues/1266); it does not block this
 > spec, and the preference API itself is fine.
 
+## Provisioning the missing lane label (#2243, DR-098)
+
+> Added 2026-10-01 with [#2259](https://github.com/AIClarityAU/minspec/pull/2259); every
+> `file:line` in this section was read on that PR's head. The decision, its consent
+> reasoning and the alternatives rejected are in
+> [DR-098](../../../docs/decisions/DR-098.md). `requirements.md` is hash-locked and does not
+> yet mention this; its wording is tracked in
+> [#2330](https://github.com/AIClarityAU/minspec/issues/2330), and until then DR-098 is the
+> authority.
+
+**Why.** FR-2's `gh pr create --label docs-lane` cannot succeed in a repository that has no
+`docs-lane` label: gh resolves every label to an id before it creates anything, and refuses
+outright ([approval-pr.ts:359-365](../../../packages/minspec/src/lib/approval-pr.ts#L359)).
+MinSpec scaffolds the lane workflow into adopters but never provisioned its label, so in
+voip-sms-inbox every approval fell to the FR-5 manual surface and needed a manual merge.
+
+**Where it lives: in the seam, as an opt-in on the existing request.** So FR-4 holds; there
+is still one PR-opening path.
+
+```ts
+interface OpenPrRequest { /* … */ readonly provisionLaneLabel?: boolean } // default false
+interface OpenPrResult {
+  /* … */
+  readonly missingLabel?: string;       // the label gh refused, when that was the cause
+  readonly labelProvisioned?: boolean;  // THIS call created DOCS_LANE_LABEL
+}
+export function buildLaneLabelCreateArgs(slug?: string): string[]; // pure argv, never --force
+export function missingLabelFrom(message: string): string | undefined;
+```
+
+`openPullRequest` ([approval-pr.ts:830](../../../packages/minspec/src/lib/approval-pr.ts#L830))
+runs `attemptCreate`, the create-and-classify arm moved out unchanged
+([:870](../../../packages/minspec/src/lib/approval-pr.ts#L870)). Only when the caller opted in
+AND the refusal names `DOCS_LANE_LABEL` does it run `createLaneLabel`
+([:903](../../../packages/minspec/src/lib/approval-pr.ts#L903)), then one retry through the
+same `attemptCreate`. The classification order AC-10 pins is untouched: a missing label still
+classifies `failed`, and only gains `missingLabel`.
+
+**Who opts in: only the approval flow.** `openApprovalPr` passes
+`provisionLaneLabel = labels.length > 0 && laneWorkflowPresent(rootDir)`
+([commit-on-approve.ts:825](../../../packages/minspec/src/commands/commit-on-approve.ts#L825)),
+so the PR must already carry the lane label (INV-2 judged it docs-only) and the checkout
+must carry `.github/workflows/docs-lane.yml`. SPEC-039's command does not opt in (AC-10);
+[#2257](https://github.com/AIClarityAU/minspec/issues/2257) tracks it.
+
+**What the user sees.** On the approval that creates the label, the suffix ends
+`· created the missing docs-lane label`
+([commit-on-approve.ts:860](../../../packages/minspec/src/commands/commit-on-approve.ts#L860)).
+When the label is missing and cannot be created, the FR-5 surface's reason names it: `the
+'docs-lane' label does not exist in this repository and could not be created`
+([:882](../../../packages/minspec/src/commands/commit-on-approve.ts#L882)).
+
 ## Key decisions
 
 - **The seam is a lib, not a command.** `approval-pr.ts` lives under `src/lib/` and imports no `vscode`. Both callers keep their own toasts. This is what makes AC-3, AC-7, AC-8 and AC-9 assertable on the *recorded runner argv* rather than by inspection.
@@ -254,6 +306,9 @@ T0/T1 first, all against a stub `ExecRun` recording every `(file, args, cwd)`:
 | `commit-on-approve` — `outcome: 'pushed'` runs no `gh` | AC-6 |
 | `commit-on-approve` — no write under `.minspec/approvals/**`, no `status:` line, on any path | AC-9, INV-4 |
 | `push-docs-lane.test.ts` — **unchanged**, must pass | AC-10, R3 |
+| `approval-pr-lane-label.test.ts` — creates only `docs-lane`, whatever gh names; argv pinned, no `--force`; one create, one retry; an "already exists" race is success; no opt-in, no call | DR-098 conditions 1, 4, 5 |
+| `approval-lane-label-parity.test.ts` — both push paths, a repository with and without the label, land identically; no lane workflow, no create; a refused create degrades naming the label | #2243 regression, DR-098 conditions 3, 5 |
+| `labels-template.test.ts` — exactly one sanctioned label call site and one opt-in caller, and that site is recorded by DR-098 and by this section | DR-098 |
 
 AC-3 is asserted structurally: the success path must have `prUrl` populated *before* any
 `showInformationMessage` promise is awaited, so no future edit can make a click load-bearing.

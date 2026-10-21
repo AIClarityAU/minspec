@@ -88,6 +88,47 @@ export function extractRequiredCheckPins(rulesetDetail: unknown): RequiredCheckP
 }
 
 /**
+ * Page size requested for the `commits/{sha}/check-runs` read (#2639). A page
+ * this size or larger may have a next page. Shared with the audit script so the
+ * request and the short-page test cannot drift apart.
+ */
+export const CHECK_RUNS_PAGE_SIZE = 100;
+
+/**
+ * Is a single parsed `commits/{sha}/check-runs` response DEMONSTRABLY SHORT, or
+ * unable to be shown whole (#2639, #2665)? True in two cases:
+ *   1. fewer `check_runs` came back than the response's own `total_count` says
+ *      exist, or
+ *   2. the page is full (`>= CHECK_RUNS_PAGE_SIZE` runs) and `total_count` is
+ *      missing or not a non-negative integer, so there is no way to show that
+ *      no further page exists.
+ * GitHub pages this endpoint at 30 by default; a caller that reads one page
+ * without this check gets a silently truncated list on any commit with more
+ * check-runs than that, and a pin whose disproving run sits past the cut is then
+ * reported `unobserved` (inconclusive) instead of the `mismatch` it should be —
+ * the exact #560 bug shape passing unreported.
+ *
+ * Mirrors the short-count and full-page refusals of `wholeCheckRunListing` in
+ * `.github/scripts/ai-review-guard.js` for the same endpoint, except that a full
+ * page whose `total_count` is a valid integer matching the run count is NOT
+ * flagged here (that function refuses it; this one trusts a usable count).
+ *
+ * Not short (false): a partial page with no usable `total_count` (nothing says
+ * runs are missing), and malformed input (not an object, no `check_runs` array)
+ * — `extractObservedCheckRuns` already treats those as empty/skippable.
+ */
+export function isShortCheckRunsPage(checkRunsResponse: unknown): boolean {
+  if (typeof checkRunsResponse !== 'object' || checkRunsResponse === null) return false;
+  const runs = (checkRunsResponse as { check_runs?: unknown }).check_runs;
+  if (!Array.isArray(runs)) return false;
+  const totalCount = (checkRunsResponse as { total_count?: unknown }).total_count;
+  if (!Number.isInteger(totalCount) || (totalCount as number) < 0) {
+    return runs.length >= CHECK_RUNS_PAGE_SIZE;
+  }
+  return runs.length < (totalCount as number);
+}
+
+/**
  * Flatten one or more parsed `commits/{sha}/check-runs` responses into a flat
  * list of observed check-runs. Tolerant of partial/unexpected JSON per entry —
  * a malformed sample point is skipped, not fatal to the whole audit.

@@ -1,7 +1,7 @@
 ---
 id: SPEC-076
 type: requirements
-status: specifying
+status: planning
 tier: T2
 product: minspec
 epic: EPIC-002  # Signpost Integrity — the never-wrong next-action promise this reader must not weaken
@@ -242,9 +242,29 @@ tier is wrong, the remedy is to raise it and re-gate — ceremony ratchets up, n
   `vscode`, transitively included. The 16-module closure measured above is the current state;
   a test keeps it true.
 
-## Decisions needed (Clarify)
+## Clarify selections (recorded by an agent 2026-10-01; ratified only by approval of this spec)
+
+DQ-1 and DQ-2 each carry a **Recorded selection** line naming the option this document
+already recommended. An agent session wrote those lines on 2026-10-01, and no human chose
+them. Both name what the code already does, because this T2 spec was implemented in the
+change that introduced it ("Why T2, and why that is not a shortcut" above), so each line
+cites that code. This repository runs with `"autonomy": "act"` (`.minspec/config.json:58`),
+under which an agent proceeds on a stated recommendation and leaves the options it did not
+take on record (DR-086 §2 and §4), which is why the options stay below with their costs.
+That setting lets an agent act; it does not turn an agent's selection into a human's. The
+lines record what was built and what is proposed, and approving this spec is what ratifies
+them. An approval records a canonical hash that covers this body
+(`packages/minspec/src/lib/approval.ts:4-8`) and reads as stale once the hash stops matching
+(`resolveStatus`, `:483-490`), so an approval of this text covers these selections and
+changing one afterwards voids it. When the lines were written no approval of this spec had
+landed on `main` (`status: specifying`). A question in this section with no **Recorded
+selection** line is still open.
 
 ### DQ-1 (shape) — N roots in one process, versus N invocations
+
+**Recorded selection: Option A,** one invocation takes N roots. Built as FR-3 specifies:
+`scripts/next-task.ts:211` takes every positional argument as a root and defaults to the
+working directory, and `:219` resolves each root on its own.
 
 - **Option A — one invocation takes N roots (rec).** As specified in FR-3. *Cost:* the
   output envelope becomes a container with per-root success and failure rather than a single
@@ -259,6 +279,10 @@ Recommendation: **Option A**, with the single-root case preserved by defaulting 
 working directory when no argument is given, so the extra structure is the only cost.
 
 ### DQ-2 (semantics) — working tree versus `origin/main`
+
+**Recorded selection: Option A,** the working tree. Built as FR-4 specifies:
+`scripts/next-task.ts:177` builds the graph from the root on disk, and `readTreeState`
+(`:114-134`) reports the `HEAD` short sha and a dirty flag beside each answer.
 
 Settled as FR-4 rather than left open, because the divergence has to be deliberate. The
 extension judges approval against the **working tree**: `getApprovalStatus`
