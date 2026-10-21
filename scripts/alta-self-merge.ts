@@ -1,7 +1,8 @@
 #!/usr/bin/env -S npx tsx
 /**
  * alta-self-merge.ts — merge a pull request that carries only the founder's own Alt-A
- * (founder decision in36, 2026-10-21), as `minspec-sdd[bot]`, with no human keystroke.
+ * (founder decision in36, 2026-10-21; DR-111), as `minspec-sdd[bot]`, with no second
+ * keystroke: the approval itself is the keystroke DR-070 §4 requires.
  *
  * The judgement is `judgeApprovalOnly` (`scripts/lib/alta-approval-only.ts`). This file
  * does the impure work around it:
@@ -160,8 +161,9 @@ export function readRequiredChecks(gh: Gh, repo: string, branch: string): Requir
 
 /**
  * The required checks NOT green on `sha`. A check-run counts when completed with
- * `success` (from the required App when the ruleset names one, newest run wins); a commit
- * status counts when its latest state is `success`.
+ * `success` (from the required App when the ruleset names one, newest run wins); for a
+ * check the ruleset does not scope to an App, a commit status also counts when its latest
+ * state is `success`.
  */
 export function failingRequiredChecks(gh: Gh, repo: string, sha: string, required: readonly RequiredCheck[]): string[] {
   const runs = pages(
@@ -181,8 +183,11 @@ export function failingRequiredChecks(gh: Gh, repo: string, sha: string, require
       .sort((a, b) => Number(b.id) - Number(a.id));
     const newestRun = matching[0];
     const runOk = newestRun !== undefined && newestRun.status === 'completed' && newestRun.conclusion === 'success';
-    // The statuses listing is newest-first per GitHub's API; the first entry for a context is its current state.
-    const newestStatus = statuses.find((s) => s.context === req.context);
+    // A check the ruleset scopes to an App is satisfied only by that App's check-run, as
+    // GitHub enforces it; a commit status of the same name can be posted by anyone with
+    // `statuses: write` and must not stand in for it. GitHub documents the statuses
+    // listing as newest-first, so the first entry for a context is its current state.
+    const newestStatus = req.integrationId === undefined ? statuses.find((s) => s.context === req.context) : undefined;
     const statusOk = newestStatus !== undefined && newestStatus.state === 'success';
     if (!runOk && !statusOk) failing.push(req.context);
   }
@@ -224,6 +229,8 @@ export function runOne(repo: string, pr: number, deps: RunDeps): Outcome {
     const failing = failingRequiredChecks(deps.gh, repo, verdict.headSha, required);
     if (failing.length > 0) return { pr, decision: 'waiting', reason: `required checks not green: ${failing.join(', ')}` };
     const tip = obj(ghJson(deps.gh, [`repos/${repo}/git/ref/heads/${facts.defaultBranch}`]), 'ref');
+    // The merge API pins the head, not the base. This re-read narrows the window, and the
+    // ruleset's strict up-to-date requirement closes it (DR-111 Cost).
     if (str(obj(tip.object, 'ref.object').sha, 'ref.object.sha') !== verdict.baseSha) {
       return { pr, decision: 'waiting', reason: 'base branch moved since the judgement' };
     }

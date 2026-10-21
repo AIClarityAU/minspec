@@ -1,5 +1,5 @@
 /**
- * Approval-only pull request judge (founder decision in36, 2026-10-21).
+ * Approval-only pull request judge (founder decision in36, 2026-10-21; DR-111).
  *
  * The founder approves a spec or accepts a decision record in the editor (Alt-A). The
  * editor opens a pull request under his account that carries that approval and nothing
