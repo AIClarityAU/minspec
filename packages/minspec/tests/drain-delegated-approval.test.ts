@@ -12,10 +12,12 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { useHostileAmbientDrainKnobs } from './helpers/drain-env';
+import { useShellTimeout } from './helpers/shell-timeout';
 
 // Module scope (#2574). The stage runs with an explicit env below, so ambient knobs
 // cannot reach it; primed anyway so the scrub gate holds for every drain test file.
 useHostileAmbientDrainKnobs();
+useShellTimeout();
 
 const DRAIN = path.resolve(__dirname, '../../../scripts/drain-inbox.sh');
 const content = fs.readFileSync(DRAIN, 'utf-8');

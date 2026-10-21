@@ -36,6 +36,10 @@ import {
   type CallerDeps,
   type CallerOptions,
 } from '../../../scripts/lib/delegated-approval-caller';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// Module scope, never in a hook (#1399): these suites spawn git/bash per assertion (#1285).
+useShellTimeout();
 
 const REPO = 'AIClarityAU/minspec';
 const TOKEN = 'fixture-installation-token';
