@@ -17,10 +17,14 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
+import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
 
 // #1285: spawns real child processes per assertion — 5s default is a load metric,
 // not a hang signal. Enforced by shell-timeout-coverage.test.ts.
 useShellTimeout();
+// Module scope: nothing in this file may depend on drain or quota knobs in the surrounding
+// environment, so it runs with hostile ones planted there (#2574, helpers/drain-env.ts; #2583).
+useHostileAmbientDrainKnobs();
 
 const DRAIN = path.resolve(__dirname, '../../../scripts/drain-inbox.sh');
 const DISPATCH = path.resolve(__dirname, '../../../scripts/dispatch-issue.sh');
@@ -70,7 +74,7 @@ describe('drain-inbox.sh: run dir self-heals past a STALE primary (#773 function
 
       const out = execFileSync('bash', [path.join(primary, 'scripts', 'drain-inbox.sh'), '--refresh-run-dir'], {
         encoding: 'utf-8',
-        env: { ...process.env, MINSPEC_DRAIN_RUN_DIR: runDir },
+        env: { ...drainBaseEnv(), MINSPEC_DRAIN_RUN_DIR: runDir },
       }).trim();
 
       // The run dir is synced to origin/main (C2) — the self-heal.
@@ -88,9 +92,33 @@ describe('drain-inbox.sh: run dir self-heals past a STALE primary (#773 function
   it('MINSPEC_DRAIN_SELF_REFRESH=0 opts out (runs in place, no run dir)', () => {
     const out = execFileSync('bash', [DRAIN, '--refresh-run-dir'], {
       encoding: 'utf-8',
-      env: { ...process.env, MINSPEC_DRAIN_SELF_REFRESH: '0', MINSPEC_DRAIN_RUN_DIR: path.join(os.tmpdir(), 'nope-should-not-exist') },
+      env: { ...drainBaseEnv(), MINSPEC_DRAIN_SELF_REFRESH: '0', MINSPEC_DRAIN_RUN_DIR: path.join(os.tmpdir(), 'nope-should-not-exist') },
     }).trim();
     expect(out).toBe('in-place');
+  });
+
+  it('MINSPEC_DRAIN_RUN_DIR="" (explicitly empty) is honoured, not silently defaulted (#2238)', () => {
+    // Regression for #2238: `${MINSPEC_DRAIN_RUN_DIR:-/tmp/minspec-drain-run}` treats
+    // an EMPTY value the same as an UNSET one, so a caller that sets
+    // MINSPEC_DRAIN_RUN_DIR="" (drain-concurrency.test.ts did, to mean "no run dir")
+    // silently fell back to /tmp/minspec-drain-run — which, on a machine running a
+    // real drain, IS that live drain's run dir. ensure_fresh_run_dir would then
+    // `git reset --hard origin/main` it out from under the live process.
+    //
+    // Deliberately does NOT reproduce the pre-fix failure for real: with the bug
+    // present this exact env would resolve to /tmp/minspec-drain-run and, on any
+    // machine where that path is a live drain's worktree (the founder's machine most
+    // of the day, and this repo's own dev containers), `git reset --hard` it — i.e.
+    // proving "base red" here would BE the incident. Only the fixed, safe behaviour
+    // is asserted: DRAIN_RUN_DIR stays empty, self-refresh disables itself, and the
+    // WARNING line's claim ("self-refresh disabled") is actually true.
+    const res = spawnSync('bash', [DRAIN, '--refresh-run-dir'], {
+      encoding: 'utf-8',
+      env: { ...drainBaseEnv(), MINSPEC_DRAIN_RUN_DIR: '' },
+    });
+    expect(res.status).toBe(0);
+    expect(res.stdout.trim()).toBe('in-place');
+    expect(res.stderr).toContain('MINSPEC_DRAIN_RUN_DIR is empty — self-refresh disabled, running in place.');
   });
 });
 
@@ -197,7 +225,7 @@ describe('drain-inbox.sh: containment guard blocks a run dir that resolves into 
   function runRefresh(scriptCwd: string, runDir: string): { code: number; err: string } {
     // spawnSync captures stderr regardless of exit code — the guard fires but exits 0.
     const r = spawnSync('bash', [path.join(scriptCwd, 'scripts', 'drain-inbox.sh'), '--refresh-run-dir'], {
-      encoding: 'utf-8', env: { ...process.env, MINSPEC_DRAIN_RUN_DIR: runDir },
+      encoding: 'utf-8', env: { ...drainBaseEnv(), MINSPEC_DRAIN_RUN_DIR: runDir },
     });
     return { code: r.status ?? 1, err: String(r.stderr ?? '') };
   }
@@ -239,7 +267,7 @@ describe('dispatch-issue.sh: native auto-merge deny-by-default (behavioral seam)
     const script = scriptDir ? path.join(scriptDir, 'scripts', 'dispatch-issue.sh') : DISPATCH;
     try {
       const out = execFileSync('bash', [script, '--check-native-automerge'], {
-        encoding: 'utf-8', env: { ...process.env, MINSPEC_AUTOMERGE_NATIVE: '', MINSPEC_AUTOMERGE_MODE: '', ...env }, stdio: 'pipe',
+        encoding: 'utf-8', env: { ...drainBaseEnv(), MINSPEC_AUTOMERGE_NATIVE: '', MINSPEC_AUTOMERGE_MODE: '', ...env }, stdio: 'pipe',
       });
       return { code: 0, out: out.trim() };
     } catch (e: any) {

@@ -203,6 +203,45 @@ describe('INV-FIDELITY: buildArtifactGraph maps the workspace exactly', () => {
     expect(byId['SPEC-004']).toMatchObject({ status: 'archived' });
   });
 
+  // #2370: SPEC-001 in AIClarityAU/voip-sms-inbox had `status: done`, tier T3, NO
+  // `phases:` block at all, and a stale approval (body edited after approval).
+  // `deriveStatus` derives 'new' for it (`allPending` wins before the approval
+  // check, because a missing `phases:` block defaults every phase to 'pending' —
+  // see lifecycle.ts), which disagrees with `commands/approve.ts` /
+  // `approve-active.ts`, which trust the literal `status: done` and refuse to
+  // offer it (#440). `literalStatusTerminal` is the signal that lets the resolver
+  // (next-task.ts) agree with the approve commands instead of re-asking forever.
+  it('#2370: a literal `done` spec with NO phases block derives "new" but is flagged literalStatusTerminal', () => {
+    const noPhasesPath = write(
+      'specs/p/SPEC-012-legacy/requirements.md',
+      [
+        '---',
+        'id: SPEC-012',
+        'type: requirements',
+        'tier: T3',
+        'status: done',
+        'created: 2026-06-01',
+        '---',
+        '',
+        '# SPEC-012',
+        '',
+        'Body.',
+        '',
+      ].join('\n'),
+    );
+    approveSpec(root, noPhasesPath, 'T3', 'tester@example.com', fixedClock);
+    // Stale it the same way SPEC-003 is staled above: edit the body after approval.
+    fs.appendFileSync(noPhasesPath, '\nEdited after approval — voids the canonical hash.\n', 'utf-8');
+
+    const g = buildArtifactGraph(root);
+    const spec012 = g.specs.find((s) => s.id === 'SPEC-012')!;
+    expect(spec012).toMatchObject({
+      status: 'new', // the drift: NOT 'done', because allPending wins first
+      approvalState: 'stale',
+      literalStatusTerminal: true, // but the approve commands still refuse it — agree with them
+    });
+  });
+
   it('maps an approved pre-implement spec (derives planning) to the resolver "implementing" — DR-069/#886', () => {
     // Approved, plan in-progress, implement NOT started → deriveStatus (the signpost) yields
     // 'planning'; the resolver maps 'planning' → 'implementing' (SPEC_STATUS_MAP), so every
