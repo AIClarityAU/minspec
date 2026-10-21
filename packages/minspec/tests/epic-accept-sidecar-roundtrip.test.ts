@@ -10,8 +10,7 @@ describe('epic accept sidecar round-trip (#2993)', () => {
   it('a tier-less epic yields a record readRecord accepts', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epic-rt-'));
     try {
-      const epic = path.join(root, 'EPIC-001.md');
-      fs.writeFileSync(epic, '---\nid: EPIC-001\nstatus: active\n---\nbody\n');
+      fs.mkdirSync(path.join(root, '.minspec'));
       writeRecord(root, {
         specPath: 'docs/epics/EPIC-001.md',
         specHash: 'sha256:abc',
