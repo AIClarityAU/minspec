@@ -177,6 +177,7 @@ describe('acceptEpicCommand()', () => {
         specPath: 'docs/epics/EPIC-010.md',
         specHash: 'sha256:abc',
         approvedBy: 'human@example.com',
+        tier: 'T1',
       }),
     );
   });

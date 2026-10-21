@@ -10,8 +10,8 @@ import {
   canonicalSpecHash,
   gitConfigEmail,
   specRelPath,
-  type ApprovalRecord,
 } from '../lib/approval';
+import type { Tier } from '../lib/config';
 import { sidecarPath, writeRecord } from '../lib/approval-store';
 
 /** Tree node carrying the epic this group represents (from EpicGroupNode). */
@@ -44,24 +44,25 @@ export async function acceptEpicCommand(node?: EpicNodeLike): Promise<void> {
     }
     setEpicStatus(epic.filePath, 'active');
     // Hash-locked sidecar (`.minspec/approvals/<epic path>.json`), hashed AFTER the
-    // flip so it covers the committed bytes. SPEC-140 follows a protected-branch
-    // leftover by comparing this `specHash`; without it an accepted epic is
-    // unrecognisable as landed (#2993).
+    // flip so it covers the committed bytes. Records the acceptance as a
+    // human-attributed, hash-locked artifact, like Accept Decision (#2993).
+    // Epics declare no `tier:`, but the store's reader rejects a record without
+    // one, so fall back to 'T1' (an epic is not tier-classified work).
     let sidecarAbs: string | undefined;
     if (folder && approver !== undefined) {
       const hash = canonicalSpecHash(epic.filePath);
       if (hash === null) throw new Error(`cannot read ${epic.id} to hash its acceptance`);
-      const tier = declaredTier(epic.filePath);
+      const tier = (declaredTier(epic.filePath) ?? 'T1') as Tier;
       const rel = specRelPath(folder, epic.filePath);
       writeRecord(folder, {
         specPath: rel,
         specHash: hash,
         approvedAt: new Date().toISOString(),
         approvedBy: approver,
-        ...(tier ? { tier } : {}),
+        tier,
         migrated: false,
         baselineBlob: '',
-      } as ApprovalRecord);
+      });
       sidecarAbs = sidecarPath(folder, rel);
     }
     if (folder) {
