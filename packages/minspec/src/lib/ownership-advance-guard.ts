@@ -1,6 +1,6 @@
 /**
- * ownership-advance-guard.ts — SPEC-051's refusal, in one place, reachable from BOTH
- * actors that cross a spec into the Plan build-band (#1446).
+ * ownership-advance-guard.ts — SPEC-051's refusal, in one place, reachable from every
+ * actor that crosses a spec into the Plan build-band (#1446, #1806).
  *
  * WHY A SEPARATE MODULE. The guard needs `violationsIntroducedByApproval`
  * (`spec-validator`). `approveSpec` lives in `approval.ts`, which value-imports
@@ -13,8 +13,16 @@
  *                          │                                      ╎
  *                          └───────── (type-only, erased) ────────┘
  *
- * One implementation, two call sites, no cycle — rather than two copies that drift, or a
- * lazy `require` that hides a cycle from `check-import-cycles.ts` instead of removing it.
+ * One implementation, no cycle — rather than copies that drift, or a lazy `require`
+ * that hides a cycle from `check-import-cycles.ts` instead of removing it.
+ *
+ * THREE CALL SITES (#1806). `spec.ts` and `approval.ts` are both `src/lib/` and share
+ * the cycle constraint diagrammed above. `commands/approve.ts` — the UI a human
+ * actually drives — is a leaf consumer with no cycle risk, but until #1806 it called
+ * `violationsIntroducedByApproval` directly instead of this guard: a second,
+ * independently-maintained implementation of the same refusal, the exact duplication
+ * shape #1520 already bit this codebase on. It now calls this function too, before
+ * `advanceSpecToImplementing` runs — so there is one enforcement point, not one-per-actor.
  */
 import * as fs from 'fs';
 import * as path from 'path';
