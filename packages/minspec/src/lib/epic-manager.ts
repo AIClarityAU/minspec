@@ -2,6 +2,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from './config';
 import { slugify } from './spec-manager';
+import { ensureDirectory } from './opt-in';
+import { prepareText, readDocument, readDocumentText, restoreLineEndings } from './text-io';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -114,7 +116,8 @@ export function listEpics(rootDir: string, vscodeOverrides?: { epicsDir?: string
       const stat = fs.statSync(filePath);
       if (!stat.isFile()) continue;
 
-      const content = fs.readFileSync(filePath, 'utf-8');
+      // Prepared (SPEC-095): a CRLF epic used to read as `proposed` with order 999.
+      const content = readDocumentText(filePath);
       const fmMatch = content.match(FRONTMATTER_RE);
       const idFromFile = entry.match(EPIC_ID_RE)?.[0] ?? entry;
       // Tier-0 stub check from the epic body (#85): empty/placeholder sections.
@@ -255,9 +258,12 @@ export function groupByEpic<T>(
  * as an inline comment after the ref (`epic: EPIC-001  # Title`). Returns the
  * written ref (without the comment).
  * @throws if the file has no frontmatter block.
+ *
+ * Like every frontmatter writer here, it reads through `text-io` and writes the file back
+ * in the line endings it had (SPEC-095); a CRLF file used to throw "No frontmatter block".
  */
 export function setArtifactEpic(filePath: string, ref: string, title?: string): string {
-  const content = fs.readFileSync(filePath, 'utf-8');
+  const { text: content, original } = readDocument(filePath);
   const fmMatch = content.match(FRONTMATTER_RE);
   if (!fmMatch) {
     throw new Error(`No frontmatter block in ${filePath}`);
@@ -273,7 +279,7 @@ export function setArtifactEpic(filePath: string, ref: string, title?: string): 
   // Replacer FUNCTION so a `$` anywhere in the rewritten block is literal (#152).
   const block = `---\n${newYaml}\n---`;
   const updated = content.replace(FRONTMATTER_RE, () => block);
-  fs.writeFileSync(filePath, updated, 'utf-8');
+  fs.writeFileSync(filePath, restoreLineEndings(updated, original), 'utf-8');
   return ref;
 }
 
@@ -281,7 +287,7 @@ export function setArtifactEpic(filePath: string, ref: string, title?: string): 
  * inline title comment is stripped — only the resolvable ref is returned. */
 export function readArtifactEpic(filePath: string): string | null {
   try {
-    const m = fs.readFileSync(filePath, 'utf-8').match(FRONTMATTER_RE);
+    const m = readDocumentText(filePath).match(FRONTMATTER_RE);
     if (!m) return null;
     const line = m[1].match(/^[ \t]*epic[ \t]*:[ \t]*(.+)$/m);
     return line ? (epicRefValue(line[1]) ?? null) : null;
@@ -298,7 +304,7 @@ export function setEpicStatus(filePath: string, status: EpicStatus): EpicStatus 
   if (!EPIC_STATUSES.has(status)) {
     throw new Error(`Invalid epic status: ${status}`);
   }
-  const content = fs.readFileSync(filePath, 'utf-8');
+  const { text: content, original } = readDocument(filePath);
   const fmMatch = content.match(FRONTMATTER_RE);
   if (!fmMatch) {
     throw new Error(`No frontmatter block in ${filePath}`);
@@ -316,7 +322,7 @@ export function setEpicStatus(filePath: string, status: EpicStatus): EpicStatus 
     : `${yaml}\nstatus: ${status}`;
   // Replacer FUNCTION so a `$` anywhere in the rewritten block is literal (#152).
   const block = `---\n${newYaml}\n---`;
-  fs.writeFileSync(filePath, content.replace(FRONTMATTER_RE, () => block), 'utf-8');
+  fs.writeFileSync(filePath, restoreLineEndings(content.replace(FRONTMATTER_RE, () => block), original), 'utf-8');
   return status;
 }
 
@@ -330,7 +336,7 @@ export function setEpicOrder(filePath: string, order: number): number {
   if (!Number.isFinite(order)) {
     throw new Error(`Invalid epic order: ${order}`);
   }
-  const content = fs.readFileSync(filePath, 'utf-8');
+  const { text: content, original } = readDocument(filePath);
   const fmMatch = content.match(FRONTMATTER_RE);
   if (!fmMatch) {
     throw new Error(`No frontmatter block in ${filePath}`);
@@ -342,7 +348,7 @@ export function setEpicOrder(filePath: string, order: number): number {
     : `${yaml}\norder: ${order}`;
   // Replacer FUNCTION so a `$` anywhere in the rewritten block is literal (#152).
   const block = `---\n${newYaml}\n---`;
-  fs.writeFileSync(filePath, content.replace(FRONTMATTER_RE, () => block), 'utf-8');
+  fs.writeFileSync(filePath, restoreLineEndings(content.replace(FRONTMATTER_RE, () => block), original), 'utf-8');
   return order;
 }
 
@@ -516,7 +522,7 @@ export function createEpic(
   goal?: string,
 ): EpicSummary {
   const epicsDir = resolveEpicsDir(rootDir, vscodeOverrides);
-  fs.mkdirSync(epicsDir, { recursive: true });
+  ensureDirectory(epicsDir); // SPEC-096 FR-4: never creates `.minspec/`
 
   const num = nextEpicNumber(epicsDir);
   const id = formatEpicId(num);
@@ -620,8 +626,17 @@ export function buildEpicIndexContent(epics: EpicSummary[]): string {
 /**
  * Merge auto content into an existing INDEX.md, preserving user content outside
  * the markers (invariant #6 / DR-011).
+ *
+ * SPEC-095 FR-2/FR-3: the merge works on the LF form of `existing`, and the result is given
+ * the line endings `existing` had. A missing INDEX is a new file and is written LF (FR-5).
  */
 export function mergeEpicIndex(existing: string | null, autoContent: string): string {
+  if (existing === null) return mergeEpicIndexText(null, autoContent);
+  return restoreLineEndings(mergeEpicIndexText(prepareText(existing), autoContent), existing);
+}
+
+/** {@link mergeEpicIndex} on LF text. */
+function mergeEpicIndexText(existing: string | null, autoContent: string): string {
   const wrapped = `${INDEX_MARKER_START}\n${autoContent.trimEnd()}\n${INDEX_MARKER_END}\n`;
   if (existing === null || existing.trim() === '') return wrapped;
 
@@ -639,11 +654,13 @@ export function mergeEpicIndex(existing: string | null, autoContent: string): st
 /** Regenerate <epicsDir>/INDEX.md, preserving user content outside markers. */
 export function writeEpicIndex(rootDir: string, vscodeOverrides?: { epicsDir?: string }): { filePath: string; count: number } {
   const epicsDir = resolveEpicsDir(rootDir, vscodeOverrides);
-  fs.mkdirSync(epicsDir, { recursive: true });
+  ensureDirectory(epicsDir); // SPEC-096 FR-4: never creates `.minspec/`
 
   const epics = listEpics(rootDir, vscodeOverrides);
   const indexPath = path.join(epicsDir, 'INDEX.md');
-  const existing = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, 'utf-8') : null;
-  fs.writeFileSync(indexPath, mergeEpicIndex(existing, buildEpicIndexContent(epics)), 'utf-8');
+  // Read through `text-io` and written back in its own line endings (SPEC-095).
+  const prior = fs.existsSync(indexPath) ? readDocument(indexPath) : null;
+  const merged = mergeEpicIndex(prior ? prior.text : null, buildEpicIndexContent(epics));
+  fs.writeFileSync(indexPath, prior ? restoreLineEndings(merged, prior.original) : merged, 'utf-8');
   return { filePath: indexPath, count: epics.length };
 }

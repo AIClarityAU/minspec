@@ -1,7 +1,7 @@
 ---
 id: SPEC-096
 type: requirements
-status: specifying
+status: implementing
 tier: T4
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - DR-074 (blast radius, the opt-in marker) lives here; this is an invariant-3 defect in shipped commands
@@ -23,10 +23,10 @@ implements: [packages/minspec/src/lib/opt-in.ts, packages/minspec/tests/opt-in-g
 affects: [packages/minspec/src/lib/session.ts, packages/minspec/src/lib/classifier.ts, packages/minspec/src/lib/parking-lot.ts, packages/minspec/src/lib/approval.ts, packages/minspec/src/lib/approval-store.ts, packages/minspec/src/lib/phase-advance-queue.ts, packages/minspec/src/lib/traceability.ts, packages/minspec/src/lib/bridge.ts, packages/minspec/src/lib/merge-refresh.ts, packages/minspec/src/lib/scaffold.ts, packages/minspec/src/lib/auto-bootstrap.ts, packages/minspec/src/lib/presence.ts, packages/minspec/src/lib/preferences.ts, packages/minspec/src/commands/constitution.ts, packages/minspec/src/commands/session.ts, packages/minspec/src/commands/park.ts, packages/minspec/src/commands/approve.ts, packages/minspec/src/commands/init.ts, packages/minspec/src/commands/classify.ts, packages/minspec/src/views/codelens-provider.ts, packages/minspec/src/extension.ts, packages/minspec/src/lib/adr-manager.ts, packages/minspec/src/lib/epic-manager.ts, packages/minspec/src/lib/spec-manager.ts, packages/minspec/src/lib/spec-layout.ts, packages/minspec/src/lib/claude-settings.ts, packages/minspec/src/lib/slash-commands.ts, packages/minspec/src/lib/context-injector.ts, packages/minspec/src/commands/example.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
-  tasks: pending
-  implement: pending
+  clarify: done
+  plan: done
+  tasks: done
+  implement: in-progress
 ---
 
 # SPEC-096: Only Initialize creates the .minspec/ opt-in marker

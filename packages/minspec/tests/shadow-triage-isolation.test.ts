@@ -99,7 +99,7 @@ const POISON: Record<string, string> = {
 const baseEnv = (extra: Record<string, string> = {}): Record<string, string> => ({
   PATH: process.env.PATH ?? '/usr/bin:/bin',
   HOME: process.env.HOME ?? '/tmp',
-  MINSPEC_SHADOW_TRIAGE_KEY: ZAI_KEY,
+  MINSPEC_ZAI_API_KEY: ZAI_KEY,
   ...extra,
 });
 
@@ -463,7 +463,7 @@ describe('shadow-triage — one resolved model id reaches every surface', () => 
   // Re-capture it with:
   //
   //   curl --disable -sS https://api.z.ai/api/anthropic/v1/models \
-  //     -H "anthropic-version: 2023-06-01" -H "x-api-key: $MINSPEC_SHADOW_TRIAGE_KEY"
+  //     -H "anthropic-version: 2023-06-01" -H "x-api-key: $MINSPEC_ZAI_API_KEY"
   //
   // (that command is for a human at a terminal — the key is on the command line, which
   // is exactly what the production path avoids.)
@@ -614,6 +614,7 @@ describe('shadow-triage — one resolved model id reaches every surface', () => 
     // The caller skips on a non-zero exit. A guessed fallback would label the row with
     // a model that never answered, corrupting the measurement the pilot exists for.
     const env = baseEnv();
+    delete (env as Record<string, string | undefined>).MINSPEC_ZAI_API_KEY;
     delete (env as Record<string, string | undefined>).MINSPEC_SHADOW_TRIAGE_KEY;
     const r = spawnSync('bash', [SHADOW, '--resolve-model'], { encoding: 'utf-8', env });
     expect(r.status).not.toBe(0);
@@ -668,7 +669,7 @@ describe('shadow-triage — a malformed key is refused rather than sent', () => 
     ['a backslash', 'good\\key'],
     ['a space', 'good key'],
   ])('%s → the run is SKIPPED, and no request is issued', (_label, badKey) => {
-    const o = observeRequest({ MINSPEC_SHADOW_TRIAGE_KEY: badKey });
+    const o = observeRequest({ MINSPEC_ZAI_API_KEY: badKey });
     expect(o.argv).toEqual([]);
     expect(o.config).toBe('');
   });
@@ -691,7 +692,7 @@ describe('shadow-triage — a malformed key is refused rather than sent', () => 
     const r = spawnSync(
       'bash',
       [SHADOW, 'record', '--issue', '5', '--repo', 'AIClarityAU/minspec', '--prompt-file', prompt, '--live-fields', live],
-      { encoding: 'utf-8', cwd: dir, env: baseEnv({ MINSPEC_SHADOW_TRIAGE_KEY: secret }) },
+      { encoding: 'utf-8', cwd: dir, env: baseEnv({ MINSPEC_ZAI_API_KEY: secret }) },
     );
     const output = `${r.stdout ?? ''}${r.stderr ?? ''}`;
     expect(output).toMatch(/not well-formed/);
