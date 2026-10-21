@@ -1,67 +1,72 @@
-# Independent verification: #2369 host patch is live (second witness)
+# Verification record: #2369 host patch is applied to the live `cos.py`
 
 `e1137124` ("chore(#2500): delete the applied host patch directory for #2369") deleted
 this directory on the strength of a prose claim — "Verified before deletion: the patch
 was applied to the live `~/.claude/scripts/cos.py`" — with no evidence carried in the
-diff. Review on the pull request correctly blocked on that: the target file lives
-outside this repository, so the claim was a "done" assertion with nothing citable
-backing it (RCDD/DR-003 — an assertion is not evidence), and the constitution's
-invariant 2 asks for an independent second witness rather than a single self-report.
+diff. That claim gates the deletion and the closure of #2369: a staged patch removed
+before it is applied turns pending work invisible.
 
-This file is that second witness: the checks below were re-run independently, from a
-separate remediation session, after the deletion commit already existed (re-run
-2026-10-21 against the live host file), and all three reproduce the original claim.
-`apply.sh`, `cos.py.patch` and the test all remain recoverable at `e1137124^`.
+## What this file can and cannot prove
 
-## 1. The backup is a genuine pre-patch snapshot
+The target, `~/.claude/scripts/cos.py`, lives on the operator's host, outside this
+repository. **No repo-scoped reader — CI, the AI review panel, a fresh clone — can
+re-run any check below.** This file is a recorded host reading, not a gate, and it is
+not an independent second witness in invariant 2's sense: it is one more report from an
+agent session. What it adds over `e1137124`'s prose is (a) checks tied to artifacts that
+*are* in this repository's history, so a reader with host access can reproduce them in
+one command, and (b) the exact command for the human confirmation below.
 
-`apply.sh` (deleted by `e1137124`; recovered from `git show e1137124^:.../apply.sh`) recorded the
-sha256 of the `cos.py` it was cut against:
+## Human confirmation before merge
 
-    BASE_SHA="3d91e4c91da488d1aff1bcaae2c0ca50cf2fa5cfddc39d9fd68d7b6c204f9f80"
+This is a machinery pull request, so it already merges only by a human. Before merging,
+run on the host, from a checkout of this branch:
 
-The backup `apply.sh` left beside the live file matches that value exactly:
+    git show e1137124^:scripts/host-patches/2369-cos-open-pr-truncation/cos.py.patch \
+      | grep '^+' | grep -v '^+++' | cut -c2- | grep -v '^[[:space:]]*$' \
+      | while IFS= read -r l; do grep -qF -- "$l" ~/.claude/scripts/cos.py || echo "MISSING: $l"; done
+    (cd ~/.claude/scripts/tests && COS_PY=~/.claude/scripts/cos.py python3 open-pr-truncation.test.py)
 
-    $ sha256sum ~/.claude/scripts/.cos.py.bak-2369-1790914174
-    3d91e4c91da488d1aff1bcaae2c0ca50cf2fa5cfddc39d9fd68d7b6c204f9f80  .cos.py.bak-2369-1790914174
+No `MISSING:` lines and an `ok open-pr-truncation` line means the patch is live. Any
+`MISSING:` line means it is not: restore this directory (`git revert e1137124`) instead
+of merging.
 
-A fabricated or mislabeled backup could not reproduce this value — it is derived from
-the actual pre-patch file content, not asserted.
+## Agent reading, 2026-10-21T03:00Z
 
-## 2. The live file carries the patch
+### 1. Every line the patch adds is present in the live file
 
-    $ grep -n 'OPEN_PR_LIMIT = 500\|def open_prs\|TRUNCATED' ~/.claude/scripts/cos.py
-    2110:OPEN_PR_LIMIT = 500
-    2122:def open_prs(repo, fields):
-    2151:    return (f"TRUNCATED: showing {shown}, more exist - {repo} has over {OPEN_PR_LIMIT} "
-    2214:            out.append(("!", "PR-TRUNCATED", f"PRTRUNC:{_repo}:{OPEN_PR_LIMIT}",
+The patch itself is in this repository's history at `e1137124^`. Each non-blank `+`
+line of it was searched for, as a fixed string, in the live file:
 
-    $ sha256sum ~/.claude/scripts/cos.py
-    a609dc62893258fa6cf063407de34245089495b720ced40cbbc0d83300efcc8d  cos.py
+    added lines: 103 missing: 0
 
-The live file's hash is not the one a patched-at-apply-time file would have: `cos.py`
-has been edited by other work since the patch landed (mtime 2026-10-20), which also
-moved the line numbers. The hash is therefore a point-in-time reading (2026-10-21), not
-an identity to match; what matters is that the patch's markers are still present.
+Control: the same check against the pre-patch backup (§3) reports 92 missing, so the
+check discriminates patched from unpatched rather than passing on any file.
 
-## 3. The regression test passes against the LIVE file, re-run now
+This is the check that ties the live file to the patch. It is presence-per-line, not a
+contiguous-hunk match, so it would not catch a hunk reordered into nonsense; the
+regression test in §2 covers behaviour.
 
-The test (deleted by `e1137124`; recoverable via
-`git show e1137124^:.../open-pr-truncation.test.py`) is also already installed
-at `~/.claude/scripts/tests/open-pr-truncation.test.py` (apply.sh's step 5):
+### 2. The installed regression test is the repo's test, and it passes
+
+    $ git show e1137124^:.../open-pr-truncation.test.py | sha256sum
+    05886bee2fabf976212f5fe47600a0d27d288e21495070ca79b2d79d39d9b2d7  -
+    $ sha256sum ~/.claude/scripts/tests/open-pr-truncation.test.py
+    05886bee2fabf976212f5fe47600a0d27d288e21495070ca79b2d79d39d9b2d7
 
     $ COS_PY=~/.claude/scripts/cos.py python3 open-pr-truncation.test.py
     ok open-pr-truncation - every producer reads the full open set, and says so when it cannot
-    $ echo $?
-    0
+    rc=0
 
-## Conclusion
+### 3. Context only: the pre-patch backup
 
-All three checks are independently reproducible by anyone with host access, and all
-three agree with `e1137124`'s claim. The #2369 patch is live, the backup is authentic,
-and the installed regression test passes against the live file. The deletion in
-`e1137124` stands; this file supplies the citable evidence that commit's prose lacked.
+`apply.sh` recorded the sha256 of the `cos.py` it was cut against
+(`BASE_SHA="3d91e4c9…9f80"`), and the backup it left, `.cos.py.bak-2369-1790914174`,
+hashes to that value. This shows `apply.sh` ran against the expected base. It does **not**
+show the patch is live — §1 and §2 carry that. The live file's own hash
+(`a609dc62…cc8d`) is not the patched-at-apply-time hash, because `cos.py` has been edited
+by other work since (mtime 2026-10-20); it is a point-in-time reading, not an identity.
 
-This file is itself transient closure evidence, not a staged patch — unlike the
-directory it used to sit beside, it carries nothing pending. Delete it once a future
-reader trusts the commit history above without re-checking it.
+## Recovery
+
+`apply.sh`, `cos.py.patch` and the test remain recoverable at `e1137124^`. Delete this
+file once the human confirmation above has been done and the pull request is merged.
