@@ -113,7 +113,7 @@ export function gitDirSync(rootDir: string): string | undefined {
     const st = fs.statSync(dotGit);
     if (st.isDirectory()) return dotGit;
     if (!st.isFile()) return undefined;
-    const m = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dotGit, 'utf-8'));
+    const m = /^gitdir:[ \t]*(.+?)[ \t\r]*$/m.exec(fs.readFileSync(dotGit, 'utf-8'));
     return m ? path.resolve(rootDir, m[1]) : undefined;
   } catch {
     return undefined;

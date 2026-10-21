@@ -193,6 +193,14 @@ describe('#2974 — a recovered approval leaves the primary clean and the panel 
     expect(fs.existsSync(file)).toBe(true);
   });
 
+  it('a linked worktree keeps its OWN record (per-worktree git dir, not the common one)', () => {
+    const wt = path.join(tmp, 'linked');
+    git(root, 'worktree', 'add', '-q', '-b', 'side', wt);
+    const file = inflightFile(wt, DR_REL)!;
+    expect(path.dirname(file)).toBe(path.join(root, '.git', 'worktrees', 'linked'));
+    expect(file).not.toBe(inflightFile(root, DR_REL));
+  });
+
   it('merge: once main carries the approval and the primary has it, the record is cleared', async () => {
     const { res } = await recoverAndSettle(acceptDr(), 'DR-001');
     // The PR merges (fast-forward of main to the approval commit), the branch is
