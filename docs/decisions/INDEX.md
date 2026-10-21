@@ -853,7 +853,7 @@ The core-tenets review proposed one voter for docs and T1, and four for machiner
 
 ## [DR-110 — The ai-review verdict carry ignores where the base put the change - text hunks lose their blob ids and start line numbers, binary files keep theirs](DR-110.md)
 
-*Status: proposed · Date: 2026-10-18*
+*Status: accepted · Date: 2026-10-18*
 
 <!-- dr-summary:DR-110 auto=be6169d668c2 -->
 The verdict-carry record ("A pass is carried across a push that changes nothing the voters are given", accepted 2026-10-13, #2701; it is the record named in this one's supersedes_partial:, and bodies here do not spell local ids of that range out, per the parent-register reference gate, #2148) carries an ai-review pass across a push when the bytes the voters are given are identical, and it explicitly rejected a position-insensitive identity.
