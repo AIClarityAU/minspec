@@ -51,7 +51,7 @@ Commands that touch no spec-owned file behave exactly as they do now.
 ## Context
 
 **The hole, cited.** `.claude/settings.json:5` wires the gate on
-`"matcher": "Edit|Write|MultiEdit"`, and `scripts/hooks/spec-gate.py:411-412` re-checks it
+`"matcher": "Edit|Write|MultiEdit"`, and `scripts/hooks/spec-gate.py:465-466` re-checks it
 (`if tool not in ("Edit", "Write", "MultiEdit"): passthrough()`). A `Bash` call never reaches
 the owned-set check. The `MINSPEC_GATE_OFF` audit in `scripts/hooks/spec-gate.sh` is never
 reached either, so `.minspec/gate-bypass.log` has nothing to show. The result is not a wrong
@@ -65,7 +65,7 @@ So the gate's strongest claim holds least in the mode it names.
 
 **Precedent for reading command text.** `scripts/hooks/host-write-guard.py` (#1816) is
 already a PreToolUse hook on `Bash`. It splits a command into simple commands on shell
-operators (`SEGMENT_SPLIT`, line 58) and judges each segment on its own, because a
+operators (`SEGMENT_SPLIT`, line 64) and judges each segment on its own, because a
 whole-string match let a mention inside an argument count as the act. Its docstring states
 plainly what text-reading cannot catch. This spec reuses that approach and that honesty.
 
