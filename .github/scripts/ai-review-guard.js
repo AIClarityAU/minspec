@@ -817,7 +817,7 @@ function findReattestableVerdict({ checkRuns, patchHash, allowlist } = {}) {
     if (c.status !== 'completed' || c.conclusion !== 'success') continue;
     const slug = c.app && c.app.slug;
     const identities = [slug, slug ? `${slug}[bot]` : null].filter(Boolean);
-    if (!identities.some((i) => allowed.includes(i))) continue;
+    if (!identities.some((i) => isAuthorizedReviewer(i, allowed))) continue;
     const text = [c.output && c.output.title, c.output && c.output.summary, c.output && c.output.text]
       .filter(Boolean)
       .join('\n');
