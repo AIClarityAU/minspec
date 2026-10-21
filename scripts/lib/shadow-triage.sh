@@ -91,8 +91,11 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION (all optional; the instrument is INERT until the key is set)
 # ══════════════════════════════════════════════════════════════════════════════
-#   MINSPEC_SHADOW_TRIAGE_KEY         z.ai API key. ABSENT → the shadow step is skipped
+#   MINSPEC_ZAI_API_KEY               z.ai API key. ABSENT → the shadow step is skipped
 #                                     with a one-line note and real triage is untouched.
+#                                     (Renamed from MINSPEC_SHADOW_TRIAGE_KEY, #2707, so the
+#                                     name says whose key it is. The old name is still read
+#                                     for one release, with a visible notice.)
 #   MINSPEC_SHADOW_TRIAGE             set to 0 to hard-disable even with a key present.
 #   MINSPEC_SHADOW_TRIAGE_MODEL       model id, or the `latest` sentinel (the default),
 #                                     which the RUNNER resolves per run from /v1/models.
@@ -162,7 +165,11 @@ SHADOW_TRIAGE_DEFAULT_TIMEOUT="120"
 # from the malformed rate. Override with MINSPEC_SHADOW_TRIAGE_MAX_TOKENS.
 SHADOW_TRIAGE_DEFAULT_MAX_TOKENS="1024"
 
-shadow_key()        { printf '%s' "${MINSPEC_SHADOW_TRIAGE_KEY:-}"; }
+# MINSPEC_ZAI_API_KEY wins; the pre-#2707 MINSPEC_SHADOW_TRIAGE_KEY is honoured for one
+# release so an unedited settings file does not silently switch the step off.
+shadow_key()        { printf '%s' "${MINSPEC_ZAI_API_KEY:-${MINSPEC_SHADOW_TRIAGE_KEY:-}}"; }
+# True when the key came from the deprecated name (callers print the notice).
+shadow_key_legacy_in_use() { [[ -z "${MINSPEC_ZAI_API_KEY:-}" && -n "${MINSPEC_SHADOW_TRIAGE_KEY:-}" ]]; }
 shadow_model()      { printf '%s' "${MINSPEC_SHADOW_TRIAGE_MODEL:-$SHADOW_TRIAGE_DEFAULT_MODEL}"; }
 shadow_base_url()   { printf '%s' "${MINSPEC_SHADOW_TRIAGE_BASE_URL:-$SHADOW_TRIAGE_DEFAULT_BASE_URL}"; }
 shadow_timeout()    { printf '%s' "${MINSPEC_SHADOW_TRIAGE_TIMEOUT:-$SHADOW_TRIAGE_DEFAULT_TIMEOUT}"; }
@@ -477,9 +484,12 @@ shadow_block_conformant() {
   raw="$(cat)"
   block="$(printf '%s\n' "$raw" | sed -n '/TRIAGE_VERDICT_BEGIN/,/TRIAGE_VERDICT_END/p')"
   [[ -z "$block" ]] && return 1
-  printf '%s\n' "$block" | grep -q 'TRIAGE_VERDICT_END' || return 1
+  # Here-strings, not pipes: `grep -q` exits on first match, and under the caller's
+  # `set -o pipefail` a pipe writer that gets SIGPIPE (141) fails the pipeline, turning a
+  # conformant block into a spurious "non-conformant" (#2874).
+  grep -q 'TRIAGE_VERDICT_END' <<<"$block" || return 1
   for f in decision role tier human_only; do
-    printf '%s\n' "$block" | grep -qiE "^[[:space:]]*${f}[[:space:]]*:" || return 1
+    grep -qiE "^[[:space:]]*${f}[[:space:]]*:" <<<"$block" || return 1
   done
   return 0
 }

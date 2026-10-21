@@ -1,7 +1,7 @@
 ---
 id: SPEC-078
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — DR-066's own domain (the silent-gate incident family); SPEC-054/SPEC-071 use it for the same gate-signal integrity class
@@ -22,8 +22,8 @@ implements: [packages/minspec/tests/quota-evidence-witness.test.ts]
 affects: [scripts/review-branch.sh, .github/workflows/ai-review.yml, .github/workflows/ai-review-retry.yml]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -31,8 +31,10 @@ phases:
 # MinSpec — `ai-review-retry` must see the quota evidence the reviewer actually observed (Requirements)
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human
-> reads it, answers **Decisions needed (Clarify)**, and approves it through the normal
-> spec-approval gate before any code changes.
+> reads it, answers its Clarify questions, and approves it through the normal
+> spec-approval gate before any code changes. Each question carries an agent-recorded
+> selection under **Clarify selections** below; the human answers by approving this spec
+> with those in place, or by changing them first.
 
 Materializes **#2178** — *"ai-review-retry declines to retry a quota-blocked PR whose run
 log contains the quota diagnostic."* It does not dispute **#1630** (the no-evidence guard:
@@ -226,9 +228,25 @@ though the second failure (PAYG) was never shown to be quota. A PAYG misconfigur
 - **INV-6 (constitution 1, offline).** No new network call is introduced in MinSpec's
   extension; all changes are in CI scripts that already call the git host.
 
-## Decisions needed (Clarify)
+## Clarify selections (recorded by an agent 2026-10-01; ratified only by approval of this spec)
+
+DQ-1 to DQ-4 each carry a **Recorded selection** line naming the option this document
+already recommended. An agent session wrote those lines on 2026-10-01, and no human chose
+them. This repository runs with `"autonomy": "act"` (`.minspec/config.json:58`), under which
+an agent proceeds on a stated recommendation and leaves the options it did not take on
+record (DR-086 §2 and §4), which is why the options stay below with their costs. Approving a
+T3 spec is the second class on that section's stop list (`scripts/lib/autonomy.ts:68-70`),
+so nothing here stands in for that approval: the lines propose, and approving this spec is
+what ratifies them. An approval records a canonical hash that covers this body
+(`packages/minspec/src/lib/approval.ts:4-8`) and reads as stale once the hash stops matching
+(`resolveStatus`, `:483-490`), so an approval of this text covers these selections and
+changing one afterwards voids it. When the lines were written no approval of this spec had
+landed on `main` (`status: specifying`, `clarify: pending`). A question in this section with
+no **Recorded selection** line is still open.
 
 ### DQ-1 — Decline notice: once per block, or every hourly tick?
+
+**Recorded selection: Option A,** once, on transition.
 
 - **Option A — once, on transition (rec).** Post the explanatory comment only when the PR
   does not already carry `needs-human-review` (or an idempotency marker such as
@@ -239,6 +257,12 @@ though the second failure (PAYG) was never shown to be quota. A PAYG misconfigur
   PR trains readers to ignore the bot, which defeats FR-6.
 
 ### DQ-2 — Retry decision when voters disagree on evidence
+
+**Recorded selection: Option A as the rule, carried by Option C as the mechanism.** Both are
+marked recommended below and they do not compete: A and B are the two candidate rules, and C
+is how either rule is carried. So the workflow emits one aggregated marker line computed
+under rule A (retry only when every blocked voter is `captured`), and the retry keeps its
+last-match extraction.
 
 With FR-4, one comment can carry several `evidence:` lines. Today the retry takes the
 *last* match.
@@ -257,6 +281,9 @@ With FR-4, one comment can carry several `evidence:` lines. Today the retry take
 
 ### DQ-3 — What the marker says when subscription hit quota and PAYG failed for a non-quota reason
 
+**Recorded selection: Option A,** `reason: quota` and `evidence: captured`, with the PAYG
+failure shown in the detail. Option B is not taken, so no new marker value is introduced.
+
 - **Option A — `reason: quota`, `evidence: captured`, PAYG failure shown in detail (rec).**
   The subscription window will reset; the retry is useful. *Cost:* a broken PAYG setup
   (bad key, no credit) keeps failing silently on every retry until someone reads the
@@ -270,6 +297,8 @@ With FR-4, one comment can carry several `evidence:` lines. Today the retry take
   to prevent.
 
 ### DQ-4 — Should the retry also read the blocked run's log as a second witness?
+
+**Recorded selection: Option A,** no second witness; fix the producer.
 
 - **Option A — no; fix the producer (rec).** Comment is durable, already fetched, and
   FR-1–FR-3 make it correct. *Cost:* if the producer regresses again, only FR-8's tests

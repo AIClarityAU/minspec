@@ -61,19 +61,6 @@ export function commitOnApproveEnabled(): boolean {
   return vscode.workspace.getConfiguration('minspec').get<boolean>('commitOnApprove', true);
 }
 
-/**
- * Commit the approval paths when the setting is on, returning a toast suffix.
- *
- *   ''                                        — setting off, not a repo, or no net change
- *   ' · committed'                            — the doc (+ record) were committed
- *   ' · not committed (detached HEAD)'        — refused so the approval isn't lost on next checkout
- *   ' · not committed (merge/cherry-pick …)'  — git refuses a partial commit mid-operation (#1112)
- *   ' · commit failed — approval saved …'     — git/hook rejected; approval on disk, uncommitted, unstaged
- *
- * Never rejects (delegates to `commitApproval`, which never rejects). A failed or
- * refused commit is surfaced (never-wrong: the user must know the approval is
- * uncommitted), with the full git/hook stderr logged for diagnosis.
- */
 /** Offer labels — worded to match #1054's harness-commit offer, so the two
  *  destination guards read as one behaviour rather than two dialects. */
 const SHOW_FILES_ACTION = 'Show me the files';
@@ -188,6 +175,19 @@ async function recoverOnProtectedBranch(
   return { suffix };
 }
 
+/**
+ * Commit the approval paths when the setting is on, returning a toast suffix.
+ *
+ *   ''                                        — setting off, not a repo, or no net change
+ *   ' · committed'                            — the doc (+ record) were committed
+ *   ' · not committed (detached HEAD)'        — refused so the approval isn't lost on next checkout
+ *   ' · not committed (merge/cherry-pick …)'  — git refuses a partial commit mid-operation (#1112)
+ *   ' · commit failed — approval saved …'     — git/hook rejected; approval on disk, uncommitted, unstaged
+ *
+ * Never rejects (delegates to `commitApproval`, which never rejects). A failed or
+ * refused commit is surfaced (never-wrong: the user must know the approval is
+ * uncommitted), with the full git/hook stderr logged for diagnosis.
+ */
 export async function commitApprovalIfEnabled(
   rootDir: string,
   absPaths: readonly string[],
@@ -419,8 +419,14 @@ async function pushAlwaysOfferAlreadyMade(rootDir: string): Promise<boolean> {
  * bare `{ answeredSignatures: { … } }` would REPLACE the whole map and wipe the
  * bootstrap steps' answers. Same hazard, same fix, as `recordAnsweredSignature`.
  *
- * Swallows every failure (read-only checkout, unwritable root, full disk): a
- * preference write must never turn a SUCCESSFUL approval into a visible error.
+ * Never lets a write failure here turn a SUCCESSFUL approval into a visible
+ * ERROR (read-only checkout, unwritable root, full disk, or — #2506 — a folder
+ * with no `.minspec/` for `savePreferences` to refuse into). That is not the
+ * same thing as never telling the user: a bare `console.warn` lands in the
+ * Debug Console, which nobody watching this toast ever opens, so the failure
+ * must still reach them some visible, non-blocking way (constitution invariant
+ * 2 — no silent gate). See the call site's comment for what it means in
+ * practice when this fails.
  */
 async function recordPushAlwaysOfferMade(rootDir: string): Promise<void> {
   try {
@@ -433,8 +439,10 @@ async function recordPushAlwaysOfferMade(rootDir: string): Promise<void> {
       },
     });
   } catch (err) {
-    console.warn(
-      `MinSpec: could not remember the push-always offer — ${err instanceof Error ? err.message : String(err)}`,
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`MinSpec: could not remember the push-always offer — ${message}`);
+    void vscode.window.showWarningMessage(
+      `MinSpec: could not remember that this offer was shown — ${message} You may see it again next time.`,
     );
   }
 }
@@ -468,7 +476,13 @@ const PUSH_ALWAYS_PREF_KEY = 'pushOnApprove';
  *
  * Swallow-and-warn on failure (the `approve.ts` precedent): the approval has
  * already succeeded and the caller pushes regardless — losing the PREFERENCE must
- * never look like losing the approval.
+ * never look like losing the approval. "Swallow" means never let it block or
+ * fail the push, not never tell the user: before #2506 the only signal was
+ * `console.warn`, invisible outside the Debug Console, so a refusal from a
+ * folder with no `.minspec/` (Accept Decision / Accept Epic reach this before
+ * anything else creates the marker) looked identical to success — the toast had
+ * already said "Always push" was accepted. A non-blocking warning toast fixes
+ * that without touching the push itself.
  */
 async function enableAlwaysPush(rootDir: string): Promise<void> {
   try {
@@ -479,8 +493,10 @@ async function enableAlwaysPush(rootDir: string): Promise<void> {
       [PUSH_ALWAYS_PREF_KEY]: 'always',
     } as Parameters<typeof savePreferences>[1]);
   } catch (err) {
-    console.warn(
-      `MinSpec: failed to persist pushOnApprove=always — ${err instanceof Error ? err.message : String(err)}`,
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`MinSpec: failed to persist pushOnApprove=always — ${message}`);
+    void vscode.window.showWarningMessage(
+      `MinSpec: "Always push" was not remembered — ${message} Pushing this once only.`,
     );
   }
 }
@@ -975,8 +991,9 @@ export async function pushApprovalIfEnabled(
     // show-once rather than show-until-answered-a-particular-way. Deliberate
     // trade-off: if `enableAlwaysPush` below fails to persist, the offer is still
     // spent and the user keeps clicking `Push` per approval. That is a degradation
-    // the console warning explains, and it is the lesser evil against re-nagging
-    // someone who has already answered.
+    // a visible warning toast now explains (#2506 — a bare console.warn never
+    // reached the user), and it is the lesser evil against re-nagging someone
+    // who has already answered.
     if (!alreadyOffered) await recordPushAlwaysOfferMade(rootDir);
 
     if (choice === ALWAYS_PUSH_ACTION) {
