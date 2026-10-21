@@ -56,10 +56,10 @@ and the issue's (global-register) `DR-362` reference both match this spec's `DR-
 story (`DR-012.md`'s own text cites `DR-362 (parent register, mmo-platform)` for an unrelated
 amendment, confirming it is not a local id — see `docs/decisions/DR-012.md:8`). Per the
 dispatch instructions for this issue, this is an UPDATE to the existing spec, not a new id.
-Verified against `origin/main` at `722e7b57` (2026-10-02):
+Verified against `origin/main` at `722e7b57` (2026-10-02); `approve.ts` line citations re-verified 2026-10-21 against `b6ec4ff6`:
 - Still zero code (re-confirmed `implements_reason`'s checks).
 - Two `file:line` citations had gone stale since 2026-06-01 and are corrected throughout
-  this document: `approve.ts:70-100` → the function is now `approve.ts:202-419` and, more to
+  this document: `approve.ts:70-100` → the function is now `approve.ts:222-462` and, more to
   the point, it gained **two more refusal gates** since this spec was written (the #1317
   `violationsIntroducedByApproval` check and the DR-056 approver-identity check) — FR-10 and
   the Blast-Radius section below now name all three; `spec-panel-html.ts:131-138` →
@@ -230,17 +230,17 @@ for content-bearing artifacts (specs, ADRs).
 ### Approve + chain to next (the signpost walk)
 
 - **FR-10 (Approve runs the DR-012 gate, never bypasses it — THREE refusal checks, not
-  one).** `approveSpecCommand` ([`approve.ts:202-419`](../../../packages/minspec/src/commands/approve.ts#L202-L419))
+  one).** `approveSpecCommand` ([`approve.ts:222-462`](../../../packages/minspec/src/commands/approve.ts#L222-L462))
   has grown two refusal gates since this spec was first written, and the scroll-bottom
   primary action MUST reuse all three, in the same order, or the pretty door is the R2
   bypass this spec exists to prevent:
   1. `validateSpec` — refuse on blocking violations
-     ([`approve.ts:244-266`](../../../packages/minspec/src/commands/approve.ts#L244-L266)).
+     ([`approve.ts:273-299`](../../../packages/minspec/src/commands/approve.ts#L273-L299)).
   2. `violationsIntroducedByApproval` (#1317) — refuse when the status/phase advance
      approval itself triggers would newly violate a rule that did not apply before the
-     advance ([`approve.ts:268-297`](../../../packages/minspec/src/commands/approve.ts#L268-L297)).
+     advance ([`approve.ts:301-330`](../../../packages/minspec/src/commands/approve.ts#L301-L330)).
   3. The DR-056 approver-identity check — refuse an agent/bot or absent identity before
-     any status flip ([`approve.ts:299-325`](../../../packages/minspec/src/commands/approve.ts#L299-L325)).
+     any status flip ([`approve.ts:332-358`](../../../packages/minspec/src/commands/approve.ts#L332-L358)).
 
   Surfacing blocking violations for whichever gate refuses. On success it records the
   approval (re-hash) / acceptance / promotion appropriate to the node kind. The webview
@@ -320,7 +320,7 @@ that pin it.
    FR-17 import-ban both collapse and must be re-split. Establish the boundary in the first
    module, not after.
 4. **Gate-call reuse of `approveSpecCommand` (FR-10, INV — Gate parity).** FR-10 requires the
-   webview reuse `approve.ts:202-419`'s three refusal gates (`validateSpec`,
+   webview reuse `approve.ts:222-462`'s three refusal gates (`validateSpec`,
    `violationsIntroducedByApproval`, the DR-056 approver-identity check) *verbatim*, not a
    fork of any one of them. A copied-then-drifted validator path is the exact bypass R2
    warns of, and it is now a three-way target, not a one-way one, because two gates were
@@ -414,7 +414,7 @@ Checkbox DoD tracing the FRs. The feature is "done" only when all hold.
 - [ ] **Approve is never softer than the command** — the scroll-bottom action runs, and
   refuses on, all three `approveSpecCommand` gates (`validateSpec`,
   `violationsIntroducedByApproval`, the DR-056 approver-identity check —
-  `approve.ts:202-419`), not only the first; a revision forces a visible re-hash so prior
+  `approve.ts:222-462`), not only the first; a revision forces a visible re-hash so prior
   approval goes `stale` (FR-9, FR-10, INV — Gate parity).
 - [ ] **Approve advances, does not close** — on success the panel loads the next human task
   from the SPEC-012 resolver into the same panel; closes only on empty queue → terminal
@@ -480,10 +480,10 @@ Checkbox DoD tracing the FRs. The feature is "done" only when all hold.
 Beyond the `depends_on: SPEC-012` link above, the declared touch-surface and the failure
 each change would trigger:
 
-- **`approve.ts:202-419` (`approveSpecCommand`, now THREE refusal gates, not one)** — FR-10
-  reuses all of it verbatim: `validateSpec` (`:244-266`), the #1317
-  `violationsIntroducedByApproval` check (`:268-297`), and the DR-056 approver-identity check
-  (`:299-325`). The last two did not exist when this spec was first written — FR-10 was
+- **`approve.ts:222-462` (`approveSpecCommand`, now THREE refusal gates, not one)** — FR-10
+  reuses all of it verbatim: `validateSpec` (`:273-299`), the #1317
+  `violationsIntroducedByApproval` check (`:301-330`), and the DR-056 approver-identity check
+  (`:332-358`). The last two did not exist when this spec was first written — FR-10 was
   originally scoped to `validateSpec` alone — so any implementer working from an older reading
   of this spec would wire only the first gate and leave the webview's Approve weaker than the
   command, which is exactly the R2 bypass this spec exists to prevent. If any gate's signature
@@ -498,7 +498,7 @@ each change would trigger:
   every stored pin's "did the artifact change" assumption (FR-4) must be re-evaluated.
 - **`spec-panel-html.ts:144-153` (CSP-nonce pattern)** — FR-1 reuses it. Loosen the CSP there
   (e.g. allow remote `img-src`) and the no-network-fetch guarantee of FR-1 silently weakens.
-- **DR-057's post-approve phase-advance toast (`approve.ts:375-401`)** — new since this spec
+- **DR-057's post-approve phase-advance toast (`approve.ts:418-444`)** — new since this spec
   was authored. It already does something FR-11 also wants, from a different motive: it fires
   immediately after a successful approve and offers (or, if the preference is set, silently
   performs) an LLM-free enqueue for implementation dispatch. FR-11's "advance to the next
@@ -705,7 +705,7 @@ default and what each costs against the invariants.
   *(Open — plan phase.)*
 - **FR-OQ3 — sequencing against DR-057's post-approve phase-advance toast (newly found,
   2026-10-02).** `approveSpecCommand` now fires a second "what next" prompt immediately after
-  a successful approve (`approve.ts:375-401`): an LLM-free enqueue offer for implementation
+  a successful approve (`approve.ts:418-444`): an LLM-free enqueue offer for implementation
   dispatch, distinct from FR-11's "load the next *human* decision" (Blast-Radius). Both want
   to run the instant Approve returns. Plan MUST pick one of: (a) the webview's "load next"
   runs first and the toast appears in the host editor behind/after it; (b) the toast is
