@@ -52,7 +52,7 @@ actually reads.
 No decision record covers this yet; see [Decision record](#decision-record) for why none is
 minted by this spec.
 
-## Evidence - what is true today (read 2026-10-16 from this branch's base, cited)
+## Evidence - what is true today (read 2026-10-16, line anchors re-resolved 2026-10-21 against base `41605a61`)
 
 The issue was written on 2026-08-06; the facts below were re-read on 2026-10-16 rather than
 taken from it.
@@ -65,24 +65,24 @@ risks and makes no recommendation.
 
 | # | Site | Trigger | Text that goes with it |
 |---|---|---|---|
-| S-1 | `.github/workflows/ai-review.yml:1206-1209` | PR touches `.github/` or `scripts/` (machinery) | Check-run title "Machinery PR — human review required" + one-paragraph summary. Problem only. |
-| S-2 | `.github/workflows/ai-review.yml:1495-1509` via `shouldSummonHumanReview` (`.github/scripts/ai-review-guard.js:1863`) | Machinery PR, or `changes` with no remediation available | No text of its own; the verdict comment (`ai-review.yml:856-992`, posted `:1277`). Problem only. |
-| S-3 | `.github/workflows/ai-review.yml:1531`, `:1562-1565` | ai-review workflow errored (fail-closed backstop) | "AI review — `ai-review:changes` (fail-closed)… See the workflow run". Problem only. |
-| S-4 | `.github/workflows/ai-review-retry.yml:102-106` | Blocked PR with `evidence: NONE` | Label only. |
-| S-5 | `scripts/remediate-pr.sh:631-633` | Merge conflict | Label only. |
-| S-6 | `scripts/remediate-pr.sh:716-725` | Remediation attempt or crash cap reached | "Auto-remediation capped — a human needs to take it from here". Problem only. |
-| S-7 | `scripts/remediate-pr.sh:891-895` | Remediation agent `ESCALATE:` | The agent's one-line reason. Problem only. |
-| S-8 | `scripts/remediate-pr.sh:911-916` | Egress guard hit (also `agent-quarantined`) | "QUARANTINED" + worktree path. Problem only. |
-| S-9 | `scripts/dispatch-issue.sh:671-679` (`surface_verdict_hold`) | No fresh triage verdict behind `agent-ready` | Problem + two numbered options with commands. No recommendation. |
-| S-10 | `scripts/dispatch-issue.sh:1395-1397` | `Closes #N` link not confirmed (#2228) | Problem + suggested fix. No question form. |
-| S-11 | `scripts/dispatch-issue.sh:1420`, `:1423`, `:1434`, `:1461` | Native auto-merge withheld | Label only; the reason (`hold_why`, `:1446-1453`) goes to the log, not to the PR. |
-| S-12 | `scripts/dispatch-issue.sh:1549-1557` (`quarantine_publish`) | Egress guard hit on an issue | "egress guard blocked publish — see worktree…". Problem only. |
-| S-13 | `scripts/dispatch-issue.sh:1587-1596` (`hold_specify_scope`) | Specify-only dispatch left its allowlist | Problem + two command options. No recommendation. |
-| S-14 | `scripts/dispatch-issue.sh:1624-1631` (`shepherd_hand_off`) | Creator-shepherd gave up | "Creator-shepherd handed off… stopped because …". Problem only. |
-| S-15 | `scripts/dispatch-issue.sh:2020-2023` | Build lifetime exceeded | Label only. |
-| S-16 | `scripts/dispatch-issue.sh:2063-2079` | Agent escalated after the stronger-model retry | Label only. |
-| S-17 | `scripts/dispatch-issue.sh:2512-2514` | Agent crashed | Label only. |
-| S-18 | `scripts/drain-inbox.sh:1097-1099` | Issue `agent-done` but no merged PR | Label only. |
+| S-1 | `.github/workflows/ai-review.yml:1259-1262` (`TITLE="Machinery PR — human review required"`) | PR touches `.github/` or `scripts/` (machinery) | Check-run title "Machinery PR — human review required" + one-paragraph summary. Problem only. |
+| S-2 | `.github/workflows/ai-review.yml:1548-1562` (the `SUMMON_HUMAN` step) via `shouldSummonHumanReview` (`.github/scripts/ai-review-guard.js:1944`) | Machinery PR, or `changes` with no remediation available | No text of its own; the verdict comment (body assembled in `ai-review.yml`, posted by `gh pr comment … --body-file` at `:1330`). Problem only. |
+| S-3 | `.github/workflows/ai-review.yml` backstop step, `gh pr comment` at `:1584` | ai-review workflow errored (fail-closed backstop) | "AI review — `ai-review:changes` (fail-closed)… See the workflow run". Problem only. |
+| S-4 | `.github/workflows/ai-review-retry.yml:95-106` | Blocked PR with `evidence: NONE` | Label only. |
+| S-5 | `scripts/remediate-pr.sh:647-657` ("Merge conflict — not auto-resolving") | Merge conflict | Label only. |
+| S-6 | `scripts/remediate-pr.sh:740-748` (`CAPPED_MARKER` comment) | Remediation attempt or crash cap reached | "Auto-remediation capped — a human needs to take it from here". Problem only. |
+| S-7 | `scripts/remediate-pr.sh:907-918` (`grep '^ESCALATE:'` branch) | Remediation agent `ESCALATE:` | The agent's one-line reason. Problem only. |
+| S-8 | `scripts/remediate-pr.sh:938-941` ("QUARANTINED" comment) | Egress guard hit (also `agent-quarantined`) | "QUARANTINED" + worktree path. Problem only. |
+| S-9 | `scripts/dispatch-issue.sh:737-745` (`surface_verdict_hold`) | No fresh triage verdict behind `agent-ready` | Problem + two numbered options with commands. No recommendation. |
+| S-10 | `scripts/dispatch-issue.sh:1459-1463` ("Closing-issue link not confirmed") | `Closes #N` link not confirmed (#2228) | Problem + suggested fix. No question form. |
+| S-11 | `scripts/dispatch-issue.sh:1486`, `:1489`, `:1500`, `:1527` | Native auto-merge withheld | Label only; the reason (`hold_why`, `:1512-1518`) goes to the log, not to the PR. |
+| S-12 | `scripts/dispatch-issue.sh:1608-1621` (`quarantine_publish`) | Egress guard hit on an issue | "egress guard blocked publish — see worktree…". Problem only. |
+| S-13 | `scripts/dispatch-issue.sh:1649-1657` (`hold_specify_scope`) | Specify-only dispatch left its allowlist | Problem + two command options. No recommendation. |
+| S-14 | `scripts/dispatch-issue.sh:1688-1696` (`shepherd_hand_off`) | Creator-shepherd gave up | "Creator-shepherd handed off… stopped because …". Problem only. |
+| S-15 | `scripts/dispatch-issue.sh:2086-2090` ("exceeded the absolute claim lifetime") | Build lifetime exceeded | Label only. |
+| S-16 | `scripts/dispatch-issue.sh:2131-2147` (`agent-escalated,needs-human-review`) | Agent escalated after the stronger-model retry | Label only. |
+| S-17 | `scripts/dispatch-issue.sh:2596-2597` ("Agent CRASHED") | Agent crashed | Label only. |
+| S-18 | `scripts/drain-inbox.sh:1103-1105` ("NO merged PR exists") | Issue `agent-done` but no merged PR | Label only. |
 
 Every label write above is `… 2>/dev/null || true`. The label is not itself the merge gate
 (`ready-to-merge` is; DR-063), so a lost label is a lost *signal*, not an open gate - but a
@@ -93,10 +93,10 @@ spec removes.
 
 - No `.github/pull_request_template.md` exists.
 - An agent-dispatched PR body is the agent's `.agent-summary.md` plus parent-appended
-  trailers (`scripts/dispatch-issue.sh:2097-2123`, `:2267`), passed whole to
-  `gh pr create` (`:1372`). Nothing inspects its structure.
+  trailers (`scripts/dispatch-issue.sh:2167-2191`, `:2335`), passed whole to
+  `gh pr create` (`:1438`). Nothing inspects its structure.
 - The assembled body is fenced as agent-authored text before it is republished
-  (`scripts/dispatch-issue.sh:2271-2296`, #1243), because the agent's prompt carried an
+  (`scripts/dispatch-issue.sh:2359-2364`, #1243), because the agent's prompt carried an
   untrusted issue body.
 - "In plain terms" exists for decision records as a template heading only
   (`packages/minspec/src/lib/adr-manager.ts:569`), with no validator behind it.
@@ -107,7 +107,7 @@ spec removes.
   `pull_request_review_comment` (grep of every `on:` block, 2026-10-16).
 - Machine-read human gestures today are: the `agent-ready` label on an issue
   (`approve-on-label.yml` → `scripts/approve-on-label.sh`, which verifies the actor against
-  GitHub's own timeline, `:85-101`, requires write permission, `:173-177`, and refuses
+  GitHub's own timeline, `:85-101`, requires write permission, `:173`, and refuses
   quarantined issues, `:196`), the PR label events read by `ready-to-merge.yml` and
   `docs-lane.yml`, the local `scripts/approve-issue.sh`, and the merge itself.
 - Comments are read only at dispatch or remediation time, through the account-type author
@@ -116,10 +116,10 @@ spec removes.
 ### E-4. Panel findings below "blocking" die with the PR
 
 - Each voter returns `{severity, location, problem}` with free-text severity
-  (`.github/scripts/ai-review-guard.js:84-91`), rendered at `:151-158`.
+  (`.github/scripts/ai-review-guard.js:89-91`), rendered at `:156`.
 - Only `verdict` and the blocking count decide the label (`scripts/review-decide.sh:23`,
   `:212`). Nothing files, copies or carries non-blocking findings anywhere after merge;
-  the only later reader is the remediation agent, before merge (`scripts/remediate-pr.sh:801-804`).
+  the only later reader is the remediation agent, before merge (`scripts/remediate-pr.sh:813-828`).
 
 ## One-Sentence Scope
 
@@ -131,7 +131,7 @@ section.
 
 ## Out of scope
 
-- **Triage's own holds** (`needs-review`, `needs-info` from `scripts/triage-inbox.sh:262-267`).
+- **Triage's own holds** (`needs-review`, `needs-info` from `scripts/triage-inbox.sh:156-160`, `:288-291`).
   They already carry a rationale and a verdict record; bringing them under the renderer is
   a natural second slice, not this one (see D-4).
 - **Carrying non-blocking findings past merge for PRs that never summon a human** - the
