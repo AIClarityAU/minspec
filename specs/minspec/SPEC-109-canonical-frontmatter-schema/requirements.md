@@ -582,6 +582,12 @@ run `gh`. They are repeated in `.agent-summary.md` so they reach a human.
   [DR-088](../../../docs/decisions/DR-088.md) (ownership keys and the hash),
   [DR-034](../../../docs/decisions/DR-034.md) (canonical hash),
   [DR-003](../../../docs/decisions/DR-003.md) (root cause is mechanism plus missing gate).
-- Spec id: SPEC-109 was chosen as one above the highest `SPEC-NNN` directory on `main` or on
-  any locally known remote branch (SPEC-108, `agent/issue-94`). A branch pushed since the
-  last fetch could still claim it; Rule 18 catches a duplicate once both are on one base.
+- Spec id: SPEC-109 is a free gap id, not max+1. It was picked when SPEC-108
+  (`agent/issue-94`) was the highest id known locally; the base has since gained SPEC-134,
+  135, 136, 139, 140 and 211, all above it, and no directory uses 109 (checked against base
+  `b6ec4ff6`). Keeping 109 is intentional: renumbering would churn every cross-reference for
+  no gain, since only a duplicate id is a defect. A branch pushed since the last fetch could
+  still claim it; Rule 18 catches a duplicate once both are on one base.
+- Corpus baseline: the file counts and "today" figures in Context and the acceptance
+  criteria were measured at `350c6fa4` (130 files); the base now holds 140 typed-layout spec
+  files. Re-measure in Plan before anchoring the thresholds.
