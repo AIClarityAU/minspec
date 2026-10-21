@@ -22,8 +22,8 @@ implements: [packages/minspec/tests/checkbox-basis-corpus.test.ts, packages/mins
 # requires.
 affects: [packages/shared/src/canonical.ts, scripts/hooks/canonical.py, packages/minspec/src/lib/scaffold.ts]
 phases:
-  specify: done
-  clarify: done
+  specify: in-progress
+  clarify: in-progress
   plan: pending
   tasks: pending
   implement: pending
@@ -346,9 +346,11 @@ Four questions, answered by the founder: Option A for all four (answers recorded
 its options and costs below as the record of what was weighed, with the resolution first.
 The requirements were already written under Option A, so none changed.
 
-Provenance: the founder gave these answers through the AskUserQuestion prompt; they were
-relayed as task-queue item `in39` (filed 2026-10-21T22:00:53Z) and are quoted verbatim in
-https://github.com/AIClarityAU/minspec/pull/3004#issuecomment-6328125417 .
+Provenance: the answers were relayed from the founder's task queue (item `in39`, filed
+2026-10-21T22:00:53Z) and are quoted verbatim in
+https://github.com/AIClarityAU/minspec/pull/3004#issuecomment-6328125417 . The Clarify phase
+is marked done only when the founder approves the spec, because his approval is the
+human-gated record (precedent: SPEC-139, PR #2952).
 
 ### DQ-1 - Which checkboxes does the hash ignore?
 
