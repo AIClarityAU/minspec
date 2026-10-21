@@ -346,6 +346,10 @@ Four questions, answered by the founder: Option A for all four (answers recorded
 its options and costs below as the record of what was weighed, with the resolution first.
 The requirements were already written under Option A, so none changed.
 
+Provenance: the founder gave these answers through the AskUserQuestion prompt; they were
+relayed as task-queue item `in39` (filed 2026-10-21T22:00:53Z) and are quoted verbatim in
+https://github.com/AIClarityAU/minspec/pull/3004#issuecomment-6328125417 .
+
 ### DQ-1 - Which checkboxes does the hash ignore?
 
 **Resolved: Option A.** Every task-list checkbox anywhere in the body leaves the hash (FR-1, FR-5, Contract step 4).
