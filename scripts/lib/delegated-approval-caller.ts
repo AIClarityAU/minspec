@@ -568,7 +568,7 @@ function recordOne(
     }
     return at('opened', 'covered', `${verdict.delegationId}, verdict ${verdict.record.verdictBy}`, url);
   } catch (err) {
-    return at('error', pushed ? 'pr-create-failed' : 'write-failed', String(err).split('\n')[0]);
+    return at('error', pushed ? 'pr-create-failed' : 'write-failed', errorDetail(err));
   } finally {
     try {
       deps.git(repoRoot, ['worktree', 'remove', '--force', wt]);
@@ -603,6 +603,23 @@ function prBody(c: Candidate, rec: CliRecord, delegationId: string, isDr: boolea
     'Opened by `scripts/lib/delegated-approval-caller.ts` (#2981). It never merges and never arms auto-merge.',
     '',
   ].join('\n');
+}
+
+/**
+ * One-line failure reason for the report. `execFileSync` puts git's own words (hook
+ * refusal, nothing to commit, identity error) on `err.stderr`, never in `String(err)`,
+ * which is only "Command failed: git ... commit"; keep both so the cause is diagnosable.
+ */
+export function errorDetail(err: unknown): string {
+  const head = String(err).split('\n')[0];
+  const raw = (err as { stderr?: unknown } | null)?.stderr;
+  const stderr = raw == null ? '' : String(raw);
+  const lines = stderr
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .slice(0, 3);
+  return lines.length === 0 ? head : `${head} | stderr: ${lines.join(' / ').slice(0, 600)}`;
 }
 
 // ─── the real seams ─────────────────────────────────────────────────────────
