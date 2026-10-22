@@ -20,7 +20,7 @@ phases:
 
 > Materializes **[#1336](https://github.com/AIClarityAU/minspec/issues/1336)** —
 > *"ESCALATE is unenforced prose: a stuck loop or a confident false success never fires
-> it."* No DR underlies this design and none is minted by it: per the DR-359 (parent
+> it."* No DR underlies this design and none is minted by it: per the MMO/DR359 (parent
 > register, mmo-platform) ADR filter, every choice below is a same-day-reversible change to
 > dev-time scripts, not an irreversible commitment. One choice comes closest — the outcome
 > record's schema (D3), which becomes a dataset a later comparison relies on — and is
@@ -39,17 +39,17 @@ pipeline's false-success rate becomes a measured number instead of an unstateabl
 
 - **`ESCALATE:` is detected by grepping the agent's free text.** The build agent runs as
   `claude -p … --output-format text 2>&1 | tee "$LOG"`
-  ([`scripts/dispatch-issue.sh:2042-2047`](../../../scripts/dispatch-issue.sh#L2042)); the
+  ([`scripts/dispatch-issue.sh:2109-2115`](../../../scripts/dispatch-issue.sh#L2109)); the
   only escalation detector is `grep -q '^ESCALATE:' "$LOG"`
-  ([`:2048`](../../../scripts/dispatch-issue.sh#L2048)). The comment above it says why:
+  ([`:2116`](../../../scripts/dispatch-issue.sh#L2116)). The comment above it says why:
   `claude -p` "exits 0 even when the agent self-escalates". So escalation fires only if the
   model writes the token — the trust-the-model shape the constitution's "enforce, don't trust
   the model" principle names.
 - **The only time bound is wall-clock, from the claim, and is two hours.**
   `BUILD_TIMEOUT_ARGS=(timeout --kill-after=30s "${BUILD_REMAINING}s")`
-  ([`:2030`](../../../scripts/dispatch-issue.sh#L2030)) is computed from
+  ([`:2097`](../../../scripts/dispatch-issue.sh#L2097)) is computed from
   `BUILD_DEADLINE = claim time + LEASE_ABS_MAX_SECS`
-  ([`:970`](../../../scripts/dispatch-issue.sh#L970)), and
+  ([`:1036`](../../../scripts/dispatch-issue.sh#L1036)), and
   `LEASE_ABS_MAX_SECS=7200` ([`scripts/lib/issue-lease.sh:57`](../../../scripts/lib/issue-lease.sh#L57)).
   SPEC-044 FR-12 chose this absolute cap and explicitly named the alternative it did not
   build: *"Equivalently a progress-coupled liveness signal — last-commit / agent-heartbeat —
@@ -59,23 +59,23 @@ pipeline's false-success rate becomes a measured number instead of an unstateabl
 - **What the ceiling does on expiry is a different path from an escalation.** A non-zero
   exit from the `timeout`-wrapped pipeline (including a kill at the ceiling) lands in the
   `else` crash branch, labelled `agent-escalated,needs-human-review` with the message
-  "Agent CRASHED" ([`:2512-2514`](../../../scripts/dispatch-issue.sh#L2512)) — I believe,
+  "Agent CRASHED" ([`:2582-2597`](../../../scripts/dispatch-issue.sh#L2582)) — I believe,
   unverified, that a ceiling kill is reported as a *crash*, not as a timeout, because the
   branch does not inspect the exit status (124/137). That reading is to be confirmed in Plan;
   it matters because FR-1's outcome must be named distinctly (INV-5).
 - **The log cannot show tool calls today.** `--output-format text` emits only the final
-  assistant text, so `.agent.log` ([`:1201`](../../../scripts/dispatch-issue.sh#L1201)) carries
+  assistant text, so `.agent.log` ([`:1267`](../../../scripts/dispatch-issue.sh#L1267)) carries
   no record of which tools were called or how often. Loop detection (FR-3) is impossible on
   the current log format; this is why D1 exists.
 - **Success is likewise self-declared.** The "Agent completed" line and `agent-done` label
-  ([`:2480-2481`](../../../scripts/dispatch-issue.sh#L2480)) follow from the agent exiting 0
+  ([`:2563-2564`](../../../scripts/dispatch-issue.sh#L2563)) follow from the agent exiting 0
   without the token. SPEC-073 (status `planning`) adds one parent-side check on that path —
   *the branch gained a commit* — which catches the empty-success case. It does not catch the
   non-empty wrong one, which is this spec's FR-5 to FR-7.
 - **Two other agent launch sites share the shape.** The creator-shepherd fix agent
-  ([`:1768`](../../../scripts/dispatch-issue.sh#L1768), `--output-format text … | tee -a
+  ([`:1829-1835`](../../../scripts/dispatch-issue.sh#L1829), `--output-format text … | tee -a
   "$LOG") || true`) and `remediate-pr.sh`
-  ([`scripts/remediate-pr.sh:873`](../../../scripts/remediate-pr.sh#L873)) launch `claude -p`
+  ([`scripts/remediate-pr.sh:893`](../../../scripts/remediate-pr.sh#L893)) launch `claude -p`
   the same way and have the same blindness. Whether they are in scope is D4.
 - **Nothing records run outcomes today.** A grep of `scripts/dispatch-issue.sh` for
   `jsonl`, `telemetry`, `metrics` and `outcome` finds no run-outcome record (the `outcome`
@@ -84,7 +84,7 @@ pipeline's false-success rate becomes a measured number instead of an unstateabl
 
 ## Definitions
 
-- **Run** — one `claude -p` invocation by the dispatcher. A DR-355 (parent register) opus
+- **Run** — one `claude -p` invocation by the dispatcher. An MMO/DR355 (parent register) opus
   retry is a second run of the same dispatch, linked to the first.
 - **Progress event** — any of: (a) a new commit on the run's branch
   (`git rev-list --count origin/main..HEAD` increases); (b) a tool call whose
@@ -112,15 +112,15 @@ pipeline's false-success rate becomes a measured number instead of an unstateabl
 - **FR-1 (bounded no-progress window).** While a run is live, the parent samples progress
   events (Definitions) and ends the run when none has occurred for a window `W`
   (default D5). Ending means SIGTERM, then SIGKILL after a grace, the same
-  `--kill-after` shape as the existing ceiling ([`:2030`](../../../scripts/dispatch-issue.sh#L2030)).
+  `--kill-after` shape as the existing ceiling ([`:2097`](../../../scripts/dispatch-issue.sh#L2097)).
   The window resets on every progress event, so a slow but advancing run is never ended by
   FR-1; only the absolute ceiling bounds that one.
 - **FR-2 (named outcome, not a crash).** A run ended by FR-1 is recorded as
   `stall: no-progress` — in the issue comment, the stderr log, and the outcome record
   (FR-5) — and labelled `agent-escalated,needs-human-review`, the same pair every other
-  terminal-failure path writes ([`:2078`](../../../scripts/dispatch-issue.sh#L2078),
-  [`:2513`](../../../scripts/dispatch-issue.sh#L2513)). It is never reported as "CRASHED"
-  and never left `agent-running`. Whether it is first eligible for the one DR-355 opus retry
+  terminal-failure path writes ([`:2146`](../../../scripts/dispatch-issue.sh#L2146),
+  [`:2596`](../../../scripts/dispatch-issue.sh#L2596)). It is never reported as "CRASHED"
+  and never left `agent-running`. Whether it is first eligible for the one MMO/DR355 opus retry
   is D6.
 
 ### Loop detection — the repeated-call stall detector
@@ -142,7 +142,7 @@ pipeline's false-success rate becomes a measured number instead of an unstateabl
 
 - **FR-5 (one record per run, written at run end).** Every run appends one record to a
   local, append-only outcome ledger (location and format D3) with at minimum: issue number,
-  role, tier, model, run index (first / DR-355 retry), start and end time, terminal reason
+  role, tier, model, run index (first run, or the MMO/DR355 retry), start and end time, terminal reason
   (`escalated` / `stall: no-progress` / `stall: repeated-call` / `crashed` / `ceiling` /
   `claimed-success` / `quarantined` / `scope-held` / `no-commit`), commit count, branch, PR
   number if any, and whether the watchdog was available (FR-4). A failed append is reported
@@ -182,7 +182,7 @@ pipeline's false-success rate becomes a measured number instead of an unstateabl
   ships. The ledger lives inside this repo's dispatch working area (D3), never in a
   user-global location.
 - **INV-4 (ESCALATE still works).** The `^ESCALATE:` detector, its reason extraction and the
-  DR-355 single opus retry ([`:2048-2079`](../../../scripts/dispatch-issue.sh#L2048)) behave
+  MMO/DR355 single opus retry ([`:2116-2147`](../../../scripts/dispatch-issue.sh#L2116)) behave
   exactly as today. If D1 changes the log format, a plain-text rendering of the assistant
   output must still be grepped by the unchanged pattern, and a fixture proves it.
 - **INV-5 (a stall is not a crash, a crash is not a stall).** The four non-success ends —
@@ -245,7 +245,7 @@ open.
   **Recorded selection: (a)** JSONL under the dispatch working base; the durable-copy
   location stays open for Plan, and no DR is written here. (b) and (c) are not taken.
 - **D4 — Which launch sites?** **(a, rec)** all three (`dispatch-issue.sh` build agent,
-  its shepherd fix agent at `:1768`, and `remediate-pr.sh:873`) through one shared launcher
+  its shepherd fix agent at `:1829`, and `remediate-pr.sh:893`) through one shared launcher
   wrapper. *Cost:* wider change across two files, one of them a remediation path with its own
   tests. **(b)** build agent only. *Cost:* fix agents, which run on the same models, stay
   unwatched, and their cycles never reach the rate. **Recorded selection: (a)** all three
@@ -258,7 +258,7 @@ open.
   small retry loops an agent legitimately makes. Both should be env-overridable and printed
   in the outcome record so a later re-tune can compare like with like. **Recorded selection:**
   `W` = 15 minutes, `N` = 8, both env-overridable; Plan measures the slowest silent step.
-- **D6 — Does a stall earn the DR-355 opus retry?** **(a, rec)** yes, a stall on a
+- **D6 — Does a stall earn the MMO/DR355 opus retry?** **(a, rec)** yes, a stall on a
   lower-tier model routes through the same `escalate_next_action` as an `ESCALATE:`, sharing
   the one-retry flag and the claim ceiling. *Cost:* the retry may stall the same way,
   spending up to one more `W` before a human sees it. **(b)** no, stalls go straight to a
