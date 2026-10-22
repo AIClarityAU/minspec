@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -52,6 +53,20 @@ from canonical import spec_hash  # noqa: E402
 SIDECAR_PREFIX = '.minspec/approvals/'
 SIDECAR_SUFFIX = '.json'
 SHORT = 8  # hash prefix length shown; full hashes are noise in a prompt
+
+# DR acceptance (SPEC-041 Slice 1, #1066). A decision record is any `DR-<n>*.md`.
+DR_PATH_RE = re.compile(r'(^|/)DR-\d+[^/]*\.md$')
+_FRONTMATTER_RE = re.compile(r'^---\r?\n([\s\S]*?)\r?\n---')
+_STATUS_RE = re.compile(r'^status:[ \t]*["\']?([A-Za-z-]+)', re.M)
+
+# Mirror of BUILTIN_AGENT_IDENTITIES in packages/minspec/src/lib/approval.ts (DR-056).
+# Keep in lockstep; the `[bot]` substring test below is a deliberate superset so a new
+# App identity fails closed here before the list is updated.
+BUILTIN_AGENT_IDENTITIES = frozenset({
+    'claude@harvest316.com',
+    'minspec-sdd[bot]@users.noreply.github.com',
+    '299695933+minspec-sdd[bot]@users.noreply.github.com',
+})
 
 
 def _git(*args: str) -> str:
@@ -249,10 +264,79 @@ def report_for(base: str, head: str, sidecar: str) -> list[str]:
     return lines
 
 
+def _fm_status(raw: str | None) -> str | None:
+    """The `status:` frontmatter value of a decision record, or None."""
+    if not raw:
+        return None
+    fm = _FRONTMATTER_RE.match(raw.replace('\r\n', '\n'))
+    if not fm:
+        return None
+    m = _STATUS_RE.search(fm.group(1))
+    return m.group(1).lower() if m else None
+
+
+def changed_dr_accepts(base: str, head: str) -> list[str]:
+    """DRs whose status is `accepted` at head and was anything else (or absent) at base."""
+    out = _git('diff', '--name-only', f'{base}...{head}')
+    flips = []
+    for p in sorted(line.strip() for line in out.splitlines()):
+        if not DR_PATH_RE.search(p):
+            continue
+        if _fm_status(_show(head, p)) == 'accepted' and _fm_status(_show(base, p)) != 'accepted':
+            flips.append(p)
+    return flips
+
+
+def _is_agent_identity(email: object) -> str | None:
+    """Why `email` cannot be a human approver, or None when it can (DR-056, fail closed)."""
+    if not isinstance(email, str) or not email.strip():
+        return 'approvedBy is empty'
+    lower = email.strip().lower()
+    if lower == 'unknown':
+        return 'approvedBy is "unknown"'
+    extra = {t.lower() for t in re.split(r'[\s,]+', os.environ.get('MINSPEC_AGENT_IDENTITIES', '')) if t}
+    if lower in BUILTIN_AGENT_IDENTITIES or lower in extra or '[bot]' in lower:
+        return 'approvedBy is an agent/bot identity'
+    return None
+
+
+def dr_accept_report(head: str, dr_path: str) -> list[str]:
+    """Fact lines for one DR flipped to `accepted`. VERIFIED needs a record that is
+    present, matches the DR as merged, is not `migrated`, and names a non-agent approver."""
+    lines = [f'DR acceptance: {_sanitize(dr_path)}']
+    raw = _show(head, f'{SIDECAR_PREFIX}{dr_path}{SIDECAR_SUFFIX}')
+    reason: str | None = None
+    data: dict = {}
+    if raw is None:
+        reason = 'no approval record at head (Accept ADR was not used, or its record was not committed)'
+    else:
+        try:
+            parsed = json.loads(raw)
+            data = parsed if isinstance(parsed, dict) else {}
+        except (ValueError, TypeError):
+            data = {}
+        dr_now = _show(head, dr_path)
+        if not data:
+            reason = 'approval record is unreadable'
+        elif dr_now is None or data.get('specHash') != spec_hash(dr_now):
+            reason = 'record hash does not match the DR as merged (edited after acceptance, or record fabricated)'
+        elif data.get('migrated') is True:
+            reason = 'record is a backfill (migrated: true), not a human acceptance'
+        else:
+            reason = _is_agent_identity(data.get('approvedBy'))
+    if reason is None:
+        lines.append(f"  approvedBy:        {_sanitize(str(data.get('approvedBy')))}")
+        lines.append('  VERDICT:           VERIFIED — a human-gated record matches the DR as merged')
+    else:
+        lines.append(f'  VERDICT:           UNVERIFIED — {reason}')
+    return lines
+
+
 def build_report(base: str, head: str) -> str:
     base = merge_base(base, head)   # agree with `git diff base...head` (see merge_base)
     sidecars = changed_sidecars(base, head)
-    if not sidecars:
+    dr_flips = changed_dr_accepts(base, head)
+    if not sidecars and not dr_flips:
         return ''
     body: list[str] = [
         'These facts are computed by scripts/approval-provenance.py from this',
@@ -269,6 +353,17 @@ def build_report(base: str, head: str) -> str:
     for s in sidecars:
         body.extend(report_for(base, head, s))
         body.append('')
+    if dr_flips:
+        body.extend([
+            'DR acceptance flips (proposed -> accepted) are judged on the record the',
+            'Accept ADR command writes. This proves as much as spec approval does (a',
+            'committed record, a matching hash, a non-agent approver) and is NOT',
+            'cryptographic: an agent that sets its git email to a human address can forge it.',
+            '',
+        ])
+        for d in dr_flips:
+            body.extend(dr_accept_report(head, d))
+            body.append('')
     return '\n'.join(body).rstrip() + '\n'
 
 

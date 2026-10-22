@@ -1,8 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-013-risk-section-policy/requirements.md",
-  "specHash": "53753e74a0a0e85bc648d556ac9741e4bffa11fee05781bb11acea777f1d42cf",
-  "approvedAt": "2026-06-05T06:44:07.025Z",
+  "specHash": "0198c126bdfbede812532ab69c5466dc90dca566c14dbf2a9f69b6bf982b1c58",
+  "approvedAt": "2026-09-22T21:26:54.371Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T4",
-  "migrated": false
+  "migrated": false,
+  "baselineBlob": "af0dd27b792d9221e2bd1d76240b127f08cb432a"
 }

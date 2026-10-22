@@ -319,7 +319,7 @@ function main(argv: string[]): number {
       console.log(JSON.stringify({ ...aggregate([]), log, exists: false }, null, 2));
     } else {
       console.log(`Shadow triage — no log at ${log}.`);
-      console.log('The harness is inert until MINSPEC_SHADOW_TRIAGE_KEY is set (#1338).');
+      console.log('The harness is inert until MINSPEC_ZAI_API_KEY is set (#1338).');
     }
     return 2;
   }

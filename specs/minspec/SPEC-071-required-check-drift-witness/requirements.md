@@ -1,26 +1,38 @@
 ---
 id: SPEC-071
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — DR-066's own domain (the silent-gate incident family)
 aspects: [ci, gates, required-checks, rulesets, drift, silent-failure, provenance, scaffold, tier-0]
 relates_to: [DR-066, DR-074, DR-050, DR-063, DR-090, SPEC-054, SPEC-033]
-# No `implements:` / `affects:` declared yet, deliberately. SPEC-038 FR-3 requires the
-# ownership declaration *past Clarify*, and the file set here is downstream of DQ-1
-# (which witness shape) and DQ-3 (whose manifest). Declaring a guessed set now would
-# freeze paths this spec may never touch — the spec-gate freezes `affects:` exactly as
-# hard as `implements:`. It MUST be declared at Clarify — `.minspec/config.json` sets
-# `ownershipDeclaration: error`, and `validateOwnership` arms the moment `phases.plan`
-# reaches `in-progress`, which approval itself writes. Declaring at Clarify therefore
-# lands the set BEFORE any approval mints a hash (SPEC-051's trap), and keeps the
-# approve gate satisfiable. Today, at `plan: pending`, the rule is inert by design
-# (spec-validator.ts:792-796).
+# Ownership declared in Specify, per SPEC-038 FR-3 and the shipped `/minspec-specify`
+# guidance (slash-commands.ts:89). The earlier draft deferred this to Clarify; that was
+# wrong on the mechanism. `validateOwnership` is inert at `plan: pending`, but approval
+# WRITES `plan: in-progress`, so the approve preflight refuses this spec outright
+# (approve.ts:262) and landing it unapproved-but-advanced fails the repo validator
+# (measured: FAIL, exit 1). Declaring now is also the only free moment — `implements:` is
+# inside the canonical hash (`canonical.ts` strips only `status:` and `phases:`), so the
+# same edit after approval stales the signature and costs a second human sign-off.
+# Not-yet-existing paths are valid by design ("greenfield ownership is the point",
+# ownership-path-rules.ts:37-38) — sibling SPEC-069 declares an unwritten workflow the
+# same way. Every entry below cites the requirement it comes from; the two marked DQ-1/
+# DQ-3 follow this spec's OWN recommended options and are revisable at no cost until
+# approval, which is when the set is first hashed.
+#   FR-2/FR-3/FR-6/FR-7 the drift check · FR-4 two independent lanes, under DQ-1 (A)
+#   FR-9 the union-never-remove property test (unconditional — no DQ gates FR-9)
+implements: [scripts/check-required-checks.ts, .github/workflows/required-check-drift.yml, packages/minspec/tests/ruleset-union-property.test.ts]
+#   FR-9 documents DEFAULT_REQUIRED_CHECK_CONTEXTS at its definition as scaffold-seed-only
+#   (ruleset-advisor.ts is OWNED by no spec; SPEC-063 also lists it under affects:, which
+#   is shareable — only `implements:` is one-owner-per-file). FR-1's declaration lands in
+#   SPEC-054's manifest if DQ-3 resolves that way; SPEC-054 owns that file via implements:,
+#   so this spec can only ever affect it.
+affects: [packages/minspec/src/lib/ruleset-advisor.ts, scripts/lib/gate-manifest.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

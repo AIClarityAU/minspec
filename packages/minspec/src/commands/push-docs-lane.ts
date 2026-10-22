@@ -50,6 +50,7 @@ import {
   isNetworkError,
   openPullRequest,
   slugFromOriginUrl,
+  splitCommitMessage,
   type ExecRun,
 } from '../lib/approval-pr';
 
@@ -344,9 +345,21 @@ export async function pushDocsLaneCommand(
 
       // Open the PR. Run in the worktree so gh can infer the repo from origin;
       // pass --repo when we could parse the slug (belt and braces).
-      const body =
+      //
+      // $message is the FULL commit message (subject + body), and this repo's
+      // convention — a subject line, a blank line, then an explanatory body,
+      // which the RCDD gate in `.githooks/commit-msg` actively requires for
+      // `fix:` commits — routinely produces a message past GitHub's 256-char PR
+      // title cap ("Title is too long (maximum is 256 characters)"). Passing it
+      // verbatim as `title` therefore failed PR creation *after* the branch was
+      // already pushed (#1606 in the bash copy; #1883 here). Split it the same
+      // way `scripts/push-docs.sh` does via the shared {@link splitCommitMessage}
+      // helper, and carry the body into the PR body instead of discarding it.
+      const laneNote =
         'Docs-only change via the **docs-lane** (auto-merges once green; ai-review still runs). Files:\n' +
         files.map((f) => `- \`${f}\``).join('\n');
+      const { title, body: commitBody } = splitCommitMessage(message);
+      const body = commitBody ? `${commitBody}\n\n${laneNote}` : laneNote;
       // The ONE `gh pr create` in the codebase (SPEC-050 FR-4). The argv it
       // builds for these inputs is byte-identical to the literal array this call
       // replaced, and its ENOENT → auth → network → failed classification is the
@@ -360,7 +373,7 @@ export async function pushDocsLaneCommand(
         slug,
         base: 'main',
         head: branch,
-        title: message,
+        title,
         body,
         labels: [DOCS_LANE_LABEL],
       });

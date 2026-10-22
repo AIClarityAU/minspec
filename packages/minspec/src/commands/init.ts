@@ -13,6 +13,7 @@ import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS, MANAGED_REGION_TEMPLATES } from 
 import { CLAUDE_SETTINGS_PATH } from '../lib/claude-settings';
 import { resolveTargetFolder, workspaceFolderLabel } from '../lib/resolve-folder';
 import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
+import { hasOptInMarker, notOptedInMessage } from '../lib/opt-in';
 import { getRepoFromRemote } from '../lib/github';
 import { resolveRemotes, renameToOriginCandidate } from '../lib/git-remotes';
 import { resolveBranchDestination, defaultGitRun } from '../lib/approve-commit';
@@ -22,7 +23,7 @@ import {
   DEFAULT_REQUIRED_CHECK_CONTEXTS,
   createRequiredChecksRuleset,
   defaultCommandRunner,
-  isGhReady,
+  probeGhAvailability,
   resolveCheckContexts,
   listRequiredCheckContexts,
   probeReviewerConfigured,
@@ -86,7 +87,7 @@ const COMMIT_ANYWAY_ACTION = 'Commit here anyway';
  * persists the coverage choice into it; CI/vitest read it) and the epic registry's
  * marker-bounded `docs/epics/INDEX.md` (writeEpicIndex, at the DEFAULT `epicsDir`
  * a fresh init uses; a custom `epicsDir` is rarer and the existsSync filter simply
- * skips the miss) — are listed here EXPLICITLY (as files), so they ride the
+ * skips the miss — a known limit, #2684) — are listed here EXPLICITLY (as files), so they ride the
  * scaffold commit without sweeping a directory. Omitting them left MinSpec-written,
  * non-gitignored files untracked after "Commit them" (#610).
  *
@@ -94,10 +95,16 @@ const COMMIT_ANYWAY_ACTION = 'Commit here anyway';
  * section-merge templates (CLAUDE.md, AGENTS.md, .cursorrules,
  * .minspec/constitution.md) plus the managed-region templates (CI workflow,
  * git hooks, and the tool-gated Spec Kit slash-command shims), and
- * `.gitignore` (init/refresh append the ephemeral-state entries).
+ * `.gitignore` / `.gitattributes` (init/refresh append the ephemeral-state
+ * entries and the executed-file LF pin, respectively — #2398).
  */
 const SCAFFOLD_PATHSPECS: readonly string[] = [
   '.gitignore',
+  // The LF pin for executed hooks/scripts/workflows (#2398) — written alongside
+  // .gitignore by the same ensureGitattributesEntries() call, and staged for the
+  // same reason: left uncommitted, it protects nothing until a human commits it
+  // separately, which is exactly the gap that let the CRLF breakage go unnoticed.
+  '.gitattributes',
   // scaffold()-authored, non-template, non-gitignored managed files (#610).
   '.minspec/config.json',
   'docs/epics/INDEX.md',
@@ -852,9 +859,14 @@ async function linkRulesetDocs(
  * READ-ONLY CONFIG PROBE runs AUTONOMOUSLY; only the MUTATING create is
  * consent-gated.
  *   - not a git repo → return (zero process, zero toast).
- *   - `gh` missing/unauthed → info toast linking the docs. Zero `gh api`. Done.
- *   - `gh` ready + no GitHub remote (or a malformed slug) → docs link. Zero
- *     `gh api`. Done.
+ *   - `gh` not installed → info toast reporting that MinSpec could not check
+ *     (never an imperative about repo state it never read). Zero `gh api`. Done.
+ *   - `gh` installed but NOT authenticated → info toast reporting the limit
+ *     ("could not check... not authenticated"), never a claim about what the
+ *     repo needs. Zero `gh api` (no anonymous probe — DR-050 authorises only the
+ *     user's own authenticated `gh`; #1889). Done.
+ *   - `gh` ready (installed + authenticated) + no GitHub remote (or a malformed
+ *     slug) → docs link. Zero `gh api`. Done.
  *   - `gh` ready + repo resolves → AUTO-PROBE (read-only `gh api .../rulesets`
  *     GET of the repo's OWN settings, no consent toast):
  *       - a qualifying ruleset ALREADY EXISTS → SILENT. No toast at all.
@@ -865,16 +877,16 @@ async function linkRulesetDocs(
  *           - "Not now"/dismiss → nothing.
  *           - "Learn more"     → open the rulesets docs.
  *
- * Why the probe is autonomous: `isGhReady`, `hasRequiredChecksRuleset` /
- * `listRequiredCheckContexts`, and the reviewer-secret-NAMES probe
- * ({@link probeReviewerConfigured}, via {@link resolveWantedChecks}) are a
- * read-only capability probe + GETs of the repo's OWN configuration — they
- * egress no user artifacts, spec content, secret VALUES, or telemetry (the same
- * class as MinSpec shelling `git fetch`). Per DR-050 they need no prior consent
- * toast: the rulesets read under Amendment 2026-07-01, and the `actions/secrets`
- * NAMES read under Amendment 2026-07-16 (materialising the founder's decision on
- * #796). Only the CREATE/ADD mutates the repo, so it is the one action gated on
- * an explicit click.
+ * Why the probes are autonomous: `probeGhAvailability`, `hasRequiredChecksRuleset`
+ * / `listRequiredCheckContexts`, and the
+ * reviewer-secret-NAMES probe ({@link probeReviewerConfigured}, via
+ * {@link resolveWantedChecks}) are all read-only capability probes + GETs of the
+ * repo's OWN configuration — they egress no user artifacts, spec content, secret
+ * VALUES, or telemetry (the same class as MinSpec shelling `git fetch`). Per
+ * DR-050 they need no prior consent toast: the rulesets read under Amendment
+ * 2026-07-01 and the `actions/secrets` NAMES read under Amendment 2026-07-16
+ * (materialising the founder's decision on #796). Only the CREATE/ADD
+ * mutates the repo, so it is the one action gated on an explicit click.
  *
  * The created ruleset's required checks come from
  * {@link resolveRequiredChecks} (the `minspec.ruleset.requiredChecks` setting,
@@ -899,12 +911,31 @@ export async function offerRulesetAdvisory(
   if (!isRepo(folder)) return;
 
   try {
-    // gh unavailable/unauthed → zero-network docs link. Done.
-    if (!(await isGhReady(run))) {
+    const availability = await probeGhAvailability(run);
+    if (!availability.authenticated) {
+      if (!availability.installed) {
+        // No `gh` binary at all → nothing left to try. Report the LIMIT, not a
+        // claim about the repo (#1889): this branch has read nothing about the
+        // default branch's rules, so it must never assert the branch needs
+        // protecting — that reads as observed fact when it is unverified.
+        await linkRulesetDocs(
+          "MinSpec could not check whether your default branch's rules already " +
+            `require CI (${DEFAULT_REQUIRED_CHECK_CONTEXTS.join(', ')}) status checks — ` +
+            'the `gh` CLI is not installed. Install/authenticate `gh` to let MinSpec check ' +
+            'and offer to create a ruleset, or see the GitHub docs.',
+          openExternal,
+        );
+        return;
+      }
+
+      // `gh` is installed but has no usable token → nothing MinSpec is
+      // authorised to read (DR-050 covers only the user's own authenticated
+      // `gh`). Report the limit, not a claim about the repo (#1889).
       await linkRulesetDocs(
-        'MinSpec: protect your default branch with a ruleset that requires CI ' +
-          `(${DEFAULT_REQUIRED_CHECK_CONTEXTS.join(', ')}) status checks. ` +
-          'Install/authenticate the `gh` CLI to let MinSpec offer to create one, or see the GitHub docs.',
+        "MinSpec could not check whether your default branch's rules already " +
+          `require CI (${DEFAULT_REQUIRED_CHECK_CONTEXTS.join(', ')}) status checks — ` +
+          'the `gh` CLI is not authenticated. Authenticate `gh` to let MinSpec check ' +
+          'and offer to create a ruleset, or see the GitHub docs.',
         openExternal,
       );
       return;
@@ -1065,6 +1096,23 @@ export function resolveGitHubPrExtensionLearnMoreUrl(appName: string): string {
     : GITHUB_PR_EXTENSION_OPEN_VSX_URL;
 }
 
+/** The one install path: the host's own `workbench.extensions.installExtension` command. */
+async function defaultInstallExtension(id: string): Promise<void> {
+  await vscode.commands.executeCommand('workbench.extensions.installExtension', id);
+}
+
+/**
+ * Install the GitHub PR extension with no prompt of its own (SPEC-042 FR-17). The caller
+ * must already hold the user's explicit click: the Getting Started page's "Install" button
+ * is that click, so asking again through the advisory toast would be a second consent for
+ * one action. Same id, same command as {@link offerGitHubPrExtensionAdvisory}'s "Install".
+ */
+export async function installGitHubPrExtension(
+  install: (id: string) => Promise<void> = defaultInstallExtension,
+): Promise<void> {
+  await install(GITHUB_PR_EXTENSION_ID);
+}
+
 /** Dependencies for {@link offerGitHubPrExtensionAdvisory}, injectable for tests. */
 export interface GitHubPrExtAdvisoryDeps {
   /** Whether `folder` is a git working tree. Defaults to the same `.git`-existence check the other advisories use. */
@@ -1108,11 +1156,7 @@ export async function offerGitHubPrExtensionAdvisory(
       deps.isInstalled ?? ((id: string) => vscode.extensions.getExtension(id) !== undefined);
     if (isInstalled(GITHUB_PR_EXTENSION_ID)) return; // already have it — nothing to do
 
-    const install =
-      deps.install ??
-      (async (id: string) => {
-        await vscode.commands.executeCommand('workbench.extensions.installExtension', id);
-      });
+    const install = deps.install ?? defaultInstallExtension;
     const openExternal =
       deps.openExternal ?? ((url: string) => vscode.env.openExternal(vscode.Uri.parse(url)));
 
@@ -1239,12 +1283,13 @@ export async function initCommand(
   // drift detector then reports false drift). Catch any failure, surface exactly
   // what went wrong, and do NOT report a misleading "Initialized" success (#153).
   let untrackedOnInit: string[] = [];
+  const indexNoticesOnInit: ManagedRegionWarning[] = [];
   try {
     scaffold(folder);
     // `?? []` — a stubbed generateHarnessFiles (several suites mock it) returns
     // undefined, and an un-iterable here would turn a reporting nicety into an
     // init-breaking TypeError. Reporting must never be able to fail the command.
-    untrackedOnInit = generateHarnessFiles(folder) ?? [];
+    untrackedOnInit = generateHarnessFiles(folder, indexNoticesOnInit) ?? [];
   } catch (err) {
     vscode.window.showErrorMessage(
       `MinSpec: Initialization failed — ${describeError(err)}. ` +
@@ -1264,6 +1309,22 @@ export async function initCommand(
       outputPath,
       message: untrackedNoticeMessage(outputPath),
       kind: 'untracked',
+    });
+  }
+  // Hooks init staged into the index as 100755 (#2399) — same notice refresh shows.
+  // A first init stages every executable template at once, so ONE notice names them
+  // all — a dialog per file would be a 7-9 dismissal storm on the onboarding path.
+  if (indexNoticesOnInit.length === 1) {
+    await surfaceManagedRegionWarning(folder, indexNoticesOnInit[0]);
+  } else if (indexNoticesOnInit.length > 1) {
+    const paths = indexNoticesOnInit.map((n) => n.outputPath);
+    await surfaceManagedRegionWarning(folder, {
+      outputPath: paths[0],
+      outputPaths: paths,
+      message:
+        `${paths.length} hooks/scripts were recorded in the git index as executable (100755) ` +
+        `so they run on every checkout: ${paths.join(', ')}. Commit them with the rest of the scaffold.`,
+      kind: 'exec-bit-recorded',
     });
   }
   if (isFirstInit) {
@@ -1334,7 +1395,7 @@ export async function surfaceManagedRegionWarning(
   // "Re-scaffold" would be meaningless (nothing was scaffolded) and actively
   // misleading, so this kind gets its own surface: state what changed to the index
   // and offer the place to review and commit it (#1146).
-  if (w.kind === 'untracked') {
+  if (w.kind === 'untracked' || w.kind === 'exec-bit-recorded') {
     const choice = await vscode.window.showInformationMessage(
       `[${label}] ${w.message}`,
       SHOW_SCM_ACTION,
@@ -1481,6 +1542,15 @@ export async function initRefreshCommand(
 ): Promise<void> {
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
+  // SPEC-096 FR-3 / DQ-1: Refresh is not a second Initialize. In a folder with no
+  // `.minspec/` it refuses - one message, no button, nothing written - and points
+  // at the command that does opt a folder in. `refreshHarnessFiles` refuses too;
+  // checking here is what lets the message be the plain refusal rather than a
+  // "refresh failed" wrapped around it.
+  if (!hasOptInMarker(folder)) {
+    vscode.window.showErrorMessage(notOptedInMessage(folder));
+    return;
+  }
   // Same all-or-nothing concern as initCommand: a mid-sequence write failure
   // must surface, not silently leave a partial/inconsistent harness (#153).
   let warnings: ReturnType<typeof refreshHarnessFiles>;

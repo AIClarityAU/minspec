@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-134-specify-just-in-time/requirements.md",
+  "specHash": "3c67c14eeedf05f828bae4cfee66651591bd37c6f5c3fe39fb21878176ef28ee",
+  "approvedAt": "2026-10-09T02:07:45.254Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "1dbc62388087d1b0c2e61ca509dda7d8bdd5e95c"
+}

@@ -18,6 +18,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { toPosixRel } from './approval-store';
+import { ensureDirectory } from './opt-in';
 
 const QUEUE_DIR = '.minspec/queue';
 
@@ -39,10 +40,15 @@ export function queueRequestPath(rootDir: string, specRelPath: string): string {
 }
 
 /**
- * Enqueue a phase-advance request for a spec (mkdir -p its nested dir).
+ * Enqueue a phase-advance request for a spec.
  * Overwrites any existing request for the same spec — one pending request per
  * spec is all a detect-and-enqueue producer needs; the consumer resolves what
  * to actually do.
+ *
+ * The request's nested directory is created below an existing `.minspec/`, never
+ * together with it: that directory is the opt-in marker (constitution invariant
+ * 3), so in a folder that has not opted in this throws `NotOptedInError` and
+ * writes nothing (SPEC-096 FR-5).
  */
 export function enqueuePhaseAdvance(
   rootDir: string,
@@ -50,7 +56,7 @@ export function enqueuePhaseAdvance(
   source: PhaseAdvanceSource,
 ): void {
   const p = queueRequestPath(rootDir, specRelPath);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
+  ensureDirectory(path.dirname(p));
   const req: PhaseAdvanceRequest = {
     specPath: toPosixRel(specRelPath),
     requestedAt: new Date().toISOString(),

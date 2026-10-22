@@ -590,6 +590,46 @@ describe('edge-cases & output contract', () => {
     expect(resolveCorruption(g)).toStrictEqual([]);
   });
 
+  // #2370: "signpost says 'Approve SPEC-NNN' for a done spec no approve command
+  // will offer." A spec with literal `status: done` but no `phases:` block derives
+  // `status: 'new'` (`allPending` wins before the approval check — see
+  // lifecycle.ts `deriveStatus`), so without `literalStatusTerminal` this spec's
+  // stale/unapproved approvalState alone made the loop below emit "Approve
+  // SPEC-001" — a signpost instruction `commands/approve.ts` / `approve-active.ts`
+  // refuse to act on, because THEY trust the literal `done` (#440). Forever-repeating,
+  // because nothing ever clears the approvalState that drove it.
+  it('#2370: a literal-terminal spec with a derived-non-terminal status never emits spec-approve', () => {
+    for (const approvalState of ['unapproved', 'stale'] as const) {
+      const g = graph({
+        epics: [mkEpic('EPIC-001', 'active')],
+        // `status: 'new'` simulates the fs-adapter's derivation for a done-literal,
+        // no-phases-block spec; `literalStatusTerminal: true` is what the fs-adapter
+        // computes from the raw `status: done` line (artifact-graph.ts #2370).
+        specs: [
+          mkSpec('SPEC-001', 'new', approvalState, {
+            epic: 'EPIC-001',
+            literalStatusTerminal: true,
+          }),
+        ],
+      });
+      expect(resolvePipeline(g).map((t) => t.kind), `approvalState=${approvalState}`).not.toContain(
+        'spec-approve',
+      );
+      expect(resolveNextTask(g), `approvalState=${approvalState}`).toBeNull();
+    }
+  });
+
+  // Control: the new field is not vacuously true — an otherwise-identical spec
+  // WITHOUT `literalStatusTerminal` still gets its "Approve" gate node.
+  it('#2370 control: the same derived-new/stale spec DOES emit spec-approve when literalStatusTerminal is absent', () => {
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active')],
+      specs: [mkSpec('SPEC-001', 'new', 'stale', { epic: 'EPIC-001' })],
+    });
+    expect(resolvePipeline(g).map((t) => t.kind)).toContain('spec-approve');
+    expect(resolveNextTask(g)!.kind).toBe('spec-approve');
+  });
+
   it('EMPTY: a totally empty graph → null / []', () => {
     const g = graph({});
     expect(resolveNextTask(g)).toBeNull();

@@ -279,7 +279,22 @@ describe('post-init commit offer (#222)', () => {
         async (_msg: string, ...actions: string[]) => (actions.length ? actions[0] : undefined),
       );
 
-      await initCommand(tmpDir, { makeCommitter: async () => committer });
+      // #2234 — only `makeCommitter` was injected here; the remote-rename and
+      // ruleset advisories fell back to the REAL process runner
+      // (`defaultCommandRunner`, `offerRemoteRenameAdvisory`/`offerRulesetAdvisory`
+      // in ../src/commands/init.ts), which exec'd real `git`/`gh` (incl. two `gh`
+      // Go-binary start-ups) against vitest's fixed 5s-per-test budget. Runner-load
+      // scaled those exec times, making this the intermittent ~5s-timeout test in
+      // CI. `isRepo: () => false` short-circuits both advisories before either
+      // touches a process (see the early-return guard each has ahead of its first
+      // `run()` call), so this test now execs nothing and runs in constant time.
+      // Coverage for the default-runner wiring itself lives in
+      // remote-rename-advisory.test.ts and ruleset-advisor.test.ts.
+      await initCommand(tmpDir, {
+        makeCommitter: async () => committer,
+        remoteRename: { isRepo: () => false },
+        ruleset: { isRepo: () => false },
+      });
 
       // The real scaffold ran, so .minspec/ + harness files exist…
       expect(fs.existsSync(path.join(tmpDir, '.minspec'))).toBe(true);
@@ -349,7 +364,15 @@ describe('post-refresh commit offer — init/refresh symmetry (RCDD 2026-07-10)'
         async (_msg: string, ...actions: string[]) => (actions.length ? actions[0] : undefined),
       );
 
-      await initRefreshCommand(tmpDir, { makeCommitter: async () => committer });
+      // #2234 — same fix as the initCommand() integration test above: short-
+      // circuit the remote-rename/ruleset advisories before they reach the real
+      // process runner, so this test execs nothing and can't inherit the same
+      // load-scaled `gh`/`git` flake against vitest's fixed per-test budget.
+      await initRefreshCommand(tmpDir, {
+        makeCommitter: async () => committer,
+        remoteRename: { isRepo: () => false },
+        ruleset: { isRepo: () => false },
+      });
 
       // Pre-fix this array is empty: refresh rewrote files but never offered to
       // commit. Post-fix: exactly one dedicated refresh commit, mirroring init.

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import * as path from 'path';
 import {
   createAdr,
@@ -14,6 +15,14 @@ import type { AdrNode } from '../views/adr-tree-provider';
 import { resolveTargetFolder, folderForFile } from '../lib/resolve-folder';
 import { resolveActiveAdrPath } from '../lib/active-adr';
 import { commitApprovalIfEnabled, commitBornIfUntracked } from './commit-on-approve';
+import {
+  assertHumanApprover,
+  canonicalSpecHash,
+  gitConfigEmail,
+  specRelPath,
+  type ApprovalRecord,
+} from '../lib/approval';
+import { sidecarPath, writeRecord } from '../lib/approval-store';
 
 function decisionsDirOverride(): { decisionsDir: string } | undefined {
   const decisionsDir = vscode.workspace
@@ -53,6 +62,10 @@ async function confirmNoDuplicate(
   }
   return choice === CREATE ? 'proceed' : 'cancel';
 }
+
+/** Advisory text only (#296): a hint shown after creation, never a gate. */
+export const ADR_FILTER_HINT =
+  'Tip: if this decision could be undone in under a day, a DR is probably not needed.';
 
 /**
  * Command: Create a new Architecture Decision Record.
@@ -97,8 +110,12 @@ export async function createAdrCommand(): Promise<void> {
     const doc = await vscode.workspace.openTextDocument(adr.filePath);
     await vscode.window.showTextDocument(doc);
 
+    // ADR filter (#296): the CDD "can this be undone in under a day?" heuristic,
+    // surfaced as an advisory line on the confirmation toast. It is not awaited
+    // and has no buttons, so it never blocks, never asks per ADR, and the DR is
+    // already created either way.
     vscode.window.showInformationMessage(
-      `MinSpec: Created ${adr.id} — ${adr.title}`,
+      `MinSpec: Created ${adr.id} — ${adr.title}. ${ADR_FILTER_HINT}`,
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -196,6 +213,16 @@ async function pickAdr(
   return picked?.adr;
 }
 
+/** The DR's own frontmatter `tier:` (T1-T4), or undefined — never inferred (D10). */
+function declaredTier(filePath: string): string | undefined {
+  try {
+    const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(fs.readFileSync(filePath, 'utf-8'))?.[1] ?? '';
+    return /^tier:[ \t]*(T[1-4])\b/m.exec(fm)?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
 /** Write the new status, regenerate the index, surface result. */
 async function applyStatus(
   filePath: string,
@@ -204,6 +231,18 @@ async function applyStatus(
   opts: { commit?: boolean } = {},
 ): Promise<void> {
   try {
+    // SPEC-041 Slice 1 / DR-062 section 2 / DR-056: accepting a DR is a human act. Gate
+    // on the approver identity BEFORE any write (the born commit, the status flip, the
+    // INDEX regen, the sidecar), so a denied identity leaves the DR bytes untouched. This
+    // sits in applyStatus, not acceptAdrCommand, so Set Status -> accepted cannot route
+    // around it. It throws `ApproverDeniedError`, surfaced by the catch below.
+    const folder = folderForFile(filePath);
+    let approver: string | undefined;
+    if (status === 'accepted') {
+      approver = gitConfigEmail(folder ?? path.dirname(filePath));
+      assertHumanApprover(approver);
+    }
+
     // Pre-MinSpec DRs have no frontmatter. `setAdrStatus` will synthesize one,
     // but that mutates the file beyond a one-line status flip — so offer it
     // first rather than silently rewriting a hand-authored doc (#201).
@@ -217,8 +256,6 @@ async function applyStatus(
       );
       if (choice !== ADD) return;
     }
-
-    const folder = folderForFile(filePath);
 
     // Issue #577: a DR that was never committed is about to be flipped to a
     // terminal status by `setAdrStatus` below, BEFORE it's ever staged. The
@@ -234,6 +271,30 @@ async function applyStatus(
     }
 
     setAdrStatus(filePath, status);
+
+    // The hash-locked record for this acceptance: the existing `ApprovalRecord`, written to
+    // `.minspec/approvals/<DR path>.json`, hashed AFTER the flip so it covers the exact bytes
+    // being committed (`status` is not part of the canonical hash; a synthesized frontmatter
+    // block is). `tier` is the DR's own declaration when it has one and is never invented:
+    // the TS reader drops a record without one, which only matters to a TS consumer, as
+    // the review-side witness (scripts/approval-provenance.py) reads the JSON directly.
+    let sidecarAbs: string | undefined;
+    if (approver !== undefined && folder) {
+      const hash = canonicalSpecHash(filePath);
+      if (hash === null) throw new Error(`cannot read ${id} to hash its acceptance`);
+      const tier = declaredTier(filePath);
+      const rel = specRelPath(folder, filePath);
+      writeRecord(folder, {
+        specPath: rel,
+        specHash: hash,
+        approvedAt: new Date().toISOString(),
+        approvedBy: approver,
+        ...(tier ? { tier } : {}),
+        migrated: false,
+        baselineBlob: '',
+      } as ApprovalRecord);
+      sidecarAbs = sidecarPath(folder, rel);
+    }
 
     // Keep the Decision Register index in sync with the new status (the
     // register of the folder that contains the changed ADR).
@@ -258,7 +319,7 @@ async function applyStatus(
       suffix = (
         await commitApprovalIfEnabled(
           folder,
-          [filePath, indexPath],
+          sidecarAbs ? [filePath, indexPath, sidecarAbs] : [filePath, indexPath],
           `chore(accept): ${id} → ${status}`,
         )
       ).suffix;

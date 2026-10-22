@@ -49,14 +49,15 @@ import * as path from 'path';
 import {
   SPEC_STATUSES,
   TERMINAL_SPEC_STATUSES,
-  ACTIVE_SPEC_STATUSES,
-  isTerminalStatus,
+  isTerminalSpecStatus,
 } from '../src/lib/spec-vocabulary';
 import type { SpecStatus } from '../src/lib/spec-vocabulary';
-import { APPROVE_INCLUDE, isOfferedInApprovalPicker } from '../src/commands/approve';
 import { SpecNode } from '../src/views/spec-tree-provider';
 import type { SpecSummary } from '../src/lib/spec-manager';
 import type { ApprovalStatus } from '../src/lib/approval';
+
+/** Non-terminal statuses, derived so a new status is classified by the terminal set. */
+const ACTIVE_SPEC_STATUSES = SPEC_STATUSES.filter((st) => !isTerminalSpecStatus(st));
 
 const APPROVAL_STATES: ApprovalStatus[] = ['unapproved', 'approved', 'stale'];
 
@@ -92,9 +93,13 @@ function treeOffersApprove(status: SpecStatus, approval: ApprovalStatus): boolea
   return approveMenuRegex().test(node.contextValue!);
 }
 
-/** Does the approve QuickPick offer this spec? Real shipped predicate. */
+/**
+ * What the approve QuickPick offers (commands/approve.ts include filter): not already
+ * approved, and not terminal. The picker's predicate is an inline closure, so this
+ * states its contract; approve-terminal-lifecycle.test.ts exercises the closure itself.
+ */
 function pickerOffers(status: SpecStatus, approval: ApprovalStatus): boolean {
-  return isOfferedInApprovalPicker(status, approval, APPROVE_INCLUDE);
+  return approval !== 'approved' && !isTerminalSpecStatus(status);
 }
 
 describe('approve picker <-> Specs tree parity (#440)', () => {
@@ -108,10 +113,10 @@ describe('approve picker <-> Specs tree parity (#440)', () => {
   });
 
   it('T0: `superseded` is terminal, like `done` and `archived`', () => {
-    expect(isTerminalStatus('superseded')).toBe(true);
-    expect(isTerminalStatus('done')).toBe(true);
-    expect(isTerminalStatus('archived')).toBe(true);
-    expect(isTerminalStatus('specifying')).toBe(false);
+    expect(isTerminalSpecStatus('superseded')).toBe(true);
+    expect(isTerminalSpecStatus('done')).toBe(true);
+    expect(isTerminalSpecStatus('archived')).toBe(true);
+    expect(isTerminalSpecStatus('specifying')).toBe(false);
   });
 
   it('T0: picker and tree agree for every status x approval pair', () => {

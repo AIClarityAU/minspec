@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-071-required-check-drift-witness/requirements.md",
+  "specHash": "1a7eb3483f9fc95c066b781c5a712ef70b5bcc557aa21575f128572fe62dbc27",
+  "approvedAt": "2026-09-25T10:49:02.229Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "d4e7a74d1c034d4b3294768ba6a38db469eff80c"
+}

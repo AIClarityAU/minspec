@@ -170,10 +170,17 @@ describe('control-marker predicates are anchored and agree (#1157)', () => {
       const src = fs.readFileSync(path.join(REPO, rel), 'utf-8');
       expect(src, `${rel} must probe for --json-schema`).toContain("grep -q -- '--json-schema'");
       expect(src, `${rel} must source the schema from the guard`).toContain('VERDICT_SCHEMA');
+      // #1402: the capability probe must not be handed the pay-as-you-go key. It used
+      // to say so by setting the key to an empty string on the probe's own line. The
+      // probe is now started through lib/agent-context.sh, which hands a child only the
+      // names on a list, and the key is not one this start asks for (#1203). This pins
+      // the spelling; agent-launch-sites.test.ts runs both scripts and reads the probe's
+      // actual environment, which is the stronger check of the same rule.
       expect(
         src,
-        `${rel} must scrub ANTHROPIC_API_KEY on the capability probe (#1402)`,
-      ).toContain("ANTHROPIC_API_KEY='' claude -p --help");
+        `${rel} must start the capability probe through the allowlist, so it holds no ANTHROPIC_API_KEY (#1402)`,
+      ).toContain('bash "$AGENT_LAUNCH_ENV" claude -p --help');
+      expect(src, `${rel} must not start the probe any other way`).not.toMatch(/(?<!AGENT_LAUNCH_ENV" )claude -p --help/);
     }
   });
 });

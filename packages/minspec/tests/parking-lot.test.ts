@@ -4,6 +4,7 @@ import {
   createParkingLotEntry,
   type ParkingLotEntry,
 } from '../src/lib/parking-lot';
+import { NotOptedInError } from '../src/lib/opt-in';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -13,6 +14,9 @@ describe('parking-lot', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-parking-test-'));
+    // SPEC-096: the local parking lot lives in `.minspec/`, so it exists only in a
+    // folder that has opted in. The store used to create that directory itself.
+    fs.mkdirSync(path.join(tmpDir, '.minspec'));
   });
 
   afterEach(() => {
@@ -77,12 +81,17 @@ describe('parking-lot', () => {
       expect(content).toContain('Second body');
     });
 
-    it('creates .minspec dir if it does not exist', () => {
+    it('refuses in a folder with no .minspec dir, and does not create it (SPEC-096 FR-5)', () => {
+      // This test used to assert the opposite: that the store creates `.minspec/`.
+      // That directory is the opt-in marker, so creating it here was the defect
+      // (#2364). The fuller version of this case, for every store, is in
+      // opt-in-writer-inventory.test.ts.
       const bareDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-bare-parking-'));
       const entry = createParkingLotEntry('Topic', 'Body', 'Scope');
-      appendToParkingLotFile(bareDir, entry);
 
-      expect(fs.existsSync(path.join(bareDir, '.minspec', 'parking-lot.md'))).toBe(true);
+      expect(() => appendToParkingLotFile(bareDir, entry)).toThrow(NotOptedInError);
+
+      expect(fs.existsSync(path.join(bareDir, '.minspec'))).toBe(false);
       fs.rmSync(bareDir, { recursive: true, force: true });
     });
 

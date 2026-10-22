@@ -23,7 +23,9 @@
 #
 # One source of truth for "what is fixable": the action token comes from
 # remediate-pr.sh's tested `--classify` seam (D4/D5) — this file never re-implements
-# classify_pr.
+# classify_pr. The one exception is `skip-unclassified` (#1729): the CALLER synthesizes
+# it when the `--classify` seam itself fails to run (non-zero exit, crash) — classify_pr
+# never emits it, because a process that did not run cannot emit a token.
 #
 # Testable pure seam (no gh/git/claude):
 #   scripts/lib/shepherd-pr.sh --decide <action> <merged:yes|no> <holds:yes|no> \
@@ -31,7 +33,7 @@
 #       <checks_pending:yes|no> <automerge_armed:yes|no>
 #     → prints ONE token: stop-merged | stand-down | stop-timeout | stop-not-automation
 #       | stop-conflict | stop-capped | stop-awaiting-human | do-rebase | do-fix | wait
-#       | wait-unknown | stop-unhandled-state
+#       | wait-unknown | stop-unhandled-state | stop-unclassified
 #     wait-unknown and stop-unhandled-state route classify_pr's two #1803 tokens
 #     (retry-unknown, skip-unhandled-state — an UNKNOWN or never-seen
 #     mergeStateStatus; the documented-but-gated states BLOCKED/UNSTABLE/HAS_HOOKS
@@ -126,6 +128,22 @@ shepherd_decide() {
       # Named honestly instead: this classifier does not know what this state means,
       # so it says so and stops polling rather than guessing either way.
       echo "stop-unhandled-state" ;;
+    skip-unclassified)
+      # #1729: the CALLER (dispatch-issue.sh) synthesizes this when
+      # `remediate-pr.sh --classify` itself failed to run — a bad argument, a
+      # `set -u` trip, a missing file, a syntax error from an edit. classify_pr
+      # never emits this token; a process that crashed produced no opinion at all.
+      # Distinct from BOTH neighbours, deliberately:
+      #   • skip-unhandled-state — classify_pr RAN and returned a token this seam
+      #     doesn't recognise (a future GitHub value). Here it didn't run at all.
+      #   • the `*)` default below (stop-not-automation) — that asserts "this
+      #     branch is out of automation scope", which is a claim the caller has no
+      #     basis for when the classifier itself errored.
+      # Not routed to shepherd_hand_off (needs-human-review) either: a crashed
+      # classifier may be transient (a flake, a race), so stay retry-able — the
+      # next dispatch re-runs --classify fresh — rather than declaring a gate
+      # failure only a human can clear.
+      echo "stop-unclassified" ;;
     *)
       # Unknown token ⇒ fail closed: stop and leave it for a human rather than guess.
       echo "stop-not-automation" ;;

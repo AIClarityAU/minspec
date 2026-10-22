@@ -441,6 +441,94 @@ describe('pushDocsLaneCommand — opens the PR on the happy path', () => {
 });
 
 // =============================================================================
+// PR title/body split (#1883) — the TS-port twin of `push-docs-pr-message.test.ts`,
+// which drives ONLY the bash script (`scripts/push-docs.sh`). That suite pinned
+// #1606's fix there and left this TS port — SPEC-050 FR-4's "the ONE `gh pr
+// create` in the codebase" — silently carrying the original bug: a whole
+// multi-line commit message passed straight through as `--title` fails
+// `gh pr create` past GitHub's 256-char cap, stranding an already-pushed branch
+// with no PR. This drives `pushDocsLaneCommand` itself, not the shell script.
+// =============================================================================
+
+describe('pushDocsLaneCommand — PR title/body split (#1883)', () => {
+  it('a subject + blank line + long body produces a title that is just the subject, with the body carried into --body', async () => {
+    writeDoc('docs/decisions/DR-102.md');
+    const longBody = 'x'.repeat(300);
+    const message = `docs(DR-102): wire note\n\nRoot cause: ${longBody}`;
+    const map: Record<string, ResponderVal> = {
+      ...LOCAL_PROBES(root, ' M docs/decisions/DR-102.md\n'),
+      'gh auth status': 'Logged in to github.com\n',
+      'git fetch origin main': '',
+      'git worktree add': '',
+      'git add --': '',
+      'git diff --cached --quiet': Object.assign(new Error('exit 1'), { stderr: '' }),
+      'git commit': '',
+      'git push': '',
+      'gh pr create': 'https://github.com/AIClarityAU/minspec/pull/2000\n',
+      'git worktree remove': '',
+    };
+    const { run, calls } = responder(map);
+    showWarn.mockResolvedValueOnce('Open docs-lane PR');
+    showInput.mockResolvedValueOnce(message);
+
+    const res = await pushDocsLaneCommand(root, { run });
+    expect(res.outcome).toBe('pushed');
+
+    const prCall = calls.find((c) => c.file === 'gh' && c.args[0] === 'pr' && c.args[1] === 'create');
+    expect(prCall).toBeDefined();
+    const title = flagValue(prCall!.args, '--title');
+    const body = flagValue(prCall!.args, '--body');
+
+    expect(title).toBe('docs(DR-102): wire note');
+    expect(title.length).toBeLessThanOrEqual(256);
+    expect(body).toContain(`Root cause: ${longBody}`);
+    // The docs-lane boilerplate + file list must still be present in the body.
+    expect(body).toContain('docs-lane');
+    expect(body).toContain('DR-102.md');
+  });
+
+  it('a single-line message over 256 chars is truncated to a title on a word boundary', async () => {
+    writeDoc('docs/decisions/DR-103.md');
+    const message = 'docs(DR-103): ' + Array.from({ length: 40 }, (_, i) => `word${i}word`).join(' ');
+    expect(message.length).toBeGreaterThan(256);
+    const map: Record<string, ResponderVal> = {
+      ...LOCAL_PROBES(root, ' M docs/decisions/DR-103.md\n'),
+      'gh auth status': 'Logged in to github.com\n',
+      'git fetch origin main': '',
+      'git worktree add': '',
+      'git add --': '',
+      'git diff --cached --quiet': Object.assign(new Error('exit 1'), { stderr: '' }),
+      'git commit': '',
+      'git push': '',
+      'gh pr create': 'https://github.com/AIClarityAU/minspec/pull/2001\n',
+      'git worktree remove': '',
+    };
+    const { run, calls } = responder(map);
+    showWarn.mockResolvedValueOnce('Open docs-lane PR');
+    showInput.mockResolvedValueOnce(message);
+
+    const res = await pushDocsLaneCommand(root, { run });
+    expect(res.outcome).toBe('pushed');
+
+    const prCall = calls.find((c) => c.file === 'gh' && c.args[0] === 'pr' && c.args[1] === 'create');
+    const title = flagValue(prCall!.args, '--title');
+
+    expect(title.length).toBeLessThanOrEqual(256);
+    expect(message.startsWith(title)).toBe(true);
+    expect(message[title.length]).toBe(' ');
+  });
+});
+
+/** Value of a `--flag` in a recorded call's argv (mirrors push-docs-pr-message.test.ts). */
+function flagValue(argv: string[], flag: string): string {
+  const i = argv.indexOf(flag);
+  if (i === -1 || i + 1 >= argv.length) {
+    throw new Error(`no ${flag} in argv: ${JSON.stringify(argv)}`);
+  }
+  return argv[i + 1];
+}
+
+// =============================================================================
 // Pure parsing helpers
 // =============================================================================
 

@@ -3,6 +3,7 @@ import * as path from 'path';
 import { listEpics, type EpicSummary } from '../lib/epic-manager';
 import { listAdrs, type AdrSummary } from '../lib/adr-manager';
 import { listSpecs, type SpecSummary } from '../lib/spec-catalog';
+import { isTerminalSpecStatus } from '../lib/spec-vocabulary';
 import { classifyApprovablePath, type ApprovableKind } from '../lib/approvable';
 import { recentApprovables } from '../lib/recent-approvables';
 import { getApprovalStatus } from '../lib/approval';
@@ -171,7 +172,14 @@ function previewAgreesWith(fsPath: string): boolean {
 function isPending(kind: ApprovableKind, node: ArtifactNode, root: string): boolean {
   if (kind === 'spec') {
     const s = (node as { spec: SpecSummary }).spec;
-    return getApprovalStatus(root, s.filePath) !== 'approved'; // unapproved | stale
+    // Both axes, mirroring `approve.ts` pickSpec (#440): a terminal-lifecycle spec
+    // (done/archived/superseded) is past the DR-012 gate, so it is not pending even
+    // with no approval record. Testing the approval status alone put terminal specs
+    // into this MRU list — and, when one was the LONE recent pending artifact, Alt+A
+    // approved it with no picker at all.
+    return (
+      getApprovalStatus(root, s.filePath) !== 'approved' && !isTerminalSpecStatus(s.status)
+    ); // unapproved | stale, and still before the gate
   }
   if (kind === 'adr') {
     return (node as { adr: AdrSummary }).adr.status !== 'accepted';

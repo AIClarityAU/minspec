@@ -27,7 +27,6 @@ import {
   sortBacklog,
   type WsjfDimensions,
   type BacklogIssue,
-  type IssueLifecycleLabel,
 } from '../src/lib/backlog';
 
 // ─── WSJF Scoring ───────────────────────────────────────────────────────

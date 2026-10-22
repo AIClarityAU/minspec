@@ -16,6 +16,7 @@ Pure stdlib unittest — run with:
 
     python3 scripts/hooks/test_spec_gate.py
 """
+import importlib.util
 import json
 import os
 import shutil
@@ -30,6 +31,13 @@ import canonical  # noqa: E402
 
 GATE_PY = os.path.join(_HERE, "spec-gate.py")
 GATE_SH = os.path.join(_HERE, "spec-gate.sh")
+
+# Import spec-gate.py as a module (its filename has a dash, so a plain
+# `import` can't reach it) to unit-test `select_verdict` directly — see
+# Select958VerdictTests below.
+_spec = importlib.util.spec_from_file_location("spec_gate_module", GATE_PY)
+spec_gate_module = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(spec_gate_module)
 
 IMPLEMENTING_PHASES = (
     "phases:\n"
@@ -104,11 +112,9 @@ class GateFixture:
             json.dumps(rec),
         )
 
-    def decision(self, rel, tool="Edit"):
-        """Feed a PreToolUse envelope for editing `rel`; return the decision.
-
-        Returns 'allow', 'deny', or None (passthrough / empty output).
-        """
+    def _run(self, rel, tool="Edit"):
+        """Feed a PreToolUse envelope for editing `rel`; return the parsed
+        hookSpecificOutput dict, or None (passthrough / empty output)."""
         env = {
             "tool_name": tool,
             "tool_input": {"file_path": os.path.join(self.root, rel)},
@@ -124,7 +130,17 @@ class GateFixture:
         out = proc.stdout.decode("utf-8").strip()
         if not out:
             return None
-        return json.loads(out)["hookSpecificOutput"]["permissionDecision"]
+        return json.loads(out)["hookSpecificOutput"]
+
+    def decision(self, rel, tool="Edit"):
+        """Returns 'allow', 'deny', or None (passthrough / empty output)."""
+        out = self._run(rel, tool)
+        return out["permissionDecision"] if out else None
+
+    def reason(self, rel, tool="Edit"):
+        """Returns the `permissionDecisionReason` string, or None if absent."""
+        out = self._run(rel, tool)
+        return out.get("permissionDecisionReason") if out else None
 
 
 class ScopedGateTests(unittest.TestCase):
@@ -318,6 +334,88 @@ class ScopedGateTests(unittest.TestCase):
             "the spec's own doc stays editable even while stale (re-approval path)",
         )
 
+    # --- #958: dedup-by-id must be deterministic + approval-preferring -------
+
+    def test_stray_tier_on_sibling_doc_does_not_shadow_approved_requirements(self):
+        """#958 regression (the actual SPEC-044 shape). A sibling doc (e.g.
+        design.md) that stray-carries the same `tier:`/`id:`/`phases:`
+        frontmatter as requirements.md (against the documented convention that
+        only requirements.md carries them) must NOT be able to shadow an
+        otherwise-approved requirements.md. tasks.md lives in the SAME spec dir
+        as both docs, so the FUZZY owned-files signal it contributes is
+        IDENTICAL regardless of which doc the old dedup picked — isolating the
+        bug to the APPROVAL VERDICT alone: design.md has no approval sidecar of
+        its own (unapproved), so if the old first-seen-in-glob dedup picked it
+        over the approved requirements.md, the whole spec read as unapproved
+        and denied an edit a human had already approved. The fix selects the
+        doc with the STRONGEST approval verdict for the id, so the approved
+        requirements.md always wins regardless of directory/glob order."""
+        # requirements.md (approved) is written FIRST, design.md (unapproved)
+        # LAST — glob.glob() is unsorted (raw directory order), empirically
+        # observed on this runner's filesystem to list the most-recently-
+        # written entry first, so this ordering is what reproduces #958's
+        # failure shape here. The ordering is FILESYSTEM-dependent, not a
+        # property of the content — which is the actual defect; the fix
+        # removes the dependency on glob order entirely rather than chasing a
+        # specific order.
+        spec = self.fx.write_spec(
+            "specs/minspec/SPEC-958-shadow/requirements.md",
+            "SPEC-958", IMPLEMENTING_PHASES,
+        )
+        self.fx.approve(
+            "specs/minspec/SPEC-958-shadow/requirements.md", spec, good=True
+        )
+        self.fx.write_spec(
+            "specs/minspec/SPEC-958-shadow/design.md",
+            "SPEC-958", IMPLEMENTING_PHASES,
+        )
+        self.fx.write(
+            "specs/minspec/SPEC-958-shadow/tasks.md",
+            "- [ ] Build `packages/core/src/presence.ts`\n",
+        )
+        self.fx.write("packages/core/src/presence.ts", "export const p = 1;\n")
+        self.assertEqual(
+            self.fx.decision("packages/core/src/presence.ts"), "allow",
+            "an approved requirements.md must not be shadowed by an unapproved "
+            "sibling doc sharing the same spec id",
+        )
+        self.assertEqual(
+            self.fx.decision("specs/minspec/SPEC-958-shadow/design.md"), "allow",
+        )
+
+    def test_dedup_prefers_stale_over_unapproved_deterministically(self):
+        """When no doc for a spec id is approved, the strongest available
+        verdict (stale, since a record exists) must win over a plain-unapproved
+        sibling — never whichever doc glob() lists first. Same shared-tasks.md
+        construction as above so the owned-files signal can't be the variable."""
+        spec = self.fx.write_spec(
+            "specs/minspec/SPEC-959-stale-shadow/requirements.md",
+            "SPEC-959", IMPLEMENTING_PHASES,
+        )
+        self.fx.approve(
+            "specs/minspec/SPEC-959-stale-shadow/requirements.md", spec,
+            good=False,
+        )  # hash mismatch -> stale
+        self.fx.write_spec(
+            "specs/minspec/SPEC-959-stale-shadow/design.md",
+            "SPEC-959", IMPLEMENTING_PHASES,
+        )  # unapproved (no sidecar of its own); written last
+        self.fx.write(
+            "specs/minspec/SPEC-959-stale-shadow/tasks.md",
+            "- [ ] Build `packages/core/src/stale_shadow.ts`\n",
+        )
+        self.fx.write("packages/core/src/stale_shadow.ts", "export const s = 1;\n")
+        self.assertEqual(
+            self.fx.decision("packages/core/src/stale_shadow.ts"), "deny",
+            "a stale record must still gate the spec's declared impl code",
+        )
+        self.assertIn(
+            "stale", self.fx.reason("packages/core/src/stale_shadow.ts"),
+            "the surfaced reason must reflect the STRONGEST verdict (stale, "
+            "re-approval possible) — not 'not approved' from whichever "
+            "unapproved sibling doc glob() happened to list first",
+        )
+
     def test_specifying_phase_spec_not_gated(self):
         """A specify/clarify-phase spec is not in implementation -> not gated, so
         even its own dir stays editable (matches 'edit unapproved specs directly')."""
@@ -379,6 +477,58 @@ class ScopedGateTests(unittest.TestCase):
         self.assertIsNone(
             self.fx.decision("specs/minspec/SPEC-907-x/requirements.md", tool="Read")
         )
+
+
+class Select958VerdictTests(unittest.TestCase):
+    """#958 regression, unit-level. `select_verdict` is the pure function the
+    fix introduced to replace the old order-dependent `if sid in seen_ids:
+    continue` dedup. Calling it directly with the SAME entries in different
+    orders — rather than relying on glob.glob()'s real (filesystem-dependent,
+    not test-controllable) traversal order — is what actually proves the fix:
+    the old code had no such function at all (this file would raise
+    AttributeError against pre-fix spec-gate.py), and the new code returns an
+    IDENTICAL, approval-preferring result regardless of input order."""
+
+    def test_approved_wins_regardless_of_order(self):
+        approved = {
+            "spec_rel": "specs/minspec/SPEC-958-shadow/requirements.md",
+            "approval": "approved", "rec": {"specHash": "x"}, "files": set(),
+        }
+        unapproved = {
+            "spec_rel": "specs/minspec/SPEC-958-shadow/design.md",
+            "approval": "unapproved", "rec": None, "files": set(),
+        }
+        r1 = spec_gate_module.select_verdict([approved, unapproved])
+        r2 = spec_gate_module.select_verdict([unapproved, approved])
+        self.assertEqual(r1[0], "approved")
+        self.assertEqual(r2[0], "approved")
+        self.assertEqual(r1[0], r2[0], "order must not change the verdict")
+
+    def test_stale_beats_unapproved_regardless_of_order(self):
+        stale = {
+            "spec_rel": "specs/minspec/SPEC-959-stale/requirements.md",
+            "approval": "stale", "rec": {"specHash": "x"}, "files": set(),
+        }
+        unapproved = {
+            "spec_rel": "specs/minspec/SPEC-959-stale/design.md",
+            "approval": "unapproved", "rec": None, "files": set(),
+        }
+        r1 = spec_gate_module.select_verdict([stale, unapproved])
+        r2 = spec_gate_module.select_verdict([unapproved, stale])
+        self.assertEqual(r1[0], "stale")
+        self.assertEqual(r2[0], "stale")
+
+    def test_declared_files_are_unioned_across_docs(self):
+        a = {
+            "spec_rel": "specs/minspec/SPEC-960/a.md", "approval": "approved",
+            "rec": {"specHash": "x"}, "files": {"packages/x/a.ts"},
+        }
+        b = {
+            "spec_rel": "specs/minspec/SPEC-960/b.md", "approval": "unapproved",
+            "rec": None, "files": {"packages/x/b.ts"},
+        }
+        _, _, files = spec_gate_module.select_verdict([a, b])
+        self.assertEqual(files, {"packages/x/a.ts", "packages/x/b.ts"})
 
 
 @unittest.skipUnless(shutil.which("git"), "git required for bypass-log test")

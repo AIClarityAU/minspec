@@ -43,6 +43,7 @@ import {
   REVIEW_SCRIPT_SHEBANG,
   PY_SCRIPT_SHEBANG,
 } from './ci-review-templates';
+import { OWNED_SRC_EXT_PATTERN, OWNED_INFRA_PREFIXES } from './ownership-path-rules';
 
 /**
  * Template names that can be rendered.
@@ -78,9 +79,15 @@ export const TEMPLATE_OUTPUT_PATHS: Record<TemplateName, string> = {
 const LABELS_MD_TEMPLATE = `# Issue label vocabulary — {{projectName}}
 
 The labels MinSpec's triage step classifies against. **This file is documentation and a
-copy-paste script — MinSpec never creates, edits, or reads a label on any forge.** Core
-functionality works offline and makes no network call without your explicit consent, so
-applying these is always a command *you* run.
+copy-paste script — MinSpec never creates, edits, or reads any of these labels on a
+forge.** Core functionality works offline and makes no network call without your explicit
+consent, so applying these is always a command *you* run.
+
+One label is not in this vocabulary, and it is the single exception: \`docs-lane\`, the
+label MinSpec's docs-lane workflow auto-merges on. When an approval you consented to push
+is eligible for that lane, MinSpec opens its pull request with the label, and creates the
+label first if this repository carries the docs-lane workflow but does not have the label
+yet. It never edits a \`docs-lane\` label that already exists.
 
 Triage reads an issue's **type label** as one of its inputs. A type it is told to
 recognise but that does not exist as a label is an input that is always absent — the
@@ -225,6 +232,7 @@ Anything waiting on the human — a decision, a credential, a manual step, a mer
   integration. Say the state you already observed alongside it, so the reader can
   decide without opening anything at all.
 - **Give each item a reply key.** One or two characters, restated on the line every turn so the human never scrolls back to find one: \`m\` merge · \`c\` close · \`d\` diff/details · \`r\` re-review · \`s\` skip.
+- **A key names what the agent does on receipt.** Agent-performed actions keep the existing form (\`m\` merge, \`r\` re-review, \`d\` diff). When only the human can act (closing a tab or session, a purchase, a command in their own terminal, an \`--admin\` merge keystroke, a click in an editor UI), state the step plainly and make the key a done-signal that names what the agent does when it arrives, e.g. \`tell me x once you have closed it - I will drop it from the queue and stop re-asking\`. A done-signal must state the consequence; without it the reader cannot tell why they are typing a letter.
 - **Every choice carries a recommendation and its cost.** When an item asks the human to *decide*, name the option you recommend and, in the same breath, the primary downside or risk of the option you are recommending. A menu with no recommendation hands the analysis back to the human; a recommendation with no stated cost is advocacy, not advice. Mark it \`(rec)\` on the option and follow with one clause naming what it costs. This applies wherever a decision is put to a human — the \`**Your turn**\` block **and** the body of any issue, PR, or DR that asks them to choose.
 
 The same block lists every pull request this session opened that is still unmerged — its number, the gate state already observed this turn, and its keys:
@@ -451,6 +459,7 @@ Two notes about clones, because an inert gate is worse than no gate — it looks
 | Author identity gate (opt-in) | \`pre-commit\` | A commit author email not in a configured allowlist |
 | Secret scan | \`pre-commit\` | Staged changes containing a detected secret |
 | Spec frontmatter | \`pre-commit\` | A staged spec missing \`id: SPEC-NNN\` |
+| Decision frontmatter | \`pre-commit\` | A staged decision record under \`docs/decisions/\` missing \`id: DR-NNN\` |
 | Deferred-work gate | \`commit-msg\` | A message that defers work without saying where it went |
 | Root-cause gate | \`commit-msg\` | A \`fix:\` commit whose body has no \`Root cause:\` line |
 
@@ -538,10 +547,27 @@ month of dangling references.
 The check runs through the best validator actually present: a Node validator if one is
 already installed, else the bundled \`python3\` script, else a pure-shell fallback. Each tier
 is used only if it can run and falls through otherwise, so a missing runtime degrades the
-check instead of bricking the commit. Know the limit of the lower tiers: the \`python3\` and
-shell tiers match paths under \`specs/\` literally, so if \`{{specsDir}}/\` differs from that,
-only the Node tier sees your specs and a clean commit is not evidence the frontmatter is
-valid.
+check instead of bricking the commit. Know the limit of what's actually shipped: the
+\`python3\` and shell tiers match paths under \`specs/\` literally, and the Node validator
+(\`@aiclarity/minspec-validator\`) is not yet published, so it is never the one that runs. If
+\`{{specsDir}}/\` differs from \`specs/\`, no tier that exists today sees your specs, and a
+clean commit is not evidence the frontmatter is valid (#2684).
+
+### Decision frontmatter
+
+Every staged markdown file under \`docs/decisions/\` must carry an \`id: DR-NNN\` frontmatter line,
+mirroring the spec-frontmatter gate above one artifact class over. The gate is keyed on the
+directory, not on a \`DR-NNN.md\` file name, so a record kept under any other name is checked
+too; only \`INDEX.md\` and \`README.md\` are exempt. A DR created through
+*MinSpec: Create Architecture Decision Record* always has one; a hand-written DR can silently
+lack it, and without this gate nothing notices — the register then holds records of which only
+some are machine-readable, and every cross-reference into that DR from a commit, spec, or
+another DR resolves against an id that was never there to begin with.
+
+Enforced by the same shell case inside the pre-commit hook's SDD-validation stage that checks
+spec frontmatter, and by \`validate.py\`'s \`DR_ID_RE\` tier. The path is matched literally
+against \`docs/decisions/\`, so a project that has relocated \`{{decisionsDir}}/\` is not covered
+by the lower tiers — the same known limit the spec-frontmatter gate carries (#2684).
 
 ### Deferred-work gate
 
@@ -663,6 +689,7 @@ Anything waiting on the human — a decision, a credential, a manual step, a mer
   integration. Say the state you already observed alongside it, so the reader can
   decide without opening anything at all.
 - **Give each item a reply key.** One or two characters, restated on the line every turn so the human never scrolls back to find one: \`m\` merge · \`c\` close · \`d\` diff/details · \`r\` re-review · \`s\` skip.
+- **A key names what the agent does on receipt.** Agent-performed actions keep the existing form (\`m\` merge, \`r\` re-review, \`d\` diff). When only the human can act (closing a tab or session, a purchase, a command in their own terminal, an \`--admin\` merge keystroke, a click in an editor UI), state the step plainly and make the key a done-signal that names what the agent does when it arrives, e.g. \`tell me x once you have closed it - I will drop it from the queue and stop re-asking\`. A done-signal must state the consequence; without it the reader cannot tell why they are typing a letter.
 - **Every choice carries a recommendation and its cost.** When an item asks the human to *decide*, name the option you recommend and, in the same breath, the primary downside or risk of the option you are recommending. A menu with no recommendation hands the analysis back to the human; a recommendation with no stated cost is advocacy, not advice. Mark it \`(rec)\` on the option and follow with one clause naming what it costs. This applies wherever a decision is put to a human — the \`**Your turn**\` block **and** the body of any issue, PR, or DR that asks them to choose.
 
 The same block lists every pull request this session opened that is still unmerged — its number, the gate state already observed this turn, and its keys:
@@ -742,6 +769,7 @@ Anything waiting on the human — a decision, a credential, a manual step, a mer
   integration. Say the state you already observed alongside it, so the reader can
   decide without opening anything at all.
 - **Give each item a reply key.** One or two characters, restated on the line every turn so the human never scrolls back to find one: \`m\` merge · \`c\` close · \`d\` diff/details · \`r\` re-review · \`s\` skip.
+- **A key names what the agent does on receipt.** Agent-performed actions keep the existing form (\`m\` merge, \`r\` re-review, \`d\` diff). When only the human can act (closing a tab or session, a purchase, a command in their own terminal, an \`--admin\` merge keystroke, a click in an editor UI), state the step plainly and make the key a done-signal that names what the agent does when it arrives, e.g. \`tell me x once you have closed it - I will drop it from the queue and stop re-asking\`. A done-signal must state the consequence; without it the reader cannot tell why they are typing a letter.
 - **Every choice carries a recommendation and its cost.** When an item asks the human to *decide*, name the option you recommend and, in the same breath, the primary downside or risk of the option you are recommending. A menu with no recommendation hands the analysis back to the human; a recommendation with no stated cost is advocacy, not advice. Mark it \`(rec)\` on the option and follow with one clause naming what it costs. This applies wherever a decision is put to a human — the \`**Your turn**\` block **and** the body of any issue, PR, or DR that asks them to choose.
 
 The same block lists every pull request this session opened that is still unmerged — its number, the gate state already observed this turn, and its keys:
@@ -1048,6 +1076,12 @@ const MINSPEC_VALIDATE_WORKFLOW = `name: MinSpec Validate
 on:
   push:
   pull_request:
+  # A required status check must also report on the MERGE GROUP event, or a merge queue can
+  # never go green: the queue evaluates a synthetic merge commit that neither \`push\` nor
+  # \`pull_request\` fires for, so the required context never reports and the queue stalls
+  # instead of failing. Inert until a merge queue is enabled on the default branch.
+  # Background: AIClarityAU/minspec#1394.
+  merge_group:
 
 permissions:
   contents: read
@@ -1068,10 +1102,11 @@ jobs:
       - name: Run MinSpec validation (fail-closed — DR-066)
         run: |
           # A required check must have a reachable red path and must NEVER conclude
-          # success without validating (DR-066 "No silent gate", clause 2 / #811).
+          # success without validating (DR-066 "No silent gate", clause 2 /
+          # AIClarityAU/minspec#811).
           # Run the highest-fidelity validator that is actually present and let its
           # exit code gate the job. Do NOT add a branch that exits 0 without a
-          # validator having run — that was the #811 always-green bug.
+          # validator having run — that was the AIClarityAU/minspec#811 always-green bug.
           if [ -f package.json ] && node -e "process.exit((require('./package.json').scripts||{}).validate?0:1)" 2>/dev/null; then
             echo "MinSpec SDD validation: running 'npm run validate' (Node validator)."
             npm ci
@@ -1350,6 +1385,21 @@ if [ "\${EMAIL_GATE_OFF:-0}" != "1" ]; then
     echo "  Bypass (rare): EMAIL_GATE_OFF=1 git commit ..." >&2
     exit 1
   fi
+  # rc 0 means the key IS set, even when \`git config minspec.allowedCommitEmails ""\`
+  # (a bootstrap script that forgot to fill in its \$EMAILS var produces exactly this
+  # shape) left it empty. That must not fold back into rc 1's "never configured" —
+  # it is opted in with a witness that can admit nothing, so like the unreadable
+  # config above it refuses visibly rather than silently no-op'ing (constitution
+  # invariant 2: no silent gate).
+  if [ "$minspec_allowed_rc" -eq 0 ] && [ -z "\${minspec_allowed_emails:-}" ]; then
+    echo "✗ MinSpec gate: minspec.allowedCommitEmails is set but names no address." >&2
+    echo "  An allowlist that admits nothing would refuse every commit, so this is" >&2
+    echo "  treated as a misconfiguration rather than opted out." >&2
+    echo "  Fix:  git config minspec.allowedCommitEmails <address> [<address> ...]" >&2
+    echo "        or turn this gate off: git config --unset-all minspec.allowedCommitEmails" >&2
+    echo "  Bypass (rare): EMAIL_GATE_OFF=1 git commit ..." >&2
+    exit 1
+  fi
   if [ -n "\${minspec_allowed_emails:-}" ]; then
     if ! minspec_author_ident=$(git var GIT_AUTHOR_IDENT); then
       echo "✗ MinSpec gate: cannot determine the author identity git will record (git var GIT_AUTHOR_IDENT failed)." >&2
@@ -1399,8 +1449,23 @@ if [ "\${EMAIL_GATE_OFF:-0}" != "1" ]; then
       echo "" >&2
       minspec_fix="git config $minspec_cfg_key <one of the allowed addresses above>"
       if [ -z "\${minspec_cfg_email:-}" ]; then
-        echo "  No author.email or user.email is configured, so git fell back to the" >&2
-        echo "  EMAIL environment variable (or <user>@<hostname>)." >&2
+        # Neither author.email nor user.email is set, so there is nothing here to
+        # compare the recorded author against — unlike the elif below. That does NOT
+        # mean the EMAIL fallback is the cause: git exports whichever source it used
+        # (GIT_AUTHOR_EMAIL, --author, an --amend / -C that kept an earlier commit's
+        # author) into THIS hook's environment as GIT_AUTHOR_EMAIL before running it
+        # (determine_author_info()), so \`git var GIT_AUTHOR_IDENT\` reports the same
+        # value regardless of which source produced it and this hook cannot tell them
+        # apart by reading its own environment. Those overrides outrank the EMAIL
+        # fallback and <user>@<hostname>, so they are the likelier explanation — and
+        # are the exact "ambient email shadowing the real one" case from the header
+        # above — not just a possible one, so the Fix leads with undoing them.
+        echo "  Neither author.email nor user.email is configured. The recorded address" >&2
+        echo "  most likely came from GIT_AUTHOR_EMAIL in the environment, git commit" >&2
+        echo "  --author, or an --amend / -C that kept an earlier commit's author —" >&2
+        echo "  those all outrank the EMAIL environment variable and <user>@<hostname>," >&2
+        echo "  which apply only if none of them do." >&2
+        minspec_fix="unset GIT_AUTHOR_EMAIL, drop --author, or add --reset-author; if none of those apply: git config $minspec_cfg_key <one of the allowed addresses above>"
       elif [ "$minspec_cfg_email" != "$minspec_author_email" ]; then
         echo "  git config $minspec_cfg_key is '$minspec_cfg_email', but this commit's author overrides it:" >&2
         echo "  GIT_AUTHOR_EMAIL in the environment, git commit --author, or an --amend / -C" >&2
@@ -1450,7 +1515,8 @@ fi
 # it degrades to the always-present shell gate below. Tiers:
 #   Node   — only if @aiclarity/minspec-validator is ALREADY resolvable
 #            (\`npx --no-install\`, never a network fetch that could E404-block).
-#   python — only if python3 is on PATH and validate.py exists.
+#   python — only if a python3/python/\`py -3\` candidate actually RUNS (not
+#            merely resolves on PATH, #2400) and validate.py exists.
 #   shell  — always present; the two pattern-matchable gates, inline below.
 
 # minspec_shell_gate: the always-correct baseline. (1) every staged specs/**/ md
@@ -1463,16 +1529,21 @@ minspec_shell_gate() {
   for f in $staged; do
     case "$f" in
       specs/*.md)
-        # Frontmatter is the block between the first two \`---\` fences.
+        # Frontmatter is the block between the first two \`---\` fences. The
+        # optional \\042/\\047 (octal for " and ') before the id lets a quoted
+        # value through — \`id: "SPEC-001"\` is well-formed YAML for the string
+        # \`SPEC-001\`, and the bare pattern used to refuse it (#1908). Octal, not a
+        # literal quote char, because this awk program is itself inside a
+        # single-quoted shell string, where a literal ' would end it early.
         if ! git show ":$f" 2>/dev/null | awk '
           /^---[[:space:]]*$/ { fence++; next }
-          fence==1 && /^id:[[:space:]]*SPEC-[0-9]+/ { found=1 }
+          fence==1 && /^id:[[:space:]]*[\\042\\047]?SPEC-[0-9]+/ { found=1 }
           END { exit(found?0:1) }'; then
           echo "✗ MinSpec gate: $f missing \\\`id: SPEC-NNN\\\` frontmatter." >&2
           gate_fail=1
         fi
         ;;
-      docs/decisions/DR-*.md)
+      docs/decisions/*.md)
         # Decision records are approvables too, and were ungated until now: a DR
         # created by the MinSpec command carried frontmatter, one written by hand
         # carried none, and nothing noticed. Observed in a real project where
@@ -1484,17 +1555,29 @@ minspec_shell_gate() {
         # over: the tooling validated what it created and never asserted the
         # class as a whole.
         #
+        # Keyed on the DIRECTORY, not a \\\`DR-*.md\\\` filename match: a record kept
+        # under any other name (docs/decisions/0024-some-name.md, say) used to be
+        # skipped, silently, by this same asymmetry one level up (#1908). INDEX.md
+        # (the register listing) and README.md (prose) are the only exemptions,
+        # since neither carries an id of its own.
+        #
         # The path is literal, matching the \\\`specs/\\\` case above — this hook is a
         # managed region rendered without template context, so a project that has
         # relocated its decisions directory is not covered. That is a known limit
-        # of both gates, not a new one.
-        if ! git show ":$f" 2>/dev/null | awk '
-          /^---[[:space:]]*$/ { fence++; next }
-          fence==1 && /^id:[[:space:]]*DR-[0-9]+/ { found=1 }
-          END { exit(found?0:1) }'; then
-          echo "✗ MinSpec gate: $f missing \\\`id: DR-NNN\\\` frontmatter." >&2
-          gate_fail=1
-        fi
+        # of both gates, not a new one (#2684).
+        case "$(basename -- "$f")" in
+          INDEX.md|README.md) ;;
+          *)
+            # Same optional-quote allowance as the SPEC- case above (#1908).
+            if ! git show ":$f" 2>/dev/null | awk '
+              /^---[[:space:]]*$/ { fence++; next }
+              fence==1 && /^id:[[:space:]]*[\\042\\047]?DR-[0-9]+/ { found=1 }
+              END { exit(found?0:1) }'; then
+              echo "✗ MinSpec gate: $f missing \\\`id: DR-NNN\\\` frontmatter." >&2
+              gate_fail=1
+            fi
+            ;;
+        esac
         ;;
     esac
   done
@@ -1522,10 +1605,33 @@ if command -v npx >/dev/null 2>&1 \\
   exit $?
 fi
 
-# Python tier — ONLY when python3 + validate.py are present.
-if command -v python3 >/dev/null 2>&1 && [ -f "$hook_dir/validate.py" ]; then
-  python3 "$hook_dir/validate.py" --pre-commit
-  exit $?
+# Python tier — ONLY when a candidate interpreter actually RUNS (#2400). A name
+# being on PATH is not proof it can run the script: Windows ships python.exe /
+# python3.exe "app execution aliases" under
+# %LOCALAPPDATA%\\Microsoft\\WindowsApps that \`command -v\` resolves on every
+# machine, Python installed or not — with no Microsoft Store Python, invoking
+# the alias prints a Store-install prompt and exits non-zero. \`command -v
+# python3\` proved a NAME exists, never that it RUNS; only invoking it can tell
+# those apart, so probe each candidate by executing it. Order covers the
+# spellings that matter across platforms: python3 (POSIX / most installs),
+# python (the python.org Windows installer ships python.exe, not python3.exe),
+# then the py launcher's -3 switch (bundled with python.org Windows installs).
+if [ -f "$hook_dir/validate.py" ]; then
+  minspec_py=""
+  for minspec_py_candidate in python3 python "py -3"; do
+    # shellcheck disable=SC2086  # intentional word-split: "py -3" is launcher + flag.
+    if $minspec_py_candidate -c 'import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)' >/dev/null 2>&1; then
+      minspec_py="$minspec_py_candidate"
+      break
+    fi
+  done
+  if [ -n "$minspec_py" ]; then
+    # A real interpreter started: let its verdict (pass OR fail) stand — only
+    # "no candidate could start at all" falls through to the shell tier below.
+    # shellcheck disable=SC2086
+    $minspec_py "$hook_dir/validate.py" --pre-commit
+    exit $?
+  fi
 fi
 
 # Shell tier — always present.
@@ -1643,10 +1749,30 @@ exit 1`;
  *
  *   - every spec markdown under \`specs/\` must carry \`id: SPEC-NNN\` frontmatter
  *   - every markdown under \`docs/domain/\` must carry \`type: domain\` frontmatter
+ *   - SPEC-038's spec→code ownership rule (#2250): a primary T3/T4 spec whose
+ *     \`phases.plan\` is \`in-progress\`/\`done\` must declare \`implements:\` (or
+ *     \`implements: none\` + \`implements_reason:\`). FAIL under
+ *     \`ownershipDeclaration: "error"\`, a visible WARN otherwise; an escaping
+ *     \`implements:\`/\`affects:\` path always FAILs.
+ *
+ * WHY THE OWNERSHIP RULE IS HERE (#2250). This file is the SDD validator the scaffolded
+ * pre-commit hook runs wherever python3 is present, and the one the scaffolded CI
+ * workflow runs in any repo without an npm \`validate\` script. Until #2250 it carried
+ * only the three id/type checks, so SPEC-038's rule blocked nowhere outside MinSpec's
+ * own repo, whose dev-only \`scripts/validate-frontmatter.ts\` (Rule 15) ran it at
+ * \`error\`. voip-sms-inbox SPEC-003 reached main at T3 without \`implements:\` through
+ * exactly that gap. The port
+ * is line-for-line from \`validateOwnership\` (spec-validator.ts) and the readers it
+ * calls, and the owned-path rules are interpolated from \`ownership-path-rules.ts\`
+ * rather than retyped. \`tests/shipped-ownership-gate-2250.test.ts\` requires the two
+ * verdicts to be identical over a fixture matrix and over this repo's whole corpus.
  *
  * Frontmatter is parsed with the SAME lightweight \`key: value\` split the Node
  * \`validate-frontmatter.ts\` uses (first \`---\` … \`---\` block, split on the first
- * colon, trim) — no PyYAML dependency, so it runs on a stock python3. Scopes to the
+ * colon, trim) — no PyYAML dependency, so it runs on a stock python3. It is not an
+ * exact re-implementation, though: since #1908 the checked values are unquoted and
+ * comment-stripped first (\`clean_frontmatter_value\`), and it gates DR \`id:\`
+ * frontmatter. The Node validator does neither yet (#2297). Scopes to the
  * STAGED tree (\`git diff --cached\`) when invoked as a pre-commit hook, else scans
  * the whole repo. Tier-0: deterministic, offline, no network, no third-party deps.
  *
@@ -1655,15 +1781,34 @@ exit 1`;
  */
 const VALIDATE_PY = `"""MinSpec mid-tier validator (DR-037 / #246).
 
-Language-agnostic twin of the Node validate-frontmatter core FATAL checks:
+FATAL checks, modelled on MinSpec's Node validate-frontmatter:
   - specs/**/*.md must have \`id: SPEC-NNN\` frontmatter
-  - docs/decisions/DR-*.md must have \`id: DR-NNN\` frontmatter
+  - every docs/decisions/*.md (except INDEX.md / README.md) must have
+    \`id: DR-NNN\` frontmatter — keyed on the DIRECTORY, not the filename, so a
+    record not named DR-NNN.md is still checked, never silently skipped (#1908)
   - docs/domain/*.md must have \`type: domain\` frontmatter
+  - a T3/T4 spec past Clarify must declare the code it owns (SPEC-038):
+    \`implements:\` listing repo-relative source paths, or \`implements: none\`
+    with an \`implements_reason:\`. FAIL when .minspec/config.json sets
+    "ownershipDeclaration": "error", otherwise WARN. An \`implements:\` or
+    \`affects:\` path that escapes the repo always FAILs.
+  - a spec/DR/domain file that cannot be read at all (decode error, permission
+    error, a pre-commit \`git show\` failure) FAILs as \`unreadable (<reason>)\`;
+    it is counted and reported, never skipped in silence (invariant 2, #2630).
+    The same applies one level up: if the pre-commit git call that LISTS staged
+    files itself errors, that is also a FAIL, not an empty — and therefore
+    passing — run.
 
-Frontmatter parsing mirrors the Node validator exactly (first --- ... --- block,
-split each line on the first colon, trim) — no PyYAML, so it runs on a stock
-python3. Deterministic + offline (Tier-0, DR-004)."""
+The id/type checks split frontmatter the way the Node validator does (first
+--- ... --- block, split each line on the first colon, trim); the ownership rule
+ports the MinSpec extension's own readers. No PyYAML, so it runs on a stock
+python3. The id/type checks are not an exact twin of the Node validator: values
+checked here go through clean_frontmatter_value (one layer of quotes, a trailing
+comment), which the Node side does not do yet, and the Node side has no rule
+that a decision record must carry an id. #2297 tracks bringing them level.
+Deterministic + offline (Tier-0, DR-004)."""
 
+import json
 import os
 import re
 import subprocess
@@ -1672,6 +1817,51 @@ import sys
 FM_RE = re.compile(r"^---\\n(.*?)\\n---", re.DOTALL)
 SPEC_ID_RE = re.compile(r"^SPEC-\\d+$")
 DR_ID_RE = re.compile(r"^DR-\\d+$")
+# A DR is any .md under the decisions dir except the register's own listing
+# (no id: of its own) and a conventional README (prose, not a record) — #1908.
+DR_EXEMPT_FILENAMES = {"INDEX.md", "README.md"}
+# The section the founder reads to accept a DR. A hand-written DR skipped it because
+# only the generator template carried it (#2921). WARN until the corpus is backfilled.
+DR_PLAIN_TERMS_RE = re.compile(r"^#{1,6}[ \\t]+In plain terms\\b", re.IGNORECASE | re.MULTILINE)
+
+
+def clean_frontmatter_value(raw):
+    """Strip a trailing inline comment, then one layer of matching quotes.
+
+    \`id: "DR-024"  # note\` is well-formed YAML for the string \`DR-024\`, but the
+    naive key:value split above leaves the quotes and comment in \`raw\` verbatim.
+    Comment-stripping runs FIRST so the quoted value's closing quote is still the
+    last character when the quote check runs — a quote-then-comment strip order
+    would leave the trailing comment sitting where the closing quote is expected
+    and the quotes would never come off (#1908).
+    """
+    value = raw.split("#", 1)[0].strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+        value = value[1:-1]
+    return value
+
+# Spec-to-code ownership (SPEC-038). The owned-path rules below are generated from
+# the MinSpec extension's own definitions, so the two cannot disagree about what a
+# declared path is.
+OWNED_SRC_EXT_RE = re.compile(r"${OWNED_SRC_EXT_PATTERN}", re.IGNORECASE)
+OWNED_INFRA_PREFIXES = (${OWNED_INFRA_PREFIXES.map((p) => JSON.stringify(p)).join(', ')})
+PHASE_STATUSES = ("pending", "in-progress", "done", "skipped")
+TIERS = ("T1", "T2", "T3", "T4")
+FM_KEY = r"[A-Za-z0-9_][A-Za-z0-9_-]*"
+OWNERSHIP_HINTS = {
+    "ownership.implements.missing": (
+        "Add an \`implements:\` list of the repo-relative code paths this spec creates "
+        "or owns (e.g. \`implements: [src/feature.ts]\`), or \`implements: none\` plus a "
+        "one-line \`implements_reason:\` when it owns no code (SPEC-038)."
+    ),
+    "ownership.implements.invalid": (
+        "Each entry must be a repo-relative path: no absolute paths and no ../ escapes."
+    ),
+}
+OWNERSHIP_ADVISORY = (
+    "Advisory only, because .minspec/config.json does not set "
+    "\\"ownershipDeclaration\\": \\"error\\"; set it to make this fail."
+)
 
 
 def repo_root():
@@ -1702,27 +1892,33 @@ def parse_frontmatter(content):
 
 
 def staged_files(root):
-    """Staged added/copied/modified files (pre-commit scope). [] on any git error."""
+    """Staged added/copied/modified files (pre-commit scope). Returns the
+    Exception itself on any git error — never \`[]\` — so a git failure cannot
+    be read as "nothing staged" and validate zero files while still exiting 0
+    (invariant 2: an errored witness fails the gate closed, visibly, never by
+    going quiet)."""
     try:
         out = subprocess.run(
             ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
             cwd=root, capture_output=True, text=True, check=True,
         )
         return [f for f in out.stdout.splitlines() if f.strip()]
-    except Exception:
-        return []
+    except Exception as exc:
+        return exc
 
 
 def staged_content(root, rel):
-    """Content of the staged blob (what is ACTUALLY being committed)."""
+    """Content of the staged blob (what is ACTUALLY being committed). Returns
+    the Exception itself on failure — never \`None\` — so the caller can tell
+    "nothing to read" apart from "could not read it" (invariant 2)."""
     try:
         out = subprocess.run(
             ["git", "show", ":" + rel],
             cwd=root, capture_output=True, text=True, check=True,
         )
         return out.stdout
-    except Exception:
-        return None
+    except Exception as exc:
+        return exc
 
 
 def all_md(root, rel_dir):
@@ -1735,12 +1931,219 @@ def all_md(root, rel_dir):
     return found
 
 
+# ── Spec-to-code ownership (SPEC-038) ────────────────────────────────────────
+# A line-for-line port of the MinSpec extension's \`validateOwnership\` and of the
+# frontmatter readers it calls (spec.ts, spec-vocabulary.ts, spec-validator.ts,
+# ownership-path-rules.ts). MinSpec's test suite runs both over the same inputs,
+# and over its own spec corpus, and requires identical verdicts: change the two
+# together. Before this port a repo whose CI runs this file never evaluated
+# SPEC-038 at all (AIClarityAU/minspec#2250).
+
+
+def ownership_declaration(root):
+    """\`ownershipDeclaration\` as the extension's loadConfig resolves it: "warn"
+    unless .minspec/config.json says otherwise. An unreadable config falls back to
+    that default exactly as loadConfig does, but says so rather than silently."""
+    path = os.path.join(root, ".minspec", "config.json")
+    if not os.path.exists(path):
+        return "warn"
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            config = json.load(fh)
+    except (OSError, ValueError) as exc:
+        sys.stderr.write(
+            "WARN .minspec/config.json: unreadable (" + str(exc) + "), so the "
+            "ownership rule runs at its default, warn, until it parses.\\n"
+        )
+        return "warn"
+    value = config.get("ownershipDeclaration") if isinstance(config, dict) else None
+    return value if isinstance(value, str) else "warn"
+
+
+def strip_inline_comment(value):
+    """A scalar without surrounding quotes or a trailing \` # comment\`."""
+    v = value.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "\\"'":
+        return v[1:-1]
+    m = re.search(r"\\s#", v)
+    return v[:m.start()].strip() if m else v
+
+
+def parse_frontmatter_yaml(yaml):
+    """Top-level scalars plus one indented level (\`phases:\`), as the extension's
+    parser reads them. An empty key with no indented children reads as ""."""
+    result = {}
+    current_key = None
+    nested = None
+    for line in yaml.split("\\n"):
+        trimmed = line.rstrip()
+        if trimmed == "" or trimmed.startswith("#"):
+            continue
+        if re.match(r"\\s{2,}[A-Za-z0-9_]", line) and current_key:
+            m = re.match("(" + FM_KEY + r")\\s*:\\s*(.+)$", trimmed.strip())
+            if m:
+                if nested is None:
+                    nested = {}
+                nested[m.group(1)] = m.group(2).strip()
+            continue
+        if nested is not None and current_key:
+            result[current_key] = nested if nested else ""
+            nested = None
+        m = re.match("(" + FM_KEY + r")\\s*:\\s*(.*)$", trimmed)
+        if m:
+            current_key = m.group(1)
+            value = m.group(2).strip()
+            if value == "":
+                nested = {}
+            else:
+                result[current_key] = value
+                current_key = None
+    if nested is not None and current_key:
+        result[current_key] = nested if nested else ""
+    return result
+
+
+def raw_frontmatter_field(raw, key):
+    """A top-level (column-0) frontmatter value, comment-stripped. None when the
+    key is absent or its value is empty. Horizontal whitespace only after the
+    colon, so a block-form key never reads its first list item as a value."""
+    block = FM_RE.match(raw)
+    if not block:
+        return None
+    m = re.search(
+        "^" + re.escape(key) + r"[ \\t]*:[ \\t]*(.*)$", block.group(1), re.MULTILINE
+    )
+    if not m:
+        return None
+    stripped = strip_inline_comment(m.group(1))
+    return stripped if stripped != "" else None
+
+
+def unquote_token(token):
+    return re.sub(r"^[\\"']+|[\\"']+$", "", token)
+
+
+def frontmatter_list(raw, key):
+    """Tokens of a frontmatter list: inline (\`key: a, b\` or \`key: [a, b]\`) or
+    block form (\`key:\` then \`  - item\` lines). Empty when the key is absent."""
+    block = FM_RE.match(raw)
+    if not block:
+        return []
+    inline = raw_frontmatter_field(raw, key)
+    if inline is not None:
+        return [unquote_token(t) for t in re.split(r"[,\\s\\[\\]]+", inline) if t]
+    key_line = re.compile(re.escape(key) + r"[ \\t]*:[ \\t]*(?:#.*)?$")
+    item = re.compile(r"[ \\t]+-[ \\t]*(.+?)[ \\t]*(?:#.*)?$")
+    lines = block.group(1).split("\\n")
+    tokens = []
+    for i, line in enumerate(lines):
+        if key_line.match(line):
+            for cont in lines[i + 1:]:
+                if re.match(r"[ \\t]*$", cont):
+                    continue
+                m = item.match(cont)
+                if not m:
+                    break
+                tokens.append(unquote_token(m.group(1)))
+            break
+    return tokens
+
+
+def owned_path(token):
+    """The normalized repo path a token names, or None when it names no path."""
+    t = token.strip()
+    t = re.sub(r'^"+|"+$', "", t)
+    t = re.sub(r"^'+|'+$", "", t)
+    t = t.strip()
+    if not t or "/" not in t:
+        return None
+    p = t.replace("\\\\", "/")
+    return p[2:] if p.startswith("./") else p
+
+
+def escapes_repo(p):
+    return p.startswith("/") or p.startswith("../") or ".." in p.split("/")
+
+
+def is_escaping_path(token):
+    """An absolute path, a ../ climb, or any .. segment: outside the repo."""
+    p = owned_path(token)
+    return p is not None and escapes_repo(p)
+
+
+def is_valid_owned_path(token):
+    """A repo-relative source path: the only kind of token that declares code.
+    Existence is NOT required; a not-yet-created file is valid ownership."""
+    p = owned_path(token)
+    if p is None or escapes_repo(p):
+        return False
+    if any(p.startswith(prefix) for prefix in OWNED_INFRA_PREFIXES):
+        return False
+    return OWNED_SRC_EXT_RE.search(p) is not None
+
+
+def ownership_violations(content, declaration):
+    """SPEC-038 for one spec file's text: [(rule, severity, message), ...].
+
+    Armed only for a primary spec (no \`type:\`, or \`type: requirements\`) at T3/T4
+    whose \`phases.plan\` is \`in-progress\` or \`done\`. A tier edit arms it exactly as
+    a phase advance does, which is how voip-sms-inbox SPEC-003 reached main at T3
+    without \`implements:\` while nothing here checked (#2250)."""
+    raw = re.sub(r"\\r\\n?", "\\n", content)
+    block = FM_RE.match(raw)
+    fm = parse_frontmatter_yaml(block.group(1)) if block else {}
+    spec_type = fm.get("type")
+    spec_type = spec_type.lower() if isinstance(spec_type, str) else ""
+    tier = fm.get("tier")
+    tier = strip_inline_comment(tier) if isinstance(tier, str) else ""
+    tier = tier if tier in TIERS else "T2"
+    phases = fm.get("phases")
+    plan = phases.get("plan") if isinstance(phases, dict) else None
+    plan = strip_inline_comment(plan) if isinstance(plan, str) else "pending"
+    plan = plan if plan in PHASE_STATUSES else "pending"
+    if (
+        spec_type not in ("", "requirements")
+        or tier in ("T1", "T2")
+        or plan not in ("in-progress", "done")
+    ):
+        return []
+
+    implemented = frontmatter_list(raw, "implements")
+    is_none = len(implemented) == 1 and implemented[0].lower() == "none"
+    has_reason = raw_frontmatter_field(raw, "implements_reason") is not None
+    out = []
+    if not any(is_valid_owned_path(t) for t in implemented) and not (
+        is_none and has_reason
+    ):
+        out.append((
+            "ownership.implements.missing",
+            "error" if declaration == "error" else "warning",
+            tier + " spec past Clarify does not declare its owned code (implements:).",
+        ))
+    declared = ([] if is_none else implemented) + frontmatter_list(raw, "affects")
+    escaping = [t for t in declared if is_escaping_path(t)]
+    if escaping:
+        out.append((
+            "ownership.implements.invalid",
+            "error",
+            "implements:/affects: contains invalid owned-code path(s): "
+            + ", ".join(escaping) + ".",
+        ))
+    return out
+
+
 def main():
     pre_commit = "--pre-commit" in sys.argv[1:]
     root = repo_root()
 
     if pre_commit:
         targets = staged_files(root)
+        if isinstance(targets, Exception):
+            sys.stderr.write(
+                "FAIL pre-commit: could not list staged files (" + str(targets) + "). "
+                "Refusing to treat an unknown staged set as an empty one.\\n"
+            )
+            return 1
         reader = lambda rel: staged_content(root, rel)
     else:
         targets = (
@@ -1752,49 +2155,87 @@ def main():
             try:
                 with open(os.path.join(root, rel), "r", encoding="utf-8") as fh:
                     return fh.read()
-            except Exception:
-                return None
+            except Exception as exc:
+                return exc
 
     errors = 0
+    # Read on the first spec, not up front: a commit that stages no spec never
+    # needs it, so a broken config does not nag on every unrelated commit.
+    declaration = None
 
     for rel in targets:
         norm = rel.replace(os.sep, "/")
         is_spec = norm.startswith("specs/") and norm.endswith(".md")
         is_domain = norm.startswith("docs/domain/") and norm.endswith(".md")
-        # A decision record, not the register's INDEX.md (a listing with no id).
+        # ANY decision record, not just one named DR-NNN.md — a record kept under a
+        # different name (docs/decisions/0024-some-name.md, say) was previously
+        # unchecked and unreported as skipped (#1908). The register's own INDEX.md
+        # and a conventional README are the only exemptions, since neither carries
+        # an id of its own.
         is_dr = (
             norm.startswith("docs/decisions/")
             and norm.endswith(".md")
-            and os.path.basename(norm).startswith("DR-")
+            and os.path.basename(norm) not in DR_EXEMPT_FILENAMES
         )
         if not (is_spec or is_dr or is_domain):
             continue
 
         content = reader(rel)
-        if content is None:
+        if isinstance(content, Exception):
+            sys.stderr.write(
+                "FAIL " + norm + ": unreadable (" + str(content) + ")\\n"
+            )
+            errors += 1
             continue
         fm = parse_frontmatter(content)
 
         if is_spec:
-            spec_id = fm.get("id", "")
-            # Strip an inline comment (\`id: SPEC-001  # note\`) before matching.
-            spec_id = spec_id.split("#", 1)[0].strip()
-            if not SPEC_ID_RE.match(spec_id):
+            spec_id = clean_frontmatter_value(fm.get("id", ""))
+            if not spec_id:
                 sys.stderr.write(
-                    "FAIL " + norm + ": missing or invalid \`id: SPEC-NNN\` frontmatter\\n"
+                    "FAIL " + norm + ": missing \`id: SPEC-NNN\` frontmatter\\n"
                 )
                 errors += 1
+            elif not SPEC_ID_RE.match(spec_id):
+                sys.stderr.write(
+                    "FAIL " + norm + ": invalid \`id: SPEC-NNN\` frontmatter (got \`" + spec_id + "\`)\\n"
+                )
+                errors += 1
+
+            if declaration is None:
+                declaration = ownership_declaration(root)
+            for rule, severity, message in ownership_violations(content, declaration):
+                if severity == "error":
+                    sys.stderr.write(
+                        "FAIL " + norm + ": " + message + " "
+                        + OWNERSHIP_HINTS[rule] + "\\n"
+                    )
+                    errors += 1
+                else:
+                    sys.stderr.write(
+                        "WARN " + norm + ": " + message + " " + OWNERSHIP_ADVISORY + "\\n"
+                    )
 
         if is_dr:
-            dr_id = fm.get("id", "").split("#", 1)[0].strip()
-            if not DR_ID_RE.match(dr_id):
+            dr_id = clean_frontmatter_value(fm.get("id", ""))
+            if not dr_id:
                 sys.stderr.write(
-                    "FAIL " + norm + ": missing or invalid \`id: DR-NNN\` frontmatter\\n"
+                    "FAIL " + norm + ": missing \`id: DR-NNN\` frontmatter\\n"
+                )
+                errors += 1
+            elif not DR_ID_RE.match(dr_id):
+                sys.stderr.write(
+                    "FAIL " + norm + ": invalid \`id: DR-NNN\` frontmatter (got \`" + dr_id + "\`)\\n"
                 )
                 errors += 1
 
+            if not DR_PLAIN_TERMS_RE.search(FM_RE.sub("", content, count=1)):
+                sys.stderr.write(
+                    "WARN " + norm + ": decision record lacks a \`## In plain terms\` section (#2921)\\n"
+                )
+
         if is_domain:
-            if fm.get("type", "").split("#", 1)[0].strip() != "domain":
+            if clean_frontmatter_value(fm.get("type", "")) != "domain":
                 sys.stderr.write(
                     "FAIL " + norm + ": missing \`type: domain\` frontmatter\\n"
                 )

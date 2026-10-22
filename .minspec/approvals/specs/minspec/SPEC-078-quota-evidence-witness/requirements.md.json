@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-078-quota-evidence-witness/requirements.md",
+  "specHash": "68c3dccac55f1e2bbef011ab3aad994bd4f0ac43e4f1bc6e5705867b88a53d5c",
+  "approvedAt": "2026-10-01T07:27:32.820Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "48da157ed12527a58d1af86f9879272a61c53073"
+}

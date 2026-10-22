@@ -7,7 +7,10 @@ corpus parity test and points at the exact rule. Pure stdlib unittest — run wi
 
     python3 scripts/hooks/test_canonical.py
 
-(also collected by CI alongside the Node suite).
+CI runs it through the Node suite: `packages/minspec/tests/canonical-golden-python.test.ts`
+spawns this file under vitest and fails (never skips) if python3 is absent or any test
+fails (#1669). vitest cannot collect a .py file directly, so without that wrapper nothing
+executes this suite.
 """
 import os
 import sys

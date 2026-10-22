@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-080-pre-commit-code-quality-stage/requirements.md",
+  "specHash": "192c5a8b0fde4e777fd5b8bd07a1a3004dd7b1103c9b65a9e81009142dfe9773",
+  "approvedAt": "2026-10-01T22:53:17.142Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "eef31cd42fc7120f53d1365b495a28340efb9702"
+}

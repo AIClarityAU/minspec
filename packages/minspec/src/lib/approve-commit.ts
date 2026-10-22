@@ -57,6 +57,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
+import { toPosixRel } from './approval-store';
 
 const execFileAsync = promisify(execFile);
 
@@ -444,7 +445,11 @@ export async function isUntrackedAtHead(
   const rel = path.relative(rootDir, absPath);
   if (rel.length === 0 || rel.startsWith('..' + path.sep) || rel === '..') return true;
   try {
-    await run(['cat-file', '-e', `HEAD:${rel}`]);
+    // Git's `<rev>:<path>` object-name form names a tree entry and takes
+    // forward slashes only — a `path.relative` backslash (Windows) must be
+    // POSIX-normalized here, same as approval.ts's `git show <sha>:<path>`
+    // call and approval-store.ts's sidecar key (#2402).
+    await run(['cat-file', '-e', `HEAD:${toPosixRel(rel)}`]);
     return false;
   } catch {
     return true;

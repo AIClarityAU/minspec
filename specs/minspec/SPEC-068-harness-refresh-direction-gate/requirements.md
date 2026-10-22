@@ -1,7 +1,7 @@
 ---
 id: SPEC-068
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — "marker-bounded updates that never surprise-write"
@@ -17,8 +17,8 @@ implements: [packages/minspec/src/lib/harness-provenance.ts, packages/minspec/te
 affects: [packages/minspec/src/lib/scaffold.ts, packages/minspec/src/lib/merge-refresh.ts, packages/minspec/src/lib/auto-bootstrap.ts, packages/minspec/src/commands/init.ts, scripts/validate-frontmatter.ts, .github/workflows/ci.yml]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

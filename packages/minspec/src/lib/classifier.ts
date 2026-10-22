@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Tier, Phase, MinspecConfig } from './config';
+import { ensureDirectory } from './opt-in';
 
 // ─── Shared Types ────────────────────────────────────────────────────────────
 
@@ -243,13 +244,14 @@ export function loadCalibration(rootDir: string): CalibrationData {
 
 /**
  * Save the override log to `.minspec/calibration.json`.
- * Creates the `.minspec/` directory if it does not exist.
+ *
+ * Never creates `.minspec/`: that directory is the opt-in marker (constitution
+ * invariant 3). In a folder that has not opted in this throws `NotOptedInError`
+ * and writes nothing (SPEC-096 FR-5).
  */
 export function saveCalibration(rootDir: string, data: CalibrationData): void {
   const dir = path.join(rootDir, '.minspec');
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  ensureDirectory(dir);
   const filePath = path.join(dir, CALIBRATION_FILE);
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
 }
