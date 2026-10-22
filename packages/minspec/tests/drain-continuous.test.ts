@@ -396,7 +396,7 @@ describe('drain-inbox.sh — pause marker + signal cleanup (#1187)', () => {
     return Number(fs.readFileSync(s.lock, 'utf-8').trim());
   }
 
-  it('--paused seam: present marker => exit 0, absent => exit 1, unreadable dir path => not paused', () => {
+  it('--paused seam: present marker => exit 0, absent or removed => exit 1', () => {
     const s = sandbox();
     const env = s.env;
     const probe = () => spawnSync('bash', [DRAIN, '--paused'], { env, encoding: 'utf-8' }).status;
@@ -405,6 +405,20 @@ describe('drain-inbox.sh — pause marker + signal cleanup (#1187)', () => {
     expect(probe()).toBe(0);
     fs.rmSync(s.pause);
     expect(probe()).toBe(1);
+  });
+
+  it.skipIf(process.getuid?.() === 0)('--paused seam: a marker under an unreadable directory => not paused', () => {
+    const s = sandbox();
+    const locked = path.join(s.dir, 'locked');
+    fs.mkdirSync(locked);
+    fs.writeFileSync(path.join(locked, 'drain-pause'), '');
+    fs.chmodSync(locked, 0o000);
+    try {
+      const env = { ...s.env, MINSPEC_DRAIN_PAUSE_FILE: path.join(locked, 'drain-pause') };
+      expect(spawnSync('bash', [DRAIN, '--paused'], { env, encoding: 'utf-8' }).status).toBe(1);
+    } finally {
+      fs.chmodSync(locked, 0o700);
+    }
   });
 
   it('--pause / --resume write and remove the marker', () => {
