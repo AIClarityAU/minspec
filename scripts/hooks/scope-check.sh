@@ -17,16 +17,6 @@
 #
 # Apart from the no-panel block in (1), this hook is ADVISORY: it never blocks a turn.
 
-HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
-# shellcheck source=lib/session-scope.sh
-if [ ! -r "$HOOK_DIR/lib/session-scope.sh" ]; then
-  # Say so rather than going quiet: a hook that degrades in silence is indistinguishable
-  # from a hook with nothing to report, which is the failure this whole issue is about.
-  echo "[MinSpec] scope-check: scripts/hooks/lib/session-scope.sh is missing, skipping."
-  exit 0
-fi
-. "$HOOK_DIR/lib/session-scope.sh" || exit 0
-
 # Read stdin once — harness provides a JSON envelope with the prompt.
 INPUT=$(cat 2>/dev/null || true)
 
@@ -67,6 +57,18 @@ elif [ "$_PANEL_RC" -ne 0 ]; then
 elif [ -n "$_PANEL_OUT" ]; then
   printf '%s\n' "$_PANEL_OUT"
 fi
+# The lib is only needed from here on. The no-panel block above needs none of it, so a
+# missing/unsourceable lib must not disable that one blocking gate (#2651).
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+# shellcheck source=lib/session-scope.sh
+if [ ! -r "$HOOK_DIR/lib/session-scope.sh" ]; then
+  # Say so rather than going quiet: a hook that degrades in silence is indistinguishable
+  # from a hook with nothing to report, which is the failure this whole issue is about.
+  echo "[MinSpec] scope-check: scripts/hooks/lib/session-scope.sh is missing, skipping."
+  exit 0
+fi
+. "$HOOK_DIR/lib/session-scope.sh" || exit 0
+
 # Process substitution, never `$(...)`: command substitution DROPS NUL bytes, which would
 # splice the three fields into one and put the whole prompt in $SESSION_ID.
 FIELDS=()
