@@ -9,7 +9,7 @@
 #      $CLAUDE_PROJECT_DIR, but the lookup used the CALLER'S working directory, so one
 #      session got opposite verdicts from the repo root and from a subdirectory.
 #   2. UNTRACKED, so it cannot exist in a freshly created worktree. Dispatched agents run
-#      `claude -p` in `git worktree add ... origin/main` trees (dispatch-issue.sh:703) with
+#      `claude -p` in `git worktree add ... origin/main` trees (dispatch-issue.sh:1094) with
 #      project hooks deliberately loaded (agent-context.sh), so every headless run was told
 #      to write a file that `.gitignore:24` (`.claude/*`) guarantees is absent. `.claude/`
 #      is a harness-sensitive path, so the write was then denied.
@@ -32,7 +32,7 @@
 # shellcheck shell=bash
 
 # Dispatch worktree base. dispatch-issue.sh:22 sets WORKTREE_BASE and exports it onward as
-# MINSPEC_LEASE_WORKTREE_BASE (dispatch-issue.sh:618), so a dispatched run hands this hook
+# MINSPEC_LEASE_WORKTREE_BASE (dispatch-issue.sh:996), so a dispatched run hands this hook
 # the live value and only the DEFAULT is duplicated here. The literal is pinned against
 # dispatch-issue.sh by packages/minspec/tests/scope-check-hook.test.ts so the two copies
 # cannot drift apart silently.
