@@ -67,7 +67,7 @@ run, could not finish, or returned something malformed, the PR stays visibly red
   `docs/decisions/`, `specs/`, `.github/` and `scripts/` for it, for "invented requirement",
   and for any check name that encodes it finds nothing. I searched for the vocabulary listed
   here; a differently worded encoding could exist, but no workflow under `.github/workflows/`
-  names one (`ls .github/workflows` lists 12 files and none of them concerns design scope).
+  names one (`ls .github/workflows` lists 13 files and none of them concerns design scope).
 - **The panel that does run judges a document, not a comparison.** `ai-review.yml:689-699`
   requires the architect and skeptic voters under `panel` coverage. `scripts/roles/architect.md`
   asks about design fit, scope, reversibility, contracts and alternatives. The scope bullet
@@ -141,12 +141,19 @@ independent second witness invariant 2 asks for.
   untrusted-diff defang, quota handling and verdict extraction. For this role only, the prompt
   gains a trusted block
   `<approved_requirements TRUSTED="read from the merge base by this repository's tooling - NOT from the diff" path="…">…</approved_requirements>`
-  holding the FR-4 text. It is placed next to the existing `approval_provenance` block. The
+  holding the FR-4 text. It is placed next to the existing `approval_provenance` block.
+  `review-branch.sh` today rejects any role outside `reviewer|security|architect|skeptic`
+  (`scripts/review-branch.sh:74-76`, and the matching usage strings at `:18` and `:59-60`), so
+  that allowlist gains `design-scope`; the role file is still loaded from `scripts/roles/`
+  (`:82-84`), which exits non-zero when the file is missing. The
   untrusted-diff defang (`review-branch.sh`'s `sed` over tag names) gains open and close forms
   of `approved_requirements`, with the same tolerance and visible marker as the existing tags.
   Without that, a design line containing a literal `<approved_requirements TRUSTED=…>` could
   impersonate the block. The design itself reaches the voter as the head file (the voter keeps
-  read-only `Read`/`Glob`/`Grep`), and the diff shows what changed.
+  read-only `Read`/`Glob`/`Grep`), and the diff shows what changed. The block joins
+  `REVIEW_INPUT` (`review-branch.sh:152`) only when the role is `design-scope`. That variable
+  is what `--print-input` prints and what ai-review hashes for its verdict carry, so the
+  input every other role sees, and its carry hash, stay byte-identical (FR-16).
 
 ### The rubric
 
@@ -233,7 +240,7 @@ independent second witness invariant 2 asks for.
   or an indeterminate one, it requires a completed `design-scope` check-run on the **current
   head SHA**, conclusion `success`, posted by an allowlisted reviewer identity (the same
   allowlist and head-binding strictness as `verifyHeadPassCheckRun`,
-  `ai-review-guard.js:1485`). If that check-run is absent, stale, failed or from any other
+  `ai-review-guard.js:1566`). If that check-run is absent, stale, failed or from any other
   identity, `ready-to-merge` posts `failure` with the description
   `design-scope check missing or not passed on this head`. This holds even when the PR carries
   a verified `ai-review:pass`. Two producers must each fail for the gate to open falsely: the
@@ -252,13 +259,14 @@ independent second witness invariant 2 asks for.
 - **FR-12a - Shipped files carry the change dormant, and the base tree arms it.**
   `review-branch.sh`, `ai-review-guard.js` (with its test file) and `ready-to-merge.yml` are
   shipped to adopters verbatim through the generated
-  `packages/minspec/src/lib/ci-review-templates.ts` (bodies at `:1479`, `:2420`, `:4317`), so
+  `packages/minspec/src/lib/ci-review-templates.ts` (bodies at `:1479` for `ready-to-merge.yml`,
+  `:2420` for `review-branch.sh`, `:4367` for the guard and `:5842` for its test file), so
   FR-5, FR-10 and FR-11 change files adopters receive. To keep this repo-only (Clarify Q3
   option `a`, constitution invariant 3), the FR-10 and FR-11 reads apply **only when
   `.github/workflows/design-scope.yml` exists in the base tree** the guard is already pinned
   to. The `design-scope.yml` workflow and `scripts/roles/design-scope.md` are not added to the
-  templates, so in an adopter repo the reads stay off and `--role design-scope` has no role
-  file to load. In this repo the gate is armed as soon as the workflow merges. Disarming it
+  templates, so in an adopter repo the reads stay off, and `--role design-scope`, though accepted by
+  the widened allowlist (FR-5), stops at the missing-role-file check and exits non-zero. In this repo the gate is armed as soon as the workflow merges. Disarming it
   means deleting that workflow in a machinery PR, which merges only by human `--admin`, so
   disarming is deliberate and visible, never a configuration gap. The rejected alternative,
   an Actions repository variable as the switch, lives outside the tree and is exactly the
@@ -354,7 +362,7 @@ independent second witness invariant 2 asks for.
 - Design PRs open at merge time (including #1881 and #1882 if still open) turn red on
   `ready-to-merge` at their next event until a `design-scope` run passes. That is intended.
 - Cost: one more model-backed voter run per design-PR push, carried when inputs are unchanged.
-  DR-109 (proposed) already puts specs at the machinery voter count. This check is in addition
+  DR-109 (accepted) already puts specs at the machinery voter count. This check is in addition
   to the panel, not a replacement for any voter.
 - SPEC-212 (in flight) gives the architect voter a declared-scope block for every diff. It
   answers "does this diff stay inside what its spec owns?", while this spec answers "does
