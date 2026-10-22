@@ -9,9 +9,11 @@
  * active-spec summary both import them from `lib` now, so the edge only ever
  * points `views → lib`.
  *
- * `StatusBarSpec` keeps its name deliberately: renaming it (OQ-4's optional
- * `SpecProgressView`) is orthogonal churn across four call sites and would
- * blur the behaviour-preserving move with a rename in one diff.
+ * `StatusBarSpec` kept its old name in that move deliberately: renaming it
+ * (OQ-4's optional `SpecProgressView`) was orthogonal churn across four call
+ * sites and would have blurred the behaviour-preserving move with a rename
+ * in one diff. #994 does that rename now, as a pure rename with no
+ * behaviour change.
  */
 
 import type { SpecFrontmatter, PhaseStatus } from './spec';
@@ -19,7 +21,7 @@ import type { Phase, Tier } from './config';
 import { PHASES, DEFAULT_CONFIG } from './config';
 
 /** Lightweight summary passed to the status bar for display */
-export interface StatusBarSpec {
+export interface SpecProgressView {
   readonly id: string;
   readonly title: string;
   readonly tier: string;
@@ -28,10 +30,10 @@ export interface StatusBarSpec {
 }
 
 /**
- * Build a StatusBarSpec from a SpecFrontmatter.
+ * Build a SpecProgressView from a SpecFrontmatter.
  * Determines the current phase from the phases map.
  */
-export function fromFrontmatter(fm: SpecFrontmatter): StatusBarSpec {
+export function fromFrontmatter(fm: SpecFrontmatter): SpecProgressView {
   let currentPhase: Phase | null = null;
   // First check for in-progress
   for (const phase of PHASES) {

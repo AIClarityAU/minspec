@@ -152,8 +152,11 @@ describe('the scaffolded hook scripts actually enforce the SDD gates', () => {
     const c = byPath(PRE_COMMIT).content;
     expect(c).toContain('npx --no-install @aiclarity/minspec-validator');
     expect(c).not.toContain('npx --yes @aiclarity/minspec-validator');
-    // Python tier only fires when both python3 and the script are present.
-    expect(c).toContain('command -v python3');
+    // Python tier only fires when a candidate interpreter actually RUNS, not
+    // merely resolves on PATH (#2400: Windows' python3.exe "app execution
+    // alias" placeholder passes `command -v` with no Python installed).
+    expect(c).not.toContain('command -v python3');
+    expect(c).toContain('sys.version_info[0]');
     expect(c).toContain('[ -f "$hook_dir/validate.py" ]');
     // The always-present shell gate is the terminal fallback.
     expect(c).toContain('minspec_shell_gate');
@@ -253,6 +256,103 @@ describe('commit-msg follow-up gate (DR-023) — executed behavior', () => {
   it('still enforces the RCDD root-cause gate on fix: commits (no regression)', () => {
     expect(runHook('fix: thing\n\nno diagnosis here.\n').code).toBe(1);
     expect(runHook('fix: thing\n\nRoot cause: the widget was null.\n').code).toBe(0);
+  });
+
+  // #1918 — the escape used to scan the WHOLE message, subject included. This
+  // repo's own convention puts the issue number in the subject
+  // (`feat(#N): ...`), so that number alone satisfied the escape on nearly
+  // every conventional commit and the gate almost never fired.
+  describe('#1918 regression — the subject line must not satisfy the escape', () => {
+    it('BLOCKS a deferral whose only issue reference is the subject\'s (#N)', () => {
+      const r = runHook('feat(#79): add X\n\nCI files held back for a separate PR.\n');
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain('follow-up gate');
+    });
+
+    it('BLOCKS a fix(#N): subject the same way', () => {
+      expect(
+        runHook('fix(#79): add X\n\nRoot cause: n/a.\n\nCI files held back for a separate PR.\n').code
+      ).toBe(1);
+    });
+
+    it('a bare inline #NNN mention in the BODY (not a trailer, no escape phrase) no longer escapes', () => {
+      // Previously the bare `#[0-9]+` escape passed on ANY mention. Now only a
+      // structured `Follow-ups:` trailer, or one of the surviving prose escapes
+      // ("tracked in", "Follow-ups: none", "handled here", ...), satisfies it.
+      const r = runHook('feat: add X\n\nCI files held back for a separate PR, see #12.\n');
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain('follow-up gate');
+    });
+
+    it('ALLOWS the same deferral once a `Follow-ups: #NNN` trailer is added', () => {
+      expect(
+        runHook('feat(#79): add X\n\nCI files held back for a separate PR.\n\nFollow-ups: #12\n').code
+      ).toBe(0);
+    });
+
+    it('ALLOWS a multi-issue `Follow-ups: #NNN, #NNN` trailer', () => {
+      expect(
+        runHook('feat: add X\n\nCI files held back for a separate PR.\n\nFollow-ups: #12, #34\n').code
+      ).toBe(0);
+    });
+  });
+
+  // PR #2067 review (Architect: blocking, Security: independently converged) —
+  // the structured `Follow-ups:` escape parsed trailers from the RAW `$msg_file`
+  // via `git interpret-trailers --parse "$msg_file"`, instead of the already
+  // scissors/comment-stripped `$body` every OTHER check in this hook uses
+  // (DR-059 §3). git's own trailer parser has its own internal cut-line
+  // detection for the `-v` scissors marker, and that detection is stricter and
+  // more format-sensitive than this hook's deliberately lenient
+  // `sed '/^#.*>8/,$ d'` — verified empirically: `git interpret-trailers` only
+  // recognizes the scissors line as a cut point when it matches byte-for-byte,
+  // while a single trailing space (or a non-canonical dash count) is enough to
+  // defeat it, at which point it silently returns NO trailer at all even
+  // though one is genuinely present above the diff. That is the "git-version-
+  // specific patch/comment handling" risk the review named: a scissors line
+  // that this git's OWN parser fails to recognize (a different git version's
+  // output, or a message that has passed through a whitespace-touching editor)
+  // falsely blocks a `-v` commit whose `Follow-ups:` trailer is entirely valid.
+  describe('#2067 regression — raw $msg_file trailer parse must not bypass the scissors strip', () => {
+    it('does NOT falsely block a real Follow-ups: trailer under a `git commit -v` shape whose scissors line has trailing whitespace', () => {
+      // Trailer sits ABOVE the scissors line (git commit -v shape); the diff,
+      // including deferral-sounding text, sits below it. Trailing whitespace
+      // on the scissors line is a mundane, realistic way a message can diverge
+      // from git's own strict internal cut-line pattern.
+      const msg =
+        'feat(#79): add X\n\n' +
+        'CI files held back for a separate PR.\n\n' +
+        'Follow-ups: #12\n' +
+        '# ------------------------ >8 ------------------------   \n' +
+        '# Do not modify or remove the line above.\n' +
+        '# Everything below it will be ignored.\n' +
+        'diff --git a/notes.md b/notes.md\n' +
+        'index 1111111..2222222 100644\n' +
+        '--- a/notes.md\n' +
+        '+++ b/notes.md\n' +
+        '@@ -1 +1,2 @@\n' +
+        ' hello\n' +
+        '+a follow-up idea, out of scope, deferred for later\n';
+      const r = runHook(msg);
+      expect(r.code, `expected the real Follow-ups: #12 trailer to escape the gate; stderr: ${r.stderr}`).toBe(0);
+    });
+
+    it('still BLOCKS the same shape when there is genuinely no Follow-ups: trailer', () => {
+      const msg =
+        'feat(#79): add X\n\n' +
+        'CI files held back for a separate PR.\n\n' +
+        '# ------------------------ >8 ------------------------   \n' +
+        '# Do not modify or remove the line above.\n' +
+        '# Everything below it will be ignored.\n' +
+        'diff --git a/notes.md b/notes.md\n' +
+        'index 1111111..2222222 100644\n' +
+        '--- a/notes.md\n' +
+        '+++ b/notes.md\n' +
+        '@@ -1 +1,2 @@\n' +
+        ' hello\n' +
+        '+world\n';
+      expect(runHook(msg).code).toBe(1);
+    });
   });
 });
 
@@ -491,5 +591,94 @@ describe('python validate.py mirrors the Node validator core checks (#246)', () 
 
     const py = runValidatePy();
     expect(py.code).toBe(0);
+  });
+
+  // ── #1908: a quoted id: "SPEC-NNN" / id: 'SPEC-NNN' is well-formed YAML for
+  // the bare string and must not be refused. The old parser did `fm[key] =
+  // rest.strip()` with no quote handling, so SPEC_ID_RE (anchored, no quote in
+  // its class) never matched and a quoted-but-valid id read as "missing or
+  // invalid" — a message that named two possibilities and the file was
+  // neither. This is where python deliberately stops mirroring the Node
+  // validator, which still refuses a quoted id (#2297 tracks the Node side). ──
+  describe('#1908 — a quoted id is not refused', () => {
+    it.skipIf(!hasPy)('accepts a double-quoted SPEC id (id: "SPEC-001")', () => {
+      writeSpec('specs/spec-001/spec.md', '---\nid: "SPEC-001"\nstatus: specifying\n---\n# ok\n');
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)("accepts a single-quoted SPEC id (id: 'SPEC-001')", () => {
+      writeSpec('specs/spec-001/spec.md', "---\nid: 'SPEC-001'\nstatus: specifying\n---\n# ok\n");
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)('accepts a quoted id with a trailing inline comment (id: "SPEC-001"  # primary)', () => {
+      writeSpec('specs/spec-001/spec.md', '---\nid: "SPEC-001"  # primary\nstatus: specifying\n---\n# ok\n');
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)('accepts a double-quoted DR id (id: "DR-024")', () => {
+      writeSpec('docs/decisions/DR-024.md', '---\nid: "DR-024"\ntitle: x\nstatus: accepted\n---\n# ok\n');
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)('still rejects a genuinely malformed id, quoted or not, distinctly from "missing"', () => {
+      // "invalid" (present, wrong shape) must read differently from "missing"
+      // (absent) — the compound "missing or invalid" message named two
+      // possibilities and the reader could not tell which was true.
+      writeSpec('specs/spec-x/spec.md', '---\nid: "SPEC-abc"\n---\n# bad id\n');
+      const py = runValidatePy();
+      expect(py.code).toBe(1);
+      expect(py.stderr).toContain('invalid');
+      expect(py.stderr).not.toContain('missing `id: SPEC-NNN`');
+    });
+
+    it.skipIf(!hasPy)('reports "missing", not "invalid", when the id key is absent entirely', () => {
+      writeSpec('specs/spec-y/spec.md', '---\nstatus: specifying\n---\n# no id\n');
+      const py = runValidatePy();
+      expect(py.code).toBe(1);
+      expect(py.stderr).toContain('missing `id: SPEC-NNN`');
+      expect(py.stderr).not.toContain('invalid');
+    });
+  });
+
+  // ── #1908: the DR gate is keyed on the DIRECTORY (docs/decisions/), not on a
+  // DR-NNN.md filename — a decision record kept under any other name used to
+  // be skipped by is_dr entirely, silently: a skipped file and a passing file
+  // looked identical. INDEX.md (the register listing) and README.md (prose)
+  // are the two named exemptions, since neither carries an id of its own. The
+  // Node validator has no DR id rule to mirror yet (#2297). ──
+  describe('#1908 — the DR gate validates every docs/decisions/*.md, not just DR-NNN.md', () => {
+    it.skipIf(!hasPy)('flags a misnamed decision record with no frontmatter', () => {
+      writeSpec('docs/decisions/0024-thread-identity.md', '# thread identity\n\nno frontmatter\n');
+      const py = runValidatePy();
+      expect(py.code).toBe(1);
+      expect(py.stderr).toContain('docs/decisions/0024-thread-identity.md');
+      expect(py.stderr).toContain('id: DR-NNN');
+    });
+
+    it.skipIf(!hasPy)('accepts the same misnamed record once it carries id: DR-NNN frontmatter', () => {
+      writeSpec(
+        'docs/decisions/0024-thread-identity.md',
+        '---\nid: DR-024\ntitle: Thread identity\nstatus: accepted\n---\n# ok\n'
+      );
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)('still ignores INDEX.md, the register listing with no id of its own', () => {
+      writeSpec('docs/decisions/INDEX.md', '# Decision Register\n\n- DR-001\n');
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)('still ignores README.md, prose with no id of its own', () => {
+      writeSpec('docs/decisions/README.md', '# How this directory works\n');
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
   });
 });

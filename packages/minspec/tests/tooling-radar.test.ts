@@ -40,12 +40,14 @@ import {
 
 const RADAR_DIR = path.resolve(__dirname, '../../../scripts/tooling-radar');
 const runRadarSh = fs.readFileSync(path.join(RADAR_DIR, 'run-radar.sh'), 'utf8');
+const radarPrompt = fs.readFileSync(path.join(RADAR_DIR, 'radar-prompt.md'), 'utf8');
+const filerSource = fs.readFileSync(path.join(RADAR_DIR, 'file-findings.mjs'), 'utf8');
 
 /** A minimal valid finding; individual tests override one field at a time. */
 const validFinding = (over: Record<string, unknown> = {}) => ({
   key: 'some-tool',
   act: true,
-  category: 'scrooge',
+  category: 'minspec',
   type: 'measure',
   title: 'Evaluate some tool',
   url: 'https://example.com/some-tool',
@@ -128,9 +130,6 @@ describe('tooling radar — the repo is chosen by the filer, never by the model'
     expect(planFinding(validFinding({ category: 'minspec' }), 0).repo).toBe(
       'AIClarityAU/minspec',
     );
-    expect(planFinding(validFinding({ category: 'scrooge' }), 0).repo).toBe(
-      'AIClarityAU/scroogellm',
-    );
     expect(planFinding(validFinding({ category: 'sealbox' }), 0).repo).toBe(
       'AIClarityAU/sealbox',
     );
@@ -142,6 +141,32 @@ describe('tooling radar — the repo is chosen by the filer, never by the model'
     );
   });
 
+  it('no longer routes anything into scroogellm, and fails loudly on a stale scrooge finding', () => {
+    // The founder stopped work on scroogellm on 2026-09-22, so the radar must not file
+    // there. Deleting a routing key is only safe if the now-unreachable category fails
+    // VISIBLY AND CLOSED (constitution invariant 2 — no silent gate): a category the
+    // map does not know must never fall through to a default repo, and must never be
+    // dropped so the finding quietly vanishes. A stale scan that still emits `scrooge`
+    // therefore aborts the whole run with the offending category named — a signal an
+    // operator can act on. Filing into a dead repo, or discarding the item, would not be.
+    expect(CATEGORY_REPO).not.toHaveProperty('scrooge');
+    expect(Object.keys(CATEGORY_REPO).sort()).toEqual(['minspec', 'sealbox']);
+    expect(Object.values(CATEGORY_REPO)).not.toContain('AIClarityAU/scroogellm');
+
+    // Named in the error, so the failure is diagnosable rather than merely non-zero.
+    expect(() => planFinding(validFinding({ category: 'scrooge' }), 0)).toThrow(
+      /unknown category "scrooge"/,
+    );
+    expect(() => planFinding(validFinding({ category: 'scrooge' }), 0)).toThrow(
+      /expected one of minspec, sealbox/,
+    );
+
+    // And it aborts the RUN, not just the planner — nothing is filed anywhere.
+    expect(() => runMain([validFinding({ category: 'scrooge' })])).toThrow(
+      /unknown category/,
+    );
+  });
+
   it('cannot be steered by a finding that names a repository directly', () => {
     // A hostile page's best move is to smuggle a repo into a field. Every field is
     // either enum-checked or treated as text, so this lands as text or not at all.
@@ -149,6 +174,54 @@ describe('tooling radar — the repo is chosen by the filer, never by the model'
       validFinding({ title: 'AIClarityAU/private-repo take over', category: 'minspec' }),
       0,
     );
+    expect(plan.repo).toBe(CATEGORY_REPO.minspec);
+  });
+});
+
+describe('tooling radar — the scan prompt and the filer agree on the category enum', () => {
+  it('offers the model exactly the categories the filer can route', () => {
+    // Producer/consumer drift across these two files is not cosmetic. The filer plans
+    // every item BEFORE filing any, so one unroutable finding aborts the whole run —
+    // a prompt still advertising a retired category would cost the entire week's
+    // findings, every week, until somebody read the health file. Nothing checked these
+    // two lists against each other before; that asymmetry is what this pins.
+    const declared = radarPrompt.match(/"category":\s*(.+)/);
+    expect(declared, 'radar-prompt.md must declare the category union').not.toBeNull();
+    const offered = [...declared![1].matchAll(/"([a-z][a-z0-9-]*)"/g)]
+      .map((m) => m[1])
+      .sort();
+    expect(offered).toEqual(Object.keys(CATEGORY_REPO).sort());
+  });
+
+  it('tells the scan to downgrade an unroutable finding rather than invent a category', () => {
+    // The graceful exit has to stay stated, or the model's best guess becomes a hard
+    // failure. `act: false` keeps the item visible in the briefing without filing it.
+    const rule = radarPrompt.match(/- `category` routes the issue to a repo\.[\s\S]*?\n(?=- `)/);
+    expect(rule, 'radar-prompt.md must carry the category routing rule').not.toBeNull();
+    expect(rule![0]).toMatch(/act: false/);
+  });
+
+  it('scans AI-dev practice and model capability as scan area 5', () => {
+    expect(radarPrompt).toMatch(/^5\. AI-dev practice and model capability/m);
+  });
+
+  it('lets a token or cost finding be actionable under minspec, not forced watch-only', () => {
+    // Token spend is a core tenet; forcing every such finding to `act: false` meant the
+    // area could never produce work. The rule must say they route to `minspec` and may act.
+    const rule = radarPrompt.match(/- `category` routes the issue to a repo\.[\s\S]*?\n(?=- `)/);
+    expect(rule![0]).toMatch(/filed under `minspec`/);
+    expect(rule![0]).toMatch(/`act: true`/);
+    expect(radarPrompt).not.toMatch(/never with `act: true`/);
+  });
+
+  it('has the filer side agree: its policy comment does not call cost findings watch-only', () => {
+    // The prompt and the filer are one contract. The prompt routes cost findings to
+    // `minspec` with `act: true`; a filer comment still claiming they land as `act: false`
+    // is a false signpost for the next editor.
+    expect(filerSource).not.toMatch(/lands? as a watch item/);
+    expect(filerSource).toMatch(/cost\/measurement finding[\s\S]*`minspec`[\s\S]*`act: true`/);
+    // Behaviour: the filer does not force such a finding to watch-only.
+    const plan = planFinding(validFinding({ category: 'minspec', title: 'Cut token spend' }), 0);
     expect(plan.repo).toBe(CATEGORY_REPO.minspec);
   });
 });
@@ -216,7 +289,7 @@ describe('tooling radar — filing behaviour', () => {
     const create = calls.find((c) => c.args.includes('create'))!;
     expect(create.cmd).toBe('gh');
     expect(create.args).toContain('--repo');
-    expect(create.args[create.args.indexOf('--repo') + 1]).toBe('AIClarityAU/scroogellm');
+    expect(create.args[create.args.indexOf('--repo') + 1]).toBe('AIClarityAU/minspec');
     expect(create.args[create.args.indexOf('--label') + 1]).toBe('idea,inbox');
     // Body on stdin, never as an argument — an 8 KB body in argv would also risk
     // ARG_MAX, but the reason it matters here is that argv is where injection lives.
@@ -240,7 +313,7 @@ describe('tooling radar — filing behaviour', () => {
       tokenCmd: '/bin/false',
     });
     expect(calls.some((c) => c.args.includes('create'))).toBe(false);
-    expect(logs.join('\n')).toMatch(/already tracked as AIClarityAU\/scroogellm#1183/);
+    expect(logs.join('\n')).toMatch(/already tracked as AIClarityAU\/minspec#1183/);
   });
 
   it('reports what a cap dropped rather than truncating silently', () => {

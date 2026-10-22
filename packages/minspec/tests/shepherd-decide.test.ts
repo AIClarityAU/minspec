@@ -16,6 +16,21 @@ import { execFileSync } from 'child_process';
 
 const SCRIPT = path.resolve(__dirname, '../../../scripts/lib/shepherd-pr.sh');
 const DISPATCH = path.resolve(__dirname, '../../../scripts/dispatch-issue.sh');
+const REMEDIATE = path.resolve(__dirname, '../../../scripts/remediate-pr.sh');
+
+/**
+ * The REAL classify_pr seam, so the end-to-end block below joins the two halves the
+ * creator-shepherd actually runs (classify → decide) rather than asserting against a
+ * hand-typed token. A token-only test cannot catch a producer/consumer mismatch: it
+ * passes happily while classify_pr emits something the asserted arm never sees.
+ */
+function classify(branch: string, mergeable: string, mergeState: string): string {
+  return execFileSync(
+    'bash',
+    [REMEDIATE, '--classify', branch, mergeable, mergeState, '', 'no', 'no'],
+    { encoding: 'utf-8' },
+  ).trim();
+}
 
 interface DecideArgs {
   action: string;
@@ -62,16 +77,62 @@ function decide({
   ).trim();
 }
 
-/** Every action token classify_pr can emit, plus an unknown one. */
+/**
+ * Every action token classify_pr can emit, plus an unknown one. retry-unknown and
+ * skip-unhandled-state are #1803's two new tokens (an UNKNOWN or unrecognised
+ * mergeStateStatus) — included here so the priority gates below (merged, stand-down,
+ * the wall-clock ceiling) are proven to apply to them too, not just the pre-existing
+ * vocabulary. skip-live-owned (SPEC-044 FR-6/INV-4, the owner gate) was missing until
+ * #1730 — the "the derived-list guard proves this list" test below is what keeps that
+ * from recurring: a hand-maintained "exhaustive" list drifts silently every time
+ * classify_pr grows a token, which is exactly the class of bug this one was.
+ */
 const ALL_ACTIONS = [
   'skip-not-automation',
+  'skip-live-owned',
   'skip-conflict',
   'agent-remediate-checks',
   'agent-remediate-review',
   'rebase-only',
   'skip-clean',
+  'retry-unknown',
+  'skip-unhandled-state',
   'some-token-from-the-future',
 ];
+
+/**
+ * #1730: ALL_ACTIONS above is hand-maintained and asserts it is exhaustive — the same
+ * validator asymmetry this repo has hit before (checks the values present, never
+ * asserts one should be). skip-live-owned went unregistered for a full release this
+ * way, silently excluding it from all three INV-5/D3 safety sweeps. This derives the
+ * REAL token vocabulary straight from classify_pr's source (every `echo "<token>"`
+ * inside its function body, in remediate-pr.sh) and asserts it equals ALL_ACTIONS
+ * minus the one deliberate sentinel that classify_pr can never actually emit — so
+ * adding a token to classify_pr without registering it here fails the build instead
+ * of silently shrinking coverage.
+ */
+function classifyPrTokensFromSource(): string[] {
+  const src = fs.readFileSync(REMEDIATE, 'utf-8');
+  const start = src.indexOf('\nclassify_pr() {');
+  if (start === -1) {
+    throw new Error('classify_pr() { not found in remediate-pr.sh — derivation is stale');
+  }
+  const end = src.indexOf('\n}', start);
+  if (end === -1) {
+    throw new Error('classify_pr() closing brace not found in remediate-pr.sh — derivation is stale');
+  }
+  const body = src.slice(start, end);
+  const tokens = [...body.matchAll(/echo "([a-z0-9-]+)"/g)].map((m) => m[1]);
+  return [...new Set(tokens)];
+}
+
+describe('shepherd --decide: ALL_ACTIONS is exhaustive (#1730)', () => {
+  it('equals the real token vocabulary classify_pr emits, plus only the deliberate sentinel', () => {
+    const real = classifyPrTokensFromSource();
+    const declared = ALL_ACTIONS.filter((a) => a !== 'some-token-from-the-future');
+    expect(new Set(declared)).toEqual(new Set(real));
+  });
+});
 
 describe('shepherd --decide: INV-5/D3 a reclaimed owner never elects a credentialed op', () => {
   it('stands down for EVERY action token when the claim is no longer held', () => {
@@ -203,6 +264,146 @@ describe('shepherd --decide: polling only while something async can still change
   });
 });
 
+// #1803 round 2 (PR #1813 review): classify_pr grew two new tokens — retry-unknown
+// and skip-unhandled-state — for an UNKNOWN or otherwise unrecognised mergeStateStatus.
+// The blocking review finding was that shepherd_decide had NO arm for either, so both
+// fell through the `*)` default to stop-not-automation. Concretely: the creator-
+// shepherd polls its own freshly-pushed PR, GitHub returns UNKNOWN (a routine cold
+// read — the exact case #1803's fix targets), classify_pr returns retry-unknown, and
+// the OLD shepherd_decide reported stop-not-automation — abandoning a PR that IS an
+// automation branch with a false "outside automation scope" message. Each token now
+// gets its own arm, proven distinct from every pre-existing one below.
+describe('shepherd --decide: the two new #1803 classify_pr tokens get their OWN arms (#1813 round 2)', () => {
+  it('retry-unknown does NOT get abandoned as not-automation (the exact blocking finding)', () => {
+    expect(decide({ action: 'retry-unknown' })).not.toBe('stop-not-automation');
+  });
+
+  it('retry-unknown keeps polling — the merge state just has not resolved yet', () => {
+    expect(decide({ action: 'retry-unknown' })).toBe('wait-unknown');
+  });
+
+  it('retry-unknown is a WAIT, not an escape from the FR-4 wall-clock ceiling', () => {
+    expect(decide({ action: 'retry-unknown', elapsed: 3600, maxSecs: 3600 })).toBe('stop-timeout');
+  });
+
+  it('retry-unknown still stands down when the claim is lost (INV-5/D3)', () => {
+    expect(decide({ action: 'retry-unknown', holds: 'no' })).toBe('stand-down');
+  });
+
+  it('skip-unhandled-state does NOT return stop-not-automation (this IS an automation branch)', () => {
+    expect(decide({ action: 'skip-unhandled-state' })).not.toBe('stop-not-automation');
+  });
+
+  it('skip-unhandled-state does NOT collapse into the skip-clean wait/awaiting-human path either', () => {
+    // Folding it into skip-clean's branch would silently re-introduce, one layer up,
+    // the exact "unrecognised state treated as fine" bug #1803 fixed in classify_pr —
+    // the reviewers' core objection to shipping the producer without this consumer.
+    const t = decide({ action: 'skip-unhandled-state', checksPending: 'no', automergeArmed: 'no' });
+    expect(t).not.toBe('stop-awaiting-human');
+    expect(t).not.toBe('wait');
+  });
+
+  it('skip-unhandled-state gets its own honestly-named terminal token', () => {
+    expect(decide({ action: 'skip-unhandled-state' })).toBe('stop-unhandled-state');
+  });
+
+  it('skip-unhandled-state still stands down when the claim is lost (INV-5/D3)', () => {
+    expect(decide({ action: 'skip-unhandled-state', holds: 'no' })).toBe('stand-down');
+  });
+
+  it('a genuinely future/unrecognised token still falls closed to stop-not-automation (no regression)', () => {
+    // Only the two tokens #1803 actually introduced get their own arm — the true
+    // catch-all must still guard anything neither of us has seen yet.
+    expect(decide({ action: 'some-token-from-the-future' })).toBe('stop-not-automation');
+  });
+});
+
+// PR #1813 blocking review finding — SPEC-044 FR-4 regression, end to end.
+//
+// The creator-shepherd pushes, then polls its own PR until the merge-gating ai-review
+// check finishes. While that check runs, GitHub reports mergeStateStatus BLOCKED —
+// the merge IS blocked, by the gate that has not reported yet. That is the normal,
+// expected state for the entire window this loop exists to cover.
+//
+// #1803 made skip-clean exclusive to CLEAN so an UNKNOWN/never-seen state could never
+// be asserted healthy — correct in intent, but it also swept BLOCKED (and UNSTABLE)
+// into skip-unhandled-state, which shepherd_decide terminates on. The creator-shepherd
+// therefore stopped polling its own freshly-pushed PR the moment it looked, abandoning
+// the shepherding FR-4 requires instead of waiting for ai-review.
+//
+// Asserted through BOTH seams with the real scripts: a token-only assertion would have
+// stayed green while classify_pr emitted a different token than the arm under test.
+describe('shepherd: a PR BLOCKED on a still-running ai-review keeps being shepherded (FR-4, #1813)', () => {
+  it('classify → decide: BLOCKED with checks in flight ends in wait, not a stop', () => {
+    const action = classify('agent/issue-1813', 'MERGEABLE', 'BLOCKED');
+    const decision = decide({ action, checksPending: 'yes', automergeArmed: 'no' });
+    expect(decision).toBe('wait');
+  });
+
+  it('UNSTABLE with checks in flight also keeps polling', () => {
+    const action = classify('agent/issue-1813', 'MERGEABLE', 'UNSTABLE');
+    expect(decide({ action, checksPending: 'yes', automergeArmed: 'no' })).toBe('wait');
+  });
+
+  it('BLOCKED with auto-merge armed keeps polling too — GitHub will merge without us', () => {
+    const action = classify('agent/issue-1813', 'MERGEABLE', 'BLOCKED');
+    expect(decide({ action, checksPending: 'no', automergeArmed: 'yes' })).toBe('wait');
+  });
+
+  it('BLOCKED with nothing async left is the HUMAN gate, not an unrecognised state', () => {
+    // Required-review-missing also reports BLOCKED. Polling does not move a human, so
+    // the honest exit is stop-awaiting-human — the pre-existing skip-clean behaviour,
+    // never stop-unhandled-state.
+    const action = classify('agent/issue-1813', 'MERGEABLE', 'BLOCKED');
+    expect(decide({ action, checksPending: 'no', automergeArmed: 'no' })).toBe('stop-awaiting-human');
+  });
+
+  it('the #1803 guard still holds: a never-seen merge state does NOT end in wait', () => {
+    const action = classify('agent/issue-1813', 'MERGEABLE', 'SOME_FUTURE_GITHUB_VALUE');
+    expect(action).toBe('skip-unhandled-state');
+    expect(decide({ action, checksPending: 'yes' })).toBe('stop-unhandled-state');
+  });
+
+  it('the #1803 guard still holds: UNKNOWN routes to the non-terminal wait-unknown', () => {
+    const action = classify('agent/issue-1813', 'MERGEABLE', 'UNKNOWN');
+    expect(action).toBe('retry-unknown');
+    expect(decide({ action, checksPending: 'yes' })).toBe('wait-unknown');
+  });
+});
+
+// #1729 — the shepherd's OWN classify call substituted a POSITIVE "PR is clean"
+// token (`skip-clean`) for ANY failure of `remediate-pr.sh --classify` (the ONLY
+// producer of that token), both exit code and stderr discarded
+// (`2>/dev/null || echo "skip-clean"`). Invariant 2: an errored witness must fail
+// closed and visibly, never read as healthy. `skip-unclassified` is the caller-
+// synthesized replacement — classify_pr itself never emits it (see the doc header
+// of shepherd-pr.sh) — and `stop-unclassified` is shepherd_decide's arm for it.
+describe('shepherd --decide: an ERRORED classifier reads as unclassified, never clean (#1729)', () => {
+  it('skip-unclassified does NOT collapse into skip-clean (never asserted healthy)', () => {
+    const t = decide({ action: 'skip-unclassified', checksPending: 'no', automergeArmed: 'no' });
+    expect(t).not.toBe('stop-awaiting-human');
+    expect(t).not.toBe('wait');
+  });
+
+  it('skip-unclassified does NOT fall through to the generic stop-not-automation default', () => {
+    // Distinct claim: stop-not-automation asserts "this branch is out of automation
+    // scope", which the caller has no basis to claim when the classifier crashed.
+    expect(decide({ action: 'skip-unclassified' })).not.toBe('stop-not-automation');
+  });
+
+  it('gets its own honestly-named terminal token', () => {
+    expect(decide({ action: 'skip-unclassified' })).toBe('stop-unclassified');
+  });
+
+  it('still stands down when the claim is lost (INV-5/D3)', () => {
+    expect(decide({ action: 'skip-unclassified', holds: 'no' })).toBe('stand-down');
+  });
+
+  it('is a STOP, not an escape from the FR-4 wall-clock ceiling', () => {
+    expect(decide({ action: 'skip-unclassified', elapsed: 3600, maxSecs: 3600 })).toBe('stop-timeout');
+  });
+});
+
 describe('shepherd wiring: the loop is bounded by CODE, not by a token', () => {
   const code = fs.readFileSync(DISPATCH, 'utf-8');
 
@@ -248,7 +449,15 @@ describe('shepherd wiring: the loop is bounded by CODE, not by a token', () => {
   });
 
   it('tears the renew ticker down in the same EXIT trap that releases the claim (D10)', () => {
-    expect(code).toMatch(/trap 'lease_stop_renew_ticker; lease_release_all[^']*' EXIT/);
+    // The script has ONE exit trap, a function (#2641): `trap ... EXIT` replaces the trap
+    // before it, so the claim's teardown could not stay a trap of its own beside the one
+    // that guards the dispatcher's answering statuses. The two steps are still one
+    // statement in that handler, in this order, and what arms them is set where the
+    // claim is won. dispatch-outcome-status.test.ts runs it and checks the order.
+    expect(code).toMatch(/^trap _dispatch_on_exit EXIT$/m);
+    const handler = code.match(/^_dispatch_on_exit\(\) \{[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(handler).toMatch(/\(\( DISPATCH_RELEASE_ON_EXIT \)\); then\n\s+lease_stop_renew_ticker; lease_release_all /);
+    expect(code).toMatch(/lease_start_renew_ticker "\$ISSUE"\n\s+DISPATCH_RELEASE_ON_EXIT=1\n/);
   });
 
   it('runs the shepherd AFTER the in-process merge actor, never before it', () => {
@@ -264,6 +473,79 @@ describe('shepherd wiring: the loop is bounded by CODE, not by a token', () => {
 
   it('kills a build that ignores SIGTERM, so the FR-12 ceiling really bounds it', () => {
     expect(code).toMatch(/timeout --kill-after=30s/);
+  });
+
+  // #1813 round 2: BOTH consumers of classify_pr's vocabulary need an arm for the two
+  // #1803 tokens — shepherd_decide (asserted above) AND dispatch-issue.sh's own case
+  // statement, which turns a decide token into actual behaviour. Without an explicit
+  // arm here, `stop-unhandled-state` would silently fall through to `sleep` and keep
+  // polling for the full hour ceiling instead of stopping as its name promises — a
+  // decide-token name that lies about what the caller actually does with it.
+  it('handles wait-unknown and stop-unhandled-state explicitly, not via silent fallthrough', () => {
+    const body = shepherdBody();
+    expect(body).toMatch(/wait-unknown\)/);
+    expect(body).toMatch(/stop-unhandled-state\)/);
+  });
+
+  it('stop-unhandled-state actually stops (returns) rather than looping under its own name', () => {
+    const body = shepherdBody();
+    const start = body.indexOf('stop-unhandled-state)');
+    expect(start, 'stop-unhandled-state arm must exist').toBeGreaterThan(-1);
+    const nextArmOrEnd = body.indexOf(';;', start);
+    const arm = body.slice(start, nextArmOrEnd === -1 ? undefined : nextArmOrEnd);
+    expect(arm).toMatch(/return 0/);
+  });
+
+  // #1729: the classify call used to be
+  // `... 2>/dev/null || echo "skip-clean"` — a swallowed exit code AND stderr,
+  // substituting a POSITIVE "clean" claim for ANY crash of the only producer of
+  // this token. Pin the fix at the wiring level so a future edit cannot silently
+  // reintroduce the exact shape invariant 2 forbids.
+  describe('the classify call fails closed, never reads a crash as clean (#1729)', () => {
+    const body = shepherdBody();
+    const classifyCallStart = body.indexOf('remediate-pr.sh" --classify');
+    // Look at everything from the classify invocation through the next 20 lines,
+    // which covers the exit-code capture and the resulting fallback assignment.
+    const classifyRegion = body.slice(classifyCallStart, classifyCallStart + 1500);
+
+    it('the classify call exists', () => {
+      expect(classifyCallStart, 'the --classify call must exist').toBeGreaterThan(-1);
+    });
+
+    it('never substitutes skip-clean on failure of its own classify call', () => {
+      expect(classifyRegion).not.toMatch(/\|\|\s*echo\s*"skip-clean"/);
+    });
+
+    it("captures the classify call's exit code rather than discarding it", () => {
+      expect(classifyRegion).toMatch(/classify_rc=\$\?/);
+    });
+
+    it('does not discard stderr from the classify call (no bare 2>/dev/null on it)', () => {
+      // Only the classify INVOCATION itself — up through the `|| classify_rc=$?`
+      // that closes it — not the cleanup lines after, which legitimately read the
+      // captured errfile back with their OWN harmless 2>/dev/null.
+      const invocationEnd = body.indexOf('|| classify_rc=$?', classifyCallStart);
+      expect(invocationEnd, 'the classify_rc capture must exist').toBeGreaterThan(-1);
+      const invocation = body.slice(classifyCallStart, invocationEnd);
+      expect(invocation).not.toMatch(/2>\/dev\/null/);
+      expect(invocation).toMatch(/2>"\$classify_errfile"/);
+    });
+
+    it('the fallback token reads as "could not classify", not "clean"', () => {
+      expect(classifyRegion).toMatch(/action="skip-unclassified"/);
+    });
+
+    it('handles stop-unclassified explicitly in the decision case statement', () => {
+      expect(body).toMatch(/stop-unclassified\)/);
+    });
+
+    it('stop-unclassified actually stops (returns) rather than falling through', () => {
+      const start = body.indexOf('stop-unclassified)');
+      expect(start, 'stop-unclassified arm must exist').toBeGreaterThan(-1);
+      const nextArmOrEnd = body.indexOf(';;', start);
+      const arm = body.slice(start, nextArmOrEnd === -1 ? undefined : nextArmOrEnd);
+      expect(arm).toMatch(/return 0/);
+    });
   });
 
   // Regression + gate for the second review round on PR #975. `automerge_armed` read

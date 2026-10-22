@@ -22,6 +22,7 @@ import * as path from 'path';
 import type { ApprovalRecord } from './approval';
 import type { Tier } from './config';
 import { classifyApprovablePath } from './approvable';
+import { ensureDirectory } from './opt-in';
 
 const APPROVALS_DIR = '.minspec/approvals';
 
@@ -156,10 +157,17 @@ export function readRecord(rootDir: string, specRelPath: string): ApprovalRecord
   }
 }
 
-/** Write one sidecar (mkdir -p its nested dir). Pretty-printed + trailing newline. */
+/**
+ * Write one sidecar. Pretty-printed + trailing newline.
+ *
+ * Its nested directory is created below an existing `.minspec/`, never together
+ * with it: that directory is the opt-in marker (constitution invariant 3), so in
+ * a folder that has not opted in this throws `NotOptedInError` and writes nothing
+ * (SPEC-096 FR-5).
+ */
 export function writeRecord(rootDir: string, rec: ApprovalRecord): void {
   const p = sidecarPath(rootDir, rec.specPath);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
+  ensureDirectory(path.dirname(p));
   fs.writeFileSync(p, JSON.stringify(rec, null, 2) + '\n', 'utf-8');
 }
 

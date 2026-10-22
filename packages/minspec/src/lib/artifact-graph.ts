@@ -45,6 +45,7 @@ import { parseSpec, type ParsedSpec, type SpecStatus } from './spec';
 import { getCurrentPhase } from './lifecycle';
 import { deriveStatus, explicitTerminalOf, type ExplicitTerminal } from './lifecycle';
 import { getApprovalStatus, type ApprovalStatus } from './approval';
+import { isTerminalSpecStatus } from './spec-vocabulary';
 
 // ───────────────────────────────────────────────────────────────────────────
 // Status-enum mapping tables — STRICT 1:1 (INV-FIDELITY).
@@ -112,7 +113,7 @@ function frontmatterBlock(content: string): string {
  * which is dropped (the regex stops at the first `]`). Empty/absent ⇒ no edges.
  */
 function parseEdgeArray(fmBlock: string, kind: EdgeKind, fromId: string): Edge[] {
-  const re = new RegExp(`^${kind}:\\s*\\[([^\\]]*)\\]`, 'm');
+  const re = new RegExp(`^${kind}:[ \\t]*\\[([^\\]]*)\\]`, 'm');
   const m = fmBlock.match(re);
   if (!m) return [];
   return m[1]
@@ -131,7 +132,7 @@ function edgesFrom(fmBlock: string, fromId: string): Edge[] {
 
 /** The raw `goal:` ref (e.g. `G-2`) from a frontmatter block, inline-comment-stripped, or null. */
 function goalRefOf(fmBlock: string): string | null {
-  const m = fmBlock.match(/^goal:\s*([^\s#]+)/m);
+  const m = fmBlock.match(/^goal:[ \t]*([^\s#]+)/m);
   return m ? m[1].trim() : null;
 }
 
@@ -416,7 +417,7 @@ function readImplementHole(disc: DiscoveredSpecFile): ImplementHole | undefined 
       // as its own. Claim the file only when its `id:` says so; a tasks.md with
       // no id at all is still accepted, since the scaffolder's output and older
       // hand-written lists predate the convention.
-      const owner = /^id:\s*(\S+)/m.exec(frontmatterBlock(raw))?.[1];
+      const owner = /^id:[ \t]*(\S+)/m.exec(frontmatterBlock(raw))?.[1];
       if (owner === undefined || owner === disc.parsed.frontmatter.id) splitBody = raw;
     }
   } catch {
@@ -548,6 +549,12 @@ export function buildArtifactGraph(rootDir: string): ArtifactGraph {
       // which ones it acts on (only approved + implementing specs qualify), so
       // the gate stays in ONE place rather than being half-encoded here.
       implementHole: readImplementHole(disc),
+      // #2370: deliberately the ONE spot that reads the literal `status:` line for
+      // a spec — not to derive `status` above (that would re-introduce #112), but
+      // to tell the resolver when `commands/approve.ts` / `approve-active.ts`
+      // (which DO trust the literal, by design since #440) would refuse this spec.
+      // Same predicate those commands use, so the two surfaces can't drift again.
+      literalStatusTerminal: isTerminalSpecStatus(fm.status),
     });
   }
 

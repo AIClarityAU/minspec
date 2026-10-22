@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-068-harness-refresh-direction-gate/requirements.md",
+  "specHash": "db05e57dceb7bc921dd934026f4d37039b0ea1f919b0125ef6c19e028e35c154",
+  "approvedAt": "2026-09-22T20:50:56.839Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "a70e8d4201e4f794e31271635f09ffafd88638ad"
+}

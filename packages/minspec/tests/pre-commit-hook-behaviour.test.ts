@@ -155,4 +155,62 @@ describe('#1277 pre-commit DR-029 born-proposed gate — behaviour', () => {
     expect(code).not.toBe(0);
     expect(err).toMatch(/branch|main/i);
   });
+
+  // #2057 — the gate diffed against the branch tip, so any DR that `main` accepted after a
+  // feature branch forked looks newly-authored on every merge-from-main into that branch: a
+  // merge commit's added-files set is "everything main has that this branch does not". Fixed
+  // by skipping files whose staged content is byte-identical to what MERGE_HEAD already has —
+  // that content arrived via the merge, nobody authored it in this commit.
+  it('#2057 ALLOWS a merge commit that brings in a DR already `accepted` on the other parent', () => {
+    // main accepts DR-999 well after `feature` forked off — the exact "branch older than the
+    // most recent DR acceptance" shape from the issue.
+    git('checkout', '-q', '-b', 'feature');
+    write('unrelated.txt', 'feature work\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'feature work');
+
+    git('checkout', '-q', 'main');
+    write('docs/decisions/DR-999.md', ACCEPTED);
+    git('add', '-A');
+    git('commit', '-q', '-m', 'accept DR-999');
+
+    git('checkout', '-q', 'feature');
+    // Merge main into feature. No conflict (disjoint files), so git fast-applies the merge
+    // and leaves MERGE_HEAD set for the pending commit — exactly the `git merge` +
+    // `git commit` sequence from the issue's repro.
+    const merge = spawnSync('git', ['-C', repo, 'merge', '--no-ff', '--no-commit', 'main'], {
+      encoding: 'utf8',
+    });
+    expect(merge.status).toBe(0);
+    const { code, err } = runHook(ISOLATE);
+    expect(err).not.toMatch(/DR-029 gate/);
+    expect(code).toBe(0);
+  });
+
+  it('#2057 still REFUSES a merge commit whose DR is rewritten to `accepted` during conflict resolution', () => {
+    // Content differs from BOTH parents (neither side ever had this exact status:accepted
+    // text) — the residual case the fix intentionally leaves checked.
+    git('checkout', '-q', '-b', 'feature');
+    write('unrelated.txt', 'feature work\n');
+    git('add', '-A');
+    git('commit', '-q', '-m', 'feature work');
+
+    git('checkout', '-q', 'main');
+    write('docs/decisions/DR-999.md', PROPOSED);
+    git('add', '-A');
+    git('commit', '-q', '-m', 'propose DR-999');
+
+    git('checkout', '-q', 'feature');
+    const merge = spawnSync('git', ['-C', repo, 'merge', '--no-ff', '--no-commit', 'main'], {
+      encoding: 'utf8',
+    });
+    expect(merge.status).toBe(0);
+    // Resolve by rewriting the freshly-merged-in DR to `accepted` — content now differs from
+    // both the `feature` parent (didn't have the file) and the `main` parent (had `proposed`).
+    write('docs/decisions/DR-999.md', ACCEPTED);
+    git('add', '-A');
+    const { code, err } = runHook(ISOLATE);
+    expect(code).not.toBe(0);
+    expect(err).toMatch(/DR-029 gate/);
+  });
 });

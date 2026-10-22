@@ -6,6 +6,24 @@ import { runConsequenceAnalyzers } from '../lib/consequence-analyzers';
 import { loadConfig, applyVSCodeOverrides, TIERS } from '../lib/config';
 import type { Tier } from '../lib/config';
 import { resolveTargetFolder } from '../lib/resolve-folder';
+import { hasOptInMarker, savePreferences } from '../lib/preferences';
+import { NotOptedInError } from '../lib/opt-in';
+
+/**
+ * Show a store's opt-in refusal as MinSpec's own message (SPEC-096 FR-8).
+ * Returns false, having shown nothing, for any other error.
+ *
+ * Both persisting buttons on the classify toast are offered only in a folder that
+ * has opted in, but the folder is checked BEFORE the toast and the toast then
+ * waits for the user, so the marker can be gone by the time one is clicked. The
+ * store refuses in that case. Without this the command would reject, and the
+ * refusal would be left to the editor's handling of a rejected command.
+ */
+function showedRefusal(err: unknown): boolean {
+  if (!(err instanceof NotOptedInError)) return false;
+  vscode.window.showErrorMessage(err.message);
+  return true;
+}
 
 /** Tier the next-higher one above `tier`, or `tier` itself if already T4. */
 function nextTierUp(tier: Tier): Tier {
@@ -118,13 +136,26 @@ export async function classifyCommand(
   // one-click "harder than it looks → raise tier" ONLY at the boundary where
   // that miss lives — predicted-T1 — to avoid nag fatigue (DR-021 Risk 2).
   // Dismissible like any MinSpec toast.
-  const showBumpUp = predictedTier === 'T1';
+  //
+  // #2355: both buttons that PERSIST something are offered only in a folder that
+  // has opted in. Classifying is allowed in any folder, but what these two keep
+  // lives under `.minspec/`, the opt-in marker: the bump-up in
+  // `.minspec/calibration.json`, the standing choice in `.minspec/preferences.json`
+  // (plus a workspace setting that changes that repo's behaviour). When this was
+  // written each of them created the marker as a side effect of answering a toast;
+  // since SPEC-096 the stores refuse instead, so offering the buttons in a folder
+  // with no `.minspec/` would only offer a refusal. The one-off verdict and its
+  // details are still shown there; anything that lasts belongs to an initialized
+  // project.
+  const optedIn = hasOptInMarker(workspaceRoot);
+  const showBumpUp = optedIn && predictedTier === 'T1';
   const bumpUpLabel = 'Harder than it looks — raise tier';
   // The old "Override Tier" wrote to a calibration log nothing reads back
   // (DR-021 gutted the feedback loop). Replace it with a live affordance: opt
   // into auto-classify-on-commit so the advice runs itself going forward (#203).
   const AUTO_CLASSIFY = 'Auto-classify from now on';
-  const actions = ['Show Details', AUTO_CLASSIFY];
+  const actions = ['Show Details'];
+  if (optedIn) actions.push(AUTO_CLASSIFY);
   if (showBumpUp) actions.push(bumpUpLabel);
 
   // Advisory toast: names the unit (your current diff) and states that nothing
@@ -161,12 +192,17 @@ export async function classifyCommand(
     // One-click ratchet up by a single tier (the floor only ever moves up).
     const raised = nextTierUp(predictedTier);
     const { recordOverride } = await import('../lib/classifier.js');
-    recordOverride(
-      workspaceRoot,
-      predictedTier,
-      raised,
-      result.signals.map((s) => s.name),
-    );
+    try {
+      recordOverride(
+        workspaceRoot,
+        predictedTier,
+        raised,
+        result.signals.map((s) => s.name),
+      );
+    } catch (err) {
+      if (!showedRefusal(err)) throw err;
+      return; // refused: no "Raised to" after it
+    }
     vscode.window.showInformationMessage(`MinSpec: Raised to ${raised}.`);
   } else if (choice === AUTO_CLASSIFY) {
     // Enable the git-HEAD watcher (extension.ts) for this workspace so
@@ -176,6 +212,16 @@ export async function classifyCommand(
     await vscode.workspace
       .getConfiguration('minspec')
       .update('autoClassifyOnCommit', true, vscode.ConfigurationTarget.Workspace);
+    // #2079: record the same standing choice in MinSpec's own project-local
+    // store, which is where the auto-bootstrap prompt's guard reads it. Both
+    // "always classify" affordances (this toast and the bootstrap prompt's
+    // "Always") must silence the prompt, or one of them is a label that lies.
+    try {
+      savePreferences(workspaceRoot, { autoClassifyOnCommit: true });
+    } catch (err) {
+      if (!showedRefusal(err)) throw err;
+      return; // refused: no "enabled" after it
+    }
     vscode.window.showInformationMessage(
       'MinSpec: Auto-classify on commit enabled for this workspace.',
     );

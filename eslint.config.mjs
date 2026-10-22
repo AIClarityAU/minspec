@@ -164,7 +164,7 @@ export default [
     ignores: ['**/.vscode-test/**', '**/out/**', '**/dist/**', '**/*.vsix'],
   },
   {
-    files: ['packages/*/src/**/*.ts'],
+    files: ['packages/*/src/**/*.{ts,tsx}', 'scripts/**/*.ts', 'packages/*/tests/**/*.ts'],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
@@ -202,13 +202,32 @@ export default [
     },
   },
   {
+    // #991 — `scripts/**`, `packages/*/tests/**` and `.tsx` are now type-aware
+    // linted (widened above), but they were never held to the app-code bar the
+    // `packages/*/src/**/*.ts` block enforces. Turning the full `recommended`
+    // set on unmodified surfaced ~260 pre-existing findings here, almost all
+    // `no-explicit-any` / `no-unsafe-function-type` from test mocks and
+    // dynamic script glue — legitimate uses in that context, not the kind of
+    // defect the barrel/cycle gates below exist to catch. Fixing that corpus is
+    // a separate, much larger piece of work than closing the coverage hole;
+    // scoping it out here keeps this change mechanical. The rules THIS issue
+    // actually cares about — barrel-only depth (below), and the cycle checker
+    // (`scripts/check-import-cycles.ts`) — are unaffected: neither is disabled
+    // for this file set.
+    files: ['scripts/**/*.ts', 'packages/*/tests/**/*.ts', 'packages/*/src/**/*.tsx'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-unsafe-function-type': 'off',
+    },
+  },
+  {
     // FR-1 (depth): `@aiclarity/shared` is barrel-only. Broadest scope of any
-    // block here — every package's `src`, not just Tier-0 — but NOT repo-wide,
-    // whatever "repo-wide" might suggest: `scripts/**` and `packages/*/tests/**`
-    // match no block in this file and go unlinted entirely. Extending to them
-    // needs more than a glob, since they sit outside every package tsconfig that
-    // the type-aware parser resolves against; it is tracked separately.
-    files: ['packages/*/src/**/*.ts'],
+    // block here — every package's `src`, plus `scripts/**`, `packages/*/tests/**`
+    // and `.tsx` (#991) — so "anywhere" in the FR-1 requirement is no longer an
+    // overstatement. Zero violations found when this was widened (verified via
+    // `npm run lint`, not assumed): every `@aiclarity/shared` import outside
+    // `src/` already goes through the bare barrel specifier.
+    files: ['packages/*/src/**/*.{ts,tsx}', 'scripts/**/*.ts', 'packages/*/tests/**/*.ts'],
     ignores: LAYER_RULE_EXEMPT,
     rules: {
       '@typescript-eslint/no-restricted-imports': ['error', { patterns: [SHARED_BARREL_ONLY] }],

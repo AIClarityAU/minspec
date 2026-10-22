@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-077-idle-wake-economics/requirements.md",
+  "specHash": "ad4d63fe9fa4b6f2c227c707943d3ee36785fdcf6091fb0e351ecbcd348becd6",
+  "approvedAt": "2026-10-01T22:46:46.166Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "c6b13ffaf73b99a94cf229c2794e6238d19725b9"
+}

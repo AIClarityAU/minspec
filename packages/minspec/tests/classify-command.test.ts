@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 // ─── Mock vscode ─────────────────────────────────────────────────────────────
 
@@ -83,7 +86,19 @@ import type { MinspecConfig } from '../src/lib/config';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const WS = '/tmp/ws';
+// A REAL temp project that has opted in (`.minspec/` present). It was the fixed
+// path `/tmp/ws`, which only "worked" because the preference store used to
+// create `.minspec/` on demand - leaking a real `/tmp/ws/.minspec/` outside the
+// test and making the result depend on what an earlier run left behind (#2355).
+const WS = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-classify-ws-'));
+fs.mkdirSync(path.join(WS, '.minspec'));
+/** A folder that has NOT opted in: no `.minspec/`. */
+const BARE = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-classify-bare-'));
+
+afterAll(() => {
+  fs.rmSync(WS, { recursive: true, force: true });
+  fs.rmSync(BARE, { recursive: true, force: true });
+});
 
 const BUMP_UP_LABEL = 'Harder than it looks — raise tier';
 
@@ -433,6 +448,70 @@ describe('classifyCommand()', () => {
     // The dead override log is never written by this path.
     expect(recordOverride).not.toHaveBeenCalled();
     expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
+  });
+
+  it('records the standing choice in the project-local store of an opted-in folder (#2079)', async () => {
+    const signals = [makeSignal('fileCount', 3, 'T2')];
+    vi.mocked(analyzeGitDiff).mockResolvedValueOnce(signals);
+    vi.mocked(classify).mockReturnValue(makeResult('T2', signals));
+    vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(
+      'Auto-classify from now on' as unknown as undefined,
+    );
+
+    await classifyCommand(WS);
+
+    const stored = JSON.parse(
+      fs.readFileSync(path.join(WS, '.minspec', 'preferences.json'), 'utf-8'),
+    );
+    expect(stored.autoClassifyOnCommit).toBe(true);
+  });
+
+  // ── #2355: no standing choice, and no write, in a folder that did not opt in ──
+
+  it('T0 (#2355): does not offer "Auto-classify from now on" in a folder with no .minspec/', async () => {
+    const signals = [makeSignal('fileCount', 3, 'T2')];
+    vi.mocked(analyzeGitDiff).mockResolvedValueOnce(signals);
+    vi.mocked(classify).mockReturnValue(makeResult('T2', signals));
+
+    await classifyCommand(BARE);
+
+    // Not vacuous: the verdict toast itself is still shown, with its details action.
+    const call = vi.mocked(vscode.window.showInformationMessage).mock.calls[0];
+    expect(call).toContain('Show Details');
+    expect(call).not.toContain('Auto-classify from now on');
+  });
+
+  it('T0 (#2355): does not offer the tier bump-up (it writes .minspec/calibration.json) in a folder with no .minspec/', async () => {
+    const signals = [makeSignal('fileCount', 1, 'T1')];
+    vi.mocked(analyzeGitDiff).mockResolvedValue(signals);
+    vi.mocked(classify).mockReturnValue(makeResult('T1', signals));
+
+    // Control: the same predicted-T1 verdict DOES offer it once the folder opted in.
+    await classifyCommand(WS);
+    expect(vi.mocked(vscode.window.showInformationMessage).mock.calls[0]).toContain(BUMP_UP_LABEL);
+
+    await classifyCommand(BARE);
+    const bare = vi.mocked(vscode.window.showInformationMessage).mock.calls[1];
+    expect(bare).toContain('Show Details');
+    expect(bare).not.toContain(BUMP_UP_LABEL);
+    expect(recordOverride).not.toHaveBeenCalled();
+  });
+
+  it('T0 (#2355): answering the toast in a folder with no .minspec/ creates nothing there', async () => {
+    const signals = [makeSignal('fileCount', 3, 'T2')];
+    vi.mocked(analyzeGitDiff).mockResolvedValue(signals);
+    vi.mocked(classify).mockReturnValue(makeResult('T2', signals));
+
+    for (const answer of [undefined, 'Show Details']) {
+      vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(
+        answer as unknown as undefined,
+      );
+      await classifyCommand(BARE);
+    }
+
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(2);
+    expect(mockConfigUpdate).not.toHaveBeenCalled();
+    expect(fs.readdirSync(BARE)).toEqual([]);
   });
 
   // ── Dismissal does not fire any branch ────────────────────────────────────

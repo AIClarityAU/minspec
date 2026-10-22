@@ -10,15 +10,19 @@
  * import) because the script has top-level side effects, including
  * `process.exit(1)` on failure, which would kill the test worker if imported
  * directly.
+ *
+ * Spawned via `runTsxCli` (#1032) rather than `npx tsx` directly: `cwd` below is a
+ * throwaway fixture directory outside the repo, and `npx` cannot resolve this repo's
+ * locally-installed `tsx` from there — see `helpers/run-tsx-cli.ts` for the failure
+ * mode that produced (main red at ce7d24a, exit 127 — the CLI under test never ran).
  */
 
 import { describe, it, expect } from 'vitest';
-import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { runTsxCli, REPO_ROOT } from './helpers/run-tsx-cli';
 
-const REPO_ROOT = process.cwd();
 const SCRIPT_PATH = path.join(REPO_ROOT, 'scripts', 'validate-frontmatter.ts');
 
 function writeFixture(tmpDir: string, requirementsBody: string): void {
@@ -47,8 +51,7 @@ ${requirementsBody}
 }
 
 function runValidate(cwd: string): { status: number | null; output: string } {
-  const result = spawnSync('npx', ['tsx', SCRIPT_PATH], { cwd, encoding: 'utf-8' });
-  return { status: result.status, output: `${result.stdout}\n${result.stderr}` };
+  return runTsxCli(SCRIPT_PATH, [], { cwd });
 }
 
 describe('#654 scripts/validate-frontmatter.ts — acceptance criteria gate', () => {

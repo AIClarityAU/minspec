@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-086-remove-scroogellm-upsell/requirements.md",
+  "specHash": "8475e5d6b59ff67732011004afc1687a2022e91ff2bc9a27a876a0fdb7ab8744",
+  "approvedAt": "2026-10-01T07:27:12.095Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "796d9cf0a3b178226dbe3f556bacc4e9643a0266"
+}

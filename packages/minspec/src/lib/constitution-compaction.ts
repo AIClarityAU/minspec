@@ -11,6 +11,8 @@
  * Pure logic, no vscode dependency.
  */
 
+import { prepareText, restoreLineEndings } from './text-io';
+
 /** Result of compacting a constitution (FR-8). */
 export interface CompactionResult {
   readonly compacted: string;
@@ -39,17 +41,22 @@ function stripDraftMarker(line: string): [string, boolean] {
 /**
  * Compact a constitution (FR-8). Strips DRAFT markers + provenance lines and
  * tightens runs of blank lines. Meaning-preserving: rule text is retained.
+ *
+ * Works on the LF form of `content`, and `compacted` is given back the line endings
+ * `content` had (SPEC-095 FR-2/FR-3). On CRLF text the DRAFT-marker pattern
+ * (`(.*)$`, no multiline flag) matched nothing, so the markers were left in place.
  */
 export function compactConstitution(content: string): CompactionResult {
   if (typeof content !== 'string' || content.length === 0) {
     return { compacted: content ?? '', strippedDraftMarkers: 0, strippedProvenance: 0, unchanged: true };
   }
 
+  const text = prepareText(content);
   let strippedDraftMarkers = 0;
   let strippedProvenance = 0;
   const out: string[] = [];
 
-  for (const line of content.split('\n')) {
+  for (const line of text.split('\n')) {
     if (isProvenanceLine(line)) {
       strippedProvenance++;
       continue; // drop the provenance blockquote entirely
@@ -62,12 +69,12 @@ export function compactConstitution(content: string): CompactionResult {
   // Tighten: collapse 3+ blank lines to a single blank line, trim trailing space.
   let compacted = out.join('\n').replace(/\n{3,}/g, '\n\n');
   // Preserve a single trailing newline if the original had one.
-  compacted = compacted.replace(/\s+$/, '') + (content.endsWith('\n') ? '\n' : '');
+  compacted = compacted.replace(/\s+$/, '') + (text.endsWith('\n') ? '\n' : '');
 
   const unchanged = strippedDraftMarkers === 0 && strippedProvenance === 0;
   // Never silently rewrite: if nothing was stripped, return the original verbatim.
   return {
-    compacted: unchanged ? content : compacted,
+    compacted: unchanged ? content : restoreLineEndings(compacted, content),
     strippedDraftMarkers,
     strippedProvenance,
     unchanged,

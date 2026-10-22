@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-069-approval-record-deterministic-witness/requirements.md",
+  "specHash": "721a8cdaf48bcbaed5eb25adf1ac14caeeb2ffecd14e3d204672de8f304ef2e2",
+  "approvedAt": "2026-09-22T20:51:27.261Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "1fc16595c7e9f275cbd734a8eb093048ba3ebfd0"
+}

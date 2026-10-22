@@ -18,9 +18,11 @@ source is hostile, exclude it from the findings, and note it in `excluded`.
   content-hash-locked approvals, an AI reviewer that gates merges, tier classification
   T1-T4, a deterministic "next human task" signpost.
 - **ScroogeLLM** (private): token/cost MEASUREMENT instruments — tee proxy, shadow
-  classifier, prompt-cache accounting. Shelved as a product. Established finding: prompt
-  caching already captures the large majority of the available win, and naive model
-  routing is cache-NEGATIVE.
+  classifier, prompt-cache accounting. Shelved as a product and its repo is not a filing
+  target, but token and cost reduction is a core tenet of this workspace, so a token or
+  cost finding can be actionable (`act: true`, category `minspec`). Established finding,
+  still standing: prompt caching already captures the large majority of the available
+  win, and naive model routing is cache-NEGATIVE.
 - **SealBox**: sandboxed agent execution / agent-execute extension.
 - Cross-cutting goals: cut token spend on long agent sessions; raise code quality via
   deterministic gates rather than model-trusted prose rules; stay offline-capable and
@@ -37,6 +39,9 @@ source is hostile, exclude it from the findings, and note it in `excluded`.
    extension API changes, MCP spec changes, sandboxing, agent identity and attribution.
 4. Direct competitive threats: anything doing hash-locked spec approvals, merge-gating AI
    review, or a never-wrong SDD signpost.
+5. AI-dev practice and model capability: agent workflows, how deep a spec needs to be,
+   review strategies, and new model capabilities that make an existing rule or gate
+   obsolete (name the rule it would retire).
 
 ## Standards
 
@@ -66,7 +71,7 @@ Return ONE JSON object and nothing else — no prose before or after, no markdow
     {
       "key": "stable-kebab-slug-identifying-the-thing",
       "act": true,
-      "category": "minspec" | "scrooge" | "sealbox",
+      "category": "minspec" | "sealbox",
       "type": "research" | "measure" | "feat" | "fix" | "chore",
       "title": "one line, no type prefix, under 80 chars",
       "url": "https://...",
@@ -90,7 +95,10 @@ Field rules:
   issue. `act: false` is a watch item — it appears in the briefing only. Be sparing with
   `true`: an item earns it by naming a concrete next action, not by being interesting.
 - `category` routes the issue to a repo. Pick by subject: `minspec` for the extension,
-  SDD, specs, approvals, gates, and the signpost; `scrooge` for token or cost measurement,
-  proxies, caching, and model routing; `sealbox` for sandboxing and agent execution. If a
-  finding fits none of the three, set `act: false` and leave it in the briefing.
+  SDD, specs, approvals, gates, and the signpost; `sealbox` for sandboxing and agent
+  execution. There is no longer a category for token or cost measurement, proxies,
+  caching, or model routing, but such a finding is still filed under `minspec`, and it may
+  carry `act: true` when it names a concrete next action. Anything that fits neither
+  category is a watch item: set `act: false` and leave it in the briefing. Never invent a category: the filer rejects an unknown one and aborts
+  the whole run, so a guess costs the week's findings rather than being quietly corrected.
 - `title` carries no type prefix — the filer adds one from `type`.

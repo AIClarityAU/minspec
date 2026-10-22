@@ -153,6 +153,29 @@ function writeSpec(id: string, tier: string, status: string, implementsList: str
 }
 
 /**
+ * Write a spec doc at an EXPLICIT relative path (rather than the fixed
+ * `specs/<id>-x.md` shape `writeSpecIn` uses) — needed to exercise #958,
+ * where two sibling docs (e.g. requirements.md + design.md) in the SAME
+ * spec dir share one `id:`.
+ */
+function writeSpecAt(
+  relPath: string,
+  id: string,
+  tier: string,
+  status: string,
+  implementsList: string[] = [],
+): string {
+  const p = path.join(ws, relPath);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  const impl = implementsList.length ? `implements: [${implementsList.join(', ')}]\n` : '';
+  fs.writeFileSync(
+    p,
+    `---\nid: ${id}\ntitle: X\ntier: ${tier}\nstatus: ${status}\ncreated: 2026-05-30\n${impl}phases:\n  ${phasesFor(status)}\n---\n# ${id}\nbody\n`,
+  );
+  return p;
+}
+
+/**
  * Write a COMMITTED, path-keyed, canonically-hashed approval sidecar (FR-1/FR-2/
  * FR-3) under `<root>/.minspec/approvals/<repo-relative-spec-path>.json`.
  * `migrated` defaults false; pass true to exercise the WARN-phase migrated path.
@@ -240,6 +263,76 @@ describe('spec-gate.sh', () => {
     const r = runGate(editEnvelope('src/app.ts'));
     expect(r.decision).toBe('deny');
     expect(r.raw).toContain('stale');
+  });
+
+  // --- #958: dedup-by-id over multiple docs must be deterministic + prefer
+  // the approved record, never whichever doc glob() happened to list first ---
+
+  it('#958: an unapproved sibling doc sharing the spec id must not shadow an approved one (end-to-end)', () => {
+    // design.md stray-carries the same `tier:`/`id:`/`phases:` frontmatter as
+    // requirements.md (against the documented convention that only
+    // requirements.md carries them) and has no approval sidecar of its own.
+    // tasks.md lives in the SAME spec dir as both docs, so the FUZZY
+    // owned-files signal it contributes is IDENTICAL regardless of which doc
+    // "wins" a naive dedup — isolating the scenario to the approval verdict
+    // alone. (glob.glob()'s real traversal order is filesystem-dependent and
+    // not controllable from a test — see the `select_verdict` unit test below
+    // for the order-independence proof that doesn't rely on it.)
+    writeSpecAt('specs/SPEC-958-shadow/design.md', 'SPEC-958', 'T4', 'implementing');
+    const reqs = writeSpecAt('specs/SPEC-958-shadow/requirements.md', 'SPEC-958', 'T4', 'implementing');
+    approve(reqs, 'T4');
+    fs.writeFileSync(
+      path.join(ws, 'specs/SPEC-958-shadow/tasks.md'),
+      '- [ ] Build `src/presence.ts`\n',
+    );
+    fs.writeFileSync(path.join(ws, 'src/presence.ts'), 'export const p = 1;\n');
+    expect(runGate(editEnvelope('src/presence.ts')).decision).toBe('allow');
+  });
+
+  it('#958: select_verdict is order-independent — approved beats unapproved regardless of input order', () => {
+    // This is the real regression proof: it calls the FIXED function directly
+    // with the same two doc-entries in BOTH orders and asserts an IDENTICAL
+    // (correct) result, rather than depending on glob.glob()'s real traversal
+    // order (which is filesystem-dependent and not something a test can pin
+    // down — #958's actual root cause was relying on that order at all).
+    const approved = { spec_rel: 'specs/SPEC-958-shadow/requirements.md', approval: 'approved', rec: { specHash: 'x' }, files: [] };
+    const unapproved = { spec_rel: 'specs/SPEC-958-shadow/design.md', approval: 'unapproved', rec: null, files: [] };
+    const script = [
+      'import sys, json, importlib.util',
+      `spec = importlib.util.spec_from_file_location('spec_gate', ${JSON.stringify(HOOK.replace(/\.sh$/, '.py'))})`,
+      'mod = importlib.util.module_from_spec(spec)',
+      'spec.loader.exec_module(mod)',
+      'a, u = json.loads(sys.argv[1]), json.loads(sys.argv[2])',
+      'for e in (a, u):',
+      '    e["files"] = set(e["files"])',
+      'r1 = mod.select_verdict([a, u])',
+      'r2 = mod.select_verdict([u, a])',
+      'assert r1[0] == "approved" and r2[0] == "approved", (r1, r2)',
+      'assert r1[0] == r2[0], "order must not change the verdict"',
+      'print("PASS")',
+    ].join('\n');
+    const out = execFileSync('python3', ['-c', script, JSON.stringify(approved), JSON.stringify(unapproved)], { encoding: 'utf-8' }).trim();
+    expect(out).toBe('PASS');
+  });
+
+  it('#958: select_verdict prefers stale over unapproved regardless of input order', () => {
+    const stale = { spec_rel: 'specs/SPEC-959-stale/requirements.md', approval: 'stale', rec: { specHash: 'x' }, files: [] };
+    const unapproved = { spec_rel: 'specs/SPEC-959-stale/design.md', approval: 'unapproved', rec: null, files: [] };
+    const script = [
+      'import sys, json, importlib.util',
+      `spec = importlib.util.spec_from_file_location('spec_gate', ${JSON.stringify(HOOK.replace(/\.sh$/, '.py'))})`,
+      'mod = importlib.util.module_from_spec(spec)',
+      'spec.loader.exec_module(mod)',
+      's, u = json.loads(sys.argv[1]), json.loads(sys.argv[2])',
+      'for e in (s, u):',
+      '    e["files"] = set(e["files"])',
+      'r1 = mod.select_verdict([s, u])',
+      'r2 = mod.select_verdict([u, s])',
+      'assert r1[0] == "stale" and r2[0] == "stale", (r1, r2)',
+      'print("PASS")',
+    ].join('\n');
+    const out = execFileSync('python3', ['-c', script, JSON.stringify(stale), JSON.stringify(unapproved)], { encoding: 'utf-8' }).trim();
+    expect(out).toBe('PASS');
   });
 
   it('a migrated:true sidecar ALLOWS in the WARN phase but surfaces a re-approve note', () => {

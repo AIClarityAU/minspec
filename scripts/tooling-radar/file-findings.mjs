@@ -54,9 +54,17 @@ import path from 'node:path';
  */
 export const CATEGORY_REPO = {
   minspec: 'AIClarityAU/minspec',
-  scrooge: 'AIClarityAU/scroogellm',
   sealbox: 'AIClarityAU/sealbox',
 };
+// `scrooge` -> AIClarityAU/scroogellm was removed on 2026-09-22: the founder stopped
+// work on that repo, so filing there would manufacture a backlog nobody reads. The
+// radar prompt no longer offers the category either. A cost/measurement finding is
+// filed under `minspec` and may carry `act: true` (radar-prompt.md says the same; the
+// test checks both sides). That reverses the 2026-09-22 watch-only treatment: the
+// founder's core-tenets review (2026-10-17) made minimising tokens a core tenet, so
+// cost findings are actionable again. Re-adding the key
+// is a decision to restart that work, not a repair — a stale scan that still emits
+// `scrooge` fails the run loudly by design, and the fix is the scan, not this table.
 
 const ALLOWED_TYPES = new Set(['research', 'measure', 'feat', 'fix', 'chore']);
 const LABELS = 'idea,inbox';

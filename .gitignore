@@ -18,6 +18,15 @@ coverage/
 
 # Tool / cache directories
 .wrangler/
+# XDG state dir a bare `gh` invocation writes into when $HOME (or
+# $XDG_STATE_HOME) resolves to the checkout itself, rather than the real user
+# home — e.g. `.local/state/gh/device-id`. That is a session/environment
+# misconfiguration outside this repo's own scripts (grepped: nothing under
+# scripts/, .githooks/, or .github/workflows/ sets HOME or XDG_STATE_HOME to a
+# repo-relative path), so it is not fixable in-repo; this is the backstop so a
+# future occurrence sits untracked instead of one `git add -A` from being
+# committed (#1915).
+.local/
 # .claude/ is machine-local EXCEPT MinSpec's slash-command shims, which are part
 # of the shared SDD harness (like AGENTS.md/.cursorrules) and must be tracked so
 # the team/CI receive them (minspec#763). Carve those out of the ignore.
@@ -125,3 +134,14 @@ sites/scroogellm.com/
 
 # Weekly tooling-radar output (briefings, raw transcripts, health record)
 .radar/
+
+# DR-043 per-machine baseline snapshots (#1376).
+# The blob-pinning path already never travels: the pin is a LOCAL
+# refs/minspec/snapshots/* ref and DR-043's default is "do not push snapshot refs"
+# (approval.ts:126-133). Its gzip FALLBACK writes .minspec/snapshots/<refKey>.json.gz
+# into the working tree, and nothing ignored it — so the two halves of one per-machine
+# mechanism had different travel semantics, and only by accident. Committing a snapshot
+# would publish an approval's body bytes to every clone, which DR-043 deliberately does
+# not do. Cross-clone recovery is already handled without it (classifyBaseline surfaces
+# 'unrecoverable', and #701 walks the spec's own history).
+.minspec/snapshots/

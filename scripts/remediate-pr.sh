@@ -4,8 +4,9 @@
 #
 # The drain's PR-side counterpart to dispatch-issue.sh (#239 extended). Where
 # dispatch-issue.sh builds a NEW branch for an issue, this SWEEPS an existing open
-# PR and, when it carries a fixable problem, dispatches a credential-free agent (or
-# a mechanical merge) to fix it IN PLACE on the PR branch, then re-pushes so CI
+# PR and, when it carries a fixable problem, dispatches an agent that is not handed
+# this script's token (or a mechanical merge) to fix it IN PLACE on the PR branch,
+# then re-pushes so CI
 # re-reviews. The human still holds the merge keystroke — remediation never merges.
 #
 # Problem classes handled (see classify_pr):
@@ -28,8 +29,11 @@
 # hand-crafted human PR is never auto-edited under this sweep.
 #
 # Security model (identical to dispatch-issue.sh, reused not re-implemented):
-#   • the agent is CREDENTIAL-FREE (no gh / git push / remote / network tools). It
-#     only edits + commits locally. THIS parent does every credentialed op.
+#   • the agent is started WITHOUT this script's token: its environment is built from
+#     a list of names (lib/agent-context.sh) that the token is not on, and its tool
+#     list has no gh / git push / remote / network. It only edits + commits locally.
+#     THIS parent does every credentialed op. (It is still a process of this script's
+#     user; see lib/agent-context.sh for what that leaves open.)
 #   • the pre-publish EGRESS GUARD (scripts/lib/agent-egress.sh, #358) scans the new
 #     commits BEFORE the push and FAILS CLOSED on any secret/exfil hit.
 #   • ai-review:* labels are NEVER mutated here — CI (ai-review.yml, as the bot) owns
@@ -47,10 +51,23 @@
 #       <labels_csv> <failing_non_review:yes|no> <ai_review_bad:yes|no> \
 #       [<live_nonself_claim:yes|no>]
 #     → prints ONE action token: skip-not-automation | skip-live-owned | skip-conflict |
-#       agent-remediate-checks | agent-remediate-review | rebase-only | skip-clean
+#       agent-remediate-checks | agent-remediate-review | rebase-only | retry-unknown |
+#       skip-clean | skip-unhandled-state
 #     The 7th argument is OPTIONAL and defaults to "no", so the creator-shepherd's
 #     existing 6-argument call keeps working and is never told to stand down from the
 #     PR it owns.
+#     retry-unknown and skip-unhandled-state are #1803's fix: mergeStateStatus is
+#     computed LAZILY by GitHub, so a cold read is routinely UNKNOWN rather than the
+#     real state. The classifier used to have no arm for that, so it fell through to
+#     the terminal default — which asserted skip-clean (a POSITIVE health claim) for
+#     ANY unrecognised state. Now skip-clean is reached only from a CLOSED allow-list
+#     of documented values; UNKNOWN gets its own non-terminal retry-unknown (the call
+#     site re-polls once before trusting it, never from --classify itself); and any
+#     value the allow-list has never seen (a future GitHub value, an empty read,
+#     garbage) returns skip-unhandled-state instead of silently passing as healthy.
+#     The documented-but-gated states (BLOCKED, UNSTABLE, HAS_HOOKS, DRAFT) are NOT
+#     unrecognised — they keep skip-clean, so the creator-shepherd goes on polling its
+#     own PR while a merge-gating check is still running (SPEC-044 FR-4).
 #   scripts/remediate-pr.sh --count-markers <marker> [author_logins_csv] < comments.json
 #     → prints how many comments the runaway guard would charge to that marker
 #   scripts/remediate-pr.sh --check-markers <marker> <marker> [marker...]
@@ -59,6 +76,13 @@
 #   scripts/remediate-pr.sh --cap-notice-decision [author_logins_csv] < comments.json
 #     → prints post | skip — whether the one-shot "capped, needs a human" notice is
 #       posted this sweep (never skip unless authorship is provable)
+#   scripts/remediate-pr.sh --check-same-repo <head_owner> <head_repo> <base_owner/repo>
+#     → exit 0 iff the PR's head repo IS the base repo we operate against, exit 1
+#       otherwise (#1894: a fork PR's headRefName is only safe to resolve as
+#       origin/<branch> when the head repo is the base repo — for a fork, that
+#       resolves against an unrelated, possibly-colliding same-named branch in the
+#       BASE repo, and a push there writes to the wrong place while reporting
+#       success against the PR)
 
 set -euo pipefail
 
@@ -66,6 +90,16 @@ REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/lib/agent-context.sh"
+agent_caveman_init
+# How this script touches the worktree it checks a pull request's branch out into. That
+# branch is usually an agent's work, but nothing here checks who wrote it: any branch of
+# this repository whose name fits is taken, from whoever can push one, and the list in
+# lib/dispatch-author-gate.sh is asked about commenters only. Another agent is then
+# started in it, so nothing in
+# the worktree is run as this script: git is given the worktree's own git directory and
+# THIS tree's hooks outright. The file's header has the reasoning and the limits.
+# shellcheck source=scripts/lib/agent-worktree.sh
+source "${SCRIPT_DIR}/lib/agent-worktree.sh"
 # Agent writes carry the BOT's identity, never the human's (#1355). This arms a
 # `gh` wrapper; acquiring the token is LAZY, so reads pass through untouched and
 # only the first WRITE mints — aborting there, loudly, if it cannot.
@@ -85,6 +119,21 @@ MAX_CRASHES="${MINSPEC_REMEDIATE_MAX_CRASHES:-2}"
 # real delimiter, so it never over-matches human branches like `fixture-…` (the
 # char after `fix` there is a letter, not `/` or `-`).
 AUTOMATION_BRANCH_RE='^(agent|fix|feat)[/-]'
+
+# ── Pure fork-guard (no gh/git/claude — safe to unit-test in isolation) ────────
+# #1894: `headRefName` alone is not enough to know which repo a branch lives in — a
+# PR opened from a FORK carries a headRefName that means nothing against the BASE
+# repo's `origin`. Resolving it there anyway either fails harmlessly (no such
+# branch) or, when the base repo happens to have a same-named branch (ordinary
+# under this repo's fix/*, feat/*, agent/* conventions), silently pushes agent
+# commits to that unrelated branch while reporting success against the PR. Compare
+# the head repo the API already knows against the base repo we operate on, and
+# refuse — visibly, exit 0, no side effect — whenever they differ, rather than
+# inferring identity from the branch name.
+same_repo() {
+  local head_owner="$1" head_name="$2" base_repo="$3"
+  [[ -n "$head_owner" && -n "$head_name" && "${head_owner,,}/${head_name,,}" == "${base_repo,,}" ]]
+}
 
 # ── Pure classifier (no gh/git/claude — safe to unit-test in isolation) ────────
 # Decide, from a PR's already-fetched attributes, what remediation (if any) applies.
@@ -128,7 +177,46 @@ classify_pr() {
   if [[ "$merge_state" == "BEHIND" ]]; then
     echo "rebase-only"; return 0
   fi
-  echo "skip-clean"
+  # 7. UNKNOWN (#1803) — GitHub computes mergeStateStatus LAZILY, so a cold read
+  #    routinely returns UNKNOWN before the real state is ready, rather than because
+  #    anything is actually wrong. The call site re-polls once, after a short pause,
+  #    BEFORE calling this classifier (still no network call from --classify itself);
+  #    if it is STILL unknown here, that is a genuinely unresolved witness. This must
+  #    NOT fall through to skip-clean's positive health assertion (constitution
+  #    invariant 2: an unreadable witness fails closed and VISIBLY, never quietly).
+  #    retry-unknown is deliberately NON-TERMINAL — unlike skip-conflict, it names no
+  #    human action; it just means "try again once GitHub finishes computing this."
+  if [[ "$merge_state" == "UNKNOWN" ]]; then
+    echo "retry-unknown"; return 0
+  fi
+  # 8. The remaining DOCUMENTED mergeStateStatus values. Reaching here means every
+  #    fixable problem above was already ruled out, so there is nothing for this
+  #    classifier to act on — which is exactly what skip-clean means to its consumers
+  #    ("no remediation applies"); whether to keep WAITING is decided downstream from
+  #    the check/auto-merge signals, not from this token.
+  #      CLEAN     — mergeable, everything green.
+  #      BLOCKED   — mergeable, but a merge-gating REQUIRED check has not reported yet
+  #                  (or a required review is missing). This is GitHub's normal state
+  #                  for the whole window ai-review is running — precisely the window
+  #                  the creator-shepherd exists to poll through (SPEC-044 FR-4). It
+  #                  is a known-TRANSIENT state, not an unrecognised one.
+  #      UNSTABLE  — mergeable, a non-required check in flight or red.
+  #      HAS_HOOKS — mergeable and clean; the repo has pre-receive hooks.
+  #      DRAFT     — recognised; both callers gate drafts before reaching here.
+  #    Listing them by NAME rather than defaulting to skip-clean is what keeps #1803
+  #    fixed: the allow-list is CLOSED, so an UNKNOWN or never-seen value can never
+  #    reach a health claim by falling through.
+  case "$merge_state" in
+    CLEAN|BLOCKED|UNSTABLE|HAS_HOOKS|DRAFT)
+      echo "skip-clean"; return 0 ;;
+  esac
+  # 9. A mergeStateStatus this classifier has genuinely never seen — a future GitHub
+  #    value, an empty read, or garbage. Same shape #1803 fixed for UNKNOWN: it must
+  #    not silently pass as healthy, so name it as unhandled and fail visibly.
+  #    Deliberately NOT the known-transient states above: capturing those stops the
+  #    creator-shepherd polling its own PR while a merge-gating check is still
+  #    running, which is the opposite failure — a gate abandoned, not a gate asserted.
+  echo "skip-unhandled-state"
 }
 
 # ── Marker vocabulary + pure counting helpers ──────────────────────────────────
@@ -313,6 +401,14 @@ if [[ "${1:-}" == "--check-markers" ]]; then
   fi
   if assert_markers_isolated "$@"; then exit 0; else exit 1; fi
 fi
+if [[ "${1:-}" == "--check-same-repo" ]]; then
+  shift
+  if [[ $# -ne 3 ]]; then
+    echo "Usage: remediate-pr.sh --check-same-repo <head_owner> <head_repo> <base_owner/repo>" >&2
+    exit 2
+  fi
+  if same_repo "$1" "$2" "$3"; then exit 0; else exit 1; fi
+fi
 if [[ "${1:-}" == "--sanitize-body" ]]; then
   sanitize_comment_body "$(cat)"
   exit 0
@@ -352,6 +448,9 @@ fi
 # Shared, tested units — reused, never re-implemented.
 # shellcheck source=lib/agent-egress.sh
 source "${SCRIPT_DIR}/lib/agent-egress.sh"
+# Whose pull-request comments may be handed to an agent: dispatch_pr_trusted_comments.
+# shellcheck source=lib/dispatch-author-gate.sh
+source "${SCRIPT_DIR}/lib/dispatch-author-gate.sh"
 
 # The ONLY place a marker is ever written to a PR. It sanitises the body (so nothing
 # interpolated into it can carry or forge a marker) and appends the marker on its own
@@ -365,19 +464,64 @@ post_marked_comment() {
 ${marker}" 2>/dev/null || true
 }
 
-# Same scoped, credential-free tool allow-list as dispatch-issue.sh (no gh / push /
-# remote / network — the agent edits + commits only; the parent publishes).
+# ── What the remediation agent is started with ───────────────────────────────
+# The agent edits and commits in its worktree and THIS script publishes, so the agent
+# needs no GitHub token: every push, comment and label below is the parent's, made
+# after the agent has exited. But this script HOLDS one, exported into this very shell
+# on its first write (lib/gh-bot.sh), and the agent runs the pull request's own build,
+# which is code this script did not write. So the launch below goes through
+# "$AGENT_LAUNCH_ENV": lib/agent-context.sh, sourced at the top of this script, run as a
+# program. It builds the agent's environment from a list of names that the token is not
+# on.
+#
+# That file assigns the variable itself, to its own absolute path: a value that arrived
+# in the environment is overwritten before the launch, and because the path is absolute
+# the launch, made after `cd "$WORKTREE"`, runs THIS checkout's copy and never the one
+# on the pull request's branch.
+#
+# No `--model-login`: the drain runs this on an operator's machine, where the CLI's
+# login is a file under HOME.
+
+# Same scoped tool allow-list as dispatch-issue.sh (no gh / push / remote / network —
+# the agent edits + commits only; the parent publishes). The list limits what the MODEL
+# may ask for; the build it runs is arbitrary code, which is why the environment above
+# is what carries the weight.
 ALLOWED_TOOLS="Read,Edit,Write,Glob,Grep,Bash(npm test),Bash(npm run validate),Bash(npm run lint),Bash(npm run build),Bash(npm ci),Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
 
 echo "Fetching PR #$PR ($REPO)..."
-PR_JSON=$(gh pr view "$PR" --repo "$REPO" \
-  --json number,state,isDraft,headRefName,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>/dev/null) || {
-  echo "ERROR: could not fetch PR #$PR" >&2; exit 1
+# gh's stderr is KEPT (#2868): the HTTP status / auth error / rate-limit text is the only
+# thing that tells an expired token from a transient fault, and 2>/dev/null threw it away.
+# On a failure, force ONE re-mint (gh_bot_reauth_read: non-zero when the broker gave back
+# the same credential or we do not own the token, so a retry would be pointless) and retry
+# once. A second failure is reported WITH its stderr and exits 1.
+_PR_FETCH_ERR=$(mktemp)
+# Mint in THIS shell, not inside the $(...) below: a mint in a subshell is lost with it,
+# which would also leave gh_bot_reauth_read nothing to compare a re-mint against.
+gh_bot_warm_read
+_fetch_pr_json() {
+  gh pr view "$PR" --repo "$REPO" \
+    --json number,state,isDraft,headRefName,headRepository,headRepositoryOwner,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>"$_PR_FETCH_ERR"
 }
+if ! PR_JSON=$(_fetch_pr_json); then
+  echo "WARNING: fetch of PR #$PR failed: $(tr '\n' ' ' <"$_PR_FETCH_ERR")" >&2
+  if gh_bot_reauth_read; then
+    echo "Re-minted the read token — retrying the fetch of PR #$PR once." >&2
+    PR_JSON=$(_fetch_pr_json) || {
+      echo "ERROR: could not fetch PR #$PR (after re-mint): $(tr '\n' ' ' <"$_PR_FETCH_ERR")" >&2
+      rm -f "$_PR_FETCH_ERR"; exit 1
+    }
+  else
+    echo "ERROR: could not fetch PR #$PR: $(tr '\n' ' ' <"$_PR_FETCH_ERR")" >&2
+    rm -f "$_PR_FETCH_ERR"; exit 1
+  fi
+fi
+rm -f "$_PR_FETCH_ERR"
 
 STATE=$(jq -r '.state' <<<"$PR_JSON")
 IS_DRAFT=$(jq -r '.isDraft' <<<"$PR_JSON")
 BRANCH=$(jq -r '.headRefName' <<<"$PR_JSON")
+HEAD_OWNER=$(jq -r '.headRepositoryOwner.login // empty' <<<"$PR_JSON")
+HEAD_REPO_NAME=$(jq -r '.headRepository.name // empty' <<<"$PR_JSON")
 MERGEABLE=$(jq -r '.mergeable' <<<"$PR_JSON")
 MERGE_STATE=$(jq -r '.mergeStateStatus' <<<"$PR_JSON")
 TITLE=$(jq -r '.title' <<<"$PR_JSON")
@@ -386,6 +530,54 @@ LABELS_CSV=$(jq -r '[.labels[].name] | join(",")' <<<"$PR_JSON")
 # Only OPEN, non-draft PRs are remediable.
 if [[ "$STATE" != "OPEN" ]]; then echo "PR #$PR is $STATE — skipping."; exit 0; fi
 if [[ "$IS_DRAFT" == "true" ]]; then echo "PR #$PR is a draft — skipping."; exit 0; fi
+
+# #1894: refuse to act unless the PR's head repo IS the base repo we operate on.
+# `origin/$BRANCH` (used below to build the worktree and, later, to push) only
+# names the PR's actual head when the two coincide — for a fork PR it names an
+# unrelated, possibly-colliding same-named branch in the BASE repo, and a push
+# there silently remediates the wrong branch while reporting success against
+# this PR. Explicitly out of scope beats silently wrong: exit 0, no side effect,
+# reason stated. (option 1 of #1894 — pin the repo, don't infer it from a SHA.)
+if ! same_repo "$HEAD_OWNER" "$HEAD_REPO_NAME" "$REPO"; then
+  echo "  PR #$PR's head repo is '${HEAD_OWNER:-?}/${HEAD_REPO_NAME:-?}', not the base repo ($REPO) this sweep operates on — refusing to resolve 'origin/$BRANCH' against an unrelated repo (#1894). Leaving for a human." >&2
+  exit 0
+fi
+
+# #1803: GitHub computes mergeStateStatus LAZILY, so the FIRST read after a push is
+# routinely UNKNOWN even on a genuinely healthy PR — not because anything is wrong,
+# just because the computation hasn't finished yet. Re-poll ONCE, after a short pause,
+# before trusting it: a merely-not-yet-computed state resolves almost immediately on a
+# second read, so this one retry converts most UNKNOWNs into their real state without
+# ever falling into classify_pr's retry-unknown arm at all. If it is STILL UNKNOWN
+# after this, retry-unknown correctly holds — this refetch is what makes that arm mean
+# "genuinely unresolved," not "we didn't bother to check twice."
+if [[ "$MERGE_STATE" == "UNKNOWN" ]]; then
+  echo "  mergeStateStatus is UNKNOWN (GitHub computes it lazily) — re-polling once before classifying..."
+  sleep "${MINSPEC_REMEDIATE_UNKNOWN_RETRY_SLEEP:-5}"
+  # DR-066 clause 1 (#1859): KEEP the exit status. A re-poll that FAILED and a
+  # re-poll that succeeded with nothing are different facts, and only the second one
+  # licenses replacing what we already know. Fail CLOSED on the first: leave
+  # MERGE_STATE at UNKNOWN — which classifies as the non-terminal retry-unknown, not
+  # as health — and say out loud that the look itself failed.
+  RETRY_RC=0
+  RETRY_JSON=$(gh pr view "$PR" --repo "$REPO" \
+    --json number,state,isDraft,headRefName,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>/dev/null) || RETRY_RC=$?
+  if (( RETRY_RC != 0 )); then
+    echo "  the re-poll of PR #$PR FAILED (gh exited $RETRY_RC) — keeping mergeStateStatus UNKNOWN rather than treating an unreadable answer as an answer." >&2
+  elif [[ -z "$RETRY_JSON" ]]; then
+    echo "  the re-poll of PR #$PR returned an empty body — keeping mergeStateStatus UNKNOWN." >&2
+  else
+    PR_JSON="$RETRY_JSON"
+    MERGEABLE=$(jq -r '.mergeable' <<<"$PR_JSON")
+    MERGE_STATE=$(jq -r '.mergeStateStatus' <<<"$PR_JSON")
+    LABELS_CSV=$(jq -r '[.labels[].name] | join(",")' <<<"$PR_JSON")
+    if [[ "$MERGE_STATE" == "UNKNOWN" ]]; then
+      echo "  still UNKNOWN after the re-poll — leaving for the next sweep (retry-unknown), never assuming it's healthy."
+    else
+      echo "  resolved to $MERGE_STATE on re-poll."
+    fi
+  fi
+fi
 
 # Derive the two check booleans the classifier needs from the rollup. A check
 # named exactly "ai-review" is the independent reviewer's own check — treated via
@@ -465,8 +657,25 @@ case "$ACTION" in
       gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
     fi
     exit 0 ;;
+  retry-unknown)
+    # #1803: mergeStateStatus was STILL UNKNOWN after the one re-poll above — GitHub
+    # hasn't finished computing it. This is deliberately NON-TERMINAL: unlike
+    # skip-conflict, it names no human action and takes no side effect (no label, no
+    # comment, no attempt consumed) — the next scheduled sweep re-reads the PR and
+    # will very likely see a real state by then. Never treat this as skip-clean.
+    echo "  mergeStateStatus is still UNKNOWN — leaving for the next sweep rather than asserting this PR is healthy."
+    exit 0 ;;
   skip-clean)
     echo "  No fixable problem — nothing to do."; exit 0 ;;
+  skip-unhandled-state)
+    # #1803: a mergeStateStatus this classifier doesn't recognise (a future GitHub
+    # value, an empty read, or garbage) reached the terminal fallthrough. That used
+    # to silently report skip-clean — a positive health claim on a PR that was never
+    # actually confirmed clean. Say so loudly instead and leave it for a human; no
+    # attempt is consumed and no label is added, since this classifier is not
+    # confident enough about the state to characterise it further.
+    echo "  mergeStateStatus '$MERGE_STATE' is not one this classifier recognises — leaving for a human rather than assuming it's healthy." >&2
+    exit 0 ;;
 esac
 
 if $DRY_RUN; then
@@ -504,7 +713,7 @@ if [[ "$ACTION" == agent-* ]]; then
   # Budget counters must only ever degrade toward OVER-counting (cap sooner: annoying but
   # safe). UNDER-counting un-bounds the loop, so an unresolved identity falls all the way
   # back to any-author rather than trusting an operator string we cannot corroborate.
-  SELF_LOGIN=$(gh api user --jq '.login' 2>/dev/null || true)
+  SELF_LOGIN=$(gh api user --jq '.login' 2>/dev/null || true)  # swallow-ok: authors_provable is false for empty, which routes to always-post; the unprovable case is already the safe direction and is documented above
   if authors_provable "$SELF_LOGIN"; then
     AUTHOR_ALLOW="${SELF_LOGIN}${MINSPEC_REMEDIATE_AUTHOR_LOGINS:+,${MINSPEC_REMEDIATE_AUTHOR_LOGINS}}"
   else
@@ -550,36 +759,46 @@ git fetch origin "$BRANCH" -q 2>/dev/null || {
 }
 WORKTREE="${WORKTREE_BASE}/pr-${PR}"
 if [[ -d "$WORKTREE" ]]; then
-  git worktree remove "$WORKTREE" --force 2>/dev/null || true
+  launcher_git worktree remove "$WORKTREE" --force 2>/dev/null || true
 fi
 mkdir -p "$WORKTREE_BASE"
 # Detached checkout at the remote branch tip: we add commits on top and push them
 # back to the branch as a fast-forward (never a force-push over the PR author).
-git worktree add --detach "$WORKTREE" "origin/${BRANCH}" 2>/dev/null || {
+# launcher_git, because a checkout runs a hook, and the hooks a relative `core.hooksPath`
+# finds are the ones in the tree being checked out: here, the pull request's.
+launcher_git worktree add --detach "$WORKTREE" "origin/${BRANCH}" 2>/dev/null || {
   echo "ERROR: could not create worktree for $BRANCH — skipping." >&2; exit 0
+}
+# Remember which git directory is this worktree's own, before anything else happens in
+# it. Every git operation on the worktree below names that directory and this tree's
+# hooks (lib/agent-worktree.sh). One that cannot be pinned is left alone, and said so.
+agent_worktree_pin "$WORKTREE" || {
+  echo "ERROR: could not pin the worktree for $BRANCH — skipping." >&2
+  launcher_git worktree remove "$WORKTREE" --force 2>/dev/null || true
+  exit 0
 }
 # The egress base: the branch tip BEFORE our remediation, so the guard scans ONLY
 # the new commits the agent adds (the pre-existing branch history already passed
 # the guard at its original dispatch, or is human-authored and out of our channel).
-PRE_SHA=$(git -C "$WORKTREE" rev-parse HEAD)
+PRE_SHA=$(agent_worktree_git rev-parse HEAD)
 
-cleanup() { git worktree remove "$WORKTREE" --force 2>/dev/null || true; }
+cleanup() { launcher_git worktree remove "$WORKTREE" --force 2>/dev/null || true; }
 
 # ── rebase-only: mechanical merge of origin/main, no agent ─────────────────────
 if [[ "$ACTION" == "rebase-only" ]]; then
   echo "  Merging origin/main into $BRANCH (mechanical, no agent)..."
   # Merge (not rebase) so we never rewrite the PR branch's published history.
-  if git -C "$WORKTREE" -c user.email="claude@harvest316.com" -c user.name="minspec-sdd[bot]" \
+  if agent_worktree_git -c user.email="claude@harvest316.com" -c user.name="minspec-sdd[bot]" \
        merge origin/main --no-edit 2>&1; then
-    if [[ "$(git -C "$WORKTREE" rev-parse HEAD)" == "$PRE_SHA" ]]; then
+    if [[ "$(agent_worktree_git rev-parse HEAD)" == "$PRE_SHA" ]]; then
       echo "  Already up to date — nothing to push."
-    elif git -C "$WORKTREE" push origin "HEAD:${BRANCH}" 2>&1; then
+    elif agent_worktree_git push origin "HEAD:${BRANCH}" 2>&1; then
       echo "  Pushed merge of main into $BRANCH (PR #$PR refreshed)."
     else
       echo "  WARNING: push failed for $BRANCH — left for a human." >&2
     fi
   else
-    git -C "$WORKTREE" merge --abort 2>/dev/null || true
+    agent_worktree_git merge --abort 2>/dev/null || true
     echo "  Merge hit conflicts — aborting and leaving for a human (surfaced)."
     post_marked_comment "$ATTEMPT_MARKER" 'Auto-remediation tried to merge `origin/main` to bring this branch up to date, but hit conflicts. Left for a human to resolve.'
   fi
@@ -591,11 +810,20 @@ fi
 # Assemble the UNTRUSTED remediation context per class.
 CONTEXT=""
 if [[ "$ACTION" == "agent-remediate-review" ]]; then
-  # The reviewer's most recent ai-review:changes findings (bot-authored comment).
-  # Untrusted data (a prompt-injected diff could have steered the reviewer's echo),
-  # so it is fenced as data, never instructions.
-  FINDINGS=$(gh pr view "$PR" --repo "$REPO" --json comments \
-    --jq '[.comments[] | select(.body | test("ai-review|AI review|REVIEW_VERDICT"))] | last | .body // ""' 2>/dev/null || true)
+  # The reviewer's most recent ai-review:changes findings.
+  #
+  # WHOSE comment it is gets decided before what it says. Anyone can comment on a pull
+  # request in a public repository, and a comment only has to contain the words below to
+  # be picked, so the choice is made among the comments dispatch_pr_trusted_comments
+  # keeps: written by an account on the list in lib/dispatch-author-gate.sh (the App and
+  # the founder, by account type and id, never by a login), and edited by nobody else.
+  # When that read fails it says why on stderr and nothing is kept, so the agent gets
+  # the placeholder below and no comment at all.
+  #
+  # Still untrusted data (a prompt-injected diff could have steered the reviewer's
+  # echo), so it is fenced as data, never instructions.
+  FINDINGS=$(dispatch_pr_trusted_comments "$REPO" "$PR" \
+    | jq -r '[.comments[] | select(.body | test("ai-review|AI review|REVIEW_VERDICT"))] | last | .body // ""' || true)  # swallow-ok: the next line substitutes an explicit placeholder for empty, so no branch reads the ambiguity, and the failed read has already said why on stderr
   [[ -z "$FINDINGS" ]] && FINDINGS="(no findings comment found — re-read the diff for correctness/security/simplification issues and address anything the independent reviewer would flag.)"
   CONTEXT=$(printf 'The independent AI reviewer requested changes on this PR. Address the findings below, then ensure the full local gate is green.\n\n<untrusted_review_findings>\n%s\n</untrusted_review_findings>' "$FINDINGS")
 else
@@ -662,8 +890,9 @@ ESCALATED_ALREADY=0
 
 echo "  Launching remediation agent (model: $RUN_MODEL, log: $LOG)..."
 while true; do
-  if (cd "$WORKTREE" && "${AGENT_ENV_SCRUB[@]}" claude -p "$RUN_PROMPT" \
+  if (cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$RUN_PROMPT" \
         "${AGENT_CONTEXT_ARGS[@]}" \
+        ${AGENT_CAVEMAN_ARGS[@]+"${AGENT_CAVEMAN_ARGS[@]}"} \
         --model "$RUN_MODEL" \
         --allowedTools "$ALLOWED_TOOLS" \
         --output-format text 2>&1 | tee "$LOG"); then
@@ -692,14 +921,16 @@ while true; do
     fi
 
     # Did the agent actually add a commit? A no-op run has nothing to push.
-    if [[ "$(git -C "$WORKTREE" rev-parse HEAD)" == "$PRE_SHA" ]]; then
+    if [[ "$(agent_worktree_git rev-parse HEAD)" == "$PRE_SHA" ]]; then
       echo "  Agent made no new commit — nothing to push (no change)."
       cleanup; exit 0
     fi
 
     # EGRESS GUARD (#358) — scan ONLY the new commits (base = PRE_SHA) before any
     # push. Fail-closed: on any hit, publish nothing and surface for a human.
-    if ! MATCHES=$(agent_egress_scan "$WORKTREE" "$PRE_SHA" "${WORKTREE}/.agent-summary.md"); then
+    # The scan reads the new commits with git, so it is called with git pointed at the
+    # worktree's pinned git directory: the history scanned is the history pushed.
+    if ! MATCHES=$(agent_worktree_function agent_egress_scan "$WORKTREE" "$PRE_SHA" "${WORKTREE}/.agent-summary.md"); then
       echo "  🛑 egress guard BLOCKED remediation push for PR #$PR:" >&2
       printf '%s\n' "$MATCHES" >&2
       gh label create "agent-quarantined" --repo "$REPO" --color b60205 \
@@ -713,8 +944,8 @@ while true; do
     fi
 
     # Clean → push the new commits (fast-forward on the PR branch) and comment.
-    if git -C "$WORKTREE" push origin "HEAD:${BRANCH}" 2>&1; then
-      SHA=$(git -C "$WORKTREE" rev-parse --short HEAD)
+    if agent_worktree_git push origin "HEAD:${BRANCH}" 2>&1; then
+      SHA=$(agent_worktree_git rev-parse --short HEAD)
       SUMMARY=""
       [[ -f "${WORKTREE}/.agent-summary.md" ]] && SUMMARY=$(cat "${WORKTREE}/.agent-summary.md")
       [[ -z "$SUMMARY" ]] && SUMMARY="(no summary written)"

@@ -44,14 +44,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Every refusal path below must REVOKE an arming an earlier run already made,
-          # not merely decline to arm. Arming is sticky, and a PR that was clean when it
-          # was armed can later acquire a non-docs path, an outward-facing doc, a hold
-          # label, or a status transition on a `synchronize` — declining to re-arm leaves
-          # the original arming standing in all four cases. ALL FOUR refusals call this
-          # helper. They did not always: the two pre-existing ones (non-docs path,
-          # outward-facing doc) exited without disarming until #1847 brought them in
-          # line with the two it added.
+          # Every non-zero exit from this step must REVOKE an arming an earlier run
+          # already made, not merely decline to arm. Arming is sticky, and a PR that was
+          # clean when it was armed can later acquire a non-docs path, an outward-facing
+          # doc, a hold label, or a status transition on a `synchronize` — declining to
+          # re-arm leaves the original arming standing in every one of those cases.
+          #
+          # That guarantee is held by the EXIT trap installed below, not by counting
+          # call sites. This comment used to assert that all four refusals called the
+          # helper; three witness-failure exits did not, and the assertion is what made
+          # that invisible — it reads as a completed audit, so a reader stops counting
+          # (#1968). An enumeration is a claim that has to be re-verified by hand on
+          # every edit; a trap is a property that holds for refusals not yet written.
           #
           # Sets `disarm_note` for the refusal comment, and never claims more than it
           # knows: when the auto-merge state could not be READ, a precautionary disarm is
@@ -61,6 +65,7 @@ jobs:
           revoke_any_arming() {
             local armed
             disarm_note=""
+            revoke_done=1
             if ! armed="$(gh pr view "$PR" --repo "$REPO" --json autoMergeRequest -q '.autoMergeRequest.enabledAt // ""')"; then
               echo "::error::docs-lane: could not read PR #$PR's auto-merge state — attempting a disarm regardless"
               armed="unknown"
@@ -80,6 +85,17 @@ jobs:
               disarm_note=" ⚠️ Auto-merge was already enabled and could **not** be disarmed — disarm it by hand."
             fi
           }
+          # Arming is sticky, so EVERY non-zero exit from this step must revoke an arming
+          # an earlier run already made — not only the refusals enumerated below. Calling
+          # the helper per refusal fixes the paths that exist today; it does not fix the
+          # property, and three witness-failure exits (#1968) shipped without the call
+          # under a comment asserting all of them had it. A trap holds by construction:
+          # it covers a refusal added later, and a `set -euo pipefail` abort, neither of
+          # which any per-site call reaches. `revoke_done` keeps an explicit revoke from
+          # being repeated here — the helper is idempotent, but a second run would clobber
+          # the `disarm_note` already embedded in the refusal comment.
+          revoke_done=0
+          trap 'rc=$?; if [ "$rc" -ne 0 ] && [ "$revoke_done" -eq 0 ]; then revoke_any_arming || true; fi; exit $rc' EXIT
           # Allowed corpus: specs, docs, skills markdown (.md ONLY), approval records, top-level markdown.
           allowed='^(specs/|docs/|skills/.*\.md$|\.minspec/approvals/|[^/]+\.md$)'
           # OUTWARD-FACING DENYLIST (#1001), applied ON TOP of the corpus above.
@@ -172,14 +188,47 @@ jobs:
           # whole point of the lane. Matching the file rather than the line is the
           # coarse-discriminant mistake (#1754) this is avoiding.
           #
-          # It is `^[+-]status:` against the diff, so it also matches a `status:` line
-          # that is NOT frontmatter — one quoted inside a fenced block or in body prose.
-          # That is deliberate and the safe direction: the gate over-refuses rather than
-          # under-refuses, and telling frontmatter from body text would mean tracking
-          # position within each hunk, i.e. a second predicate to be wrong about. Said
-          # plainly here because "frontmatter line" would be a claim narrower than the
-          # code, and a comment that overstates its own precision is the same false
-          # signpost as one that understates it.
+          # The predicate is `^[+-]([*_>|-]+ ?)?[*_]*[Ss]tatus:`. Every piece of the
+          # prefix is load-bearing, and the corpus is why (#2124).
+          #
+          # A governance status is written several ways here. Frontmatter `status:` is
+          # the authoritative field for a whole DR or spec. A DR AMENDMENT has NO
+          # frontmatter of its own, so its ``**Status: `proposed`.**`` line IS its status
+          # with nothing to fall back on. Accepted DRs carry supersession as a
+          # blockquoted `> **Status: superseded ...**` banner. Specs mirror their
+          # frontmatter in a `**Status:** Implementing` display line, and the decision
+          # INDEX mirrors every DR in an italic `*Status: accepted ...*` row.
+          #
+          # Leading whitespace is deliberately NOT matched. An indented `status:` is a
+          # TypeScript or YAML literal inside a fenced block - the two in this repo are
+          # `specs/minspec/SPEC-023-consequence-screen/requirements.md` and
+          # `specs/minspec/SPEC-065-solo-mode-ceremony-cut/design.md`. Refusing those
+          # would strip the lane from ordinary spec edits, which is this gate's own
+          # failure mode. So the discriminant is: markdown decoration before the word is
+          # fine, indentation is not.
+          #
+          # THIS IS A FLOOR, NOT A CENSUS. Do not read the list above as the complete set
+          # of ways a disposition can be written, and do not add an assertion that says
+          # it is. Two classes are known NOT to be covered, both tracked on #2124:
+          #   - a `## Status` SECTION whose body carries the ruling, e.g. rewriting
+          #     `**Proposed** 2026-09-09.` to `**Accepted** 2026-09-25 (human).` - the
+          #     changed line contains no status token at all, so no line-wise predicate
+          #     can see it; that needs section scoping.
+          #   - an amendment whose disposition lives only in its heading, e.g.
+          #     `## Amendment A (2026-09-05) - PROPOSED, not accepted` (DR-086 has no
+          #     `**Status:` line at all).
+          #
+          # History, stated precisely because an earlier version of this comment got it
+          # wrong. This gate did not exist when #1741 armed: #1741's lane armed at
+          # 2026-09-05T22:09:34Z and the gate landed 2026-09-09 in 132a0bc6 (#1858). The
+          # true and checkable claim is the COUNTERFACTUAL - run the pre-#2124 predicate
+          # `^[+-]status:` against #1741's patch and it does not fire, so had the gate
+          # existed it would not have stopped that ratification. That earlier version
+          # also claimed the predicate matched "body prose"; it did not, because `**` and
+          # a capital `S` each defeat the old anchor alone. Both errors are recorded here
+          # rather than quietly deleted: a comment that overstates its own precision is
+          # the same false signpost as one that understates it, and this block has now
+          # been wrong in both directions.
           # A brand-new DR or spec (an all-`+` patch containing `+status: proposed`) also
           # matches, so it is refused from the lane too. That is intended and fail-closed:
           # a substantive new DR/spec has never ridden this lane (see the header note), and
@@ -215,7 +264,7 @@ jobs:
                 status_changed+=("$fname (patch could not be decoded — treated as a transition)")
                 continue
               fi
-              if grep -qE '^[+-]status:' <<<"$decoded"; then
+              if grep -qE '^[+-]([*_>|-]+ ?)?[*_]*[Ss]tatus:' <<<"$decoded"; then
                 status_changed+=("$fname")
               fi
             done <<<"$files_tsv"

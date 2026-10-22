@@ -41,8 +41,17 @@ probe() {
 }
 
 echo "--- probe says workflows=write ⇒ step aside ---"
-setup; probe "real token script (has workflows=write)" allow \
-  MINSPEC_PERM_TTL=0
+# STUBBED, deliberately. This case used to invoke the REAL host token script and
+# assert `allow`, which made it a test of the environment's current grant rather
+# than of this code path: it passed only while the installation happened to hold
+# `workflows: write`, and went red the moment that changed — silently, because no
+# CI job or npm script runs this suite. Stub the affirmative answer so the case
+# proves what it claims: given a permissions object containing workflows=write,
+# the gate steps aside.
+GRANTED=$(mktemp); printf '#!/usr/bin/env bash\necho "contents=write"\necho "workflows=write"\n' > "$GRANTED"; chmod +x "$GRANTED"
+setup; probe "probe reports workflows=write"           allow \
+  MINSPEC_APP_TOKEN_SCRIPT="$GRANTED" MINSPEC_PERM_TTL=0
+rm -f "$GRANTED"
 
 echo "--- probe cannot answer ⇒ fail CLOSED ---"
 setup; probe "token script missing"                    BLOCK \
@@ -57,6 +66,37 @@ FAKE=$(mktemp); printf '#!/usr/bin/env bash\necho "contents=write"\necho "metada
 setup; probe "installation lacks workflows"            BLOCK \
   MINSPEC_APP_TOKEN_SCRIPT="$FAKE" MINSPEC_PERM_TTL=0
 rm -f "$FAKE"
+
+# ── an INDETERMINATE probe must not be cached as a measurement (#1120) ────────
+# Every case above asserts only allow/BLOCK, and both a real "workflows absent"
+# answer and a probe that cannot answer BLOCK. So allow/BLOCK cannot tell them
+# apart, and the difference is load-bearing: a determinate answer is cached for
+# MINSPEC_PERM_TTL, an indeterminate one must not be — otherwise a repaired token
+# script is disbelieved for up to the TTL, and the cache records a measurement
+# that was never taken. The discriminator is the CACHE FILE, so assert on it.
+cache_case() {
+  local desc="$1" want="$2" script="$3"
+  setup
+  echo "refs/heads/feature $SHA refs/heads/feature $ZERO" \
+    | (cd "$R" && env MINSPEC_FAKE_APP_CRED=1 MINSPEC_ALLOW_WORKFLOW_PUSH=0 \
+        MINSPEC_APP_TOKEN_SCRIPT="$script" MINSPEC_PERM_TTL=86400 \
+        bash "$HOOK" origin https://github.com/o/r.git >/dev/null 2>&1)
+  local f got
+  f="$R/$(git -C "$R" rev-parse --git-dir)/minspec-workflows-perm"
+  if [ -e "$f" ]; then got="cached:$(cut -d' ' -f2 <"$f")"; else got="uncached"; fi
+  if [ "$got" = "$want" ]; then printf '  ok   %-54s -> %s\n' "$desc" "$got"; pass=$((pass+1))
+  else printf '  FAIL %-54s -> %s (wanted %s)\n' "$desc" "$got" "$want"; fail=$((fail+1)); fi
+  rm -rf "$R"
+}
+
+echo "--- indeterminate vs answered: only an ANSWER may be cached ---"
+REAL=$(mktemp); printf '#!/usr/bin/env bash\necho "contents=write"\necho "metadata=read"\n' > "$REAL"; chmod +x "$REAL"
+NOTPERMS=$(mktemp); printf '#!/usr/bin/env bash\necho "repositories: 6"\n' > "$NOTPERMS"; chmod +x "$NOTPERMS"
+EMPTY=$(mktemp); printf '#!/usr/bin/env bash\nexit 0\n' > "$EMPTY"; chmod +x "$EMPTY"
+cache_case "a real permissions object, workflows absent" "cached:none" "$REAL"
+cache_case "NOT a permissions object (host-brokered flag)" "uncached"   "$NOTPERMS"
+cache_case "empty output"                                 "uncached"   "$EMPTY"
+rm -f "$REAL" "$NOTPERMS" "$EMPTY"
 
 echo "  ---- $pass passed, $fail failed ----"
 [ "$fail" -eq 0 ]

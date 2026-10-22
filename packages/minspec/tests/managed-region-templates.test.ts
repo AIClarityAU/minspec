@@ -298,7 +298,8 @@ describe('managed-region template scaffolding (#249)', () => {
 //
 // ai-review.yml + ready-to-merge.yml + ai-review-retry.yml and the scripts they
 // depend on (review-branch.sh, review-decide.sh, roles/reviewer.md,
-// roles/security.md, .github/scripts/ai-review-guard.js) are scaffolded exactly
+// roles/security.md, .github/scripts/ai-review-guard.js + its unit suite) are
+// scaffolded exactly
 // like validate-workflow so any MinSpec-inited repo gets the full AI-review gate.
 // =============================================================================
 
@@ -314,7 +315,11 @@ function findRepoRoot(): string {
   throw new Error('could not locate repo root (…/.github/workflows/ai-review.yml)');
 }
 
-/** The eight CI-review-stack managed templates and their expected shape. */
+/**
+ * The CI-review-stack managed templates and their expected shape. Deliberately NOT
+ * described by a count: the previous wording said "eight" while the list held eleven,
+ * and a number in a comment is a claim that rots on the next entry (#871).
+ */
 const CI_STACK: ReadonlyArray<{
   name: string;
   outputPath: string;
@@ -343,6 +348,10 @@ const CI_STACK: ReadonlyArray<{
   { name: 'review-role-architect', outputPath: 'scripts/roles/architect.md', style: 'html', executable: false, shebang: false },
   { name: 'review-role-skeptic', outputPath: 'scripts/roles/skeptic.md', style: 'html', executable: false, shebang: false },
   { name: 'ai-review-guard', outputPath: '.github/scripts/ai-review-guard.js', style: 'slash', executable: false, shebang: false },
+  // #871 — the guard's unit suite travels WITH the guard. See
+  // ai-review-guard-test-parity.test.ts for why, and for the fail-closed property of
+  // the gate that syncs it.
+  { name: 'ai-review-guard-test', outputPath: '.github/scripts/ai-review-guard.test.js', style: 'slash', executable: false, shebang: false },
 ];
 
 const tplByName = (name: string) => MANAGED_REGION_TEMPLATES.find((t) => t.name === name);
@@ -354,7 +363,7 @@ describe('#564 CI-review stack — registry membership + [0] stability', () => {
     expect(MANAGED_REGION_TEMPLATES[0].outputPath).toBe(WORKFLOW_PATH);
   });
 
-  it('registers all eleven stack templates with the right output path / comment style / mode', () => {
+  it('registers every stack template with the right output path / comment style / mode', () => {
     for (const t of CI_STACK) {
       const tpl = tplByName(t.name);
       expect(tpl, `template ${t.name} is registered`).toBeDefined();

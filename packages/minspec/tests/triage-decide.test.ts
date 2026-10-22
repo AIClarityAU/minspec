@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll, vi } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execFile } from 'node:child_process';
 import path from 'node:path';
 
 // #1099 — this suite drives real `bash`/`triage-decide.sh` child processes per
@@ -71,6 +71,38 @@ function fields(input: string): Record<string, string> {
   return out;
 }
 
+// #1085 — async counterparts of decide()/fields(), used ONLY by the three tests below
+// that sweep every (tier, decision, human_only) combination. Those loops each fire
+// 16-60 child-process invocations per test; run through execFileSync they are issued
+// one at a time, so the test's wall-clock cost is the SUM of every spawn's fork/exec
+// latency. Under full-suite concurrent load that latency is not constant — #1099 raised
+// this file's testTimeout to 30s from a baseline measured on lighter, mostly
+// one-spawn-per-assertion suites — and the sum of 60 serial spawns is exactly what
+// occasionally pushed past that budget (observed once in ~3 full-suite runs, never in
+// isolation). The gate itself (triage-decide.sh) is pure — stdin in, stdout out, no
+// temp files, no $PWD, no clock — so nothing here is a real correctness race; firing
+// the spawns concurrently instead of serially turns the test's exposure into roughly
+// the SLOWEST single spawn rather than the sum of all of them, which is what the fixed
+// 30s ceiling was actually sized for.
+function decideAsync(input: string, ...args: string[]): Promise<string> {
+  return new Promise((resolve) => {
+    const child = execFile('bash', [DECIDE, ...args], { encoding: 'utf8' }, (_err, stdout) => {
+      resolve(String(stdout ?? '').trim());
+    });
+    child.stdin!.end(input);
+  });
+}
+
+async function fieldsAsync(input: string): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  const raw = await decideAsync(input, '--fields');
+  for (const line of raw.split('\n')) {
+    const m = line.match(/^([a-z_]+)=(.*)$/);
+    if (m) out[m[1]] = m[2];
+  }
+  return out;
+}
+
 describe('triage-decide.sh — deterministic triage gate', () => {
   it('T1 + agent-ready (auto-buildable) → agent-ready, hold none (the only auto path)', () => {
     expect(decide(verdict({ tier: 'T1', decision: 'agent-ready' }))).toBe('agent-ready dev none');
@@ -105,15 +137,23 @@ describe('triage-decide.sh — deterministic triage gate', () => {
     );
   });
 
-  it('T3/T4 still NEVER reach plain agent-ready (the implement path stays shut)', () => {
+  it('T3/T4 still NEVER reach plain agent-ready (the implement path stays shut)', async () => {
+    // #1085 — fired concurrently (decideAsync), not serially, so this test's
+    // wall-clock cost is not the sum of all 16 spawns' latency. See decideAsync above.
+    const checks: Promise<void>[] = [];
     for (const tier of ['T3', 'T4']) {
       for (const decision of ['agent-ready', 'agent-ready-specify', 'needs-review', 'garbage']) {
         for (const human_only of ['no', 'yes']) {
-          const [label] = decide(verdict({ tier, decision, human_only })).split(' ');
-          expect(label, `${tier}/${decision}/${human_only}`).not.toBe('agent-ready');
+          checks.push(
+            decideAsync(verdict({ tier, decision, human_only })).then((out) => {
+              const [label] = out.split(' ');
+              expect(label, `${tier}/${decision}/${human_only}`).not.toBe('agent-ready');
+            }),
+          );
         }
       }
     }
+    await Promise.all(checks);
   });
 
   it('T3 WITHOUT an affirmative decision keeps the old tier hold (no blanket auto-specify)', () => {
@@ -135,6 +175,61 @@ describe('triage-decide.sh — deterministic triage gate', () => {
 
   it('needs-info still wins over the specify class at T3/T4', () => {
     expect(decide(verdict({ tier: 'T3', decision: 'needs-info' }))).toBe('needs-info dev info');
+  });
+
+  // #345 — the gate documents (lines 7-9) that it "fails CLOSED: any
+  // missing/garbled field downgrades to a human gate", but a MISSING
+  // human_only line previously fell through to `agent-ready` for a T1/T2
+  // agent-ready verdict instead of downgrading. Every other test in this
+  // file supplies human_only via verdict()'s default fill, so none of them
+  // exercised the field's actual absence — these two build the block by
+  // hand, omitting the line entirely.
+  it('MISSING human_only line fails closed to needs-review, hold human (#345)', () => {
+    const noHumanOnly = [
+      'TRIAGE_VERDICT_BEGIN',
+      'decision: agent-ready',
+      'role: dev',
+      'tier: T1',
+      'rationale: x',
+      'TRIAGE_VERDICT_END',
+    ].join('\n');
+    expect(decide(noHumanOnly)).toBe('needs-review dev human');
+  });
+
+  it('MISSING human_only line at T3 still fails closed (not agent-ready-specify either)', () => {
+    const noHumanOnly = [
+      'TRIAGE_VERDICT_BEGIN',
+      'decision: agent-ready',
+      'role: architect',
+      'tier: T3',
+      'rationale: x',
+      'TRIAGE_VERDICT_END',
+    ].join('\n');
+    expect(decide(noHumanOnly)).toBe('needs-review architect human');
+  });
+
+  it('garbled human_only value (neither yes/true nor no/false) also fails closed', () => {
+    expect(decide(verdict({ human_only: 'maybe', tier: 'T2', decision: 'agent-ready' }))).toBe(
+      'needs-review dev human',
+    );
+  });
+
+  it('--fields reports human_only=unknown for a missing line, not a false no or yes', () => {
+    const noHumanOnly = [
+      'TRIAGE_VERDICT_BEGIN',
+      'decision: agent-ready',
+      'role: dev',
+      'tier: T1',
+      'rationale: x',
+      'TRIAGE_VERDICT_END',
+    ].join('\n');
+    expect(fields(noHumanOnly)).toEqual({
+      label: 'needs-review',
+      role: 'dev',
+      hold: 'human',
+      tier: 'T1',
+      human_only: 'unknown',
+    });
   });
 
   it('the agent cannot ASSERT the specify class — T1/T2 + agent-ready-specify is not affirmative', () => {
@@ -176,22 +271,34 @@ describe('triage-decide.sh — deterministic triage gate', () => {
     expect(decide(noisy)).toBe('agent-ready dev none');
   });
 
-  it('label and hold are locked together — each affirmative label has exactly one hold', () => {
+  it('label and hold are locked together — each affirmative label has exactly one hold', async () => {
     // Exhaustive sweep: whatever the agent emits, an affirmative label and its
     // matching hold must travel together or not at all. Two pairs now exist, and
     // they must never cross: `agent-ready` goes with `none` (full build) and
     // `agent-ready-specify` with `specify` (spec only). A crossed pair would let the
     // dispatcher read one authority (the label) and the gate another (the hold).
+    //
+    // #1085 — fired concurrently (decideAsync), not serially: this loop is 60
+    // combinations, and running them one child-process at a time made the test's
+    // wall-clock cost the SUM of every spawn's latency, which is exactly what
+    // occasionally exceeded the shared 30s shell-test budget under full-suite load.
+    // See decideAsync above.
+    const checks: Promise<void>[] = [];
     for (const tier of ['T1', 'T2', 'T3', 'T4', 'T9', '']) {
       for (const decision of ['agent-ready', 'agent-ready-specify', 'needs-review', 'needs-info', 'garbage']) {
         for (const human_only of ['no', 'yes']) {
           const where = `${tier}/${decision}/${human_only}`;
-          const [label, , hold] = decide(verdict({ tier, decision, human_only })).split(' ');
-          expect(label === 'agent-ready', where).toBe(hold === 'none');
-          expect(label === 'agent-ready-specify', where).toBe(hold === 'specify');
+          checks.push(
+            decideAsync(verdict({ tier, decision, human_only })).then((out) => {
+              const [label, , hold] = out.split(' ');
+              expect(label === 'agent-ready', where).toBe(hold === 'none');
+              expect(label === 'agent-ready-specify', where).toBe(hold === 'specify');
+            }),
+          );
         }
       }
     }
+    await Promise.all(checks);
   });
 });
 
@@ -242,20 +349,35 @@ describe('triage-decide.sh --fields — the projection the verdict record is bui
     });
   });
 
-  it('the two projections never describe different decisions', () => {
+  it('the two projections never describe different decisions', async () => {
+    // #1085 — this test's original all-synchronous form fired 2 child-process spawns
+    // (decide + fields, and fields internally spawns one more) per combination × 30
+    // combinations = 60 spawns, one at a time. That made the test's wall-clock cost
+    // the SUM of every spawn's fork/exec latency, and under full-suite concurrent load
+    // that sum occasionally exceeded the shared 30s shell-test budget (#1099) — the
+    // one-off flake this fixes. The gate under test (triage-decide.sh) is pure: stdin
+    // in, stdout out, no temp files, no $PWD, no clock — so the non-determinism was in
+    // this harness, not the script, and the #983 invariant itself was never at risk.
+    // Firing the two projections concurrently (decideAsync/fieldsAsync) turns the
+    // test's exposure into roughly the slowest single spawn instead of the sum of 60.
+    const checks: Promise<void>[] = [];
     for (const tier of ['T1', 'T2', 'T3', 'T4', 'T9']) {
       for (const decision of ['agent-ready', 'needs-review', 'needs-info']) {
         for (const human_only of ['no', 'yes']) {
           const v = verdict({ tier, decision, human_only });
-          const [label, role, hold] = decide(v).split(' ');
-          const f = fields(v);
-          expect({ label, role, hold }, `${tier}/${decision}/${human_only}`).toEqual({
-            label: f.label,
-            role: f.role,
-            hold: f.hold,
-          });
+          checks.push(
+            Promise.all([decideAsync(v), fieldsAsync(v)]).then(([out, f]) => {
+              const [label, role, hold] = out.split(' ');
+              expect({ label, role, hold }, `${tier}/${decision}/${human_only}`).toEqual({
+                label: f.label,
+                role: f.role,
+                hold: f.hold,
+              });
+            }),
+          );
         }
       }
     }
+    await Promise.all(checks);
   });
 });

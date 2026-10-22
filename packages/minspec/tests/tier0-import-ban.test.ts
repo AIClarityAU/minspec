@@ -35,6 +35,7 @@
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 // Repo root (relative to THIS test file's location: packages/minspec/tests/).
@@ -186,21 +187,34 @@ describe('INV — Tier-0 network-import ban covers every classified workspace sr
         `Network imports found in packages/${rootName}/src:\n${violations.join('\n')}`,
       ).toHaveLength(0);
     });
-
-    it(`a planted network import in packages/${rootName}/src fails the check`, () => {
-      const canaryPath = path.join(srcDir, '__tier0_import_ban_canary__.ts');
-      expect(fs.existsSync(canaryPath), `canary file already exists at ${canaryPath}`).toBe(false);
-
-      fs.writeFileSync(canaryPath, "import * as https from 'https';\nexport {};\n", 'utf-8');
-      try {
-        const violations = scanForBannedImports(srcDir);
-        expect(
-          violations.some((v) => v.startsWith('__tier0_import_ban_canary__.ts:')),
-          `planted network import in packages/${rootName}/src was not detected:\n${violations.join('\n')}`,
-        ).toBe(true);
-      } finally {
-        fs.rmSync(canaryPath, { force: true });
-      }
-    });
   }
+
+  // Negative control: prove `scanForBannedImports` actually detects a planted
+  // violation. This must NOT write into a live, git-tracked `packages/*/src`
+  // tree (#1864) — a hard kill between the write and the `finally` below would
+  // otherwise strand a file containing a real banned import inside Tier-0
+  // source, ungitignored, and visible to any other test that walks
+  // `packages/*/src` concurrently in a separate vitest worker.
+  //
+  // `scanForBannedImports` is parameterised by root, so the fixture is a
+  // throwaway directory under `os.tmpdir()` instead. This only proves the
+  // regex/walk fires on a synthetic tree, not on the exact real tree it
+  // guards — the positive controls above (real packages/*/src, asserting a
+  // non-zero file count and zero violations) still cover that the real trees
+  // are actually being walked.
+  it('a planted network import in a fixture src tree fails the check', () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tier0-import-ban-canary-'));
+    try {
+      const canaryPath = path.join(fixtureRoot, '__tier0_import_ban_canary__.ts');
+      fs.writeFileSync(canaryPath, "import * as https from 'https';\nexport {};\n", 'utf-8');
+
+      const violations = scanForBannedImports(fixtureRoot);
+      expect(
+        violations.some((v) => v.startsWith('__tier0_import_ban_canary__.ts:')),
+        `planted network import in fixture tree was not detected:\n${violations.join('\n')}`,
+      ).toBe(true);
+    } finally {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
 });

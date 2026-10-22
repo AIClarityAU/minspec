@@ -16,6 +16,9 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+useShellTimeout();
 
 const SCRIPT = path.resolve(__dirname, '../../../scripts/remediate-pr.sh');
 const LIB = path.resolve(__dirname, '../../../scripts/lib/agent-egress.sh');
@@ -79,6 +82,102 @@ describe('remediate-pr.sh --classify: problem priority', () => {
   it('clean automation PR → skip-clean', () => {
     expect(classify('fix/x', 'MERGEABLE', 'CLEAN', '', 'no', 'no')).toBe('skip-clean');
     expect(classify('fix/x', 'MERGEABLE', 'BLOCKED', 'needs-human-review', 'no', 'no')).toBe('skip-clean');
+  });
+});
+
+// #1803: classify_pr's terminal fallthrough used to assert `skip-clean` — a POSITIVE
+// health claim — for ANY mergeStateStatus it didn't recognise, not just the genuinely
+// clean one. GitHub computes mergeStateStatus LAZILY, so a cold `gh pr view` routinely
+// returns UNKNOWN; with no arm for it, that fell through the same "everything else is
+// fine" default as BLOCKED/UNSTABLE/HAS_HOOKS/garbage. Constitution invariant 2
+// forbids exactly this: an unreadable or unrecognised witness must fail closed and
+// VISIBLY, never pass quietly as healthy. The fix makes CLEAN the only value that
+// still returns skip-clean, gives UNKNOWN its own non-terminal `retry-unknown` (the
+// call site re-polls once before trusting it — never a network call from --classify
+// itself), and turns the terminal default into an honest, explicitly-named
+// `skip-unhandled-state` rather than a silent health claim.
+describe('remediate-pr.sh --classify: an UNKNOWN merge state never asserts health (#1803)', () => {
+  it('reproduces the exact filed repro: UNKNOWN must NOT return skip-clean', () => {
+    expect(classify('agent/issue-1511', 'MERGEABLE', 'UNKNOWN', '', 'no', 'no')).not.toBe('skip-clean');
+  });
+
+  it('UNKNOWN with no other fixable problem → retry-unknown (non-terminal, not a health claim)', () => {
+    expect(classify('agent/issue-1511', 'MERGEABLE', 'UNKNOWN', '', 'no', 'no')).toBe('retry-unknown');
+  });
+
+  it('BEHIND is unaffected by the UNKNOWN fix (no regression)', () => {
+    expect(classify('agent/issue-1511', 'MERGEABLE', 'BEHIND', '', 'no', 'no')).toBe('rebase-only');
+  });
+
+  it('a genuinely clean PR still returns skip-clean (no regression)', () => {
+    expect(classify('fix/x', 'MERGEABLE', 'CLEAN', '', 'no', 'no')).toBe('skip-clean');
+  });
+
+  it('real check failures still outrank an UNKNOWN merge state (fix the code first)', () => {
+    expect(classify('fix/x', 'MERGEABLE', 'UNKNOWN', '', 'yes', 'no')).toBe('agent-remediate-checks');
+  });
+
+  it('a pending re-review still outranks an UNKNOWN merge state', () => {
+    expect(classify('fix/x', 'MERGEABLE', 'UNKNOWN', 'ai-review:changes', 'no', 'no')).toBe('agent-remediate-review');
+  });
+
+  it('an unrecognised/garbage merge state does not return skip-clean either', () => {
+    const result = classify('fix/x', 'MERGEABLE', 'SOME_FUTURE_GITHUB_VALUE', '', 'no', 'no');
+    expect(result).not.toBe('skip-clean');
+    expect(result).toBe('skip-unhandled-state');
+  });
+
+  it('a KNOWN-but-gated state is not "unrecognised" — BLOCKED keeps its skip-clean routing', () => {
+    // BLOCKED is GitHub's NORMAL mergeStateStatus while a merge-gating required check
+    // (ai-review) is still running: the merge is blocked precisely because the gate has
+    // not finished. Capturing it here would be a different bug from the one #1803 fixed
+    // — the guard is for states this classifier has never SEEN, not for states it knows
+    // are transient. See the FR-4 regression block below for the consequence.
+    expect(classify('fix/x', 'MERGEABLE', 'BLOCKED', 'needs-human-review', 'no', 'no')).toBe('skip-clean');
+  });
+});
+
+// PR #1813 blocking review finding — the #1803 guard OVER-REACHED. Making skip-clean
+// exclusive to CLEAN swept BLOCKED and UNSTABLE into skip-unhandled-state, but neither
+// is an unrecognised state: BLOCKED is what GitHub reports while a merge-gating
+// required check (ai-review) is still running, and UNSTABLE is what it reports while a
+// non-required one is. Both are routine on a freshly-pushed, perfectly healthy PR.
+// Routing them to skip-unhandled-state made the creator-shepherd stop polling its own
+// PR instead of waiting for ai-review to finish (SPEC-044 FR-4).
+//
+// The distinction #1803 actually turns on is UNKNOWN-or-never-seen vs known-transient,
+// so the guard must be an ALLOW-LIST of the documented mergeStateStatus values, not
+// "CLEAN or bust".
+describe('remediate-pr.sh --classify: known transient merge states are not "unhandled" (#1813)', () => {
+  it('BLOCKED while a merge-gating required check runs → skip-clean, so the shepherd keeps waiting', () => {
+    expect(classify('agent/issue-1813', 'MERGEABLE', 'BLOCKED', '', 'no', 'no')).toBe('skip-clean');
+  });
+
+  it('UNSTABLE (a non-required check in flight) → skip-clean, same reason', () => {
+    expect(classify('agent/issue-1813', 'MERGEABLE', 'UNSTABLE', '', 'no', 'no')).toBe('skip-clean');
+  });
+
+  it('HAS_HOOKS is a documented, mergeable state — also not "unhandled"', () => {
+    expect(classify('agent/issue-1813', 'MERGEABLE', 'HAS_HOOKS', '', 'no', 'no')).toBe('skip-clean');
+  });
+
+  it('DRAFT is documented too — nothing for this classifier to fix, but it is recognised', () => {
+    expect(classify('agent/issue-1813', 'MERGEABLE', 'DRAFT', '', 'no', 'no')).toBe('skip-clean');
+  });
+
+  it('a state GitHub has not documented yet is STILL not asserted healthy (#1803 preserved)', () => {
+    expect(classify('fix/x', 'MERGEABLE', 'SOME_FUTURE_GITHUB_VALUE', '', 'no', 'no')).toBe('skip-unhandled-state');
+    expect(classify('fix/x', 'MERGEABLE', '', '', 'no', 'no')).toBe('skip-unhandled-state');
+  });
+
+  it('UNKNOWN is STILL its own non-terminal retry, never skip-clean (#1803 preserved)', () => {
+    expect(classify('fix/x', 'MERGEABLE', 'UNKNOWN', '', 'no', 'no')).toBe('retry-unknown');
+  });
+
+  it('a real problem still outranks a known-transient state (priority unchanged)', () => {
+    expect(classify('fix/x', 'MERGEABLE', 'BLOCKED', '', 'yes', 'no')).toBe('agent-remediate-checks');
+    expect(classify('fix/x', 'MERGEABLE', 'UNSTABLE', '', 'no', 'yes')).toBe('agent-remediate-review');
+    expect(classify('fix/x', 'CONFLICTING', 'BLOCKED', '', 'no', 'no')).toBe('skip-conflict');
   });
 });
 
@@ -178,6 +277,76 @@ describe('remediate-pr.sh --classify: SPEC-044 owner gate (drain = orphan-fallba
     expect(() =>
       execFileSync('bash', [SCRIPT, '--classify', 'agent/issue-1', 'MERGEABLE'], { encoding: 'utf-8' }),
     ).toThrow();
+  });
+});
+
+// #1894 — a fork PR's headRefName means nothing against the BASE repo's `origin`:
+// resolving `origin/<headRefName>` there either fails harmlessly (no such branch) or,
+// when the base repo happens to have a same-named branch (ordinary under this repo's
+// fix/*, feat/*, agent/* conventions), silently pushes agent commits to that unrelated
+// branch while reporting success against the PR. `same_repo` is the pure comparison
+// the call site gates on before ever touching `origin/$BRANCH`.
+function checkSameRepo(headOwner: string, headRepo: string, baseRepo: string): boolean {
+  try {
+    execFileSync('bash', [SCRIPT, '--check-same-repo', headOwner, headRepo, baseRepo], { encoding: 'utf-8' });
+    return true;
+  } catch (e: any) {
+    if (e.status === 1) return false;
+    throw e;
+  }
+}
+
+describe('remediate-pr.sh --check-same-repo: fork-PR guard (#1894)', () => {
+  it('same owner and repo → true (the ordinary, same-repo PR)', () => {
+    expect(checkSameRepo('AIClarityAU', 'minspec', 'AIClarityAU/minspec')).toBe(true);
+  });
+
+  it('a different owner (a fork) → false, even when the repo NAME matches', () => {
+    expect(checkSameRepo('someoutsidecontributor', 'minspec', 'AIClarityAU/minspec')).toBe(false);
+  });
+
+  it('a different repo name under the same owner → false', () => {
+    expect(checkSameRepo('AIClarityAU', 'minspec-fork', 'AIClarityAU/minspec')).toBe(false);
+  });
+
+  it('is case-insensitive, matching GitHub login/repo-name semantics', () => {
+    expect(checkSameRepo('aiclarityau', 'MinSpec', 'AIClarityAU/minspec')).toBe(true);
+  });
+
+  it('an empty/unresolved head owner or repo name → false, never guessed as a match', () => {
+    expect(checkSameRepo('', 'minspec', 'AIClarityAU/minspec')).toBe(false);
+    expect(checkSameRepo('AIClarityAU', '', 'AIClarityAU/minspec')).toBe(false);
+  });
+
+  it('rejects a malformed arity rather than guessing', () => {
+    expect(() =>
+      execFileSync('bash', [SCRIPT, '--check-same-repo', 'AIClarityAU', 'minspec'], { encoding: 'utf-8' }),
+    ).toThrow();
+  });
+});
+
+describe('remediate-pr.sh: the fork-PR guard is wired into the main flow (#1894)', () => {
+  const code = fs.readFileSync(SCRIPT, 'utf-8');
+
+  it('requests headRepository and headRepositoryOwner from the PR fetch — the exact filed repro (`grep headRepository` used to return nothing)', () => {
+    expect(code).toMatch(/--json number,state,isDraft,headRefName,headRepository,headRepositoryOwner,/);
+  });
+
+  it('calls same_repo before the worktree is ever created against origin/$BRANCH', () => {
+    const guardIdx = code.indexOf('if ! same_repo "$HEAD_OWNER" "$HEAD_REPO_NAME" "$REPO"');
+    const worktreeIdx = code.indexOf('git worktree add --detach "$WORKTREE" "origin/${BRANCH}"');
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(worktreeIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeLessThan(worktreeIdx);
+  });
+
+  it('refuses silently-wrong (side-effect-free exit 0), never a network write, on mismatch', () => {
+    const guardBlock = code.slice(
+      code.indexOf('if ! same_repo "$HEAD_OWNER" "$HEAD_REPO_NAME" "$REPO"'),
+      code.indexOf('if ! same_repo "$HEAD_OWNER" "$HEAD_REPO_NAME" "$REPO"') + 400,
+    );
+    expect(guardBlock).toMatch(/exit 0/);
+    expect(guardBlock).not.toMatch(/git push|gh pr edit|gh label create/);
   });
 });
 

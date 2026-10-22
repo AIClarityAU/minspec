@@ -39,7 +39,26 @@ const SCAN_ROOTS = ['docs', 'README.md', 'CLAUDE.md'];
  */
 const EXCLUDE = new Set(['docs/decisions/INDEX.md']);
 
-/** Parent-range DR tokens — anything DR-100+ is outside the local register. */
+/**
+ * Parent-range DR tokens — anything DR-100+ is outside the local register.
+ *
+ * SECOND, UNINTENDED JOB (since #2051). This predicate is now the only thing in
+ * the repo that reacts to a global-register number minted into the LOCAL
+ * register (the #41 / DR-362 class): a leaked record's own heading line is a
+ * DR-100+ token with no attribution, so this gate fails on it. Rule 6 in
+ * scripts/validate-frontmatter.ts used to report that class and no longer does,
+ * and the id-collision gate never did — a leaked number is free, not duplicated,
+ * so `decideDrIdCollision` returns ok:true on it.
+ *
+ * Two limits, both measured, before anyone relies on that: it matches line TEXT,
+ * so a title containing an attributing word ("global", "parent register",
+ * "mmo-platform") slips past; and the floor is DR-100 while main tops out at
+ * DR-093, so the first legitimate local DR-100 turns this gate RED on correct
+ * work. Raising the floor or dropping the rule is therefore also a decision
+ * about the leak class — make it deliberately, not as a way to clear a red.
+ * That boundary is tracked as #2148 (the DR-100 red on the parent-register
+ * gate), which lays out the options and what each one costs.
+ */
 const PARENT_DR = /DR-([1-9]\d{2,})/g;
 
 /**

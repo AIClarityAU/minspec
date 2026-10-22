@@ -20,6 +20,11 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/docs-corpus.sh"
 CORPUS="$DOCS_CORPUS_RE"
 
+# The lane's SECOND arming precondition (#1847, #2078): no governance status
+# transition. Corpus membership alone is not eligibility — see the check right
+# before the commit below (#2158).
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/governance-transition.sh"
+
 # The docs-lane PR this opens is an AGENT write, so it must carry the bot's
 # identity rather than the human's (#1355). Acquiring the token is LAZY: this
 # only arms a `gh` wrapper, and the mint (or a loud abort) happens at the first
@@ -106,6 +111,41 @@ if git -C "$wt" diff --cached --quiet; then
   echo "push-docs: no delta vs origin/main — nothing to push" >&2
   exit 0
 fi
+
+# ── GOVERNANCE STATUS-TRANSITION CHECK (#2158) ──────────────────────────────
+# Corpus membership (CORPUS above) is only the lane's FIRST arming precondition.
+# Its second is that the diff not change a `status:` line under docs/decisions/
+# or specs/ — a DR acceptance or spec approval is a human act (DR-029, DR-086
+# §2) and the lane refuses it with `exit 1`, REVOKING any earlier arming. Before
+# this check, push-docs.sh applied the `docs-lane` label unconditionally, so it
+# opened a PR the lane was guaranteed to refuse — a manufactured red that reads
+# like a defect rather than "this needs a human".
+#
+# Mirrors laneLabelsFor's WITHHOLD-the-label direction
+# (packages/minspec/src/lib/approval-pr.ts), not an outright refusal to push:
+# the change is still real and still needs to land, just via a human merge
+# keystroke rather than the auto-merging lane. `git -C "$wt" diff --cached`
+# reads the SAME staged content the lane's status gate would see, one file at a
+# time, so a failing `git diff` here aborts the whole script (`set -euo
+# pipefail`) rather than silently reading as "no transition" (constitution
+# invariant 2 — no silent gate).
+status_hits=()
+for f in "${files[@]}"; do
+  [[ "$f" =~ $GOVERNANCE_PATH_RE ]] || continue
+  diff_text="$(git -C "$wt" diff --cached -- "$f")"
+  if grep -qE "$STATUS_TRANSITION_RE" <<<"$diff_text"; then
+    status_hits+=("$f")
+  fi
+done
+label_args=(--label docs-lane)
+if [ "${#status_hits[@]}" -gt 0 ]; then
+  echo "push-docs: NOT labelling docs-lane — governance status transition in: ${status_hits[*]}" >&2
+  echo "push-docs: accepting a DR or approving a spec is a human act (DR-029, DR-086 §2);" >&2
+  echo "push-docs: the docs-lane would refuse this PR with exit 1 (#1847). Opening it" >&2
+  echo "push-docs: un-labelled instead, for an ordinary human merge." >&2
+  label_args=()
+fi
+
 # DR_INDEX_GATE_OFF=1 (NOT --no-verify): the ephemeral worktree has no node_modules /
 # built @aiclarity/shared, so ONLY .githooks/pre-commit's `npm run validate` step crashes
 # on module load. That step has this dedicated kill-switch, and it is the right scope —
@@ -139,8 +179,13 @@ if [ "${#pr_title}" -gt 256 ]; then
   pr_title="$truncated"
 fi
 
-lane_note="Docs-only change via the **docs-lane** (auto-merges once green; ai-review still runs). Files:
+if [ "${#status_hits[@]}" -gt 0 ]; then
+  lane_note="**Not labelled for the docs-lane** — this PR changes a \`status:\` line in: $(printf '\`%s\`, ' "${status_hits[@]}" | sed 's/, $//'). Accepting a DR or approving a spec is a **human act** (DR-029, DR-086 §2), so the lane refuses it by design (#1847). This needs a human merge keystroke (#2158). Files:
 $(printf -- '- \`%s\`\n' "${files[@]}")"
+else
+  lane_note="Docs-only change via the **docs-lane** (auto-merges once green; ai-review still runs). Files:
+$(printf -- '- \`%s\`\n' "${files[@]}")"
+fi
 if [ -n "$pr_rest" ]; then
   pr_body="$pr_rest
 
@@ -155,13 +200,23 @@ fi
 # loudly and hand back the exact command to finish it by hand, rather than
 # `set -e` killing the script on a bare failed command substitution.
 if pr_url="$(gh pr create --repo "$slug" --base main --head "$branch" \
-  --title "$pr_title" --label docs-lane --body "$pr_body")"; then
+  --title "$pr_title" "${label_args[@]}" --body "$pr_body")"; then
   echo "push-docs: opened $pr_url"
-  echo "push-docs: docs-lane workflow will verify docs-only + enable auto-merge."
+  if [ "${#status_hits[@]}" -eq 0 ]; then
+    echo "push-docs: docs-lane workflow will verify docs-only + enable auto-merge."
+  else
+    echo "push-docs: not labelled — this PR needs a human merge (#2158)."
+  fi
 else
   echo "push-docs: PR creation FAILED, but the branch was already pushed to origin — it is not lost, finish it by hand:" >&2
   echo "push-docs:   branch: $branch" >&2
-  printf 'push-docs:   gh pr create --repo %q --base main --head %q --title %q --label docs-lane --body %q\n' \
-    "$slug" "$branch" "$pr_title" "$pr_body" >&2
+  if [ "${#status_hits[@]}" -eq 0 ]; then
+    printf 'push-docs:   gh pr create --repo %q --base main --head %q --title %q --label docs-lane --body %q\n' \
+      "$slug" "$branch" "$pr_title" "$pr_body" >&2
+  else
+    printf 'push-docs:   gh pr create --repo %q --base main --head %q --title %q --body %q\n' \
+      "$slug" "$branch" "$pr_title" "$pr_body" >&2
+    echo "push-docs:   (no --label: a governance status transition needs a human merge, #2158)" >&2
+  fi
   exit 1
 fi

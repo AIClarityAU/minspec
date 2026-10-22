@@ -208,8 +208,21 @@ ISSUE_BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '"# " + .title + "\n\n" + .body'
 # verdictAt rather than by position — so a stale record QUOTED inside a later trusted
 # comment cannot masquerade as the current verdict and turn a label flip into an
 # approval of a hold that is no longer live.
-RECORD="$(printf '%s' "$ISSUE_JSON" | "$READY_CHECK" --trusted-comment-bodies \
-  | "$READY_CHECK" --newest-record)"
+#
+# The two steps are taken one at a time so that the filter's exit status is seen. It
+# makes a read of GitHub, and when that read cannot be completed it prints nothing,
+# exactly as it does when there is no trusted comment. Piped straight on, that fault
+# would be BOUNCED below as "carries no triage verdict record": the label taken off and
+# a comment posted saying so, on an issue whose record is intact. Any status but 0 is
+# NO ANSWER (dispatch-ready-check.sh says which). It fails closed, visibly, and writes
+# nothing to the issue, like the failed fetch above.
+TRUSTED_FILTER_STATUS=0
+TRUSTED_BODIES="$(printf '%s' "$ISSUE_JSON" | "$READY_CHECK" --trusted-comment-bodies)" || TRUSTED_FILTER_STATUS=$?
+if (( TRUSTED_FILTER_STATUS != 0 )); then
+  say "ERROR: which of #${ISSUE}'s comments are trusted could not be established (the comment filter left with status ${TRUSTED_FILTER_STATUS}; its own line above says why). That is a fault of the machine or the network, not a finding about the issue: its verdict record was not read. Failing closed: nothing was approved, and nothing was written to the issue. Re-run this job."
+  exit 1
+fi
+RECORD="$(printf '%s\n' "$TRUSTED_BODIES" | "$READY_CHECK" --newest-record)"
 
 if [[ -z "$RECORD" ]]; then
   bounce "This issue carries no triage verdict record, so there is no hold to approve — and an approval that is not OF a verdict would be a second admission lane that skips triage entirely (#983)." \

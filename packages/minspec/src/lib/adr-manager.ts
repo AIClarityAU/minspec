@@ -4,7 +4,9 @@ import * as crypto from 'crypto';
 import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from './config';
 import { slugify } from './spec-manager';
 import { epicRefValue } from './epic-manager';
-import { inspectAllStatusClaims } from './status-parity';
+import { inspectAllStatusClaims, claimParagraphText } from './status-parity';
+import { ensureDirectory } from './opt-in';
+import { prepareText, readDocument, readDocumentText, restoreLineEndings } from './text-io';
 export { slugify };
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -128,7 +130,7 @@ export function formatAdrId(num: number): string {
 // ─── DR Sequence Validation (issue #41) ──────────────────────────────────────
 
 /** Kind of local-sequence anomaly a DR file can exhibit. */
-export type DrSequenceWarningKind = 'gap' | 'duplicate' | 'padding';
+export type DrSequenceWarningKind = 'duplicate' | 'padding';
 
 /**
  * A non-fatal warning about the local DR-NNN numbering sequence.
@@ -139,8 +141,8 @@ export interface DrSequenceWarning {
   /** The DR number this warning concerns. */
   readonly number: number;
   /**
-   * The DR file name(s) implicated. Empty for `gap` (no file exists for a
-   * missing number); one entry for `padding`; two-plus for `duplicate`.
+   * The DR file name(s) implicated: one entry for `padding`, two-plus for
+   * `duplicate`. Never empty — every kind names a file that exists.
    */
   readonly files: readonly string[];
   /** Human-readable, single-line explanation with a suggested action. */
@@ -276,7 +278,8 @@ export function validateDrAmendments(decisionsDir: string): DrAmendmentGap[] {
     // next DR the extension created.
     const id = `DR-${match[1]}`;
     try {
-      bodies.set(id, fs.readFileSync(path.join(decisionsDir, entry), 'utf-8'));
+      // Prepared (SPEC-095): a CRLF record's frontmatter claims are read like an LF one's.
+      bodies.set(id, readDocumentText(path.join(decisionsDir, entry)));
     } catch {
       // Unreadable file — skip it rather than fail the whole scan.
     }
@@ -286,7 +289,7 @@ export function validateDrAmendments(decisionsDir: string): DrAmendmentGap[] {
   const seen = new Set<string>();
 
   for (const [source, body] of [...bodies].sort(([a], [b]) => a.localeCompare(b))) {
-    if (!/^status:\s*accepted\s*$/m.test(body)) continue;
+    if (!/^status:[ \t]*accepted\s*$/m.test(body)) continue;
 
     /**
      * Record one claim, wherever it was written. Prose and frontmatter both funnel
@@ -370,23 +373,29 @@ const ADR_MIN_PAD_WIDTH = 3;
  * Scan the decisions directory and report local DR-NNN sequence anomalies.
  *
  * Pure, offline, Tier-0 (DR-004): only reads file names — no frontmatter, no
- * network, no AI. Catches the DR-362 class of error (a global-register number
- * minted into a project-local register) after the fact, which `nextAdrNumber`
- * — correct by construction — cannot.
+ * network, no AI. It therefore asserts ONLY about ids in front of it: a number
+ * absent from the run is not reported, because under worktree-per-session
+ * (#168) that number is usually held by an open pull request this scan cannot
+ * see. Dropping that `gap` rule (#2051) gave up REPORTING the DR-362 class here
+ * (a global-register number minted into a project-local register); it was firing
+ * on correct work far more often than it caught a leak. The class is not
+ * undetected: `parent-register-refs.test.ts` fails fatally on a DR-100+ token
+ * that carries no parent-register attribution, which a leaked record's own
+ * heading line supplies. That witness is incidental rather than designed — it
+ * matches line text, so an attributing word in the title slips past it, and its
+ * floor is DR-100, which this register will reach.
  *
  * Reuses `ADR_FILE_RE` so it sees exactly the files `listAdrs` treats as DRs.
  *
  * Warning kinds:
- *  - `gap`       — a number in `1..max` with no DR file (e.g. DR-010 → DR-362
- *                  leaves 11..361 as gaps).
  *  - `duplicate` — two or more files sharing one DR number.
  *  - `padding`   — an id not zero-padded to at least 3 digits (e.g. `DR-1`).
  *
- * A clean, contiguous, properly-padded run (and the empty/single/non-DR-only
- * cases) returns `[]`.
+ * A properly-padded run with no repeated number returns `[]`, whether or not it
+ * is contiguous (as do the empty/single/non-DR-only cases).
  *
  * Determinism: warnings are sorted by `number`, then by kind in a fixed order
- * (gap, duplicate, padding) so identical inputs yield identical output.
+ * (duplicate, padding) so identical inputs yield identical output.
  *
  * @param decisionsDir Absolute path to the resolved decisions directory.
  */
@@ -439,34 +448,94 @@ export function validateDrSequence(decisionsDir: string): DrSequenceWarning[] {
     }
   }
 
-  // Gaps: every number in 1..max with no DR file. `max` is the highest number
-  // present (including any out-of-sequence jump), so a DR-010 → DR-362 leak
-  // surfaces 11..361 as gaps, flagging the leaked number itself.
-  const max = Math.max(...byNumber.keys());
-  for (let n = 1; n < max; n++) {
-    if (!byNumber.has(n)) {
-      warnings.push({
-        kind: 'gap',
-        number: n,
-        files: [],
-        message:
-          `${formatAdrId(n)} is missing — the sequence jumps over it. ` +
-          `Renumber the out-of-sequence DR to close the gap.`,
-      });
-    }
-  }
+  // NO gap rule (#2051). A number absent from `1..max` was reported here as
+  // "the sequence jumps over it. Renumber the out-of-sequence DR to close the
+  // gap." That instruction is wrong whenever the id is claimed by an open pull
+  // request — the normal state under worktree-per-session (#168) — and this
+  // scan cannot see open PRs, so it could not tell the two apart. Cross-PR id
+  // truth lives in `scripts/check-dr-id-collision.ts`, which does see them.
+  // Do not reinstate a gap check here: no input available to a Tier-0 offline
+  // directory walk can distinguish a leaked number from an id in flight.
 
-  // Deterministic order: by number, then gap < duplicate < padding.
+  // Deterministic order: by number, then duplicate < padding.
   const kindOrder: Record<DrSequenceWarningKind, number> = {
-    gap: 0,
-    duplicate: 1,
-    padding: 2,
+    duplicate: 0,
+    padding: 1,
   };
   warnings.sort((a, b) =>
     a.number !== b.number ? a.number - b.number : kindOrder[a.kind] - kindOrder[b.kind],
   );
 
   return warnings;
+}
+
+/**
+ * A decision/epic record carrying TWO frontmatter-shaped `---` blocks back to
+ * back (#2467).
+ */
+export interface DoubledFrontmatterFinding {
+  /** 1-indexed line of the FIRST block's closing `---`. */
+  readonly firstBlockEndLine: number;
+  /** 1-indexed line of the SECOND block's opening `---`, directly after the first. */
+  readonly secondBlockStartLine: number;
+}
+
+/** A YAML-shaped top-level line: `key: value` (or `key:` alone). */
+const YAML_KEY_LINE_RE = /^[A-Za-z][A-Za-z0-9_-]*:[ \t]*\S/m;
+
+/** A `status:` frontmatter line, the concrete symptom this detector keys on. */
+const STATUS_KEY_LINE_RE = /^status[ \t]*:/m;
+
+/**
+ * Detect a decision/epic record whose body carries two frontmatter-shaped
+ * blocks in a row — the shape {@link setAdrStatus} produces when it is handed a
+ * record whose EXISTING block it could not parse (#2467): it synthesizes a
+ * fresh block and prepends it, leaving the original block as body text
+ * immediately below, complete with its own stale `status:` line. Nothing
+ * downstream notices: {@link listAdrs} reads only the first block, and the
+ * status-parity rule (status-parity.ts) compares frontmatter against a
+ * `## Status` section or a head blockquote — a stray body `status:` line is
+ * neither.
+ *
+ * Deliberately narrow (precision over recall, the same discipline as the
+ * dangling park-ref lint above): a bare `---` horizontal rule immediately
+ * followed by another `---` divider is legal markdown and must not
+ * false-positive as damage. So this fires only when BOTH blocks look like YAML
+ * (each carries at least one `key: value` line) AND at least one of the two
+ * carries a `status:` line — the concrete symptom (#2467 measured): two
+ * different status assertions surviving in one record.
+ *
+ * Pure — no fs. Returns `undefined` when the file has no doubled block.
+ */
+export function detectDoubledFrontmatter(content: string): DoubledFrontmatterFinding | undefined {
+  // Split on LF only, then fence-line comparisons tolerate a trailing CR
+  // (`isFence`). The real #2467 shape MIXES endings in one file: before SPEC-095,
+  // `setAdrStatus` prepended a freshly synthesized LF block ahead of an original
+  // block it could not parse because THAT block was CRLF (the #2397 damage), and
+  // files it damaged that way stay on disk. A plain `=== '---'` test matches the
+  // new block's fence but misses the old one's, whose lines end `---\r`.
+  const lines = content.split('\n');
+  const isFence = (line: string | undefined): boolean => line?.replace(/\r$/, '') === '---';
+  if (!isFence(lines[0])) return undefined;
+
+  let i = 1;
+  while (i < lines.length && !isFence(lines[i])) i++;
+  if (i >= lines.length) return undefined; // first block never closes
+
+  let j = i + 1;
+  while (j < lines.length && lines[j].trim() === '') j++;
+  if (j >= lines.length || !isFence(lines[j])) return undefined; // no second block directly after
+
+  let k = j + 1;
+  while (k < lines.length && !isFence(lines[k])) k++;
+  if (k >= lines.length) return undefined; // second block never closes
+
+  const block1 = lines.slice(1, i).join('\n');
+  const block2 = lines.slice(j + 1, k).join('\n');
+  if (!YAML_KEY_LINE_RE.test(block1) || !YAML_KEY_LINE_RE.test(block2)) return undefined;
+  if (!STATUS_KEY_LINE_RE.test(block1) && !STATUS_KEY_LINE_RE.test(block2)) return undefined;
+
+  return { firstBlockEndLine: i + 1, secondBlockStartLine: j + 1 };
 }
 
 // ─── ADR Template ───────────────────────────────────────────────────────────
@@ -517,7 +586,9 @@ export function generateAdrContent(id: string, title: string, date: string): str
  */
 export function createAdr(rootDir: string, title: string, vscodeOverrides?: { decisionsDir?: string }): AdrSummary {
   const decisionsDir = resolveDecisionsDir(rootDir, vscodeOverrides);
-  fs.mkdirSync(decisionsDir, { recursive: true });
+  // Through the shared guard (SPEC-096 FR-4): it will not create `.minspec/`,
+  // which closes the route where `minspec.decisionsDir` points inside it.
+  ensureDirectory(decisionsDir);
 
   const num = nextAdrNumber(decisionsDir);
   const id = formatAdrId(num);
@@ -543,7 +614,9 @@ export const ADR_STATUS_VALUES: readonly AdrStatus[] = [
 /** True if the ADR file already has a leading YAML frontmatter block. */
 export function adrHasFrontmatter(filePath: string): boolean {
   try {
-    return FRONTMATTER_RE.test(fs.readFileSync(filePath, 'utf-8'));
+    // Prepared (SPEC-095): a CRLF record has its frontmatter too. Reading it as "none" is
+    // what sent Accept Decision to its "predates MinSpec" prompt and a second block (#2397).
+    return FRONTMATTER_RE.test(readDocumentText(filePath));
   } catch {
     return false;
   }
@@ -591,15 +664,55 @@ function synthesizeAdrFrontmatter(filePath: string, content: string, status: Adr
 }
 
 /**
- * Rewrite the `status:` line in an ADR's frontmatter in place.
- * Adds the line if frontmatter exists but has no status field.
+ * A status line whose PROSE negates a status word — `**Proposed** … Not accepted …`.
  *
- * Pre-MinSpec DRs have no frontmatter at all, yet `listAdrs` deliberately
- * surfaces them into the picker (with a synthetic `proposed` status). To keep
- * the read and write paths symmetric (#201), synthesize and prepend a
- * frontmatter block from the filename + body rather than throwing.
- * Returns the updated status.
+ * `reconcileBodyStatus` swaps the token and cannot see the rest of the sentence. When
+ * that sentence was written to explain the OLD value, swapping inverts its meaning and
+ * produces a line asserting both, which is what accepting DR-088 did (#1833):
+ *
+ *     **Accepted** 2026-08-24. Not accepted, and an agent must never mint that.
+ *
+ * `npm run validate` PASSES on that text — the #626 parity rule compares the token to
+ * the frontmatter and both say `accepted`; nothing reads the clause after it. So the
+ * mechanism that keeps the gate green produced the exact false signpost the gate exists
+ * to prevent, silently.
+ *
+ * Deliberately narrow: NEGATION, not mere mention. Measured across the corpus, mere
+ * mention fires on 9 of 27 DRs — nearly all benign history ("Accepted 2026-08-05.
+ * Proposed 2026-06-23"), where swapping the token is correct. Negation fires on
+ * exactly 1: DR-088, the real defect. A rule that refused all 9 would block acceptance
+ * on a third of the corpus to catch one case.
+ *
+ * Returns the offending line (1-based) and its text, or null when safe to rewrite.
+ *
+ * #2180: tests the claim's whole PARAGRAPH (the claim line plus its wrapped continuation
+ * lines — see `claimParagraphText`), not just the single physical source line the claim
+ * happens to start on. This repo hard-wraps prose at ~90 columns, so a negation clause
+ * that lands on the SECOND physical line of a wrapped sentence was previously invisible to
+ * this check — a false clear caused by where the wrap broke, not by what the sentence said.
  */
+export function statusProseWouldInvert(
+  content: string,
+  _status: AdrStatus,
+): { line: number; text: string } | null {
+  const NEGATED =
+    /\b(not|never|no longer|neither|isn't|is not)\s+(yet\s+)?(proposed|accepted|deprecated|superseded)\b/i;
+  for (const c of inspectAllStatusClaims(content, 'dr')) {
+    if (c.kind !== 'comparable') continue;
+    const paragraph = claimParagraphText(content, c.line);
+    // Strip the way the READER identifies the token: blockquote / `Status:` prefix,
+    // leading emphasis, then the first word. What remains is the prose.
+    const stripped = paragraph
+      .replace(/^>\s*/, '')
+      .replace(/^[*_]{0,2}Status:\s*/i, '')
+      .replace(/^[*_]+/, '');
+    const m = stripped.match(/^([A-Za-z]+)/);
+    const rest = m ? stripped.slice(m[0].length) : stripped;
+    if (NEGATED.test(rest)) return { line: c.line, text: paragraph.trim() };
+  }
+  return null;
+}
+
 /**
  * Reconcile every body status claim with `status`, and return the new content.
  *
@@ -621,51 +734,6 @@ function synthesizeAdrFrontmatter(filePath: string, content: string, status: Adr
  * `unparseable` lines are returned untouched, because silently rewording a hand-authored
  * rationale is a worse failure than a caught parity error.
  */
-/**
- * A status line whose PROSE negates a status word — `**Proposed** … Not accepted …`.
- *
- * `reconcileBodyStatus` swaps the token and cannot see the rest of the sentence. When
- * that sentence was written to explain the OLD value, swapping inverts its meaning and
- * produces a line asserting both, which is what accepting DR-088 did (#1833):
- *
- *     **Accepted** 2026-08-24. Not accepted, and an agent must never mint that.
- *
- * `npm run validate` PASSES on that text — the #626 parity rule compares the token to
- * the frontmatter and both say `accepted`; nothing reads the clause after it. So the
- * mechanism that keeps the gate green produced the exact false signpost the gate exists
- * to prevent, silently.
- *
- * Deliberately narrow: NEGATION, not mere mention. Measured across the corpus, mere
- * mention fires on 9 of 27 DRs — nearly all benign history ("Accepted 2026-08-05.
- * Proposed 2026-06-23"), where swapping the token is correct. Negation fires on
- * exactly 1: DR-088, the real defect. A rule that refused all 9 would block acceptance
- * on a third of the corpus to catch one case.
- *
- * Returns the offending line (1-based) and its text, or null when safe to rewrite.
- */
-export function statusProseWouldInvert(
-  content: string,
-  _status: AdrStatus,
-): { line: number; text: string } | null {
-  const NEGATED =
-    /\b(not|never|no longer|neither|isn't|is not)\s+(yet\s+)?(proposed|accepted|deprecated|superseded)\b/i;
-  const lines = content.split('\n');
-  for (const c of inspectAllStatusClaims(content, 'dr')) {
-    if (c.kind !== 'comparable') continue;
-    const raw = lines[c.line - 1] ?? '';
-    // Strip the way the READER identifies the token: blockquote / `Status:` prefix,
-    // leading emphasis, then the first word. What remains is the prose.
-    const stripped = raw
-      .replace(/^>\s*/, '')
-      .replace(/^[*_]{0,2}Status:\s*/i, '')
-      .replace(/^[*_]+/, '');
-    const m = stripped.match(/^([A-Za-z]+)/);
-    const rest = m ? stripped.slice(m[0].length) : stripped;
-    if (NEGATED.test(rest)) return { line: c.line, text: raw.trim() };
-  }
-  return null;
-}
-
 export function reconcileBodyStatus(content: string, status: AdrStatus): string {
   const claims = inspectAllStatusClaims(content, 'dr');
   const targets = claims.filter((c): c is { kind: 'comparable'; token: string; line: number } =>
@@ -697,17 +765,31 @@ export function reconcileBodyStatus(content: string, status: AdrStatus): string 
   return lines.join('\n');
 }
 
+/**
+ * Rewrite the `status:` line in an ADR's frontmatter in place.
+ * Adds the line if frontmatter exists but has no status field.
+ *
+ * Pre-MinSpec DRs have no frontmatter at all, yet `listAdrs` deliberately
+ * surfaces them into the picker (with a synthetic `proposed` status). To keep
+ * the read and write paths symmetric (#201), synthesize and prepend a
+ * frontmatter block from the filename + body rather than throwing.
+ * Returns the updated status.
+ *
+ * SPEC-095: the record is read through `text-io` and written back in the line endings it
+ * had. A CRLF record used to fail the frontmatter pattern and take the synthesize branch,
+ * which put an LF block in front of a block that still said `proposed` (#2397).
+ */
 export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   if (!ADR_STATUSES.has(status)) {
     throw new Error(`Invalid ADR status: ${status}`);
   }
-  const content = fs.readFileSync(filePath, 'utf-8');
+  const { text: content, original } = readDocument(filePath);
   const fmMatch = content.match(FRONTMATTER_RE);
   if (!fmMatch) {
     // No frontmatter — synthesize one and prepend it, preserving the body
     // verbatim (only collapsing leading blank lines before the heading).
     const block = `---\n${synthesizeAdrFrontmatter(filePath, content, status)}\n---`;
-    fs.writeFileSync(filePath, `${block}\n\n${content.replace(/^\s*\n+/, '')}`, 'utf-8');
+    fs.writeFileSync(filePath, restoreLineEndings(`${block}\n\n${content.replace(/^\s*\n+/, '')}`, original), 'utf-8');
     return status;
   }
 
@@ -721,18 +803,27 @@ export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
         `negates a status word, so rewriting the token would invert the sentence.\n\n` +
         `  line ${inverts.line}: ${inverts.text}\n\n` +
         `Reword that line so it reads correctly under the new status, then retry. ` +
-        `(Accepting DR-088 produced "**Accepted** … Not accepted …" this way — validation ` +
-        `passes on it, because the parity rule reads only the token.)`,
+        `(This is the failure shape #1833 exists to catch: a status line whose prose ` +
+        `negates the token beside it — e.g. "**Accepted** … Not accepted …" — passes ` +
+        `validation anyway, because the parity rule reads only the token, never the ` +
+        `clause after it. No specific DR is cited here because that citation drifts: ` +
+        `the corpus DR that first triggered this rule has since been corrected and no ` +
+        `longer illustrates it — see #2074.)`,
     );
   }
 
   const yaml = fmMatch[1];
-  const statusLineRe = /^([ \t]*)status[ \t]*:[ \t]*.*$/m;
+  // Anchored to column 0 (#2149) — a non-anchored, non-global match on ANY
+  // indent would rewrite the FIRST `status:` line regardless of nesting,
+  // silently leaving a top-level key untouched if a nested `status:`
+  // preceded it. Anchoring makes writer and validator target the same line
+  // by construction, rather than relying on house key order.
+  const statusLineRe = /^status[ \t]*:[ \t]*.*$/m;
   let newYaml: string;
   if (statusLineRe.test(yaml)) {
-    // `$1` keeps the captured indent; the value is escaped so a literal `$`
-    // in it is never read as a replacement pattern (#152).
-    newYaml = yaml.replace(statusLineRe, `$1status: ${escapeReplacement(status)}`);
+    // The value is escaped so a literal `$` in it is never read as a
+    // replacement pattern (#152).
+    newYaml = yaml.replace(statusLineRe, `status: ${escapeReplacement(status)}`);
   } else {
     newYaml = `${yaml}\nstatus: ${status}`;
   }
@@ -743,7 +834,7 @@ export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   const updated = content.replace(FRONTMATTER_RE, () => block);
   // #1624 — the body's `## Status` section is the third place this status lives.
   // Writing only the frontmatter here is what broke parity on every acceptance.
-  fs.writeFileSync(filePath, reconcileBodyStatus(updated, status), 'utf-8');
+  fs.writeFileSync(filePath, restoreLineEndings(reconcileBodyStatus(updated, status), original), 'utf-8');
   return status;
 }
 
@@ -883,12 +974,15 @@ interface ExistingSummary {
  * Pull the existing per-entry summary block for `id` out of a prior INDEX.md.
  * Returns the visible text plus the recorded auto-fingerprint, or null when the
  * entry (or its markers) is absent — e.g. a legacy INDEX from before #191.
+ *
+ * Prepares its input itself (SPEC-095 FR-2): the pattern needs LF after each marker, and a
+ * caller outside the extension can hand it an INDEX read as it was on disk.
  */
 export function extractExistingSummary(existingIndex: string, id: string): ExistingSummary | null {
   const re = new RegExp(
     `${escapeRegex(`<!-- dr-summary:${id} auto=`)}([0-9a-f]+)${escapeRegex(' -->')}\\n([\\s\\S]*?)\\n${escapeRegex(summaryCloseMarker(id))}`,
   );
-  const m = existingIndex.match(re);
+  const m = prepareText(existingIndex).match(re);
   if (!m) return null;
   return { autoHash: m[1], text: m[2].trim() };
 }
@@ -918,7 +1012,8 @@ export function renderDrEntry(
 ): string {
   let body = '';
   try {
-    const content = fs.readFileSync(summary.filePath, 'utf-8');
+    // Prepared (SPEC-095): a CRLF record's frontmatter is not mistaken for its summary.
+    const content = readDocumentText(summary.filePath);
     const fmMatch = content.match(FRONTMATTER_RE);
     body = fmMatch ? content.slice(fmMatch[0].length) : content;
   } catch {
@@ -999,8 +1094,18 @@ export function buildDrIndexContent(
  *  - If markers exist: replace content between them.
  *  - If markers absent and file is empty/missing/legacy-table-only: full replace.
  *  - Otherwise: prepend markered block; preserve existing user content below.
+ *
+ * SPEC-095 FR-2/FR-3: the merge works on the LF form of `existing`, and the result is given
+ * the line endings `existing` had, so the user's lines keep theirs. A missing INDEX is a
+ * new file and is written LF (FR-5).
  */
 export function mergeDrIndex(existing: string | null, autoContent: string): string {
+  if (existing === null) return mergeDrIndexText(null, autoContent);
+  return restoreLineEndings(mergeDrIndexText(prepareText(existing), autoContent), existing);
+}
+
+/** {@link mergeDrIndex} on LF text. */
+function mergeDrIndexText(existing: string | null, autoContent: string): string {
   const wrapped = `${INDEX_MARKER_START}\n${autoContent.trimEnd()}\n${INDEX_MARKER_END}\n`;
 
   if (existing === null || existing.trim() === '') {
@@ -1051,10 +1156,12 @@ export function regenerateDrIndex(
   options: DrIndexOptions = {},
 ): DrIndexResult {
   const decisionsDir = resolveDecisionsDir(rootDir, vscodeOverrides);
-  fs.mkdirSync(decisionsDir, { recursive: true });
+  ensureDirectory(decisionsDir); // SPEC-096 FR-4: never creates `.minspec/`
 
   const indexPath = path.join(decisionsDir, 'INDEX.md');
-  const existing = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, 'utf-8') : null;
+  // Read through `text-io` and written back in its own line endings (SPEC-095).
+  const prior = fs.existsSync(indexPath) ? readDocument(indexPath) : null;
+  const existing = prior ? prior.text : null;
 
   // Thread the prior INDEX through so per-entry curated summaries survive (#191).
   const { content, count } = buildDrIndexContent(
@@ -1065,7 +1172,7 @@ export function regenerateDrIndex(
   );
 
   const merged = mergeDrIndex(existing, content);
-  fs.writeFileSync(indexPath, merged, 'utf-8');
+  fs.writeFileSync(indexPath, prior ? restoreLineEndings(merged, prior.original) : merged, 'utf-8');
 
   return { filePath: indexPath, count };
 }
@@ -1133,7 +1240,8 @@ export function validateDrIndexStatus(decisionsDir: string): DrIndexStatusDrift[
   const indexPath = path.join(decisionsDir, 'INDEX.md');
   if (!fs.existsSync(indexPath)) return [];
 
-  const indexContent = fs.readFileSync(indexPath, 'utf-8');
+  // Both reads prepared (SPEC-095): a CRLF record is not reported as `proposed`.
+  const indexContent = readDocumentText(indexPath);
   const drifts: DrIndexStatusDrift[] = [];
   const seen = new Set<string>();
 
@@ -1148,7 +1256,7 @@ export function validateDrIndexStatus(decisionsDir: string): DrIndexStatusDrift[
 
     let fileStatus = 'proposed';
     try {
-      const content = fs.readFileSync(path.join(decisionsDir, entry), 'utf-8');
+      const content = readDocumentText(path.join(decisionsDir, entry));
       const fmMatch = content.match(FRONTMATTER_RE);
       if (fmMatch) {
         const fm = parseFrontmatterYaml(fmMatch[1]);
@@ -1290,7 +1398,9 @@ export function listAdrs(rootDir: string, vscodeOverrides?: { decisionsDir?: str
       const stat = fs.statSync(filePath);
       if (!stat.isFile()) continue;
 
-      const content = fs.readFileSync(filePath, 'utf-8');
+      // Prepared (SPEC-095): on a CRLF checkout every record read as `proposed`, so the
+      // signpost offered to accept decisions that were already accepted (#2397).
+      const content = readDocumentText(filePath);
       const fmMatch = content.match(FRONTMATTER_RE);
       if (!fmMatch) {
         // File has no frontmatter — derive a clean, humanized title from the

@@ -171,4 +171,55 @@ describe('#1833 — a status line whose prose negates a status word', () => {
       .filter((f) => statusProseWouldInvert(fs.readFileSync(path.join(dir, f), 'utf-8'), 'accepted'));
     expect(refused.length).toBeLessThanOrEqual(1);
   });
+
+  // #2074 — the refusal message once named a real corpus file ("Accepting DR-088
+  // produced …") as its worked example. DR-088 was later reworded and no longer
+  // illustrates the failure, leaving the message asserting a false state of the
+  // register — the exact signpost defect this gate exists to prevent (EPIC-002).
+  // Root cause: a hardcoded citation to a specific, mutable file, with nothing
+  // keeping the prose in sync with the corpus it named. The fix removes the
+  // citation rather than making it live (a live re-scan would cost I/O over the
+  // whole corpus on a path a user is waiting on) — so assert no future edit
+  // re-introduces a DR-id citation into this message.
+  // #2180 — the guard tested only lines[c.line - 1], the SINGLE physical source line a
+  // claim starts on. This repo hard-wraps prose at ~90 columns, so a negation clause that
+  // lands on the wrapped CONTINUATION line (rather than the line carrying the status word
+  // itself) was invisible to the NEGATED regex — a false clear caused by where the wrap
+  // broke, not by what the sentence said. Empirically verified before this fix: the exact
+  // sentence below, written as one physical line, was DETECTED; hard-wrapped after "is"
+  // (matching this repo's real wrap width), it returned null.
+  it('#2180 — a negation on a WRAPPED CONTINUATION line is still detected', () => {
+    const wrapped =
+      '---\nid: DR-094\nstatus: proposed\n---\n\n# DR-094\n\n## Status\n\n' +
+      '**Proposed** 2026-09-09, pending the founder review this record is\n' +
+      'not accepted yet and must not be treated as in force.\n\n## Context\n\nc\n';
+    const r = statusProseWouldInvert(wrapped, 'accepted');
+    expect(r).not.toBeNull();
+    expect(r!.text).toContain('not accepted yet');
+  });
+
+  it('#2074 — the refusal message never names a specific DR as its example', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dr1833-msg-'));
+    const f = path.join(dir, 'DR-999.md');
+    fs.writeFileSync(f, dr088('Proposed').replace(/DR-088/g, 'DR-999'));
+    try {
+      expect(() => setAdrStatus(f, 'accepted')).toThrow(/negates a status word/);
+      let message = '';
+      try {
+        setAdrStatus(f, 'accepted');
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      // The message legitimately names the FILE BEING REFUSED (`DR-999.md`, here) —
+      // that reference can't drift, because it always points at whatever file was
+      // just checked. What must never come back is a citation to a DIFFERENT,
+      // fixed corpus DR inside the explanatory clause (the trailing parenthetical),
+      // since that one drifts the moment the named file's own prose changes — which
+      // is exactly what happened to the old "Accepting DR-088 produced …" wording.
+      const explanatoryClause = message.slice(message.indexOf('Reword that line'));
+      expect(explanatoryClause).not.toMatch(/\bDR-\d+\b/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

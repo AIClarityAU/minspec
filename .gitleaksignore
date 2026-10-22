@@ -20,6 +20,27 @@
 #   so a trailing comment would break the command. Fingerprints here are line-bound and a
 #   generated file reshuffles them on every regeneration — brittle, tracked at
 #   minspec#1663 (replace these line-bound entries with a path-scoped allowlist regex).
+#
+# Class 1 addendum 2 (#1859, 2026-09-18) — and it reshuffled, exactly as predicted above.
+#   Annotating review-branch.sh for the DR-066 clause 1 lint changed one comment, which
+#   re-wrapped the whole embedded base64 blob and moved this finding from line 2292 to
+#   2758, and a second round of annotations moved it again to 2768 - three positions in
+#   one sitting. Note BOTH forms are needed and they are not interchangeable: the bare
+#   `path:rule:line` entry satisfies the pre-commit `gitleaks protect --staged`, while CI
+#   scans the whole PR range (`gitleaks git --log-opts=BASE..HEAD`) and matches only a
+#   COMMIT-PREFIXED fingerprint. Adding the bare one alone passes locally and fails in CI,
+#   which is how this was found. The commit-scoped entry goes inert after a squash merge —
+#   same as every other SHA-prefixed line in this file. It also goes stale on a REBASE,
+#   which rewrites the SHA — `strict: true` on main's ruleset means every PR must rebase
+#   before merging, so a commit-scoped entry on a live branch is guaranteed to need
+#   re-cutting at least once. Re-cut it with:
+#     gitleaks git . --log-opts="origin/main..HEAD" --redact --no-banner -v --exit-code=1 Re-triaged by decoding it: unchanged, and still the Class 1 shape above — an
+#   empty token assignment beside a variable REFERENCE, never a literal. (Described
+#   rather than quoted, because pasting the line into this file trips the scanner on
+#   this file, which is how the first attempt at this entry failed.) The 2292 entry is
+#   retired rather
+#   than kept, because a stale line-bound entry silently allowlists whatever moves into
+#   that line next. This is the third time #1663 has cost a triage; it is worth doing.
 3bae61f64ec84289bd501dbc55b057a377134bbe:sites/minspec.dev/index.html:generic-api-key:1086
 3bae61f64ec84289bd501dbc55b057a377134bbe:sites/minspec.dev/privacy.html:generic-api-key:115
 3dabade156ec34ef0cb51a5402a46de2190bb2fe:packages/minspec/tests/egress-scan.test.ts:generic-api-key:193
@@ -34,4 +55,5 @@ ca49f94c5485b75b069e30fafbf9134d853bdc96:scripts/review-branch.sh:generic-api-ke
 db2a36b5a0d699c8ee698fdd9951e877c6928b4b:packages/minspec/src/lib/ci-review-templates.ts:generic-api-key:1341
 f6a4f3ac737712754c6c18ad41f1cf51c3b9e5a8:sites/minspec.dev/index.html:generic-api-key:1086
 f6a4f3ac737712754c6c18ad41f1cf51c3b9e5a8:sites/minspec.dev/privacy.html:generic-api-key:115
-packages/minspec/src/lib/ci-review-templates.ts:generic-api-key:2292
+packages/minspec/src/lib/ci-review-templates.ts:generic-api-key:2768
+3221cfddad18dd79c69d91d447f73ecaf8d241c2:packages/minspec/src/lib/ci-review-templates.ts:generic-api-key:2758

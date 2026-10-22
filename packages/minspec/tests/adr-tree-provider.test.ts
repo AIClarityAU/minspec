@@ -35,7 +35,7 @@ vi.mock('vscode', () => ({
 
 import * as vscode from 'vscode';
 import { AdrGroupNode, AdrNode, AdrTreeProvider } from '../src/views/adr-tree-provider';
-import type { AdrSummary, AdrStatus } from '../src/lib/adr-manager';
+import type { AdrSummary } from '../src/lib/adr-manager';
 import type { ListAdrsFn } from '../src/views/adr-tree-provider';
 
 // --- Helpers ---
