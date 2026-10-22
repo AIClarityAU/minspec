@@ -1,7 +1,7 @@
 ---
 id: SPEC-140
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - concurrent multi-session coordination; the epic DR-065 (shared-checkout moves) belongs to
@@ -22,7 +22,7 @@ affects: [packages/minspec/src/commands/commit-on-approve.ts, packages/minspec/s
 phases:
   specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
