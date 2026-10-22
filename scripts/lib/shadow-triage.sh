@@ -484,9 +484,12 @@ shadow_block_conformant() {
   raw="$(cat)"
   block="$(printf '%s\n' "$raw" | sed -n '/TRIAGE_VERDICT_BEGIN/,/TRIAGE_VERDICT_END/p')"
   [[ -z "$block" ]] && return 1
-  printf '%s\n' "$block" | grep -q 'TRIAGE_VERDICT_END' || return 1
+  # Here-strings, not pipes: `grep -q` exits on first match, and under the caller's
+  # `set -o pipefail` a pipe writer that gets SIGPIPE (141) fails the pipeline, turning a
+  # conformant block into a spurious "non-conformant" (#2874).
+  grep -q 'TRIAGE_VERDICT_END' <<<"$block" || return 1
   for f in decision role tier human_only; do
-    printf '%s\n' "$block" | grep -qiE "^[[:space:]]*${f}[[:space:]]*:" || return 1
+    grep -qiE "^[[:space:]]*${f}[[:space:]]*:" <<<"$block" || return 1
   done
   return 0
 }

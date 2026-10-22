@@ -49,7 +49,12 @@
 #                                    builds and pull request remediation carry on, and
 #                                    each cycle says how many such issues it left.
 #                                    Default 1. Anything else is read as 0, and said so.
-#   MINSPEC_DRAIN_INTERVAL=1200    — seconds between cycles (default 20 min).
+#   MINSPEC_DRAIN_SPECIFY_MAX_HELD=10 — with spec-writing on, pause it for any cycle in
+#                                    which this many or more of the drain's own PRs
+#                                    (`agent/issue-*`) sit at `needs-human-review` (#2939).
+#                                    An unreadable count pauses too. Anything but a whole
+#                                    number is read as 0, and said so.
+#   MINSPEC_DRAIN_INTERVAL=1200   — seconds between cycles (default 20 min).
 #   MINSPEC_DRAIN_QUOTA_BACKOFF=1800 — seconds to pause after a quota signal (30 min).
 #                  Now only a FALLBACK: when ~/.claude/quota.json carries a live
 #                  reset time, the loop sleeps to that instead of guessing, or to
@@ -100,6 +105,9 @@
 #                                    (DR-065): the early return precedes the fetch, so
 #                                    neither the dormant-checkout fast-forward NOR the
 #                                    read-only origin fetch runs.
+#   MINSPEC_DRAIN_DELEGATED_APPROVAL=0 — skip Step 0b, recording delegated approvals for
+#                                    merged content (#2981, DR-108). On by default.
+#   MINSPEC_DRAIN_DELEGATED_APPROVAL_MAX=5 — approval PRs opened per cycle at most.
 #   MINSPEC_DRAIN_RUN_DIR=<path>   — where the self-synced run-dir worktree lives
 #                                    (default /tmp/minspec-drain-run). Set to "" (not
 #                                    just unset) to explicitly disable self-refresh —
@@ -138,6 +146,8 @@ set -euo pipefail
 
 REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The pure seam quota_publish_wall delegates reset-time parsing to (#1062).
+GUARD="${SCRIPT_DIR}/../.github/scripts/ai-review-guard.js"
 # The reconcilers below write to GitHub (close, remove-label, add-label). Those are
 # AGENT writes, so they must carry the App identity rather than the human's — a write
 # made as the human auto-subscribes them to the thread forever and makes the audit
@@ -1108,6 +1118,51 @@ reconcile_labels() {
   reconcile_done_issues  || echo "[drain] reconcile: agent-done pass errored — continuing."
 }
 
+# record_delegated_approvals: Step 0b of a cycle (#2981, DR-108). For content that a
+# MERGED pull request left without a current approval record, opens the approval pull
+# request as minspec-sdd[bot] under a live delegation. Every decision is the caller's
+# (scripts/lib/delegated-approval-caller.ts), which fails closed on any unreadable input
+# and asks the same predicate the approval validator uses; this stage only runs it. It
+# never merges, never arms auto-merge, and spends no Claude quota (no agent launches).
+#
+# Not a gate, so it never fails the cycle: a refused or errored run is printed LOUDLY
+# with the caller's own JSON reason above it, and the cycle goes on. Uses the scripts
+# the cycle runs (the verified run dir when ensure_fresh_run_dir found it current), so
+# what it executes is origin/main's code. Off: MINSPEC_DRAIN_DELEGATED_APPROVAL=0.
+DELEGATED_APPROVAL_CMD="${MINSPEC_DRAIN_DELEGATED_APPROVAL_CMD:-}"
+record_delegated_approvals() {
+  if [[ "${MINSPEC_DRAIN_DELEGATED_APPROVAL:-1}" == "0" ]]; then
+    echo "[drain] delegated approval: off (MINSPEC_DRAIN_DELEGATED_APPROVAL=0)."
+    return 0
+  fi
+  local max="${MINSPEC_DRAIN_DELEGATED_APPROVAL_MAX:-5}"
+  if [[ ! "$max" =~ ^[1-9][0-9]*$ ]]; then
+    echo "[drain] WARNING: delegated approval NOT run: MINSPEC_DRAIN_DELEGATED_APPROVAL_MAX='${max}' is not a positive integer." >&2
+    return 0
+  fi
+  local scripts_dir root rc=0
+  scripts_dir="$(dirname "$REMEDIATE")"
+  root="$(cd "${scripts_dir}/.." && pwd)"
+  local -a cmd
+  if [[ -n "$DELEGATED_APPROVAL_CMD" ]]; then
+    cmd=("$DELEGATED_APPROVAL_CMD")
+  else
+    if [[ ! -f "${scripts_dir}/lib/delegated-approval-caller.ts" ]]; then
+      echo "[drain] WARNING: delegated approval NOT run: no caller at ${scripts_dir}/lib/delegated-approval-caller.ts." >&2
+      return 0
+    fi
+    cmd=(npx --no-install tsx "${scripts_dir}/lib/delegated-approval-caller.ts")
+  fi
+  echo "[drain] delegated approval: recording approvals for merged, covered content (max ${max})..."
+  ( cd "$root" && "${cmd[@]}" --repo-root "$root" --repo "$REPO" --max "$max" --write ) || rc=$?
+  case "$rc" in
+    0) echo "[drain] delegated approval: done (outcomes in the report above)." ;;
+    1) echo "[drain] WARNING: delegated approval REFUSED this cycle (caller exit 1) - nothing recorded. The reason is in the report above; this is not an empty queue." >&2 ;;
+    *) echo "[drain] WARNING: delegated approval FAILED for at least one artifact (caller exit ${rc}) - see the report above." >&2 ;;
+  esac
+  return 0
+}
+
 # sweep_open_prs: Step 3 of a cycle. Sweep open PRs for FIXABLE problems and
 # auto-remediate them (conflicts are surfaced, not touched). remediate-pr.sh owns ALL
 # the decision-making — branch-prefix scope, classification, attempt caps — so the
@@ -1125,14 +1180,31 @@ reconcile_labels() {
 # must still get here. The body is the old block, moved and not edited, so where a
 # comment in it says "the dispatch loop above" it means run_cycle's.
 sweep_open_prs() {
+  # Globals, not locals: the callers read them after the sweep to decide whether the
+  # cycle was clean (#2868).
+  SWEEP_PRS_SEEN=0
+  SWEEP_FETCH_FAILURES=0
   if [[ "${MINSPEC_DRAIN_REMEDIATE_PRS:-1}" != "0" ]]; then
     # The dispatch loop above may have run for hours. Same reason as the per-item
     # refresh: the sweep's own enumeration is a read, and remediate-pr.sh is a child
     # that inherits this token.
     gh_bot_warm_read
-    local open_prs pr rcap rout sweep_quota_verdict
-    open_prs=$(gh pr list --repo "$REPO" --state open --json number,isDraft \
-      --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
+    local open_prs open_rows open_count pr rcap rout sweep_quota_verdict
+    # An explicit --limit (#2975): gh's default is 30, so without one the sweep silently
+    # saw half of a 61-PR pile. One row per open PR, drafts included, so the count below
+    # is the count gh RETURNED and can be compared with the limit.
+    local pr_limit="${MINSPEC_DRAIN_PR_SWEEP_LIMIT:-500}"
+    open_rows=$(gh pr list --repo "$REPO" --state open --limit "$pr_limit" --json number,isDraft \
+      --jq '.[] | "\(.number) \(.isDraft)"' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
+    open_count=0
+    [[ -n "$open_rows" ]] && open_count=$(printf '%s\n' "$open_rows" | wc -l | tr -d ' ')
+    # Fail closed (#2975): a read that came back exactly at the limit may have been cut
+    # off, and a capped read is not "all open PRs".
+    if (( open_count >= pr_limit )); then
+      echo "[drain] CYCLE FAILED: the open-PR read returned ${open_count} rows, the limit (${pr_limit}) — it may be truncated, so the sweep would silently skip PRs (#2975). Raise MINSPEC_DRAIN_PR_SWEEP_LIMIT." >&2
+      return 1
+    fi
+    open_prs=$(awk '$2=="false"{print $1}' <<<"$open_rows")
     if [[ -n "$open_prs" ]]; then
       echo "[drain] sweeping $(echo "$open_prs" | wc -l | tr -d ' ') open PR(s) for fixable problems..."
       for pr in $open_prs; do
@@ -1162,9 +1234,18 @@ sweep_open_prs() {
         # + classify; a quota hit pauses the whole cycle (loop backs off). Only the
         # CLI's own notice counts: a refreshed PR's `HEAD is now at <subject>` is not
         # one, which is what paused the drain at 18:11 on 2026-09-30 (#2233).
+        # Per-PR token refresh (#2868): the warm above runs once, and one long
+        # remediation can outlive the ~1h App token for every PR after it.
+        gh_bot_warm_read
+        SWEEP_PRS_SEEN=$(( SWEEP_PRS_SEEN + 1 ))
         rcap=$(mktemp)
         "$REMEDIATE" "$pr" 2>&1 | tee "$rcap" || true
         rout=$(cat "$rcap" 2>/dev/null || true); rm -f "$rcap"  # swallow-ok: the capture file is written by this script moments earlier and removed on the same line; absent means the launch produced no output
+        # A skipped remediation must not read as a clean one (#2868).
+        if grep -q "ERROR: could not fetch PR" <<<"$rout"; then
+          SWEEP_FETCH_FAILURES=$(( SWEEP_FETCH_FAILURES + 1 ))
+          echo "[drain] WARNING: could not fetch PR #$pr — its remediation was skipped this cycle (#2868); the cause is in the output above." >&2
+        fi
         if is_quota <<<"$rout"; then
           echo "[drain] Claude usage-limit signal while remediating PR #$pr — pausing this cycle (will back off, not fail)."
           QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
@@ -1172,6 +1253,24 @@ sweep_open_prs() {
         fi
       done
     fi
+  fi
+  return 0
+}
+
+# _sweep_fetch_verdict — roll up the sweep's PR fetch failures (#2868).
+#
+# Some failures print a WARNING per PR and the cycle still ends "cycle done."; 8 skipped
+# remediations in a row were invisible. Says so on stderr, and returns 1 (the existing
+# transient-error code; run_loop counts consecutive 1s) only when EVERY PR the sweep
+# touched failed to fetch — the same all-failed scope as #2140, since a partial failure
+# already has its own WARNING and the PR is retried next cycle.
+_sweep_fetch_verdict() {
+  local n="${SWEEP_FETCH_FAILURES:-0}" seen="${SWEEP_PRS_SEEN:-0}"
+  (( n > 0 )) || return 0
+  echo "[drain] SWEEP NOT CLEAN: ${n} of ${seen} open PR(s) could not be fetched, so their remediation was skipped this cycle (#2868). See the gh error text above each." >&2
+  if (( n == seen )); then
+    echo "[drain] CYCLE FAILED: every PR fetch in the sweep failed — likely a dead credential, not a quiet backlog." >&2
+    return 1
   fi
   return 0
 }
@@ -1270,6 +1369,31 @@ fi
 # a value nobody can interpret; `off` or `false` quietly meaning "on" would be a knob
 # that lies about what it is doing.
 DRAIN_SPECIFY="${MINSPEC_DRAIN_SPECIFY:-1}"
+
+# SPECIFY_MAX_HELD — backpressure on spec-writing (#2939). The switch above is manual and
+# lives in a launcher's environment, so every restart of the drain turned spec-writing
+# back on: the same pile of held drafts formed three times (2026-10-07, 2026-10-16,
+# 2026-10-18, the last at 62). Every spec draft is withheld from auto-merge as
+# approval-or-acceptance, so writing more while that many already wait on a human spends
+# quota on work nothing can land. With the switch on, each cycle counts the drain's own
+# open pull requests held for a human (`needs-human-review` on an `agent/issue-*`
+# branch) and leaves the spec-writing queue alone while that count is at or above this
+# cap. Builds, triage and remediation are untouched. Anything but a whole number is read
+# as 0, which pauses spec-writing: the reading that spends nothing.
+SPECIFY_MAX_HELD="${MINSPEC_DRAIN_SPECIFY_MAX_HELD:-10}"
+
+# _held_drain_prs <varname> — count the drain's open pull requests held for a human INTO
+# a named variable. Returns gh's status: a failed read is not a count of zero, and the
+# caller pauses spec-writing on it rather than guess (invariant 2).
+_held_drain_prs() {
+  local -n _held_out="$1"
+  local _held_val _held_rc=0
+  _held_val=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit 1000 \
+    --json headRefName --jq '[.[] | select(.headRefName | startswith("agent/issue-"))] | length') || _held_rc=$?
+  if (( _held_rc != 0 )); then return "$_held_rc"; fi
+  [[ "$_held_val" =~ ^[0-9]+$ ]] || return 1
+  _held_out="$_held_val"
+}
 
 # _specify_only <agent-ready numbers> <agent-ready-specify numbers>: the issues that are
 # queued for spec-writing and NOT also queued for a build, one per line. An issue in
@@ -1372,6 +1496,11 @@ run_cycle() {
   # Runs BEFORE triage so a cycle never enumerates a queue it already knows is wrong.
   reconcile_labels
 
+  # Step 0b: delegated approvals for merged content (#2981, DR-108). Before triage, so it
+  # runs every cycle whatever the queue holds (the empty-queue return below skips the
+  # PR sweep, and approvals must not wait on it).
+  record_delegated_approvals
+
   # Step 1: triage inbox issues → labels T1/T2 as agent-ready
   # A failed inbox query must not read as an empty inbox (#1855). Triage is not
   # load-bearing for the cycle the way Step 2 is — nothing downstream depends on it
@@ -1459,6 +1588,31 @@ run_cycle() {
     fi
   fi
 
+  # Backpressure (#2939, see SPECIFY_MAX_HELD). Asked only when the switch is on and there
+  # is spec-writing to decide, so a quiet queue costs no read. specify_on is what the
+  # narrowing below reads: the switch and the backpressure are one decision there.
+  local specify_on=0
+  [[ "$DRAIN_SPECIFY" == "1" ]] && specify_on=1
+  if (( specify_on )); then
+    mapfile -t spec_left < <(_specify_only "$ready_full" "$ready_spec")
+    if (( ${#spec_left[@]} > 0 )); then
+      local held=0 held_rc=0
+      if [[ ! "$SPECIFY_MAX_HELD" =~ ^[0-9]+$ ]]; then
+        specify_on=0
+        echo "[drain] spec-writing is PAUSED: MINSPEC_DRAIN_SPECIFY_MAX_HELD=$(printf '%q' "$SPECIFY_MAX_HELD") is not a whole number, so it is read as 0, the setting that spends nothing: ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+      else
+        _held_drain_prs held || held_rc=$?
+        if (( held_rc != 0 )); then
+          specify_on=0
+          echo "[drain] spec-writing is PAUSED: the drain pull requests held for a human could not be counted (exit ${held_rc}; see the gh error above), and a count nobody read is not zero (#2939): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+        elif (( 10#$held >= 10#$SPECIFY_MAX_HELD )); then
+          specify_on=0
+          echo "[drain] spec-writing is PAUSED: ${held} drain pull request(s) held for a human (needs-human-review on agent/issue-*), at or above the cap ${SPECIFY_MAX_HELD} (MINSPEC_DRAIN_SPECIFY_MAX_HELD, #2939): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+        fi
+      fi
+    fi
+  fi
+
   if [[ -z "$all_ready" ]]; then
     # The contradiction is reported ALONGSIDE "cycle done", not instead of it: the
     # query itself succeeded (ready_rc==0, checked above), so this is not the #1855
@@ -1472,11 +1626,11 @@ run_cycle() {
     return 0
   fi
 
-  # With spec-writing off, what is dispatched is the build queue alone. Narrowed HERE,
+  # With spec-writing off or paused (#2939), what is dispatched is the build queue alone. Narrowed HERE,
   # before ranking and before the dispatch cap: capped first and skipped afterwards, a
   # cap of 2 whose top two were spec-writing issues would dispatch nothing at all, on
   # every cycle, with builds queued behind them.
-  if [[ "$DRAIN_SPECIFY" != "1" ]]; then
+  if (( ! specify_on )); then
     all_ready="$(printf '%s\n' "$ready_full" | sed '/^$/d' | sort -un)"
     if [[ -z "$all_ready" ]]; then
       # Everything ready is spec-writing. There is nothing to rank or dispatch, but this
@@ -1486,6 +1640,7 @@ run_cycle() {
       # sweep runs from here. (That an empty queue skips the sweep at all is #1708's.)
       echo "[drain] nothing to dispatch this cycle: every ready issue is agent-ready-specify. Going on to pull request remediation."
       sweep_open_prs || return $?
+      _sweep_fetch_verdict || return $?
       echo "[drain] cycle done."
       return 0
     fi
@@ -1882,6 +2037,7 @@ run_cycle() {
   # Step 3: sweep open PRs for fixable problems (sweep_open_prs, above). A limit
   # notice from a remediation pauses the cycle: 42, cause already recorded.
   sweep_open_prs || return $?
+  _sweep_fetch_verdict || return $?
 
   # #2140 — a cycle in which EVERY attempted dispatch failed is not a completed
   # cycle, and must never read as one. Per-dispatch WARNINGs (classify_dispatch,
@@ -2548,6 +2704,24 @@ quota_health() {
 # The message carries a clock time and a zone but NO DATE, so the rollover is inferred:
 # a time already past today means tomorrow.
 #
+# EXTRACTION (#1062): delegates to `parseResetInstant`, the SAME pure, unit-tested
+# seam (.github/scripts/ai-review-guard.js, next to `isQuotaExhaustion`) the
+# ai-review retry already schedules against (#1204, .github/workflows/ai-review.yml).
+# One tested implementation, never two that can quietly drift apart. (`is_quota` no
+# longer delegates to that file: since #2233 it is a pure-bash notice match, see
+# quota_notice_lines above. Only the reset-time parse still goes through node.)
+#
+# This used to be a second, bash-only regex+`date` extractor, hand-rolled separately
+# from parseResetInstant. It only ever matched the ABSOLUTE clock form ("resets
+# 8:40am (Zone)") — but isQuotaExhaustion's own pattern (`resets? (at|in)`) already
+# classifies the RELATIVE form ("resets in 25 minutes", "try again in 2 hours") as
+# quota-exhaustion too, so a message shaped that way was correctly detected as a
+# quota hit yet silently fell back to the flat QUOTA_BACKOFF guess here
+# — the exact "we capture the text and throw the timestamp away" gap #1062 exists to
+# close. parseResetInstant already handles both forms (with a DST-safe zoned
+# conversion for the absolute one); reusing it fixes the relative form here for free
+# and makes the two call sites impossible to drift apart again.
+#
 # MULTI-PRODUCER NOTE — do not "fix" this into a bug. More than one producer writes
 # QUOTA_FILE (a statusline render, this wall parser, and a poller). Last-writer-wins is
 # correct in BOTH directions here, but by convergence rather than by design:
@@ -2559,23 +2733,23 @@ quota_health() {
 # The staleness rule, not stickiness, is what keeps a wall reading from being believed
 # forever.
 quota_publish_wall() {
-  local text clock zone target now
+  local text now iso target
   text=$(cat)
-  # e.g. "You've hit your session limit · resets 10:10pm (Australia/Sydney)"
-  clock=$(printf '%s' "$text" | grep -oiE 'resets[[:space:]]+(at[[:space:]]+)?[0-9]{1,2}(:[0-9]{2})?[[:space:]]*(am|pm)' | head -1 \
-          | grep -oiE '[0-9]{1,2}(:[0-9]{2})?[[:space:]]*(am|pm)' | head -1)
-  [[ -n "$clock" ]] || { echo "no reset time in text" >&2; return 1; }
-  zone=$(printf '%s' "$text" | grep -oE '\([A-Za-z]+/[A-Za-z_]+\)' | head -1 | tr -d '()')
-
   now=$(date +%s)
-  if [[ -n "$zone" ]]; then
-    target=$(TZ="$zone" date -d "$clock" +%s 2>/dev/null)
-  else
-    target=$(date -d "$clock" +%s 2>/dev/null)
+
+  iso=""
+  if [[ -f "$GUARD" ]]; then
+    iso=$(GUARD="$GUARD" NOW_MS="$(( now * 1000 ))" node -e '
+      const fs = require("fs");
+      const { parseResetInstant } = require(process.env.GUARD);
+      let t = ""; try { t = fs.readFileSync(0, "utf-8"); } catch {}
+      const out = parseResetInstant(t, Number(process.env.NOW_MS));
+      if (out) process.stdout.write(out);
+    ' <<<"$text" 2>/dev/null) || iso=""
   fi
-  [[ -n "$target" ]] || { echo "could not parse '$clock'" >&2; return 1; }
-  # No date in the message: a time already gone means tomorrow.
-  (( target <= now )) && target=$(( target + 86400 ))
+  [[ -n "$iso" ]] || { echo "no reset time in text" >&2; return 1; }
+  target=$(date -u -d "$iso" +%s 2>/dev/null)
+  [[ -n "$target" ]] || { echo "could not parse '$iso'" >&2; return 1; }
 
   # At the wall the window is spent by definition. 100 makes every consumer defer,
   # which is exactly right until the deadline passes.
@@ -2584,7 +2758,7 @@ quota_publish_wall() {
   printf '{"used_percentage":100,"resets_at":%s,"observed_at":%s,"source":"wall"}\n' \
     "$target" "$now" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
   mv -f "$tmp" "$QUOTA_FILE" 2>/dev/null || { rm -f "$tmp"; return 1; }
-  echo "published:$target (from the wall message, resets $clock${zone:+ $zone})"
+  echo "published:$target (from the wall message, resets $iso)"
 }
 
 # quota_backoff_sleep: the rc=42 rest. Sleeps to the deadline; wait_interval still
