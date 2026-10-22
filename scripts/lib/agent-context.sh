@@ -532,4 +532,4 @@ done
 # `source` field. Without it the hook told 149 of 149 measured drain agents to write a
 # scope file their fresh worktree cannot hold.
 pairs+=("MINSPEC_HEADLESS_AGENT=1")
-exec env -i "${pairs[@]}" "$@"
+exec env -i ${pairs[@]+"${pairs[@]}"} "$@"

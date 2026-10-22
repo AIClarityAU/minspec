@@ -134,7 +134,7 @@ beforeEach(() => {
   // their own repo root from their own location.
   const dest = path.join(repo, 'scripts', 'hooks', 'lib');
   fs.mkdirSync(dest, { recursive: true });
-  for (const f of ['scope-check.sh', 'post-compact.sh']) {
+  for (const f of ['scope-check.sh', 'post-compact.sh', 'session-panel.py']) {
     fs.copyFileSync(path.join(SRC_HOOKS, f), path.join(repo, 'scripts', 'hooks', f));
   }
   fs.copyFileSync(
@@ -351,28 +351,34 @@ describe('#1914 — the wiring the fix depends on', () => {
     expect(libBase).toBe(dispatchBase);
   });
 
-  it('stamps the headless marker on every launcher, kill-switch or not', () => {
-    // By EXECUTION: source the launcher library and print the array the launchers expand.
+  it('stamps the headless marker on every launch, kill-switch or not', () => {
+    // By EXECUTION: run the launch program and read the environment it hands over.
     for (const killSwitch of ['1', '0']) {
-      const r = spawnSync(
-        'bash',
-        ['-c', `source "${REPO_ROOT}/scripts/lib/agent-context.sh"; printf '%s\\n' "\${AGENT_ENV_SCRUB[@]}"`],
-        { encoding: 'utf8', env: baseEnv({ MINSPEC_AGENT_ENV_SCRUB: killSwitch }) },
-      );
+      const r = spawnSync('bash', [path.join(REPO_ROOT, 'scripts', 'lib', 'agent-context.sh'), '/usr/bin/env'], {
+        encoding: 'utf8',
+        env: baseEnv({ MINSPEC_AGENT_ENV_SCRUB: killSwitch }),
+      });
       expect(r.stdout).toContain('MINSPEC_HEADLESS_AGENT=1');
     }
   });
 
-  it('silences the hook end-to-end through the launcher array', () => {
+  it('silences the hook end-to-end through the launch program', () => {
     // The marker is only worth anything if it survives the exact invocation shape the
-    // launchers use: "${AGENT_ENV_SCRUB[@]}" <command>.
-    const script = `source "${REPO_ROOT}/scripts/lib/agent-context.sh"; "\${AGENT_ENV_SCRUB[@]}" bash "${path.join(repo, 'scripts', 'hooks', 'scope-check.sh')}"`;
-    const r = spawnSync('bash', ['-c', script], {
-      cwd: repo,
-      input: envelope({ prompt: TRIGGER_PROMPT }),
-      encoding: 'utf8',
-      env: baseEnv({ CLAUDE_PROJECT_DIR: repo }),
-    });
+    // launchers use: `bash "$AGENT_LAUNCH_ENV" <command>`.
+    const r = spawnSync(
+      'bash',
+      [
+        path.join(REPO_ROOT, 'scripts', 'lib', 'agent-context.sh'),
+        'bash',
+        path.join(repo, 'scripts', 'hooks', 'scope-check.sh'),
+      ],
+      {
+        cwd: repo,
+        input: envelope({ prompt: TRIGGER_PROMPT }),
+        encoding: 'utf8',
+        env: baseEnv({ CLAUDE_PROJECT_DIR: repo }),
+      },
+    );
     expect(r.stdout.trim()).toBe('');
   });
 });
