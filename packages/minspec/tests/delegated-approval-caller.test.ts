@@ -26,6 +26,7 @@ import {
   BOT_EMAIL,
   REAL_DEPS,
   branchFor,
+  errorDetail,
   isApprovableCandidatePath,
   parseCallerArgs,
   parsePorcelainZ,
@@ -540,5 +541,29 @@ describe('helpers', () => {
     });
     // Dry run is the default.
     expect(parseCallerArgs(['--repo', REPO], root)).toMatchObject({ write: false });
+  });
+});
+
+describe('errorDetail (#3013: git stderr reaches the report)', () => {
+  it('carries the first stderr lines after the command line', () => {
+    let caught: unknown;
+    try {
+      execFileSync('git', ['-C', os.tmpdir(), 'commit-nonexistent-subcommand'], {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (e) {
+      caught = e;
+    }
+    const d = errorDetail(caught);
+    expect(d).toContain('Command failed: git');
+    expect(d).toContain('| stderr: ');
+    expect(d).toMatch(/not a git command/);
+  });
+
+  it('keeps only three stderr lines and falls back to the head without stderr', () => {
+    const err = Object.assign(new Error('Command failed: git x'), { stderr: 'a\n\nb\nc\nd\n' });
+    expect(errorDetail(err)).toBe('Error: Command failed: git x | stderr: a / b / c');
+    expect(errorDetail(new Error('boom'))).toBe('Error: boom');
   });
 });
