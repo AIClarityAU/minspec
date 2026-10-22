@@ -31,10 +31,13 @@
 #   scripts/drain-inbox.sh --enable-auto    # opt in: auto-drain every session start
 #   scripts/drain-inbox.sh --disable-auto   # opt out
 #   scripts/drain-inbox.sh --auto       # drain ONLY if opted in (the hook calls this)
+#   scripts/drain-inbox.sh --pause      # idle the RUNNING loop at the next cycle boundary (#1187)
+#   scripts/drain-inbox.sh --resume     # remove the marker; the loop resumes within one poll
 #
 # Testable decision seams (pure — no gh/git/claude; used by the loop + unit tests):
 #   scripts/drain-inbox.sh --session-alive <pid>            # exit 0 alive / 1 gone
 #   scripts/drain-inbox.sh --should-continue <pid> <epoch>  # exit 0 continue / 1 stop
+#   scripts/drain-inbox.sh --paused                         # exit 0 paused / 1 not (#1187)
 #   scripts/drain-inbox.sh --is-quota   (<text on stdin)    # exit 0 iff the CLI's OWN limit line is in it
 #   scripts/drain-inbox.sh --resolve-session-pid            # print session anchor PID
 #   scripts/drain-inbox.sh --quota-gate                     # exit 0 admit / 42 defer
@@ -96,6 +99,10 @@
 #                                    (a cap the meter cannot see), until a cycle completes
 #                                    cleanly. 0 disables the veto.
 #   MINSPEC_DRAIN_POLL=30          — session-liveness poll granularity while waiting.
+#   MINSPEC_DRAIN_PAUSE_FILE       — pause marker (default <primary>/.minspec/drain-pause).
+#                                    Present => the loop finishes the cycle in flight, then
+#                                    idle-polls instead of starting the next; removed =>
+#                                    resumes within one POLL. Absent/unreadable = not paused.
 #   MINSPEC_DRAIN_MAX_LIFETIME=28800 — hard wall-clock cap on a loop (8 h backstop).
 #   MINSPEC_DRAIN_MAX_FAILURES=3   — stop after N consecutive non-quota cycle errors.
 #   MINSPEC_SESSION_PID=<pid>      — explicit session anchor (else auto-resolved).
@@ -141,6 +148,23 @@
 #   3. Backstop: a hard MINSPEC_DRAIN_MAX_LIFETIME cap bounds the loop even in the
 #      pathological case where the anchor PID is stale/reused, so termination is
 #      GUARANTEED, never merely best-effort.
+#
+# Pause, and what a restart costs (#1187):
+#   * Pause: `--pause` writes the marker, `--resume` removes it. It is read every
+#     POLL and at the top of each iteration, so it takes effect BETWEEN cycles: a cycle
+#     in flight is never interrupted, and the loop's lock, session tie and lifetime cap
+#     stay in force while it idles. `--disable-auto` is different: it only changes what
+#     the NEXT session start does and does not touch a loop that is already running.
+#   * SIGTERM (e.g. a container stop): the loop logs "stopping on SIGTERM",
+#     TERMs any child it started, removes its lock and exits 143. (SIGINT is not
+#     trapped: bash cannot trap a signal a backgrounded non-interactive shell inherits as
+#     ignored, and nothing delivers one to a detached loop.) Waits run
+#     as `sleep & wait`, so the signal is handled at once there; a foreground command
+#     in a cycle delays the handler until it returns.
+#   * Recovery contract: drain state lives in GitHub labels and work-item leases, not in
+#     the loop. A killed drain therefore loses only the in-flight dispatch (its lease
+#     lapses on its TTL, and is released at once when the dispatch's own EXIT trap ran),
+#     and the next session-start hook restarts the loop.
 
 set -euo pipefail
 
@@ -193,6 +217,7 @@ CONTINUOUS=false
 # Default lock/log paths; env-overridable so hermetic tests can point them at a
 # temp dir instead of the shared /tmp file (behaviour is identical otherwise).
 LOCK="${MINSPEC_DRAIN_LOCK:-/tmp/minspec-drain-inbox.lock}"
+PAUSE_FILE="${MINSPEC_DRAIN_PAUSE_FILE:-${PREF_ROOT}/.minspec/drain-pause}"
 LOG="${MINSPEC_DRAIN_LOG:-/tmp/minspec-drain-inbox.log}"
 
 # ── Self-refreshing run directory (#773) ─────────────────────────────────────
@@ -2789,14 +2814,36 @@ quota_backoff_sleep() {
 
 # wait_interval <seconds>: sleep in POLL-sized chunks, bailing the moment the
 # session dies so the loop reacts within MINSPEC_DRAIN_POLL, not a whole interval.
+# The sleep is backgrounded and waited on so a SIGTERM trap fires at once instead
+# of after the chunk (#1187): bash defers a trap until a FOREGROUND child returns.
 wait_interval() {
   local remaining="$1" chunk
   while (( remaining > 0 )); do
     session_alive "$SESSION_PID" || return 0
     chunk=$(( remaining < POLL ? remaining : POLL ))
-    sleep "$chunk"
+    sleep "$chunk" &
+    wait $! || true  # swallow-ok: wait returns >128 when a trapped signal interrupts it; the trap handler does the work
     remaining=$(( remaining - chunk ))
   done
+}
+
+# drain_paused: exit 0 iff the pause marker exists (#1187). Anything else — absent,
+# unreadable parent — is "not paused", so a drain nobody paused behaves as before.
+drain_paused() { [[ -e "$PAUSE_FILE" ]]; }
+
+# _drain_on_signal <SIGNAL> <exit-code>: the loop's SIGTERM handler (#1187).
+# Says why it stopped, TERMs the children it started (a dispatch's own EXIT trap then
+# releases its lease), drops the lock, and exits. Idempotent: a second SIGTERM while
+# this runs is ignored.
+_drain_on_signal() {
+  trap '' TERM
+  echo "[drain] stopping on $1 — loop pid $BASHPID, releasing lock."
+  local kids
+  kids="$(jobs -p 2>/dev/null || true)"  # swallow-ok: no jobs is the common case
+  # shellcheck disable=SC2086
+  [[ -z "$kids" ]] || kill -TERM $kids 2>/dev/null || true
+  rm -f "$LOCK"
+  exit "$2"
 }
 
 # run_loop: the session-scoped continuous scheduler. Repeats run_cycle until the
@@ -2805,6 +2852,7 @@ wait_interval() {
 # cycle error never kills the loop (log + continue).
 run_loop() {
   local deadline consec=0 rc
+  local LOOP_PAUSED=false
   deadline=$(( $(date +%s) + MAX_LIFETIME ))
   echo "[drain] continuous loop started (session=$SESSION_PID$(session_anchor_note), interval=${INTERVAL}s, quota_backoff=${QUOTA_BACKOFF}s, max_lifetime=${MAX_LIFETIME}s)."
   echo "[drain] quota gate — $(quota_health)"
@@ -2814,6 +2862,21 @@ run_loop() {
     fi
     if (( $(date +%s) >= deadline )); then
       echo "[drain] max lifetime (${MAX_LIFETIME}s) reached — stopping loop (backstop cap)."; break
+    fi
+
+    # Pause (#1187): checked HERE, between cycles, so a cycle in flight always finishes.
+    # One log line per transition, not one per poll.
+    if drain_paused; then
+      if ! $LOOP_PAUSED; then
+        LOOP_PAUSED=true
+        echo "[drain] PAUSED — marker $PAUSE_FILE present; idling, no new cycle until it is removed (scripts/drain-inbox.sh --resume)."
+      fi
+      wait_interval "$POLL"
+      continue
+    fi
+    if $LOOP_PAUSED; then
+      LOOP_PAUSED=false
+      echo "[drain] RESUMED — pause marker removed; starting the next cycle."
     fi
 
     rc=0; run_cycle || rc=$?
@@ -2933,6 +2996,21 @@ case "$1" in
     if (( $(date +%s) >= _deadline )); then echo "max-lifetime reached"; exit 1; fi
     if ! session_alive "$_pid"; then echo "session $_pid ended"; exit 1; fi
     echo "continue"; exit 0
+    ;;
+  --paused)
+    # Pure seam (#1187): is the pause marker present? exit 0 paused / 1 not.
+    if drain_paused; then echo "paused"; exit 0; else echo "running"; exit 1; fi
+    ;;
+  --pause)
+    mkdir -p "$(dirname "$PAUSE_FILE")"
+    : > "$PAUSE_FILE"
+    echo "⏸️   Drain PAUSE requested. A running loop finishes its current cycle, then idles. Marker: $PAUSE_FILE. Resume: scripts/drain-inbox.sh --resume"
+    exit 0
+    ;;
+  --resume)
+    rm -f "$PAUSE_FILE"
+    echo "▶️   Drain pause marker removed ($PAUSE_FILE). A running loop resumes within one poll."
+    exit 0
     ;;
   --is-quota)
     # Pure seam: classify combined agent output (stdin) as quota/limit or not.
@@ -3104,6 +3182,7 @@ fi
   # the reclaim's `kill -0` must actually probe. (ai-review #676: BLOCKING/HIGH.)
   echo "$BASHPID" > "$LOCK"
   trap 'rm -f "$LOCK"' EXIT
+  trap '_drain_on_signal SIGTERM 143' TERM
 
   if $CONTINUOUS; then
     run_loop
