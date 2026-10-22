@@ -183,7 +183,8 @@ request. Today only the gate can tell them apart.
 ## Acceptance Criteria
 
 - [ ] **The #1835 shape passes.** In a fixture with base highest `DR-089`, open pull
-      requests holding `DR-090` and `DR-091`, and a subject adding `DR-092`, the rendered
+      requests #1776 holding `DR-090` and #1777 holding `DR-091`, and a subject adding
+      `DR-092`, the rendered
       block is exactly `DR-092: free` / `next free id: DR-093` / `open pull requests read:
       2`. The renderer is unit-tested by calling it, not by grepping. (FR-1, FR-2)
 - [ ] **A held id is named by number only.** A subject adding `DR-090` in that fixture
@@ -279,8 +280,10 @@ request. Today only the gate can tell them apart.
 ## Why no new DR
 
 Every part can be reverted in under a day: one optional flag, one prompt paragraph, one
-workflow step, one pure renderer. The ADR filter (a choice that cannot be undone in under a day) is not met. The choices are recorded
-here and on #1932. DR-066 and DR-079 are relied on unchanged.
+workflow step, one pure renderer. The ADR filter (a choice that cannot be undone in under a day) is not met. The two
+"Costly to Refactor" items do not change that: both are costly to *widen*, not to undo.
+Reverting either one is deleting the flag and the renderer, which no shipped consumer
+depends on yet. The choices are recorded here and on #1932. DR-066 and DR-079 are relied on unchanged.
 
 ## Out of Scope
 
@@ -321,4 +324,5 @@ here and on #1932. DR-066 and DR-079 are relied on unchanged.
 - Issue: #1932. Incident: #1835 (and the earlier #1956 that led to #1979/#2100).
 - Gate: #1226 (DR id collision), #1757 (repurposing half). Carry: #1688. Provenance-block
   precedent: #1017.
-- Sibling: SPEC-211 (shipped guard tests); the architect-voter declared-scope spec (on an open branch, not yet on main).
+- Sibling: SPEC-211 (guard-test parity for the guards MinSpec ships; `status: planning`,
+  not built); the architect-voter declared-scope spec (on an open branch, not yet on main).
