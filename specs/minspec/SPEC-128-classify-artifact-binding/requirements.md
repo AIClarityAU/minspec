@@ -79,14 +79,20 @@ FR-7). So the new code this spec needs does not have to re-read the diff: it can
 `consequenceInput.changedFiles` for paths matching a spec's `requirements.md` or a
 `docs/decisions/DR-NNN.md`, and parse `tier:` out of the `content` already in hand.
 
-**A spec's tier is already exposed; a DR's is not.** `parseSpec` (`packages/minspec/src/lib/
-spec.ts:269`) returns `frontmatter.tier` for any spec file — `active-spec.ts:93` already
-reads it this way. No equivalent public reader exists for a DR: `AdrSummary`
-(`adr-manager.ts:27-35`) carries `id`, `title`, `status`, `date`, `filePath` and `epic`, but
-not `tier`, and the module's own frontmatter parser (`parseFrontmatterYaml`,
-`adr-manager.ts:69`) is a bare, unexported function. Reading a DR's `tier:` for this feature
-needs either exporting that parser or adding a narrow `drTier(content)` reader beside it —
-a small, contained addition, not a new parsing strategy.
+**Neither existing reader reports the *authored* tier.** `parseSpec`
+(`packages/minspec/src/lib/spec.ts:280`) returns a `frontmatter.tier` for any spec file, but
+it is not the authored
+value: a missing or non-`TIERS` `tier:` is silently coerced to `'T2'` (`spec.ts:314`). So
+`parseSpec(...).frontmatter.tier` cannot tell "tagged T2" from "not tagged at all", and a
+comparison built on it would name a tier nobody wrote. No public reader exists for a DR
+either: `AdrSummary` (`adr-manager.ts:28-36`) carries `id`, `title`, `status`, `date`,
+`filePath` and `epic`, but not `tier`, and the module's own frontmatter parser
+(`parseFrontmatterYaml`, `adr-manager.ts:70`) is a bare, unexported function. DR files do
+carry the field in practice (94 of the 109 `docs/decisions/DR-*.md` files on `main` have a
+`tier:` line). Reading the authored `tier:` for this feature therefore needs one narrow
+reader — the frontmatter's raw `tier:` value, inline comment stripped, accepted only if it is
+a member of `TIERS` — usable for both artifact kinds. A small, contained addition, not a new
+parsing strategy.
 
 **The caveat the issue itself names.** [DR-022](../../../docs/decisions/DR-022.md) proposed
 moving `tier` from an authored scalar to a value **derived** from a risk profile's required
@@ -94,7 +100,7 @@ phases, but DR-022 is **`status: superseded`** — only the Fork-B *contract dir
 accepted, in [DR-024](../../../docs/decisions/DR-024.md), and DR-024 itself gates the actual
 reach/profile model on [#91](https://github.com/AIClarityAU/minspec/issues/91)
 (unvalidated). So today, in the shipped code, `tier:` in a spec's or a DR's frontmatter is
-still the **authored** scalar `parseSpec`/`TIERS` (`config.ts:5`, `:14`) already use
+still the **authored** scalar typed by `Tier`/`TIERS` (`config.ts:5`, `:14`) and used
 everywhere else (`active-spec.ts:93`, `classify.ts:104-122`). This spec compares against
 that authored scalar — see [DQ-5](#dq-5-compare-against-the-authored-tier-or-the-not-yet-
 shipped-phase-profile).
@@ -107,20 +113,35 @@ diff" means the same changed-file set `classifyCommand` already computed for the
 
 - **FR-1 — Detect a single touched artifact.** After `buildConsequenceInput` runs
   (`classify.ts:90`), a new pure function (in the module this spec's `implements:` names)
-  MUST scan `consequenceInput.changedFiles` for paths matching `specs/**/requirements.md` or
-  `docs/decisions/DR-*.md`, and return:
+  MUST scan `consequenceInput.changedFiles` for paths matching
+  `{config.specsDir}/**/requirements.md` or `{config.decisionsDir}/DR-*.md` — the configured
+  directories `classifyCommand` already loads (`classify.ts:60-63`; defaults `specs` and
+  `docs/decisions`, `config.ts:152-153`), never a hard-coded `specs/` or `docs/decisions/`
+  — and return:
   - the one matching artifact, when **exactly one** matches (DQ-1, DQ-2);
   - `undefined` when zero match, or when more than one matches (DQ-2) — the existing
     artifact-blind path (FR-5) runs unchanged in both cases.
+
+  A changed file whose `status` is `deleted`, or whose `content` is `undefined`
+  (`buildConsequenceInput` swallows per-file read failures, `git-analyzer.ts:300`, `:364`),
+  still counts toward the "more than one" test but can never be the one returned. If
+  `buildConsequenceInput` itself throws — today's `catch` at `classify.ts:95-97` swallows it
+  and `consequenceInput` is scoped inside that `try` — there is no changed-file list and FR-5
+  runs; the implementation MUST make that path explicit rather than reading an unassigned
+  variable.
 
 - **FR-2 — Read the artifact's own authored tier.** Given the one matched artifact, a reader
   MUST return its `tier:` and a display id (`SPEC-NNN` from frontmatter `id:`, or `DR-NNN`
   from the filename) using the **post-change** content already in `ChangedFile.content`
   (`consequence-analyzers.ts:55`) — not a fresh file read — so a diff that only just added
-  `tier:` is read correctly. A spec reads through `parseSpec` (`spec.ts:269`); a DR reads
-  through a new or newly-exported reader beside `adr-manager.ts:69` (DQ-1). A file with no
-  parseable `tier:` (new, not-yet-filled-in template) is treated as "no match" (falls back
-  to FR-5), not as an error.
+  `tier:` is read correctly. Both artifact kinds read through the one narrow reader the
+  Context section describes: the frontmatter's **raw** `tier:` value, inline comment
+  stripped, accepted only if it is a member of `TIERS`. It MUST NOT take the tier from
+  `parseSpec(...).frontmatter.tier`, which defaults a missing or invalid value to `'T2'`
+  (`spec.ts:314`) and would make an untagged spec read as "tagged T2". (`parseSpec` may still
+  supply a spec's `id:`.) A file with no `tier:` line, or a value outside `TIERS` (new,
+  not-yet-filled-in template), is treated as "no match" (falls back to FR-5), not as an
+  error. A spec with no `id:` is likewise "no match" — never a blank id in the headline.
 
 - **FR-3 — Compare, and classify the direction.** Using `TIERS` (`config.ts:14`) for
   ordering, compare the artifact's authored tier to `predictedTier`
@@ -131,10 +152,12 @@ diff" means the same changed-file set `classifyCommand` already computed for the
 - **FR-4 — The artifact-bound headline replaces the generic one for that run.** When FR-1
   found exactly one artifact, the headline built at `classify.ts:120-122` MUST instead name
   the artifact and the comparison from FR-3, keeping the existing driving-signal clause
-  (`classify.ts:118-119`, kept from the already-shipped facet-2 fix) unchanged in form:
-  - `higher`: `MinSpec: {id} is tagged {authoredTier}; this diff reads {predictedTier}{driverClause} — consider upgrading.`
-  - `same`: `MinSpec: {id} ({authoredTier}) — this diff matches{driverClause}.`
-  - `lower`: `MinSpec: {id} is tagged {authoredTier}; this diff reads {predictedTier}{driverClause}.`
+  (`classify.ts:118-119`, kept from the already-shipped facet-2 fix) and the trailing
+  ` · {phaseList}` (`classify.ts:122`) unchanged in form, so the artifact-bound headline
+  carries everything today's does plus the comparison:
+  - `higher`: `MinSpec: {id} is tagged {authoredTier}; this diff reads {predictedTier}{driverClause} · {phaseList} — consider upgrading.`
+  - `same`: `MinSpec: {id} ({authoredTier}) — this diff matches{driverClause} · {phaseList}`
+  - `lower`: `MinSpec: {id} is tagged {authoredTier}; this diff reads {predictedTier}{driverClause} · {phaseList}`
     (no "upgrade"/"downgrade" verb — DR-021's ratchet is upward-only, and naming a
     *downgrade* here would read as the toast second-guessing a human's own tier choice,
     which no part of today's toast does; see DQ-3)
@@ -165,7 +188,7 @@ diff" means the same changed-file set `classifyCommand` already computed for the
 ## Acceptance Criteria
 
 - [ ] Editing only `specs/minspec/SPEC-004-classifier-validation/requirements.md` (tier
-      `T4` already) in a diff the classifier would size as `T2` produces the headline's
+      `T3` on `main`) in a diff the classifier would size as `T2` produces the headline's
       `lower` form naming `SPEC-004` and both tiers. (FR-1–FR-4)
 - [ ] A diff sized `T3` that edits only a DR file tagged `tier: T2` in its frontmatter
       produces the `higher` form naming that `DR-NNN` and "consider upgrading". (FR-1–FR-4)
@@ -180,7 +203,11 @@ diff" means the same changed-file set `classifyCommand` already computed for the
 - [ ] The auto-on-commit status-bar line and the interactive toast's headline agree for the
       same diff shape (same artifact match, same comparison direction). (FR-6)
 - [ ] A spec file with `tier:` missing or unparseable in the diff's new content is treated
-      as no match (generic headline), not a crash or a blank id. (FR-2)
+      as no match (generic headline), not a crash, a blank id, or a `parseSpec`-defaulted
+      "tagged T2". (FR-2)
+- [ ] With `specsDir` configured to a non-default directory, editing a spec's
+      `requirements.md` there produces the artifact-bound headline, and a
+      `specs/**/requirements.md` path outside the configured directory does not. (FR-1)
 - [ ] Show Details, opened after an artifact-bound headline, names the same artifact id and
       tier the headline did. (FR-7)
 - [ ] None of the already-shipped facet-2/3 behaviour regresses: the auto path still shows
@@ -191,9 +218,9 @@ diff" means the same changed-file set `classifyCommand` already computed for the
 ## Invariants (must not break)
 
 - **INV-1 — Offline core (constitution invariant 1, DR-004).** No network call. Every read
-  this spec adds is a local file already in the working tree (via `ChangedFile.content`) or
-  a local directory scan (FR-1's glob) — same offline posture `analyzeGitDiff` and
-  `buildConsequenceInput` already have.
+  this spec adds is content `buildConsequenceInput` already read locally
+  (`ChangedFile.content`); FR-1's path match runs over that in-memory list and scans no
+  directory — same offline posture `analyzeGitDiff` and `buildConsequenceInput` already have.
 - **INV-2 — No silent gate (constitution invariant 2).** This spec adds no gate of any kind
   — the toast remains advisory-only, same as today (DR-021 Decision 2). A read that cannot
   parse an artifact degrades to FR-5's fallback, visibly the same message a non-artifact
@@ -230,9 +257,10 @@ requirements that row cites.
   changed-file path to the spec(s) that declare it under `implements:`/`affects:` —
   `scripts/hooks/spec-gate.py:382` parses those lists today, for a different gate, and
   nothing in `packages/minspec/src` currently inverts them into a lookup) and is better
-  specified on its own once this narrower, already-well-grounded slice ships. Filed as a
-  follow-up if wanted: **the human approving this spec should confirm whether to file it, or
-  decline it as scope creep** — no issue number is invented here.
+  specified on its own once this narrower, already-well-grounded slice ships. Recorded, not
+  filed (it would not change a decision within 30 days, DR-023): backlog: classify toast
+  could bind a diff to the spec that owns its changed code via `implements:`/`affects:`;
+  needs a reverse index and a multi-owner tie-break (DQ-1 Option B, not taken).
 - **Option B — also bind via `implements:`/`affects:` ownership.** *Cost:* requires building
   and validating a new reverse index (not test-covered anywhere today), a tie-break policy
   when a changed file is claimed by more than one spec, and a decision about whether a stale
@@ -305,7 +333,7 @@ artifact's frontmatter).
   profile model ships, this comparison's *unit* changes from a tier letter to a required-
   phase set; FR-1/FR-2's artifact-lookup plumbing does not need to change, only what FR-3
   compares — a forward note for that future spec, not a blocker now.
-  - **Option B — wait for the phase-profile model.** *Cost:* blocks this entire,
+- **Option B — wait for the phase-profile model.** *Cost:* blocks this entire,
   already-scoped fix on unscheduled, unvalidated work (#91) with no date, over a caveat the
   issue itself only raised as a "watch for" note, not a requirement.
 
@@ -313,7 +341,8 @@ artifact's frontmatter).
 
 This changes what a toast's headline says and adds one small, pure, read-only reader; it
 adds no store, no setting, no new kind of consent, and nothing it does survives a `git
-revert` of this change (the DR-359 reversible-in-under-a-day filter). It does not touch
+revert` of this change (the DR-359 (parent register, mmo-platform) reversible-in-under-a-day
+filter). It does not touch
 DR-021's ratchet, DR-022/024's superseded/gated model, or any approval mechanics (DQ-4
 Option A keeps it read-only). A DR becomes necessary only if Plan or a later Clarify round
 picks DQ-1 Option B (the `implements:`/`affects:` reverse index) or DQ-4 Option B (a
@@ -355,9 +384,10 @@ Recorded because this spec was written without a live conversation (DR-086 §4).
 
 ## Test plan (for the Plan phase to place)
 
-- **Unit, pure function:** FR-1's matcher and FR-2's readers, given synthetic
+- **Unit, pure function:** FR-1's matcher and FR-2's reader, given synthetic
   `ConsequenceInput.changedFiles`, with cases: zero matches, one spec match, one DR match,
-  two matches (either combination), a match with missing/unparseable `tier:`.
+  two matches (either combination), a match with missing/unparseable `tier:`, a match with
+  `content: undefined`, a deleted match, and a non-default `specsDir`/`decisionsDir`.
 - **Integration, `classifyCommand`:** each Acceptance Criteria row, using the same harness
   pattern `commands.test.ts` already has for `classifyCommand` (staged and working-tree
   fixtures), asserting on the exact headline string and on the Show Details channel content
