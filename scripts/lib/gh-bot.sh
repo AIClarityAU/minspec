@@ -144,7 +144,7 @@ _gh_bot_adopt() {
 # dispatch, for hours (#2066).
 #
 # The stamp is fingerprint-VERIFIED, not merely present, because a marker outlives the
-# token it describes: scripts/review-churn-report.sh assigns GH_TOKEN from the broker
+# token it describes: the review-churn report script assigns GH_TOKEN from the broker
 # itself, and an unverified stamp inherited from an ancestor would then claim ownership
 # of a credential this file never minted.
 #

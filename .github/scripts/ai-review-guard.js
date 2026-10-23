@@ -445,7 +445,7 @@ function parseResetInstant(text, nowMs) {
 //
 // WHAT THIS SECTION IS. The ai-review workflow embeds a `patch-fingerprint:` marker -
 // a hash of the three-dot diff - in the verdict check-run's output. It is a
-// MEASUREMENT record: `scripts/review-churn-report.sh` reads it back to count how often
+// MEASUREMENT record: the review-churn report script reads it back to count how often
 // a round re-reviewed a patch an earlier round had already passed.
 //
 // WHAT READS IT TO SKIP A REVIEW: nothing. `findReattestableVerdict` below is
@@ -487,6 +487,87 @@ function patchFingerprint(diffText) {
   const norm = String(diffText == null ? '' : diffText).replace(/\r\n?/g, '\n').replace(/\s+$/, '');
   if (norm === '') return null; // an empty patch is never re-attestable (see #1680)
   return require('crypto').createHash('sha256').update(norm, 'utf8').digest('hex');
+}
+
+/**
+ * The line `review-branch.sh --print-input` closes the diff block with. Inside the diff
+ * no line can equal it: every body line starts with ' ', '+', '-' or '\', and the
+ * script defangs the tag in the payload before wrapping it. A test pins this literal
+ * against the script.
+ */
+const REVIEW_INPUT_DIFF_CLOSE = '</untrusted_diff>';
+
+/**
+ * A line that marks a file section of `git diff` as binary: the plain form review-branch.sh
+ * prints, and the `--binary` form in case that ever changes. In a text section no body
+ * line can match, since each starts with ' ', '+', '-' or '\'.
+ */
+const BINARY_DIFF_MARKER = /^(?:Binary files .* differ|GIT binary patch)$/;
+
+/**
+ * Fingerprint of the reviewable input, as the verdict carry keys it (#1688; queue item
+ * tm1, founder "go" 2026-10-17). It is `patchFingerprint` over the input with exactly two
+ * things taken out, and only inside the diff block:
+ *
+ *   - the blob ids on a diff's `index <old>..<new> <mode>` line (the mode stays), and
+ *   - the START line numbers on a hunk header `@@ -a,b +c,d @@` (the lengths, and the
+ *     function text git prints after the second `@@`, stay).
+ *
+ * WHY. Both follow the BASE copy of a file, not the change. When main edits a file the
+ * pull request also edits, anywhere outside the hunk's context, a base merge leaves every
+ * added, removed and context line identical and still moves the old blob id and the line
+ * numbers. Hashing them refused the carry on exactly the push it exists for: measured
+ * 2026-10-18, 2 of the 4 base merges refused in a 26-push sample.
+ *
+ * WHAT IT STILL SEES. Every body line byte-for-byte, whitespace included (which is why
+ * this is not `git patch-id`); the context lines, so a base edit next to the change is
+ * reviewed again; the hunk lengths and the function text in the header; file headers,
+ * modes, renames; and the approval facts after the diff block, untouched.
+ *
+ * BINARY FILES KEEP THEIR BLOB IDS (#2926 security finding). `review-branch.sh` runs a
+ * plain `git diff`, so a changed binary file is one constant line ("Binary files a/x and
+ * b/x differ") and its blob ids are the only trace of what changed. The ids are dropped
+ * only from a file section that shows its content as text hunks and has no binary
+ * marker; a binary section, or any section with no hunk at all, is hashed as written.
+ *
+ * WHAT IT ACCEPTS, stated: a change whose text is identical but that now sits at a
+ * different line, with identical context, carries. The voters would read the same
+ * lines with different numbers. This is NOT a class DR-104 accepted: DR-104 rejected a
+ * position-insensitive identity, and this reversal is recorded, proposed, in DR-110.
+ *
+ * A malformed input (no closing line) is hashed with nothing taken out: never wider
+ * than before. Empty is null, as for patchFingerprint.
+ */
+function reviewInputFingerprint(inputText) {
+  const text = String(inputText == null ? '' : inputText).replace(/\r\n?/g, '\n');
+  if (patchFingerprint(text) === null) return null;
+  const lines = text.split('\n');
+  const end = lines.indexOf(REVIEW_INPUT_DIFF_CLOSE);
+  if (end === -1) return patchFingerprint(text);
+  const HUNK = /^@@ -\d+(,\d+)? \+\d+(,\d+)? @@(.*)$/;
+  // Walk one file section (`diff --git` up to the next one) at a time. The blob ids are
+  // dropped only from a section whose content is shown as text hunks and that carries no
+  // binary marker; anywhere else they are the only trace of the content and stay.
+  let start = 0;
+  while (start < end) {
+    let stop = start + 1;
+    while (stop < end && !lines[stop].startsWith('diff --git ')) stop += 1;
+    const section = lines.slice(start, stop);
+    const shownAsText =
+      section.some((l) => HUNK.test(l)) && !section.some((l) => BINARY_DIFF_MARKER.test(l));
+    for (let i = start; i < stop; i += 1) {
+      const line = lines[i];
+      let m = /^index [0-9a-f]+\.\.[0-9a-f]+((?: [0-7]{6})?)$/.exec(line);
+      if (m) {
+        if (shownAsText) lines[i] = `index ..${m[1]}`;
+        continue;
+      }
+      m = HUNK.exec(line);
+      if (m) lines[i] = `@@ -${m[1] || ''} +${m[2] || ''} @@${m[3]}`;
+    }
+    start = stop;
+  }
+  return patchFingerprint(`review-input/v2\n${lines.join('\n')}`);
 }
 
 /** Render the marker embedded in a check-run's output so a later run can read it. */
@@ -736,7 +817,7 @@ function findReattestableVerdict({ checkRuns, patchHash, allowlist } = {}) {
     if (c.status !== 'completed' || c.conclusion !== 'success') continue;
     const slug = c.app && c.app.slug;
     const identities = [slug, slug ? `${slug}[bot]` : null].filter(Boolean);
-    if (!identities.some((i) => allowed.includes(i))) continue;
+    if (!identities.some((i) => isAuthorizedReviewer(i, allowed))) continue;
     const text = [c.output && c.output.title, c.output && c.output.summary, c.output && c.output.text]
       .filter(Boolean)
       .join('\n');
@@ -1216,7 +1297,7 @@ function carriedLabelFault({ current = [], carried } = {}) {
  */
 function planVerdictCarry(raw) {
   const o = raw && typeof raw === 'object' ? raw : {};
-  const inputHash = patchFingerprint(o.inputText);
+  const inputHash = reviewInputFingerprint(o.inputText);
   const panelKey = reviewPanelKey({ lsTree: o.lsTree, coverage: o.coverage });
 
   // The response is handed on WHOLE - count and all - and never unwrapped to its
@@ -1996,6 +2077,8 @@ module.exports = {
   renderCarriedComment,
   carriedLabelFault,
   planVerdictCarry,
+  reviewInputFingerprint,
+  REVIEW_INPUT_DIFF_CLOSE,
   parseResetInstant,
   VERDICT_SCHEMA,
   defangProtocolTokens,

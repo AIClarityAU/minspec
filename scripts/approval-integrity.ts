@@ -33,6 +33,15 @@ import { fileURLToPath } from 'node:url';
 
 import { specHash } from '../packages/shared/src/canonical';
 import { checkApprover, parseAgentIdentities } from '../packages/minspec/src/lib/approval';
+import { parseDelegations } from './lib/autonomy';
+import {
+  checkApprovalActor,
+  frontmatterField,
+  NO_WITNESSES,
+  type DelegationWitnesses,
+} from './lib/approval-actor';
+import { readRepeatFixShare, utcToday } from './lib/repeat-fix-share';
+import { readContentPullRequest } from './lib/content-pr';
 
 const APPROVALS_PREFIX = '.minspec/approvals/';
 
@@ -131,6 +140,7 @@ function checkOneRecord(
   sidecarPath: string,
   changed: readonly string[],
   readBase: ReadBase,
+  witnesses: DelegationWitnesses,
 ): Failure[] {
   const derivedSpecPath = approvableFor(sidecarPath);
   const at = (d: string): string => `${derivedSpecPath}: ${d}`;
@@ -143,11 +153,14 @@ function checkOneRecord(
     return [{ check: 'path-shape', detail: at('derived approvable path escapes the repo') }];
   }
 
-  let record: { specHash?: unknown; approvedBy?: unknown; specPath?: unknown };
+  let record: { specHash?: unknown; approvedBy?: unknown; specPath?: unknown } & Record<string, unknown>;
   try {
     record = JSON.parse(fs.readFileSync(path.join(rootDir, sidecarPath), 'utf-8'));
   } catch (err) {
     return [{ check: 'record-readable', detail: at(`${sidecarPath} is not readable JSON: ${String(err)}`) }];
+  }
+  if (typeof record !== 'object' || record === null || Array.isArray(record)) {
+    return [{ check: 'record-readable', detail: at(`${sidecarPath} is not a JSON object`) }];
   }
 
   const failures: Failure[] = [];
@@ -201,6 +214,25 @@ function checkOneRecord(
     }
   }
 
+  // WHO ACTED, ON WHOSE BASIS (DR-012 Amendment, DR-108, #2854). A record with no actor
+  // fields is a founder record and falls through to the human checks below unchanged. A
+  // bot record is valid only when a live delegation covers it, judged against witnesses
+  // read from the MERGE BASE; it then replaces the human allowlist and agent denylist,
+  // which would refuse the bot by design. Any actor failure is final for this record.
+  const actor = checkApprovalActor(
+    record,
+    {
+      path: derivedSpecPath,
+      content: fs.existsSync(approvableAbs) ? fs.readFileSync(approvableAbs, 'utf-8') : null,
+    },
+    witnesses,
+  );
+  if (actor.failures.length > 0) {
+    failures.push(...actor.failures.map((f) => ({ check: f.check, detail: at(f.detail) })));
+    return failures;
+  }
+  if (actor.cls?.kind === 'delegated') return failures;
+
   // The approver is a permitted human, re-checked here because a local
   // `assertHumanApprover` proves nothing about a pushed branch (DR-081 §4). Per-record,
   // because `approvedBy` is per-record: a batch does not get to inherit one identity.
@@ -238,6 +270,7 @@ export function evaluateApprovalIntegrity(
   rootDir: string,
   changed: readonly string[],
   readBase: ReadBase,
+  witnesses: DelegationWitnesses = NO_WITNESSES,
 ): Failure[] {
   if (changed.length === 0) return [];
 
@@ -278,10 +311,52 @@ export function evaluateApprovalIntegrity(
   }
 
   for (const sidecarPath of sidecars) {
-    failures.push(...checkOneRecord(rootDir, sidecarPath, changed, readBase));
+    failures.push(...checkOneRecord(rootDir, sidecarPath, changed, readBase, witnesses));
   }
 
   return failures;
+}
+
+/** `owner/name` from a GitHub remote URL (https or ssh), or undefined. */
+export function repoFromRemoteUrl(url: string): string | undefined {
+  const m = url.trim().match(/github\.com[:/]([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/);
+  return m ? m[1] : undefined;
+}
+
+/**
+ * The witnesses a delegated record is judged against, ALL from the merge base: the
+ * delegation records, the decision record's status and the history the repeat-fix share
+ * is measured over. A pull request can therefore never supply its own permission. Every
+ * read that fails leaves its witness undefined, which denies.
+ */
+export function baseWitnesses(rootDir: string, baseRef: string, readBase: ReadBase, env = process.env): DelegationWitnesses {
+  let repo = (env.GITHUB_REPOSITORY ?? '').trim() || undefined;
+  if (repo === undefined) {
+    try {
+      repo = repoFromRemoteUrl(execFileSync('git', ['-C', rootDir, 'remote', 'get-url', 'origin'], { encoding: 'utf-8' }));
+    } catch {
+      repo = undefined;
+    }
+  }
+  const delegationsText = readBase('.minspec/delegations.json');
+  let mergeBase = baseRef;
+  try {
+    mergeBase = execFileSync('git', ['-C', rootDir, 'merge-base', baseRef, 'HEAD'], { encoding: 'utf-8' }).trim();
+  } catch {
+    // fall back to the base ref itself; a failure there makes the share unknown below
+  }
+  return {
+    repo,
+    delegations: delegationsText === null ? undefined : parseDelegations(delegationsText),
+    decisionStatus: (drId) => {
+      if (!/^DR-\d+$/.test(drId)) return undefined;
+      const text = readBase(`docs/decisions/${drId}.md`);
+      return text === null ? undefined : frontmatterField(text, 'status');
+    },
+    repeatFixShare: readRepeatFixShare(rootDir, mergeBase).share,
+    today: utcToday(),
+    contentPullRequest: (rel) => readContentPullRequest(rootDir, baseRef, rel),
+  };
 }
 
 function main(): void {
@@ -296,14 +371,14 @@ function main(): void {
       return null; // absent on the base
     }
   };
-  const failures = evaluateApprovalIntegrity(rootDir, changed, readBase);
+  const failures = evaluateApprovalIntegrity(rootDir, changed, readBase, baseWitnesses(rootDir, baseRef, readBase));
 
   if (failures.length > 0) fail(failures);
   if (changed.length === 0) pass('no files changed against the base');
   if (!changed.some((f) => f.startsWith(APPROVALS_PREFIX) && f.endsWith('.json'))) {
     pass('not an approval-record PR (no approval sidecar changed)');
   }
-  pass("the approval record is bound to this commit's content, approved by a permitted human, and the PR changes nothing else");
+  pass("every approval record is bound to this commit's content, approved by a permitted human or covered by a live delegation, and the PR changes nothing else");
 }
 
 // Only run when invoked as a script. Importing this module (the T0 suite imports
