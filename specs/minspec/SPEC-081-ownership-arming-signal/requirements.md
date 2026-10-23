@@ -14,6 +14,12 @@ relates_to: [SPEC-038, SPEC-061, SPEC-059, SPEC-070, SPEC-051, SPEC-022, DR-088,
 # and owned elsewhere, so it goes under `affects:`. Inline form, not block form (#1961).
 implements: [packages/minspec/tests/ownership-arming-signal.test.ts]
 affects: [packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/template-registry.ts, scripts/hooks/spec-gate.py, scripts/validate-frontmatter.ts]
+phases:
+  specify: in-progress
+  clarify: pending
+  plan: pending
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — An absent `plan` phase must not silently disarm SPEC-038's ownership rule or the spec-gate (Requirements)
@@ -42,16 +48,16 @@ they cannot decide.
 ### The arming predicate reads a defaulted value as an authored one
 
 `validateOwnership` arms only when `phases.plan` is `in-progress` or `done`
-(`packages/minspec/src/lib/spec-validator.ts:799-803`). `phaseStatusOf` defaults any
-missing phase to `pending` (`packages/minspec/src/lib/spec.ts:114-118`). So a spec with **no
+(`packages/minspec/src/lib/spec-validator.ts:995-997`). `phaseStatusOf` defaults any
+missing phase to `pending` (`packages/minspec/src/lib/spec.ts:137-142`). So a spec with **no
 `phases:` block** has `plan === 'pending'` indistinguishably from a spec whose author
 wrote `plan: pending` — and the rule returns `[]` for both. The same predicate is
 duplicated in two more places, each with the same default:
 
 | Site | Predicate | Absent block reads as |
 |---|---|---|
-| `spec-validator.ts:799-803` (in-extension + corpus via `scripts/validate-frontmatter.ts:632`) | `plan === 'in-progress' \|\| plan === 'done'` | `pending` → exempt |
-| `template-registry.ts:1962-1970` (the `validate.py` shipped to adopters, #2250) | `plan not in ("in-progress", "done")` → return | `"pending"` → exempt |
+| `spec-validator.ts:995-997` (in-extension + corpus via `scripts/validate-frontmatter.ts:724`) | `plan === 'in-progress' \|\| plan === 'done'` | `pending` → exempt |
+| `template-registry.ts:2100-2110` (the `validate.py` shipped to adopters, #2250) | `plan not in ("in-progress", "done")` → return | `"pending"` → exempt |
 | `scripts/hooks/spec-gate.py:565-567` (`phase_intent_status` → `_all_pending`) | `intended not in ("implementing", "done")` → `continue` | `new` → **not gated at all** |
 
 The third row is broader than the issue states. The spec-gate `continue`s **before**
@@ -60,16 +66,17 @@ The third row is broader than the issue states. The spec-gate `continue`s **befo
 (`spec-gate.py:59-62`: "a spec carrying no `phases:` block never reaches the owned-set
 computation at all … its declaration arms nothing").
 
-### Measured on this branch's base (`a23393b6`), not on the issue's `479f2f8`
+### Measured on this branch's base (`34fa3595`), not on the issue's `479f2f8`
 
 The corpus has moved since the issue was filed: ownership batches #1821 and #1849 landed,
 and phases batch 1 (#1661) landed. A phases batch 3 for 11 specs exists on
 `fix/1513-phases-backfill` (commit `e1a7d5b2`) but is **not on main**.
 
-A frontmatter scan of every `specs/**/*.md` on `a23393b6` for a primary (`type:
+A frontmatter scan of every `specs/**/*.md` on `34fa3595` for a primary (`type:
 requirements` or absent) T3/T4 spec with **no `phases:` key**:
 
-- **24** such specs. 23 have a committed approval sidecar under `.minspec/approvals/`
+- **24** such specs, excluding this spec itself (which carries a `phases:` block). The counts
+  are unchanged from the first measurement on `a23393b6`. 23 have a committed approval sidecar under `.minspec/approvals/`
   (existence checked; hash freshness **not** checked — some are known stale, see below).
   The 24th, SPEC-056, is `status: superseded` with no sidecar.
 - **12** of the 23 declare no `implements:` at all: SPEC-001 (`specs/minspec/requirements.md`),
@@ -87,15 +94,15 @@ absence of findings reads exactly like compliance.
 
 SPEC-061's writer fix is on main: `advanceSpecToImplementing` no longer short-circuits a
 phaseless spec and calls `setSpecPhases(…, { createIfAbsent: true })`
-(`spec.ts:676-690`). New specs are also scaffolded with a `phases:` block
-(`spec.ts:328`). So new phaseless approved specs should no longer be *produced* by the
+(`spec.ts:766-802`). New specs are also scaffolded with a `phases:` block
+(`serializeFrontmatter`, `spec.ts:414`). So new phaseless approved specs should no longer be *produced* by the
 tool. What remains is (a) a reader/gate that still treats "absent" as "pending", which a
 hand-authored or legacy spec will keep hitting, and (b) the existing corpus residue above.
 
 ### A second silent path on the same rule
 
 The corpus pass wraps the whole ownership loop in `try { … } catch { /* stay silent */ }`
-(`scripts/validate-frontmatter.ts:630-643`). One unreadable or unparseable spec aborts the
+(`scripts/validate-frontmatter.ts:720-731`). One unreadable or unparseable spec aborts the
 loop for **every** remaining file with no output — the same "silence indistinguishable
 from success" property, on the same rule. Constitution invariant 2 (no silent gate).
 
@@ -107,7 +114,7 @@ from success" property, on the same rule. Constitution invariant 2 (no silent ga
   block with no `plan` line, or an unrecognised value). The existing `phaseStatusOf`
   collapse to `pending` MAY remain for every other consumer; only the ownership arming
   decision needs the distinction. An explicit `plan: pending` keeps today's behaviour
-  (not armed) — the SPEC-026/027/031/034 lesson recorded at `spec-validator.ts:795-798`
+  (not armed) — the SPEC-026/027/031/034 lesson recorded at `spec-validator.ts:990-994`
   stands.
 
 - **FR-2 — An absent `plan` signal arms on the approval record (validator).** When the
@@ -115,7 +122,7 @@ from success" property, on the same rule. Constitution invariant 2 (no silent ga
   the spec as past Clarify **if a committed approval record exists for that spec file**
   (the SPEC-022 path-keyed sidecar, `approved` **or** `stale`). Rationale: approval is
   what *creates* `plan: in-progress` (`phasesForApproval`; see the comment at
-  `spec-validator.ts:849-857`), so an approval record is direct evidence the spec was
+  `spec-validator.ts:1104-1111`), so an approval record is direct evidence the spec was
   taken past Clarify, whatever its frontmatter lost. The decision on which evidence arms
   is DQ-1.
 
@@ -163,7 +170,7 @@ from success" property, on the same rule. Constitution invariant 2 (no silent ga
   that genuinely own nothing). The fixHint MAY name the remedy; it MUST NOT apply it.
 
 - **FR-9 — Stale prose swept.** The comments/docstrings that describe the phaseless gap
-  as the current state (`spec-gate.py:24-25`, `:59-62`, `:340-343`; the
+  as the current state (`spec-gate.py:23-25`, `:59-62`, `:340-342`; the
   `validateOwnership` JSDoc; the adopter `ownership_violations` docstring) MUST be
   updated in the same change to describe the new predicate, so no signpost keeps
   asserting the old behaviour.
@@ -218,7 +225,7 @@ from success" property, on the same rule. Constitution invariant 2 (no silent ga
   pushed to red by this change.
 - **INV-4 (hash-neutral).** Nothing here edits hashed spec content; no approval is staled
   by shipping this spec. (Adding `phases:` to a spec is hash-neutral — `canonical.ts`
-  strips `status`/`phases`; adding `implements:` is **not**, until SPEC-070 lands.)
+  (`packages/shared/src/canonical.ts`) strips `status`/`phases`; adding `implements:` is **not**, until SPEC-070 lands.)
 - **INV-5 (DR-069 §3 freeze band).** The spec-gate's band for specs *with* a phases block is
   unchanged; this spec only stops phaseless specs falling out of it.
 - **INV-6 (one rule, three realisations).** The three sites cannot drift silently; FR-4's
