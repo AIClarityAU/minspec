@@ -27,6 +27,7 @@ import {
   REAL_DEPS,
   branchFor,
   errorDetail,
+  linkDependencies,
   isApprovableCandidatePath,
   parseCallerArgs,
   parsePorcelainZ,
@@ -565,5 +566,25 @@ describe('errorDetail (#3013: git stderr reaches the report)', () => {
     const err = Object.assign(new Error('Command failed: git x'), { stderr: 'a\n\nb\nc\nd\n' });
     expect(errorDetail(err)).toBe('Error: Command failed: git x | stderr: a / b / c');
     expect(errorDetail(new Error('boom'))).toBe('Error: boom');
+  });
+});
+
+describe('#3020: hook-gated commit needs deps in the recording worktree', () => {
+  it('drops the node crash banner so the real message reaches the report', () => {
+    const stderr =
+      "node:internal/modules/cjs/loader:1430\n  const err = new Error(message);\n              ^\n\nError: Cannot find module 'handlebars'\nRequire stack:\n";
+    const d = errorDetail(Object.assign(new Error('Command failed: git commit'), { stderr }));
+    expect(d).toContain("Cannot find module 'handlebars'");
+    expect(d).not.toContain('node:internal');
+  });
+
+  it('links the primary node_modules into a worktree that lacks it, once', () => {
+    const primary = fs.mkdtempSync(path.join(os.tmpdir(), 'dlg-prim-'));
+    const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'dlg-wt-'));
+    expect(linkDependencies(primary, wt)).toBe(false); // primary has none
+    fs.mkdirSync(path.join(primary, 'node_modules'));
+    expect(linkDependencies(primary, wt)).toBe(true);
+    expect(fs.realpathSync(path.join(wt, 'node_modules'))).toBe(fs.realpathSync(path.join(primary, 'node_modules')));
+    expect(linkDependencies(primary, wt)).toBe(false); // already present
   });
 });
