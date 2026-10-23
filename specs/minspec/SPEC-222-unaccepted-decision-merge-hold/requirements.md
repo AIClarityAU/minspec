@@ -81,7 +81,7 @@ that changes non-docs paths also adds or modifies a decision record whose `statu
    body embedded in `ci-review-templates.ts`, byte-pinned by `ci-stack-portability`). Any
    change reaches adopters on refresh. Adopters configure their decisions directory
    (`.minspec/config.json` `decisionsDir`, here `docs/decisions`).
-6. **DR status vocabulary on `main`:** 100 `accepted`, 4 `proposed` (DR-107, DR-108, DR-109, DR-110), 3 `superseded`
+6. **DR status vocabulary on `main`:** 106 `accepted`, 0 `proposed`, 3 `superseded` (DR-107 to DR-110 are all `accepted` now)
    (`grep -h -m1 '^status:' docs/decisions/DR-*.md | sort | uniq -c`).
 
 ## Functional Requirements
@@ -221,7 +221,7 @@ that changes non-docs paths also adds or modifies a decision record whose `statu
 - **DQ-5 - DRs cited but not in the diff.** A code PR could implement a DR that is already
   on `main` as `proposed` without touching its file. FR-1 cannot see that.
   - `a` **(rec)** Out of scope for v1. File it as a follow-up. **Cost:** the gap stays open.
-    Only 4 DRs are `proposed` today, so it is small, but it is real.
+    No DRs are `proposed` on this tree today, so it is small, but it is real.
   - `b` Also scan the PR title and body for `DR-NNN` and hold if the base tree's copy is not
     `accepted`. **Cost:** an incidental mention of a proposed DR holds an unrelated PR, and
     prose becomes a gate input.
