@@ -102,6 +102,8 @@ const baseEnv = (extra: Record<string, string> = {}): Record<string, string> => 
   PATH: process.env.PATH ?? '/usr/bin:/bin',
   HOME: process.env.HOME ?? '/tmp',
   MINSPEC_ZAI_API_KEY: ZAI_KEY,
+  // Hermetic: never fall back to the operator's real key file under HOME (zaikey23).
+  MINSPEC_ZAI_API_KEY_FILE: '/nonexistent/minspec-zai.key',
   ...extra,
 });
 
