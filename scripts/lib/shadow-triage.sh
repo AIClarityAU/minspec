@@ -335,14 +335,23 @@ shadow_classify_error() {
   body="$(cat)"
   [[ -z "${body//[[:space:]]/}" ]] && { printf 'empty-response'; return 0; }
 
+  # THIRD envelope (observed 2026-10-21, #3005): on a wrong or missing key the
+  # /anthropic/v1/* endpoints answer HTTP 200 with the refusal in the BODY:
+  #   {"code":401,"msg":"token expired or incorrect","success":false}
+  #   {"code":1001,"msg":"Authentication parameter not received in Header, …","success":false}
+  # Trusting the 2xx would hand a refused key to the model-listing parser (recorded as
+  # a listing fault) or the verdict parser. `success:false` or a numeric top-level
+  # `code` other than 200 is a refusal. Like the others, only the code is carried.
   reason="$(printf '%s' "$body" | jq -r '
-    if (.error? | type) == "object"
-    then ((.error.code? // .error.type? // "unknown") | tostring)
+    if (type == "object") and (.success? == false or ((.code? | type) == "number" and .code != 200))
+    then "auth-refused:" + ((.code? // "unknown") | tostring)
+    elif (.error? | type) == "object"
+    then "api-error:" + ((.error.code? // .error.type? // "unknown") | tostring)
     else empty end
   ' 2>/dev/null)"
 
   if [[ -n "$reason" ]]; then
-    printf 'api-error:%s' "$reason"
+    printf '%s' "$reason"
     return 0
   fi
 
