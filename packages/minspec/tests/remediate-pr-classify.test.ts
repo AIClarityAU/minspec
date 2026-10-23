@@ -370,3 +370,43 @@ describe('remediate-pr.sh: the drain honours the owner gate without extra wiring
     expect(arm).toMatch(/exit 0/);
   });
 });
+
+// #3023 — the ready-to-merge gate is not fixable by code: it is green only when a verified
+// ai-review:pass sits on the current head, and its job runs the BASE branch's guard.
+describe('remediate-pr.sh --derive-failing: ready-to-merge gate is not a code-fixable red (#3023)', () => {
+  function derive(rollup: unknown[]): string {
+    return execFileSync('bash', [SCRIPT, '--derive-failing'], {
+      encoding: 'utf-8',
+      input: JSON.stringify({ statusCheckRollup: rollup }),
+    }).trim();
+  }
+
+  it('the gate job of the ready-to-merge workflow alone failing → no', () => {
+    expect(derive([
+      { name: 'test', workflowName: 'ci', conclusion: 'SUCCESS' },
+      { name: 'gate', workflowName: 'ready-to-merge', conclusion: 'FAILURE' },
+    ])).toBe('no');
+  });
+
+  it('a ready-to-merge status context alone failing → no', () => {
+    expect(derive([{ context: 'ready-to-merge', state: 'FAILURE', conclusion: 'FAILURE' }])).toBe('no');
+  });
+
+  it('a real red check alongside the gate still → yes', () => {
+    expect(derive([
+      { name: 'gate', workflowName: 'ready-to-merge', conclusion: 'FAILURE' },
+      { name: 'lint', workflowName: 'ci', conclusion: 'FAILURE' },
+    ])).toBe('yes');
+  });
+
+  it('a differently-named job called gate in another workflow is still fixable → yes', () => {
+    expect(derive([{ name: 'gate', workflowName: 'ci', conclusion: 'FAILURE' }])).toBe('yes');
+  });
+
+  it('ai-review red stays excluded; in-flight check is not a failure', () => {
+    expect(derive([
+      { name: 'ai-review', conclusion: 'FAILURE' },
+      { name: 'test', status: 'IN_PROGRESS' },
+    ])).toBe('no');
+  });
+});
