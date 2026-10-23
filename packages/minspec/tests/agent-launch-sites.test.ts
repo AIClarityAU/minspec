@@ -1475,7 +1475,8 @@ describe('T0: what runs on an adopter\'s bash 3.2 uses nothing bash 3.2 lacks', 
     const names = r.stdout.split('\n').filter(Boolean).map((l) => l.replace(/=.*/, ''));
     // Nothing bash made up for itself on the way (a default PATH, a TERM, a SHELL) is
     // among them: those are the shell's, and were never handed to the launcher.
-    for (const n of names) expect(['PWD', 'OLDPWD', 'SHLVL', '_'], n).toContain(n);
+    // MINSPEC_HEADLESS_AGENT (#1914) is the one name the program stamps itself.
+    for (const n of names) expect(['PWD', 'OLDPWD', 'SHLVL', '_', 'MINSPEC_HEADLESS_AGENT'], n).toContain(n);
   });
 
   it('a variable that only resembles a listed name does not make the listed one appear', () => {
