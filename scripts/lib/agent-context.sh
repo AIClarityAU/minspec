@@ -525,4 +525,11 @@ pairs=()
 for name in ${AGENT_ENV_PASSING[@]+"${AGENT_ENV_PASSING[@]}"}; do
   pairs+=("${name}=${!name}")
 done
+# The headless marker (#1914). Not a name from the launcher's environment and so not on the
+# list: this program stamps it itself, on every launch, so a project hook (scope-check.sh)
+# can tell that no human is on the other end. The harness does not say so: MEASURED
+# 2026-09-12 on harness 2.1.263, a `claude -p` UserPromptSubmit envelope carries no
+# `source` field. Without it the hook told 149 of 149 measured drain agents to write a
+# scope file their fresh worktree cannot hold.
+pairs+=("MINSPEC_HEADLESS_AGENT=1")
 exec env -i ${pairs[@]+"${pairs[@]}"} "$@"
