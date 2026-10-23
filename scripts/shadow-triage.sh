@@ -229,7 +229,8 @@ if [[ -n "$(shadow_key)" ]] && ! shadow_key_wellformed "$(shadow_key)"; then
   exit 0
 fi
 if [[ -z "$(shadow_key)" ]]; then
-  note "no z.ai key configured (MINSPEC_ZAI_API_KEY) — skipped; real triage is unaffected."
+  # Names both places looked and why the file was not used — never the value.
+  note "no z.ai key configured (MINSPEC_ZAI_API_KEY unset; key file $(shadow_key_file): $(shadow_key_file_state)) — skipped; real triage is unaffected."
   exit 0
 fi
 
