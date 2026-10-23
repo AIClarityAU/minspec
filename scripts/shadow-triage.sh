@@ -131,6 +131,15 @@ shadow_resolve_model() {
   status="$(shadow_http "$(shadow_endpoint_url /v1/models)" "$out_file" 20)"
   rc=$?
   if [[ $rc -ne 0 || ! "$status" =~ ^2[0-9][0-9]$ ]]; then rm -f "$out_file"; return 1; fi
+  # A 2xx is not proof of a listing: z.ai answers 200 for a refused key with the error
+  # in the body (#3005). Name that fault instead of letting it surface as an
+  # unparseable listing (`model-resolve-failed`).
+  local refusal
+  refusal="$(shadow_classify_error "$status" < "$out_file")"
+  if [[ "$refusal" == auth-refused:* ]]; then
+    note "z.ai refused the key on the model listing (${refusal}) — skipped."
+    rm -f "$out_file"; return 1
+  fi
   shadow_pick_latest_model < "$out_file"
   rc=$?
   rm -f "$out_file"
