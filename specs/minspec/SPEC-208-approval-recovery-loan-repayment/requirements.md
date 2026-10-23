@@ -11,7 +11,7 @@ relates_to: [SPEC-140, SPEC-022, SPEC-051, DR-051, DR-065, DR-078, DR-012, "#137
 # Ownership declared in Specify, before approval mints a hash (SPEC-038).
 # implements: the shared transport module and its test are NET-NEW and owned here;
 # approval-recover.ts is existing code owned by no spec's `implements:`, and SPEC-140
-# (status: planning, in flight) already lists it under `affects:`
+# (currently planning, in flight) already lists it under `affects:`
 # (specs/minspec/SPEC-140-checkout-follows-approval/requirements.md:21). So this spec does
 # NOT take primary ownership: it also declares it under `affects:` and the two specs share
 # the file. Overlap to settle in Clarify/Plan: SPEC-140 changes what recovery leaves behind,
