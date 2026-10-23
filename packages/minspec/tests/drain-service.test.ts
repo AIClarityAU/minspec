@@ -24,8 +24,10 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn, spawnSync, ChildProcess } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
+import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
 
 useShellTimeout();
+useHostileAmbientDrainKnobs();
 
 const REPO = path.resolve(__dirname, '../../..');
 const SVC = path.join(REPO, 'scripts/drain-service/drain-service.sh');
@@ -103,7 +105,7 @@ beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'drain-service-'));
   fs.writeFileSync(file('stub-drain.sh'), STUB, { mode: 0o755 });
   env = {
-    PATH: process.env.PATH,
+    ...drainBaseEnv(),
     HOME: dir,
     MINSPEC_DRAIN_LOCK: file('drain.lock'),
     MINSPEC_DRAIN_LOG: file('drain.log'),
