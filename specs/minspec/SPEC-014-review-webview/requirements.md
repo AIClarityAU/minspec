@@ -61,9 +61,9 @@ Verified against `origin/main` at `722e7b57` (2026-10-02); `approve.ts` line cit
 - Two `file:line` citations had gone stale since 2026-06-01 and are corrected throughout
   this document: `approve.ts:70-100` → the function is now `approve.ts:222-462` and, more to
   the point, it gained **two more refusal gates** since this spec was written (the #1317
-  `violationsIntroducedByApproval` check and the DR-056 approver-identity check) — FR-10 and
+  ownership-advance check (now the shared `assertOwnershipDeclaredForAdvance` guard) and the DR-056 approver-identity check) — FR-10 and
   the Blast-Radius section below now name all three; `spec-panel-html.ts:131-138` →
-  `spec-panel-html.ts:144-153`.
+  `spec-panel-html.ts:144-151`.
 - A new interaction this spec did not know about when written: `approveSpecCommand` now also
   fires a DR-057 post-approve phase-advance toast. Recorded as **FR-OQ3** (new open question)
   and in Blast-Radius, not resolved here — it is a plan-phase sequencing choice.
@@ -148,7 +148,7 @@ for content-bearing artifacts (specs, ADRs).
   formatted HTML (headings, tables, code blocks, links) — not raw markdown text. The
   renderer + sanitiser MUST run locally with no network fetch (no remote images/scripts/
   fonts) and MUST reuse the existing CSP-nonce pattern
-  ([`spec-panel-html.ts:144-153`](../../../packages/minspec/src/views/spec-panel-html.ts#L144-L153)):
+  ([`spec-panel-html.ts:144-151`](../../../packages/minspec/src/views/spec-panel-html.ts#L144-L151)):
   `default-src 'none'`, inline style allowed, scripts only via per-render nonce. Untrusted
   spec content MUST be sanitised before injection (no raw HTML passthrough).
 - **FR-2 (frontmatter + gate state header).** The panel MUST show the artifact's id,
@@ -236,9 +236,11 @@ for content-bearing artifacts (specs, ADRs).
   bypass this spec exists to prevent:
   1. `validateSpec` — refuse on blocking violations
      ([`approve.ts:273-299`](../../../packages/minspec/src/commands/approve.ts#L273-L299)).
-  2. `violationsIntroducedByApproval` (#1317) — refuse when the status/phase advance
-     approval itself triggers would newly violate a rule that did not apply before the
-     advance ([`approve.ts:301-330`](../../../packages/minspec/src/commands/approve.ts#L301-L330)).
+  2. `assertOwnershipDeclaredForAdvance` (#1317 / #1806) — the shared guard
+     (`ownership-advance-guard.ts`, which wraps `violationsIntroducedByApproval`); refuse when
+     the status/phase advance approval itself triggers would newly violate a rule that did not
+     apply before the advance. `approve.ts` calls the shared guard, it does not carry its own
+     inline copy ([`approve.ts:301-330`](../../../packages/minspec/src/commands/approve.ts#L301-L330)).
   3. The DR-056 approver-identity check — refuse an agent/bot or absent identity before
      any status flip ([`approve.ts:332-358`](../../../packages/minspec/src/commands/approve.ts#L332-L358)).
 
@@ -321,7 +323,7 @@ that pin it.
    module, not after.
 4. **Gate-call reuse of `approveSpecCommand` (FR-10, INV — Gate parity).** FR-10 requires the
    webview reuse `approve.ts:222-462`'s three refusal gates (`validateSpec`,
-   `violationsIntroducedByApproval`, the DR-056 approver-identity check) *verbatim*, not a
+   `assertOwnershipDeclaredForAdvance`, the DR-056 approver-identity check) *verbatim*, not a
    fork of any one of them. A copied-then-drifted validator path is the exact bypass R2
    warns of, and it is now a three-way target, not a one-way one, because two gates were
    added to `approveSpecCommand` after this spec was first written — exactly the drift this
@@ -394,7 +396,7 @@ decision-only node (epic-promote / issue-triage) collapses to a summary card:
 Checkbox DoD tracing the FRs. The feature is "done" only when all hold.
 
 - [ ] **Renders, not raw** — the active artifact shows formatted HTML (headings, tables,
-  code blocks) under the reused CSP-nonce pattern (`spec-panel-html.ts:144-153`),
+  code blocks) under the reused CSP-nonce pattern (`spec-panel-html.ts:144-151`),
   `default-src 'none'`, untrusted content sanitised before injection (FR-1).
 - [ ] **Gate-state header** — id / title / tier / status / approval state
   (`approved`/`stale`/`unapproved` from `approval.ts`) + blocking validator violations show
@@ -413,7 +415,7 @@ Checkbox DoD tracing the FRs. The feature is "done" only when all hold.
   FR-7a, FR-8).
 - [ ] **Approve is never softer than the command** — the scroll-bottom action runs, and
   refuses on, all three `approveSpecCommand` gates (`validateSpec`,
-  `violationsIntroducedByApproval`, the DR-056 approver-identity check —
+  `assertOwnershipDeclaredForAdvance`, the DR-056 approver-identity check —
   `approve.ts:222-462`), not only the first; a revision forces a visible re-hash so prior
   approval goes `stale` (FR-9, FR-10, INV — Gate parity).
 - [ ] **Approve advances, does not close** — on success the panel loads the next human task
@@ -481,8 +483,8 @@ Beyond the `depends_on: SPEC-012` link above, the declared touch-surface and the
 each change would trigger:
 
 - **`approve.ts:222-462` (`approveSpecCommand`, now THREE refusal gates, not one)** — FR-10
-  reuses all of it verbatim: `validateSpec` (`:273-299`), the #1317
-  `violationsIntroducedByApproval` check (`:301-330`), and the DR-056 approver-identity check
+  reuses all of it verbatim: `validateSpec` (`:273-299`), the #1317/#1806
+  `assertOwnershipDeclaredForAdvance` shared guard (`:301-330`), and the DR-056 approver-identity check
   (`:332-358`). The last two did not exist when this spec was first written — FR-10 was
   originally scoped to `validateSpec` alone — so any implementer working from an older reading
   of this spec would wire only the first gate and leave the webview's Approve weaker than the
@@ -496,7 +498,7 @@ each change would trigger:
 - **`approval.ts` (content-hash + `approved`/`stale`/`unapproved`)** — FR-2 reads its state,
   FR-9 depends on its hash-binding. Change the hash algorithm and every persisted approval +
   every stored pin's "did the artifact change" assumption (FR-4) must be re-evaluated.
-- **`spec-panel-html.ts:144-153` (CSP-nonce pattern)** — FR-1 reuses it. Loosen the CSP there
+- **`spec-panel-html.ts:144-151` (CSP-nonce pattern)** — FR-1 reuses it. Loosen the CSP there
   (e.g. allow remote `img-src`) and the no-network-fetch guarantee of FR-1 silently weakens.
 - **DR-057's post-approve phase-advance toast (`approve.ts:418-444`)** — new since this spec
   was authored. It already does something FR-11 also wants, from a different motive: it fires
@@ -623,7 +625,7 @@ default and what each costs against the invariants.
   HTML (headings, tables, code blocks — pretty, not raw MD) with the FR-3 Google-Docs
   right-margin conversation pane and FR-7/FR-7a per-round colour highlighting; a text editor
   shows raw markdown and has no margin-card or multi-colour span affordance. It would also
-  drop the FR-1 CSP-nonce sandbox (`spec-panel-html.ts:144-153`) the no-network guarantee
+  drop the FR-1 CSP-nonce sandbox (`spec-panel-html.ts:144-151`) the no-network guarantee
   reuses. A native editor is the right surface for *editing* the `.md`, which is exactly the
   viewer-vs-editor split deferred below.
 
