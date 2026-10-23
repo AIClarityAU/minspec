@@ -1,0 +1,44 @@
+# minspec-drain.service - durable owner of the MinSpec inbox drain (#3011).
+#
+# A HOST user unit whose only job is to keep scripts/drain-service/drain-service.sh
+# running INSIDE the claude-agent container. The drain itself never runs on the host:
+# ExecStart is a `docker exec`, and drain-service.sh refuses (exit 78) unless pid 1 is
+# docker-init. Install with scripts/drain-service/install.sh; see README.md beside it.
+#
+#   Restart=always             the drain ends at its 8 h lifetime cap, with a container
+#                              restart, or on a failure; the unit starts the supervisor
+#                              again. A PAUSED drain stays paused: drain-service.sh reads
+#                              the pause marker (a file in the primary checkout) before it
+#                              starts anything, so a restart never resumes it.
+#   RestartPreventExitStatus   78 = refused (not in the container). Restarting cannot fix
+#                              that, so the unit fails and says so.
+#   StartLimit*                more than 6 starts in an hour (a drain that keeps failing)
+#                              leaves the unit FAILED and visible, not restarting forever.
+#   ExecStop                   killing the docker exec client does not stop the process it
+#                              started in the container, so stop runs drain-service.sh stop,
+#                              which SIGTERMs the supervisor and, through it, the drain.
+#                              systemd never restarts a unit that was stopped on purpose.
+#
+# %h and %u are the host user's home and name. The container mounts /home/jason/code at
+# the same path, so the same path names the checkout on both sides.
+
+[Unit]
+Description=MinSpec inbox drain, kept running inside the claude-agent container (#3011)
+Documentation=file://%h/code/MinSpecPro/scripts/drain-service/README.md
+After=claude-agent.service
+Wants=claude-agent.service
+StartLimitIntervalSec=3600
+StartLimitBurst=6
+
+[Service]
+Type=simple
+Environment=PATH=/run/current-system/sw/bin:/etc/profiles/per-user/%u/bin:%h/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env docker exec -u %u -e HOME=%h -w %h/code/MinSpecPro claude-agent %h/code/MinSpecPro/scripts/drain-service/drain-service.sh run
+ExecStop=/usr/bin/env docker exec -u %u -e HOME=%h claude-agent %h/code/MinSpecPro/scripts/drain-service/drain-service.sh stop
+Restart=always
+RestartSec=60
+RestartPreventExitStatus=78
+TimeoutStopSec=150
+
+[Install]
+WantedBy=default.target
