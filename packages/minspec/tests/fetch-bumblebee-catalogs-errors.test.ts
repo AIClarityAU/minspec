@@ -11,7 +11,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { useShellTimeout } from './helpers/shell-timeout';
 import { execFileSync, spawnSync } from 'child_process';
+
+useShellTimeout();
 
 const FETCH_SCRIPT = path.resolve(__dirname, '../../../scripts/fetch-bumblebee-catalogs.sh');
 const PINNED = '4a02b80aaca86641767c0d6cbe77c6856e4b481b';
