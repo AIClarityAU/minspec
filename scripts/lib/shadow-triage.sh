@@ -96,6 +96,15 @@
 #                                     (Renamed from MINSPEC_SHADOW_TRIAGE_KEY, #2707, so the
 #                                     name says whose key it is. The old name is still read
 #                                     for one release, with a visible notice.)
+#   MINSPEC_ZAI_API_KEY_FILE          file holding the key, read ONLY when neither env
+#                                     name is set (default ~/.claude/.secrets/minspec-zai.key).
+#                                     Must be owned by this user with no group/other bits
+#                                     (mode 600 or 400), else it is refused with a note.
+#                                     This is the preferred transport (queue item zaikey23):
+#                                     a key in the session `env` is inherited by every
+#                                     descendant of the session, the drain included, and any
+#                                     same-user process can read it from /proc/<pid>/environ.
+#                                     Read from a file, it lives only in this script's memory.
 #   MINSPEC_SHADOW_TRIAGE             set to 0 to hard-disable even with a key present.
 #   MINSPEC_SHADOW_TRIAGE_MODEL       model id, or the `latest` sentinel (the default),
 #                                     which the RUNNER resolves per run from /v1/models.
@@ -166,8 +175,46 @@ SHADOW_TRIAGE_DEFAULT_TIMEOUT="120"
 SHADOW_TRIAGE_DEFAULT_MAX_TOKENS="1024"
 
 # MINSPEC_ZAI_API_KEY wins; the pre-#2707 MINSPEC_SHADOW_TRIAGE_KEY is honoured for one
-# release so an unedited settings file does not silently switch the step off.
-shadow_key()        { printf '%s' "${MINSPEC_ZAI_API_KEY:-${MINSPEC_SHADOW_TRIAGE_KEY:-}}"; }
+# release so an unedited settings file does not silently switch the step off. With
+# neither set, the key file is read (zaikey23). Env first, so the move is order-safe: the
+# key keeps working while it still sits in settings, and after it moves to the file.
+shadow_key() {
+  local k="${MINSPEC_ZAI_API_KEY:-${MINSPEC_SHADOW_TRIAGE_KEY:-}}"
+  if [[ -z "$k" ]] && [[ "$(shadow_key_file_state)" == "ok" ]]; then
+    # `read` is a builtin: the value never becomes a process argument or an env entry.
+    IFS= read -r k < "$(shadow_key_file)" || true
+    k="${k%$'\r'}"
+  fi
+  printf '%s' "$k"
+}
+
+# ── The key file (zaikey23) ──────────────────────────────────────────────────
+# The path is resolved here and nowhere else. Nothing in this section ever prints the
+# file's CONTENT: only its path and its state appear in notes.
+SHADOW_TRIAGE_DEFAULT_KEY_FILE_REL=".claude/.secrets/minspec-zai.key"
+shadow_key_file() { printf '%s' "${MINSPEC_ZAI_API_KEY_FILE:-${HOME:-}/${SHADOW_TRIAGE_DEFAULT_KEY_FILE_REL}}"; }
+# Prints one of: ok | missing | not-owned | unsafe-mode:<octal> | empty.
+# A key file someone else can read is refused, the way ssh refuses a loose private key:
+# using it would bless the exposure the file exists to end.
+shadow_key_file_state() {
+  local f mode
+  f="$(shadow_key_file)"
+  [[ -f "$f" ]] || { printf 'missing'; return 0; }
+  [[ -O "$f" ]] || { printf 'not-owned'; return 0; }
+  mode="$(stat -c '%a' -- "$f" 2>/dev/null)" || { printf 'missing'; return 0; }
+  if (( 8#$mode & 8#077 )); then printf 'unsafe-mode:%s' "$mode"; return 0; fi
+  local first=""
+  IFS= read -r first < "$f" || true
+  [[ -n "${first%$'\r'}" ]] || { printf 'empty'; return 0; }
+  printf 'ok'
+}
+# Which source shadow_key would use, for notes: env | legacy-env | file | none.
+shadow_key_source() {
+  if [[ -n "${MINSPEC_ZAI_API_KEY:-}" ]]; then printf 'env'
+  elif [[ -n "${MINSPEC_SHADOW_TRIAGE_KEY:-}" ]]; then printf 'legacy-env'
+  elif [[ "$(shadow_key_file_state)" == "ok" ]]; then printf 'file'
+  else printf 'none'; fi
+}
 # True when the key came from the deprecated name (callers print the notice).
 shadow_key_legacy_in_use() { [[ -z "${MINSPEC_ZAI_API_KEY:-}" && -n "${MINSPEC_SHADOW_TRIAGE_KEY:-}" ]]; }
 shadow_model()      { printf '%s' "${MINSPEC_SHADOW_TRIAGE_MODEL:-$SHADOW_TRIAGE_DEFAULT_MODEL}"; }
