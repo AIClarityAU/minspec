@@ -184,6 +184,9 @@ exit 0
     PATH: `${binDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
     HOME: process.env.HOME ?? '/tmp',
     MINSPEC_SHADOW_TRIAGE_LOG: shadowLog,
+    // Hermetic: the "no key" cases must not pick up the operator's real key file under
+    // HOME, which would send a real credential to the stub curl's log (zaikey23).
+    MINSPEC_ZAI_API_KEY_FILE: path.join(dir, 'no-such-zai.key'),
     // Pin the model so these cases stay HERMETIC. The shipped default is the
     // `latest` sentinel, which resolves via GET /v1/models — a network call these
     // tests must never make, and which would (correctly) skip the run when it fails,
