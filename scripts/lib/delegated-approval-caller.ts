@@ -532,6 +532,10 @@ function recordOne(
       `Caller: scripts/lib/delegated-approval-caller.ts (#2981).`,
     ].join('\n');
     const gitId = ['-c', `user.name=${BOT_ACTOR}`, '-c', `user.email=${BOT_EMAIL}`];
+    // The pre-commit validate gate runs `npm run validate` (tsx + hoisted deps); a fresh
+    // worktree has no node_modules, the validator crashes, and the gate fails closed (#3020).
+    // Linked AFTER the stray check and never staged: add/commit take explicit paths only.
+    linkDependencies(repoRoot, wt);
     deps.git(wt, ['add', '--', ...changed]);
     deps.git(wt, [...gitId, 'commit', '--quiet', '-m', subject, '-m', why, '--', ...changed]);
     deps.git(
@@ -568,7 +572,7 @@ function recordOne(
     }
     return at('opened', 'covered', `${verdict.delegationId}, verdict ${verdict.record.verdictBy}`, url);
   } catch (err) {
-    return at('error', pushed ? 'pr-create-failed' : 'write-failed', String(err).split('\n')[0]);
+    return at('error', pushed ? 'pr-create-failed' : 'write-failed', errorDetail(err));
   } finally {
     try {
       deps.git(repoRoot, ['worktree', 'remove', '--force', wt]);
@@ -603,6 +607,45 @@ function prBody(c: Candidate, rec: CliRecord, delegationId: string, isDr: boolea
     'Opened by `scripts/lib/delegated-approval-caller.ts` (#2981). It never merges and never arms auto-merge.',
     '',
   ].join('\n');
+}
+
+/** Node's uncaught-error banner: three lines that precede the actual message (#3020). */
+const NODE_CRASH_NOISE = /^(node:internal\/|const err = |throw |\^+$)/;
+
+/**
+ * Make the primary checkout's installed dependencies visible to the recording worktree.
+ * Without them the pre-commit validate gate cannot run and refuses the commit (#3020).
+ * A no-op when the primary has none or the worktree already has `node_modules`.
+ */
+export function linkDependencies(repoRoot: string, worktree: string): boolean {
+  const src = path.join(repoRoot, 'node_modules');
+  const dst = path.join(worktree, 'node_modules');
+  if (!fs.existsSync(src)) return false;
+  try {
+    fs.lstatSync(dst);
+    return false;
+  } catch {
+    /* absent: link it */
+  }
+  fs.symlinkSync(src, dst, 'dir');
+  return true;
+}
+
+/**
+ * One-line failure reason for the report. `execFileSync` puts git's own words (hook
+ * refusal, nothing to commit, identity error) on `err.stderr`, never in `String(err)`,
+ * which is only "Command failed: git ... commit"; keep both so the cause is diagnosable.
+ */
+export function errorDetail(err: unknown): string {
+  const head = String(err).split('\n')[0];
+  const raw = (err as { stderr?: unknown } | null)?.stderr;
+  const stderr = raw == null ? '' : String(raw);
+  const lines = stderr
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !NODE_CRASH_NOISE.test(l))
+    .slice(0, 3);
+  return lines.length === 0 ? head : `${head} | stderr: ${lines.join(' / ').slice(0, 600)}`;
 }
 
 // ─── the real seams ─────────────────────────────────────────────────────────
