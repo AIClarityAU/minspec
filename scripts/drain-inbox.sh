@@ -38,6 +38,7 @@
 #   scripts/drain-inbox.sh --session-alive <pid>            # exit 0 alive / 1 gone
 #   scripts/drain-inbox.sh --should-continue <pid> <epoch>  # exit 0 continue / 1 stop
 #   scripts/drain-inbox.sh --paused                         # exit 0 paused / 1 not (#1187)
+#   scripts/drain-inbox.sh --zai-key-note                   # where the z.ai key comes from (never its value; zaikey23)
 #   scripts/drain-inbox.sh --is-quota   (<text on stdin)    # exit 0 iff the CLI's OWN limit line is in it
 #   scripts/drain-inbox.sh --resolve-session-pid            # print session anchor PID
 #   scripts/drain-inbox.sh --quota-gate                     # exit 0 admit / 42 defer
@@ -2908,6 +2909,27 @@ _drain_on_signal() {
   exit "$2"
 }
 
+# zai_key_note: one line saying WHERE the shadow-triage z.ai key would come from, never
+# what it is (queue item zaikey23). The key's only consumer is scripts/shadow-triage.sh,
+# which reads the key file itself, so the preferred state is "file": the value then lives
+# only in that short-lived process's memory. "env" means the key sits in THIS drain's
+# environment and every child's, readable by any same-user process via
+# /proc/<pid>/environ — exactly how job spec-2853-1023 came to print it — so it is
+# called out loudly. Runs in a subshell so sourcing the lib defines nothing here.
+zai_key_note() {
+  (
+    # shellcheck source=scripts/lib/shadow-triage.sh
+    source "${SCRIPT_DIR}/lib/shadow-triage.sh"
+    case "$(shadow_key_source)" in
+      file) echo "[drain] z.ai key: read from $(shadow_key_file) by shadow-triage only (not in this drain's environment)." ;;
+      env|legacy-env)
+        echo "[drain] WARNING: z.ai key is in this drain's ENVIRONMENT (inherited by every child, readable via /proc/<pid>/environ)." >&2
+        echo "[drain]   Move it to $(shadow_key_file) (mode 600) and remove it from the session env, then restart the drain (zaikey23)." >&2 ;;
+      *) echo "[drain] z.ai key: none (key file $(shadow_key_file): $(shadow_key_file_state)) — the shadow-triage instrument is inert; real triage is unaffected." >&2 ;;
+    esac
+  )
+}
+
 # run_loop: the session-scoped continuous scheduler. Repeats run_cycle until the
 # session ends, the wall-clock cap is hit, freshness fails persistently, or too
 # many consecutive cycle errors accrue. Quota signals pause-and-retry; a single
@@ -2918,6 +2940,7 @@ run_loop() {
   deadline=$(( $(date +%s) + MAX_LIFETIME ))
   echo "[drain] continuous loop started (session=$SESSION_PID$(session_anchor_note), interval=${INTERVAL}s, quota_backoff=${QUOTA_BACKOFF}s, max_lifetime=${MAX_LIFETIME}s)."
   echo "[drain] quota gate — $(quota_health)"
+  zai_key_note
   while :; do
     if ! session_alive "$SESSION_PID"; then
       echo "[drain] session $SESSION_PID ended — stopping loop (drain dies with the session)."; break
@@ -3063,6 +3086,10 @@ case "$1" in
     if (( $(date +%s) >= _deadline )); then echo "max-lifetime reached"; exit 1; fi
     if ! session_alive "$_pid"; then echo "session $_pid ended"; exit 1; fi
     echo "continue"; exit 0
+    ;;
+  --zai-key-note)
+    # Pure seam (zaikey23): the startup line naming the z.ai key's SOURCE. Never its value.
+    zai_key_note; exit 0
     ;;
   --paused)
     # Pure seam (#1187): is the pause marker present? exit 0 paused / 1 not.
@@ -3254,6 +3281,7 @@ fi
   if $CONTINUOUS; then
     run_loop
   else
+    zai_key_note
     run_cycle || true
     echo "[drain] done."
   fi
