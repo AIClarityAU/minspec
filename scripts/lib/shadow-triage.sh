@@ -96,6 +96,10 @@
 #                                     (Renamed from MINSPEC_SHADOW_TRIAGE_KEY, #2707, so the
 #                                     name says whose key it is. The old name is still read
 #                                     for one release, with a visible notice.)
+#                                     Unset in the environment, the key is read from
+#                                     MINSPEC_ZAI_KEY_FILE (default
+#                                     ~/.config/minspec/zai-api-key); that file must be
+#                                     mode 600 or tighter, else the step is refused.
 #   MINSPEC_SHADOW_TRIAGE             set to 0 to hard-disable even with a key present.
 #   MINSPEC_SHADOW_TRIAGE_MODEL       model id, or the `latest` sentinel (the default),
 #                                     which the RUNNER resolves per run from /v1/models.
@@ -165,9 +169,37 @@ SHADOW_TRIAGE_DEFAULT_TIMEOUT="120"
 # from the malformed rate. Override with MINSPEC_SHADOW_TRIAGE_MAX_TOKENS.
 SHADOW_TRIAGE_DEFAULT_MAX_TOKENS="1024"
 
-# MINSPEC_ZAI_API_KEY wins; the pre-#2707 MINSPEC_SHADOW_TRIAGE_KEY is honoured for one
-# release so an unedited settings file does not silently switch the step off.
-shadow_key()        { printf '%s' "${MINSPEC_ZAI_API_KEY:-${MINSPEC_SHADOW_TRIAGE_KEY:-}}"; }
+# The key's home outside the process environment. A key in a repo's settings `env` block
+# rides into EVERY agent session there, including ones that read untrusted issue text;
+# a private file read only by this harness does not.
+shadow_key_file()   { printf '%s' "${MINSPEC_ZAI_KEY_FILE:-${HOME:-}/.config/minspec/zai-api-key}"; }
+
+# Why the key file cannot be used, or nothing when it can. `missing` is the normal
+# unconfigured state; `insecure` means group/world can read it, and we refuse rather
+# than use a credential someone else may already hold. Never prints the value.
+shadow_key_file_problem() {
+  local f mode
+  f="$(shadow_key_file)"
+  [[ -f "$f" ]] || { printf 'missing'; return 0; }
+  mode="$(stat -L -c '%a' "$f" 2>/dev/null)" || { printf 'unreadable'; return 0; }
+  # Any group/world permission bit (the low two octal digits) is a refusal.
+  [[ "$mode" =~ ^[0-7]+$ ]] || { printf 'unreadable'; return 0; }
+  (( (8#$mode & 8#077) == 0 )) || { printf 'insecure'; return 0; }
+  [[ -r "$f" ]] || printf 'unreadable'
+}
+
+# MINSPEC_ZAI_API_KEY from the environment wins (CI, tests); else the private key file,
+# read here and never exported, so no child process inherits it. The pre-#2707
+# MINSPEC_SHADOW_TRIAGE_KEY is honoured for one release so an unedited settings file
+# does not silently switch the step off. An unusable file yields no key (fail closed).
+shadow_key() {
+  if [[ -n "${MINSPEC_ZAI_API_KEY:-}" ]]; then printf '%s' "$MINSPEC_ZAI_API_KEY"; return 0; fi
+  if [[ -n "${MINSPEC_SHADOW_TRIAGE_KEY:-}" ]]; then printf '%s' "$MINSPEC_SHADOW_TRIAGE_KEY"; return 0; fi
+  [[ -z "$(shadow_key_file_problem)" ]] || return 0
+  local k
+  IFS= read -r k < "$(shadow_key_file)" || true
+  printf '%s' "$k"
+}
 # True when the key came from the deprecated name (callers print the notice).
 shadow_key_legacy_in_use() { [[ -z "${MINSPEC_ZAI_API_KEY:-}" && -n "${MINSPEC_SHADOW_TRIAGE_KEY:-}" ]]; }
 shadow_model()      { printf '%s' "${MINSPEC_SHADOW_TRIAGE_MODEL:-$SHADOW_TRIAGE_DEFAULT_MODEL}"; }

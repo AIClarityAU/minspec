@@ -184,6 +184,8 @@ exit 0
     PATH: `${binDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
     HOME: process.env.HOME ?? '/tmp',
     MINSPEC_SHADOW_TRIAGE_LOG: shadowLog,
+    // Hermetic: never read the operator's real key file (gkmove).
+    MINSPEC_ZAI_KEY_FILE: path.join(dir, 'no-such-zai-key'),
     // Pin the model so these cases stay HERMETIC. The shipped default is the
     // `latest` sentinel, which resolves via GET /v1/models — a network call these
     // tests must never make, and which would (correctly) skip the run when it fails,
@@ -410,6 +412,47 @@ describe('shadow-triage — inert without a key, and real triage is untouched (#
   it('MINSPEC_ZAI_API_KEY set → no deprecation notice even if the old name is also present (#2707)', () => {
     const h = makeHarness({ key: 'zai-test-key', legacyKey: 'zai-old-key' });
     expect(runTriage(h).stderr).not.toMatch(/deprecated/);
+  });
+
+  describe('key file (gkmove) — read only by the harness, fail closed', () => {
+    const writeKeyFile = (h: ReturnType<typeof makeHarness>, mode: number) => {
+      const f = path.join(h.dir, 'zai-key');
+      fs.writeFileSync(f, 'zai-test-key\n');
+      fs.chmodSync(f, mode);
+      h.env.MINSPEC_ZAI_KEY_FILE = f;
+    };
+
+    it('file missing → refuses: no request, a note naming the file', () => {
+      const h = makeHarness();
+      const res = runTriage(h);
+      expect(res.stderr).toMatch(/no z\.ai key configured.*no-such-zai-key/);
+      expect(fs.existsSync(h.curlCalls)).toBe(false);
+    });
+
+    it('mode 644 → refuses without printing the value', () => {
+      const h = makeHarness();
+      writeKeyFile(h, 0o644);
+      const res = runTriage(h);
+      expect(res.stderr).toMatch(/refusing the z\.ai key file.*group\/world-readable/);
+      expect(res.stderr).not.toContain('zai-test-key');
+      expect(fs.existsSync(h.curlCalls)).toBe(false);
+    });
+
+    it('mode 600 → loads it and issues the request', () => {
+      const h = makeHarness();
+      writeKeyFile(h, 0o600);
+      const res = runTriage(h);
+      expect(res.stderr).not.toMatch(/refusing|no z\.ai key configured/);
+      expect(fs.existsSync(h.curlCalls)).toBe(true);
+    });
+
+    it('env var set → wins even over an insecure file', () => {
+      const h = makeHarness({ key: 'zai-test-key' });
+      writeKeyFile(h, 0o644);
+      const res = runTriage(h);
+      expect(res.stderr).not.toMatch(/refusing/);
+      expect(fs.existsSync(h.curlCalls)).toBe(true);
+    });
   });
 
   it('MINSPEC_SHADOW_TRIAGE=0 hard-disables it even when a key is present', () => {
