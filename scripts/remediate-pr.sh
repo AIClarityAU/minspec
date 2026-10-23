@@ -219,6 +219,26 @@ classify_pr() {
   echo "skip-unhandled-state"
 }
 
+# ── Pure failing-check derivation (#3023) ──────────────────────────────────────
+# Does the rollup carry a red check that CODE can fix? Prints yes|no for a PR's JSON.
+# Excluded from "fixable": the `ai-review` check (its own review path) and the
+# `ready-to-merge` merge gate (workflow `ready-to-merge`, job `gate`, or a status
+# context of that name). The gate turns green only when a verified `ai-review:pass`
+# sits on the current head, and its job runs the BASE branch's guard — no commit on the
+# branch can change it, so a remediation agent can only burn runs and escalate (#3023).
+# FAILURE/ERROR/TIMED_OUT/CANCELLED conclusions count; a still-running check does not.
+derive_failing_non_review() {
+  jq -r '
+    [ (.statusCheckRollup // [])[]
+      | select((.name // "") != "ai-review")
+      | select((.name // "") != "ready-to-merge")
+      | select((.context // "") != "ready-to-merge")
+      | select((.workflowName // "") != "ready-to-merge")
+      | (.conclusion // "") ]
+    | map(select(. == "FAILURE" or . == "ERROR" or . == "TIMED_OUT" or . == "CANCELLED"))
+    | if length > 0 then "yes" else "no" end' <<<"$1"
+}
+
 # ── Marker vocabulary + pure counting helpers ──────────────────────────────────
 # Markers embedded in remediation comments so prior outcomes can be COUNTED on a PR
 # (bounding the runaway loop) without a stateful store — one per outcome class:
@@ -382,6 +402,10 @@ if [[ "${1:-}" == "--classify" ]]; then
     exit 2
   fi
   classify_pr "$1" "$2" "$3" "$4" "$5" "$6" "${7:-no}"
+  exit 0
+fi
+if [[ "${1:-}" == "--derive-failing" ]]; then
+  derive_failing_non_review "$(cat)"
   exit 0
 fi
 if [[ "${1:-}" == "--count-markers" ]]; then
@@ -585,12 +609,7 @@ fi
 # a real red check. FAILURE/ERROR/TIMED_OUT/CANCELLED conclusions count as failing;
 # NEUTRAL/SKIPPED/SUCCESS do not. A still-running check (no conclusion) is NOT a
 # failure — we wait, we don't remediate mid-flight.
-FAILING_NON_REVIEW=$(jq -r '
-  [ .statusCheckRollup[]
-    | select((.name // "") != "ai-review")
-    | (.conclusion // "") ]
-  | map(select(. == "FAILURE" or . == "ERROR" or . == "TIMED_OUT" or . == "CANCELLED"))
-  | if length > 0 then "yes" else "no" end' <<<"$PR_JSON")
+FAILING_NON_REVIEW=$(derive_failing_non_review "$PR_JSON")
 AI_REVIEW_BAD=$(jq -r '
   [ .statusCheckRollup[]
     | select((.name // "") == "ai-review")
