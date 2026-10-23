@@ -90,6 +90,7 @@ REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/lib/agent-context.sh"
+agent_caveman_init
 # How this script touches the worktree it checks a pull request's branch out into. That
 # branch is usually an agent's work, but nothing here checks who wrote it: any branch of
 # this repository whose name fits is taken, from whoever can push one, and the list in
@@ -216,6 +217,40 @@ classify_pr() {
   #    creator-shepherd polling its own PR while a merge-gating check is still
   #    running, which is the opposite failure — a gate abandoned, not a gate asserted.
   echo "skip-unhandled-state"
+}
+
+# ── Pure failing-check derivation (#3023) ──────────────────────────────────────
+# Does the rollup carry a red check that CODE can fix? Prints yes|no for a PR's JSON.
+# Excluded from "fixable": the `ai-review` check (its own review path) and the
+# `ready-to-merge` merge gate (workflow `ready-to-merge`, job `gate`, or a status
+# context of that name). The gate turns green only when a verified `ai-review:pass`
+# sits on the current head, and its job runs the BASE branch's guard — no commit on the
+# branch can change it, so a remediation agent can only burn runs and escalate (#3023).
+# FAILURE/ERROR/TIMED_OUT/CANCELLED conclusions count; a still-running check does not.
+#
+# #3030: the rollup keeps SUPERSEDED runs (a concurrency-cancelled run stays listed beside
+# the later green re-run of the same check), so every entry must NOT be classified — only
+# the LATEST per check identity (workflow + name/context, newest startedAt/completedAt;
+# ties keep the later array position). Without this a cancelled-then-rerun check marks a
+# green PR red indefinitely. ROLLUP_LATEST_JQ is the single shared definition: every
+# rollup predicate below prepends it, so no predicate can read the stale entries.
+ROLLUP_LATEST_JQ='
+def latest_checks:
+  [ (.statusCheckRollup // []) | to_entries[]
+    | .value + {_i: .key} ]
+  | group_by([(.workflowName // ""), (.name // .context // "")])
+  | map(sort_by([(.startedAt // .completedAt // ""), (.completedAt // ""), ._i]) | last);
+'
+derive_failing_non_review() {
+  jq -r "$ROLLUP_LATEST_JQ"'
+    [ latest_checks[]
+      | select((.name // "") != "ai-review")
+      | select((.name // "") != "ready-to-merge")
+      | select((.context // "") != "ready-to-merge")
+      | select((.workflowName // "") != "ready-to-merge")
+      | (.conclusion // "") ]
+    | map(select(. == "FAILURE" or . == "ERROR" or . == "TIMED_OUT" or . == "CANCELLED"))
+    | if length > 0 then "yes" else "no" end' <<<"$1"
 }
 
 # ── Marker vocabulary + pure counting helpers ──────────────────────────────────
@@ -383,6 +418,10 @@ if [[ "${1:-}" == "--classify" ]]; then
   classify_pr "$1" "$2" "$3" "$4" "$5" "$6" "${7:-no}"
   exit 0
 fi
+if [[ "${1:-}" == "--derive-failing" ]]; then
+  derive_failing_non_review "$(cat)"
+  exit 0
+fi
 if [[ "${1:-}" == "--count-markers" ]]; then
   shift
   if [[ $# -lt 1 || $# -gt 2 ]]; then
@@ -488,10 +527,33 @@ ${marker}" 2>/dev/null || true
 ALLOWED_TOOLS="Read,Edit,Write,Glob,Grep,Bash(npm test),Bash(npm run validate),Bash(npm run lint),Bash(npm run build),Bash(npm ci),Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
 
 echo "Fetching PR #$PR ($REPO)..."
-PR_JSON=$(gh pr view "$PR" --repo "$REPO" \
-  --json number,state,isDraft,headRefName,headRepository,headRepositoryOwner,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>/dev/null) || {
-  echo "ERROR: could not fetch PR #$PR" >&2; exit 1
+# gh's stderr is KEPT (#2868): the HTTP status / auth error / rate-limit text is the only
+# thing that tells an expired token from a transient fault, and 2>/dev/null threw it away.
+# On a failure, force ONE re-mint (gh_bot_reauth_read: non-zero when the broker gave back
+# the same credential or we do not own the token, so a retry would be pointless) and retry
+# once. A second failure is reported WITH its stderr and exits 1.
+_PR_FETCH_ERR=$(mktemp)
+# Mint in THIS shell, not inside the $(...) below: a mint in a subshell is lost with it,
+# which would also leave gh_bot_reauth_read nothing to compare a re-mint against.
+gh_bot_warm_read
+_fetch_pr_json() {
+  gh pr view "$PR" --repo "$REPO" \
+    --json number,state,isDraft,headRefName,headRepository,headRepositoryOwner,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>"$_PR_FETCH_ERR"
 }
+if ! PR_JSON=$(_fetch_pr_json); then
+  echo "WARNING: fetch of PR #$PR failed: $(tr '\n' ' ' <"$_PR_FETCH_ERR")" >&2
+  if gh_bot_reauth_read; then
+    echo "Re-minted the read token — retrying the fetch of PR #$PR once." >&2
+    PR_JSON=$(_fetch_pr_json) || {
+      echo "ERROR: could not fetch PR #$PR (after re-mint): $(tr '\n' ' ' <"$_PR_FETCH_ERR")" >&2
+      rm -f "$_PR_FETCH_ERR"; exit 1
+    }
+  else
+    echo "ERROR: could not fetch PR #$PR: $(tr '\n' ' ' <"$_PR_FETCH_ERR")" >&2
+    rm -f "$_PR_FETCH_ERR"; exit 1
+  fi
+fi
+rm -f "$_PR_FETCH_ERR"
 
 STATE=$(jq -r '.state' <<<"$PR_JSON")
 IS_DRAFT=$(jq -r '.isDraft' <<<"$PR_JSON")
@@ -561,22 +623,17 @@ fi
 # a real red check. FAILURE/ERROR/TIMED_OUT/CANCELLED conclusions count as failing;
 # NEUTRAL/SKIPPED/SUCCESS do not. A still-running check (no conclusion) is NOT a
 # failure — we wait, we don't remediate mid-flight.
-FAILING_NON_REVIEW=$(jq -r '
-  [ .statusCheckRollup[]
-    | select((.name // "") != "ai-review")
-    | (.conclusion // "") ]
-  | map(select(. == "FAILURE" or . == "ERROR" or . == "TIMED_OUT" or . == "CANCELLED"))
-  | if length > 0 then "yes" else "no" end' <<<"$PR_JSON")
-AI_REVIEW_BAD=$(jq -r '
-  [ .statusCheckRollup[]
+FAILING_NON_REVIEW=$(derive_failing_non_review "$PR_JSON")
+AI_REVIEW_BAD=$(jq -r "$ROLLUP_LATEST_JQ"'
+  [ latest_checks[]
     | select((.name // "") == "ai-review")
     | (.conclusion // "") ]
   | map(select(. == "FAILURE" or . == "ERROR"))
   | if length > 0 then "yes" else "no" end' <<<"$PR_JSON")
 # Is the ai-review check still running from a prior push? Don't stack a second
 # remediation on top of an in-flight re-review.
-AI_REVIEW_PENDING=$(jq -r '
-  [ .statusCheckRollup[]
+AI_REVIEW_PENDING=$(jq -r "$ROLLUP_LATEST_JQ"'
+  [ latest_checks[]
     | select((.name // "") == "ai-review")
     | (.status // "") ]
   | map(select(. == "QUEUED" or . == "IN_PROGRESS" or . == "PENDING" or . == "WAITING"))
@@ -806,8 +863,8 @@ else
   # agent-remediate-checks: name the failing checks; the agent REPRODUCES locally
   # (deterministic) and fixes — we never feed CI log text (an untrusted-output
   # injection channel) into the prompt.
-  FAILED_NAMES=$(jq -r '
-    [ .statusCheckRollup[]
+  FAILED_NAMES=$(jq -r "$ROLLUP_LATEST_JQ"'
+    [ latest_checks[]
       | select((.name // "") != "ai-review")
       | select((.conclusion // "") == "FAILURE" or (.conclusion // "") == "ERROR"
                or (.conclusion // "") == "TIMED_OUT" or (.conclusion // "") == "CANCELLED")
@@ -868,6 +925,7 @@ echo "  Launching remediation agent (model: $RUN_MODEL, log: $LOG)..."
 while true; do
   if (cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$RUN_PROMPT" \
         "${AGENT_CONTEXT_ARGS[@]}" \
+        ${AGENT_CAVEMAN_ARGS[@]+"${AGENT_CAVEMAN_ARGS[@]}"} \
         --model "$RUN_MODEL" \
         --allowedTools "$ALLOWED_TOOLS" \
         --output-format text 2>&1 | tee "$LOG"); then

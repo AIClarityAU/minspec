@@ -16,7 +16,7 @@
  */
 
 import { readFileSync, existsSync } from 'fs';
-import { join, relative, dirname, sep } from 'path';
+import { join, relative, dirname, sep, basename } from 'path';
 import {
   validateDrSequence,
   validateDrIndexStatus,
@@ -45,6 +45,7 @@ import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold'
 // The corpus walkers, under their former local names. `safeGlob` now tolerates ONLY an
 // absent root; every other read failure reaches the rule's own catch instead of being
 // turned into an empty corpus (#1999).
+import { drsMissingPlainTerms } from './lib/dr-required-sections';
 import { walkFilesByExt as glob, walkOptionalRoot as safeGlob } from './lib/corpus-walk';
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
 import { checkDeclaredSpecIds } from './lib/spec-id-collision';
@@ -61,8 +62,15 @@ const ROOT = process.cwd();
 let errors = 0;
 let warnings = 0;
 
+// `\r?\n`, not `\n` — a CRLF checkout (Windows `core.autocrlf=true`; this repo's
+// `.gitattributes` pins `specs/**` and `.minspec/approvals/**` to LF but not
+// `docs/decisions/**` or `docs/epics/**`, #2465) must still match this anchor. A
+// bare `\n` silently returns `{}` on every CRLF file: every frontmatter-bearing
+// rule below then reads it as having NO frontmatter rather than failing loudly,
+// which is exactly invariant 2's "no silent gate". Mirrors the Python twin's
+// intent already proven out in `declaredSpecId` (spec-id-collision.ts).
 function parseFrontmatter(content: string): Record<string, string> {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) return {};
   const fm: Record<string, string> = {};
   for (const line of match[1].split('\n')) {
@@ -123,23 +131,50 @@ try {
   // docs/domain/ doesn't exist yet — that's fine
 }
 
-// Build the registry of valid epic refs (ids + slugs, lowercased) from
-// docs/epics/EPIC-*.md. Empty when the repo predates epics — the epic gate
-// then skips entirely (graceful degradation: don't demand epics a repo hasn't
-// adopted). Mirrors epicRefSet() in the extension.
-function loadEpicRefs(): Set<string> {
+// Registry of valid epic refs (ids + slugs, lowercased) from docs/epics/EPIC-*.md,
+// plus enough bookkeeping to tell "this repo has no epics" apart from "this repo
+// has epic files but none of them could be read" (#2465). `fileCount === 0` is
+// the former — the epic gate below skips entirely (graceful degradation: don't
+// demand epics a repo hasn't adopted). `fileCount > 0` with `refs.size === 0` is
+// the latter, and must FAIL rather than silently skip: an empty registry reads
+// identically to "no epics" at the call site, which is exactly the silent-gate
+// shape constitution invariant 2 forbids (this is how a CRLF-only docs/epics/
+// tree — every file present, none parsed — went unnoticed).
+interface EpicRegistry {
+  readonly refs: Set<string>;
+  /** Epic files found, regardless of whether an id/slug could be read from them. */
+  readonly fileCount: number;
+  /** Epic files found but unreadable, or readable with neither id: nor slug:. */
+  readonly unreadable: readonly string[];
+}
+
+function loadEpicRefs(): EpicRegistry {
   const refs = new Set<string>();
+  const unreadable: string[] = [];
   const epicsDir = join(ROOT, 'docs', 'epics');
+  let files: string[];
   try {
-    for (const file of glob(epicsDir, '.md')) {
+    // EPIC-NNN*.md only: docs/epics/INDEX.md is a derived, legitimately
+    // frontmatter-less index, and is not an epic (buildReferenceRegistry scopes
+    // epics the same way).
+    files = glob(epicsDir, '.md').filter((f) => /^EPIC-\d+/.test(basename(f)));
+  } catch {
+    // docs/epics/ doesn't exist — no epics registered.
+    return { refs, fileCount: 0, unreadable };
+  }
+  for (const file of files) {
+    try {
       const fm = parseFrontmatter(readFileSync(file, 'utf-8'));
       if (fm['id']) refs.add(fm['id'].toLowerCase());
       if (fm['slug']) refs.add(fm['slug'].toLowerCase());
+      // Unreadable = no id AND no slug. Judged per file, not by whether it added a
+      // NEW ref, so a duplicate id/slug is not mislabelled as unreadable.
+      if (!fm['id'] && !fm['slug']) unreadable.push(relative(ROOT, file));
+    } catch (err) {
+      unreadable.push(`${relative(ROOT, file)} (${err instanceof Error ? err.message : String(err)})`);
     }
-  } catch {
-    // docs/epics/ doesn't exist — no epics registered.
   }
-  return refs;
+  return { refs, fileCount: files.length, unreadable };
 }
 
 // Extract the machine ref from an `epic:` value, dropping any inline title
@@ -198,7 +233,34 @@ function buildReferenceRegistry(): ReferenceRegistry {
 // (which has adopted epics); the shipped extension keeps epics soft (warning,
 // FR-9). See DR-003 "RCDD on the RCDD" addendum.
 const specsDir = join(ROOT, 'specs');
-const epicRefs = loadEpicRefs();
+const epicsDir = join(ROOT, 'docs', 'epics');
+const epicRegistry = loadEpicRefs();
+const epicRefs = epicRegistry.refs;
+
+// Fail CLOSED (#2465) when epic files exist but the registry built from them is
+// empty — e.g. every file in docs/epics/ is CRLF and parseFrontmatter cannot see
+// any of them. Left silent, `epicRefs.size > 0` below reads identically to "this
+// repo has no epics" and skips the whole gate below without saying so, which is
+// the silent-stop-evaluating shape invariant 2 forbids. A genuinely epic-less
+// repo (fileCount === 0) is unaffected — that is the gate's normal skip path.
+if (epicRegistry.fileCount > 0 && epicRefs.size === 0) {
+  fail(
+    epicsDir,
+    `${epicRegistry.fileCount} epic file(s) exist in docs/epics/ but none could be ` +
+      `read for an \`id:\`/\`slug:\` (${epicRegistry.unreadable.join(', ')}) — the epic ` +
+      'gate cannot tell that apart from "no epics adopted" and would otherwise skip ' +
+      'silently. Check these files for CRLF line endings or malformed frontmatter.',
+  );
+} else if (epicRegistry.unreadable.length > 0) {
+  // Registry is non-empty (the gate below still runs), but some epic files
+  // contributed nothing to it — surface that too rather than let a bad file hide
+  // behind the others' successful reads.
+  warn(
+    `${epicRegistry.unreadable.length} epic file(s) in docs/epics/ could not be read for an ` +
+      `\`id:\`/\`slug:\`, and are silently absent from the epic registry: ${epicRegistry.unreadable.join(', ')}`,
+  );
+}
+
 try {
   const specFiles = glob(specsDir, '.md');
   for (const file of specFiles) {
@@ -322,6 +384,26 @@ try {
   warn(
     `DR-id uniqueness check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
       'Rule 17 validated NOTHING this run; do not read the green as a collision-free register.',
+  );
+}
+
+// Rule 20 (non-fatal, #2921): every decision record carries `## In plain terms`.
+// That section is what the founder reads to accept a DR, and it existed only in the
+// generator template, so a hand-written DR skipped it with no gate noticing. WARNS
+// until the existing corpus is backfilled, then flips to fatal. Not a silent catch
+// (invariant 2): an unreadable register says so.
+try {
+  const drs = safeGlob(resolveDecisionsDir(), '.md').map((file) => ({
+    file: relative(ROOT, file),
+    content: readFileSync(file, 'utf-8'),
+  }));
+  for (const file of drsMissingPlainTerms(drs)) {
+    warn(`${file}: decision record lacks a \`## In plain terms\` section (#2921).`);
+  }
+} catch (err) {
+  warn(
+    `DR required-section check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
+      'Rule 20 validated NOTHING this run.',
   );
 }
 
@@ -955,6 +1037,85 @@ try {
   }
 } catch {
   // Template rendering / harness files unreadable — nothing to check, stay silent.
+}
+
+// Rule 24 (FATAL, #2684): a known limit admitted in shipped product source or
+// template text must cite a tracked issue. The commit-message follow-up gate
+// (COMMIT_MSG_HOOK, template-registry.ts) already requires a tracked ref when a
+// commit MESSAGE defers work in prose (DR-023/DR-059) — but nothing applied that
+// same rule to a limit recorded in a comment or in text this repo SHIPS. Found
+// twice in August with no issue anywhere nearby: "Know the limit of the lower
+// tiers" (template-registry.ts, the shipped CLAUDE.md template) and "That is a
+// known limit of both gates" (template-registry.ts, the shipped pre-commit-hook
+// template). A prose-only admission is exactly the leak the deferred-work gate
+// already closes on commit messages — just on a different artifact class.
+//
+// Text match, deliberately approximate (constitution invariant 2: a noisy gate
+// beats a silent one). Scoped to \`packages/*/src/\` — shipped product source —
+// and never \`tests/\`, so a test documenting a deliberate test-only limitation
+// (dr-amendments.test.ts already does this correctly, citing \`#1448\`) is not
+// swept in.
+//
+// "Nearby" is the surrounding PARAGRAPH, not the whole file: the contiguous run
+// of lines sharing the matched line's comment leader (\`*\`, \`#\`, \`//\`, or none
+// for plain template prose), bounded by a blank(-ish) line or a change of
+// leader. A fixed-line-count window would have let an unrelated \`#NNN\` elsewhere
+// in the same function silently satisfy the gate — the hook-template instance
+// above sits six lines from an \`#1908\` that cites a different claim entirely;
+// a paragraph-scoped window still correctly flags it.
+const KNOWN_LIMIT_PATTERN = /\bknow(?:n)?\s+(?:the\s+)?limit/i;
+const ISSUE_REF_PATTERN = /#\d+/;
+const COMMENT_LEADER_PATTERN = /^\s*(\/\*\*|\*\/|\*|\/\/|#)/;
+
+function commentLeader(line: string): string | null {
+  const m = line.match(COMMENT_LEADER_PATTERN);
+  return m ? m[1] : null;
+}
+
+function isKnownLimitParagraphBoundary(line: string, anchorLeader: string | null): boolean {
+  const stripped = line.replace(COMMENT_LEADER_PATTERN, '').trim();
+  if (stripped === '') return true;
+  return anchorLeader !== null && commentLeader(line) !== anchorLeader;
+}
+
+try {
+  let limitFilesScanned = 0;
+  for (const file of safeGlob(join(ROOT, 'packages'), '.ts')) {
+    const rel = relative(ROOT, file).split(sep).join('/');
+    // Shipped product source only: packages/<pkg>/src/, never tests/, and never a
+    // vendored or built tree (node_modules/, dist/) that merely contains a src/ folder.
+    if (!/^packages\/[^/]+\/src\//.test(rel)) continue;
+    if (rel.split('/').some(seg => seg === 'node_modules' || seg === 'dist')) continue;
+    limitFilesScanned++;
+
+    const lines = readFileSync(file, 'utf-8').split('\n');
+    lines.forEach((line, i) => {
+      if (!KNOWN_LIMIT_PATTERN.test(line)) return;
+
+      const anchorLeader = commentLeader(line);
+      let start = i;
+      while (start > 0 && !isKnownLimitParagraphBoundary(lines[start - 1], anchorLeader)) start--;
+      let end = i;
+      while (end < lines.length - 1 && !isKnownLimitParagraphBoundary(lines[end + 1], anchorLeader)) end++;
+
+      const paragraph = lines.slice(start, end + 1).join('\n');
+      if (!ISSUE_REF_PATTERN.test(paragraph)) {
+        fail(
+          file,
+          `line ${i + 1}: admits a known limit with no tracked issue nearby — "${line.trim()}". ` +
+            'Cite the issue that tracks it (e.g. "(#NNN)") in the same paragraph (#2684).',
+        );
+      }
+    });
+  }
+  if (limitFilesScanned === 0) {
+    warn('Rule 24 scanned 0 files under packages/*/src/; do not read the green as verified.');
+  }
+} catch (err) {
+  warn(
+    `known-limit check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
+      'Rule 24 validated NOTHING this run; do not read the green as clean.',
+  );
 }
 
 checkCiReviewTemplatesFresh().then(() => {

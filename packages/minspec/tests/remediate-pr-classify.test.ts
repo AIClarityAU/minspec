@@ -370,3 +370,72 @@ describe('remediate-pr.sh: the drain honours the owner gate without extra wiring
     expect(arm).toMatch(/exit 0/);
   });
 });
+
+// #3023 — the ready-to-merge gate is not fixable by code: it is green only when a verified
+// ai-review:pass sits on the current head, and its job runs the BASE branch's guard.
+describe('remediate-pr.sh --derive-failing: ready-to-merge gate is not a code-fixable red (#3023)', () => {
+  function derive(rollup: unknown[]): string {
+    return execFileSync('bash', [SCRIPT, '--derive-failing'], {
+      encoding: 'utf-8',
+      input: JSON.stringify({ statusCheckRollup: rollup }),
+    }).trim();
+  }
+
+  it('the gate job of the ready-to-merge workflow alone failing → no', () => {
+    expect(derive([
+      { name: 'test', workflowName: 'ci', conclusion: 'SUCCESS' },
+      { name: 'gate', workflowName: 'ready-to-merge', conclusion: 'FAILURE' },
+    ])).toBe('no');
+  });
+
+  it('a ready-to-merge status context alone failing → no', () => {
+    expect(derive([{ context: 'ready-to-merge', state: 'FAILURE', conclusion: 'FAILURE' }])).toBe('no');
+  });
+
+  it('a real red check alongside the gate still → yes', () => {
+    expect(derive([
+      { name: 'gate', workflowName: 'ready-to-merge', conclusion: 'FAILURE' },
+      { name: 'lint', workflowName: 'ci', conclusion: 'FAILURE' },
+    ])).toBe('yes');
+  });
+
+  it('a differently-named job called gate in another workflow is still fixable → yes', () => {
+    expect(derive([{ name: 'gate', workflowName: 'ci', conclusion: 'FAILURE' }])).toBe('yes');
+  });
+
+  // #3030 — superseded runs stay in the rollup; only the latest per check counts.
+  it('CANCELLED older + SUCCESS newer for one check → no (#3030)', () => {
+    expect(derive([
+      { name: 'DR id uniqueness', workflowName: 'dr', conclusion: 'CANCELLED', startedAt: '2026-10-22T23:20:00Z', completedAt: '2026-10-22T23:23:55Z' },
+      { name: 'DR id uniqueness', workflowName: 'dr', conclusion: 'SUCCESS', startedAt: '2026-10-22T23:30:00Z', completedAt: '2026-10-22T23:31:00Z' },
+    ])).toBe('no');
+  });
+
+  it('order in the array does not matter: SUCCESS listed first, CANCELLED older → no (#3030)', () => {
+    expect(derive([
+      { name: 'x', workflowName: 'ci', conclusion: 'SUCCESS', startedAt: '2026-10-22T23:30:00Z' },
+      { name: 'x', workflowName: 'ci', conclusion: 'CANCELLED', startedAt: '2026-10-22T23:20:00Z' },
+    ])).toBe('no');
+  });
+
+  it('SUCCESS older + FAILURE newer for one check → yes (latest wins both ways)', () => {
+    expect(derive([
+      { name: 'x', workflowName: 'ci', conclusion: 'SUCCESS', startedAt: '2026-10-22T23:20:00Z' },
+      { name: 'x', workflowName: 'ci', conclusion: 'FAILURE', startedAt: '2026-10-22T23:30:00Z' },
+    ])).toBe('yes');
+  });
+
+  it('same name in different workflows is NOT deduped together → yes', () => {
+    expect(derive([
+      { name: 'gate', workflowName: 'a', conclusion: 'FAILURE', startedAt: '2026-10-22T23:20:00Z' },
+      { name: 'gate', workflowName: 'b', conclusion: 'SUCCESS', startedAt: '2026-10-22T23:30:00Z' },
+    ])).toBe('yes');
+  });
+
+  it('ai-review red stays excluded; in-flight check is not a failure', () => {
+    expect(derive([
+      { name: 'ai-review', conclusion: 'FAILURE' },
+      { name: 'test', status: 'IN_PROGRESS' },
+    ])).toBe('no');
+  });
+});

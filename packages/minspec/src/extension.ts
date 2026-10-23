@@ -38,6 +38,8 @@ import { tidyPrimaryCommand } from './commands/tidy-primary';
 import { fromFrontmatter } from './lib/spec-progress';
 import { nextTaskCommand, computeNextTask } from './commands/next-task';
 import { SpecPanel } from './views/spec-panel';
+import { GettingStartedPanel } from './views/getting-started-webview';
+import { gettingStartedCommand, hotkeysFromManifest } from './commands/getting-started';
 import { loadSession, saveSession, addToScope, isFileInScope } from './lib/session';
 import { SessionPresenceManager } from './lib/presence';
 import { detectTools, getToolFilePath, type DetectedTools } from './lib/tool-detector';
@@ -386,6 +388,11 @@ export function activate(context: vscode.ExtensionContext): void {
         // first sets the var; it only keeps it in step with the marker.
         syncSessionIdEnvVar();
       },
+    ),
+    // SPEC-042: opening the page is cheap and side-effect-free; no panel opens at activation.
+    vscode.commands.registerCommand(
+      'minspec.gettingStarted',
+      gettingStartedCommand(new GettingStartedPanel(), hotkeysFromManifest(context.extension?.packageJSON)),
     ),
     vscode.commands.registerCommand('minspec.commitHarnessRefresh', async (folderArg?: string) => {
       await commitHarnessRefreshCommand(folderArg);

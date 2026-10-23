@@ -252,6 +252,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type "MinSpec" to 
 |---------|-------------|
 | **MinSpec: Initialize SDD Structure** | Create `.minspec/` and the files listed under [What Initialization Produces](#what-initialization-produces) |
 | **MinSpec: Refresh Harness Files** | Merge the installed version's templates into the generated files, keeping your edits |
+| **MinSpec: Getting Started** | Open the onboarding checklist page, which walks through setting MinSpec up in the current project |
 | **MinSpec: Commit Harness Refresh** | Offer again to commit generated files that are still uncommitted |
 | **MinSpec: Tidy Checkout (discard redundant copies)** | List changed files that are identical to the default branch, and discard them after you confirm |
 | **MinSpec: Migrate Spec Layout (Flat ↔ Spec Kit)** | Convert specs between one file per spec and one folder per spec |
