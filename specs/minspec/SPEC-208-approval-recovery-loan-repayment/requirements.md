@@ -10,13 +10,19 @@ depends_on: [DR-080, SPEC-050, SPEC-039]  # DR-080 §5 is the loan this repays; 
 relates_to: [SPEC-140, SPEC-022, SPEC-051, DR-051, DR-065, DR-078, DR-012, "#1375", "#1115", "#1653", "#1224", "#1346", "#1354", "#1064", "#168"]
 # Ownership declared in Specify, before approval mints a hash (SPEC-038).
 # implements: the shared transport module and its test are NET-NEW and owned here;
-# approval-recover.ts is existing code that no spec declares (grep of specs/ on
-# 2026-10-18 found no `implements:`/`affects:` naming it), so this spec takes primary
-# ownership of it. affects: push-docs-lane.ts is SPEC-039's command and becomes the
-# transport's second caller; commit-on-approve.ts is SPEC-050's seam and gains one
-# argument (the bytes captured at approval time, FR-6).
-implements: [packages/minspec/src/lib/worktree-transport.ts, packages/minspec/tests/worktree-transport.test.ts, packages/minspec/src/lib/approval-recover.ts]
-affects: [packages/minspec/src/commands/push-docs-lane.ts, packages/minspec/src/commands/commit-on-approve.ts, packages/minspec/tests/approval-recover.test.ts, docs/decisions/DR-080.md]
+# approval-recover.ts is existing code owned by no spec's `implements:`, and SPEC-140
+# (status: planning, in flight) already lists it under `affects:`
+# (specs/minspec/SPEC-140-checkout-follows-approval/requirements.md:21). So this spec does
+# NOT take primary ownership: it also declares it under `affects:` and the two specs share
+# the file. Overlap to settle in Clarify/Plan: SPEC-140 changes what recovery leaves behind,
+# this spec changes how it copies, commits and pushes; land them in an agreed order.
+# affects: push-docs-lane.ts is SPEC-039's command and becomes the transport's second
+# caller; commit-on-approve.ts is SPEC-050's seam and gains one argument (the bytes
+# captured at approval time, FR-6); approval-pr.ts is SPEC-050's hash-locked runner, whose
+# ExecRun call shape gains a per-call timeout option under D-4(a), so SPEC-050 needs
+# re-approval for that signature change.
+implements: [packages/minspec/src/lib/worktree-transport.ts, packages/minspec/tests/worktree-transport.test.ts]
+affects: [packages/minspec/src/lib/approval-recover.ts, packages/minspec/src/lib/approval-pr.ts, packages/minspec/src/commands/push-docs-lane.ts, packages/minspec/src/commands/commit-on-approve.ts, packages/minspec/tests/approval-recover.test.ts, docs/decisions/DR-080.md]
 phases:
   specify: in-progress
   clarify: pending
@@ -320,8 +326,8 @@ here only so a reader of either can find this one.
   runner uses 30 s.
   - (a) **(rec) The transport passes 60 s for fetch and push, and the runner default for
     everything else.** No caller's network budget gets shorter. Cost: the `ExecRun` call
-    shape gains a per-call timeout option, which is a small change to SPEC-050's runner
-    signature.
+    shape gains a per-call timeout option, which changes SPEC-050's hash-locked runner
+    signature (`approval-pr.ts`, now in `affects:`) and so needs SPEC-050 re-approval.
   - (b) Use 30 s everywhere. Cost: recovery's push budget halves, and a slow link that
     recovers today would time out to `offline`.
 
