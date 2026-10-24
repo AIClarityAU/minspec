@@ -578,6 +578,46 @@ fi
 # Never arms anything itself; the `--delegated-spec-merge ... --arm` seam below does, and
 # only on a proceed. The judge's command can be replaced for tests
 # (MINSPEC_DELEGATED_MERGE_JUDGE_CMD); the decision downstream of it cannot.
+# delegated_merge_human_claims <pr> (#3050)
+#
+# Two reasons the bot must not merge a held spec PR, whatever the delegation says. Both
+# say a decision is still someone's, which a delegation of SPEC APPROVAL does not cover:
+#   1. an unconfirmed closing link. A drain PR is dispatched for issue N (branch
+#      `agent/issue-N`); merging it closes whatever GitHub says it closes
+#      (`closingIssuesReferences`), so that list must contain N. A branch that is not a
+#      drain branch names no issue, so it needs at least one confirmed link.
+#   2. a creator-shepherd handoff. `shepherd_hand_off` stamps SHEPHERD_HANDOFF_MARKER on a
+#      comment when the creating session gives the PR to the founder; a bot merge would
+#      take that decision from him.
+# Prints the denial reason and detail (tab-separated) and returns 1 on a claim OR on any
+# unreadable input; returns 0 only when both are positively clear.
+delegated_merge_human_claims() {
+  local pr="$1" view="" head="" refs="" handoffs="" issue=""
+  local marker="<!-- minspec-shepherd-handoff -->"
+  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments 2>/dev/null) \
+     || ! head=$(printf '%s' "$view" | jq -r '.headRefName' 2>/dev/null) \
+     || ! refs=$(printf '%s' "$view" | jq -r '.closingIssuesReferences | if type == "array" then .[].number else error("no list") end' 2>/dev/null) \
+     || ! handoffs=$(printf '%s' "$view" | jq -r --arg m "$marker" '.comments | if type == "array" then [.[] | select((.body // "") | contains($m))] | length else error("no list") end' 2>/dev/null); then
+    printf 'pr-claims-unreadable\tcould not read PR #%s closing links and comments; failing closed\n' "$pr"
+    return 1
+  fi
+  if [[ "$handoffs" != "0" ]]; then
+    printf 'handed-to-human\tPR #%s was handed to the founder by its creator (shepherd handoff comment); a bot merge would take his decision\n' "$pr"
+    return 1
+  fi
+  if [[ "$head" =~ ^agent/issue-([0-9]+)$ ]]; then
+    issue="${BASH_REMATCH[1]}"
+    if ! grep -qxF "$issue" <<<"$refs"; then
+      printf 'closes-link-unconfirmed\tPR #%s was dispatched for issue #%s but GitHub does not confirm that it closes it (#2228); merging would close the wrong issue or none\n' "$pr" "$issue"
+      return 1
+    fi
+  elif [[ -z "${refs//[$'\n\r\t ']/}" ]]; then
+    printf 'closes-link-unconfirmed\tPR #%s has no confirmed closing link; merging would close no issue\n' "$pr"
+    return 1
+  fi
+  return 0
+}
+
 autonomy_may_merge_delegated() {
   local pr="${1-}" changed="" classes="" judged="" rc=0 after="" head="" dlg=""
   local deny_fmt='{"proceed":false,"reason":"%s","detail":"%s","autonomy":"ask"}\n'
@@ -592,6 +632,11 @@ autonomy_may_merge_delegated() {
   fi
   if ! classes=$(autonomy_stop_classes_for_paths "$changed"); then
     printf "$deny_fmt" "stop-class-derivation-failed" "the stop-class derivation exited non-zero; failing closed"
+    return 1
+  fi
+  local claim=""
+  if ! claim=$(delegated_merge_human_claims "$pr"); then
+    printf "$deny_fmt" "${claim%%$'\t'*}" "${claim#*$'\t'}"
     return 1
   fi
   local -a judge
