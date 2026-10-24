@@ -202,47 +202,9 @@ export function planDelegatedApproval(input: PlanInput): PlanResult {
     return no('author-is-recorder', `the recording branch ${recorder} is the branch that wrote ${artifactPath}`);
   }
 
-  // The verdict check-run on the reviewed commit.
-  const checks = review.checkRuns
-    .filter((c) => c.name === AI_REVIEW_CHECK_NAME && c.headSha === pull.headSha && c.appSlug === REVIEWER_APP_SLUG)
-    .sort((a, b) => (ms(b.completedAt) || 0) - (ms(a.completedAt) || 0));
-  if (checks.length === 0) {
-    return no('no-ai-review-check', `no ${AI_REVIEW_CHECK_NAME} check-run from ${REVIEWER_APP_SLUG} on ${pull.headSha}`);
-  }
-  if (checks[0].status !== 'completed' || checks[0].conclusion !== 'success') {
-    return no(
-      'ai-review-check-not-success',
-      `the latest ${AI_REVIEW_CHECK_NAME} check on ${pull.headSha} is ${checks[0].status}/${String(checks[0].conclusion)}`,
-    );
-  }
-
-  // The latest AI review comment, and the CI run it was posted inside.
-  const reviews = review.comments
-    .filter((c) => c.login === REVIEWER_LOGIN && REVIEW_HEADING.test(c.body) && !Number.isNaN(ms(c.createdAt)))
-    .sort((a, b) => ms(b.createdAt) - ms(a.createdAt) || b.id - a.id);
-  if (reviews.length === 0) return no('no-ai-review-comment', `#${pull.number} has no AI review comment`);
-  const latest = reviews[0];
-  const label = latest.body.match(REVIEW_HEADING)?.[1];
-  if (label !== 'pass') {
-    return no('latest-review-not-pass', `the latest AI review on #${pull.number} is ai-review:${String(label)}`);
-  }
-  const runs = review.workflowRuns.filter(
-    (r) =>
-      r.path === AI_REVIEW_WORKFLOW_PATH &&
-      r.event === 'pull_request' &&
-      r.status === 'completed' &&
-      r.headSha === pull.headSha,
-  );
-  if (runs.length === 0) {
-    return no('no-ai-review-run', `no completed ${AI_REVIEW_WORKFLOW_PATH} run on ${pull.headSha}`);
-  }
-  const at = ms(latest.createdAt);
-  if (!runs.some((r) => ms(r.runStartedAt) <= at && at <= ms(r.updatedAt))) {
-    return no(
-      'comment-outside-ci-run',
-      `the pass comment ${latest.url} was not posted during any ${AI_REVIEW_WORKFLOW_PATH} run on ${pull.headSha}`,
-    );
-  }
+  const pass = judgeHeadReviewPass(review);
+  if (!pass.ok) return no(pass.reason, pass.detail);
+  const latest = { url: pass.url };
 
   const tier = frontmatterField(artifactContent, 'tier');
   if (tier === undefined || !TIERS.includes(tier as Tier)) {
@@ -279,6 +241,64 @@ export function planDelegatedApproval(input: PlanInput): PlanResult {
     return no(f ? f.check : 'not-delegated', f ? f.detail : 'the record did not classify as delegated');
   }
   return { ok: true, record, delegationId: judged.cls.delegationId };
+}
+
+/**
+ * Did an independent AI review pass on the pull request's CURRENT head commit? Items 3
+ * and 4 of the header, and nothing else: the `ai-review` check-run from the reviewer App
+ * on `pull.headSha` concluded `success`, and the LATEST AI review comment from the
+ * reviewer App is an `ai-review:pass`, posted inside a completed `ai-review.yml` run on
+ * that same head. Pure. Shared by the post-merge approval path (above) and the pre-merge
+ * delegated arm (`delegated-merge.ts`, #2981), so the two cannot disagree on what a pass
+ * on a head is.
+ */
+export function judgeHeadReviewPass(
+  review: ReviewEvidence,
+): { readonly ok: true; readonly url: string } | { readonly ok: false; readonly reason: string; readonly detail: string } {
+  const deny = (reason: string, detail: string) => ({ ok: false as const, reason, detail });
+  const { pull } = review;
+  // The verdict check-run on the reviewed commit.
+  const checks = review.checkRuns
+    .filter((c) => c.name === AI_REVIEW_CHECK_NAME && c.headSha === pull.headSha && c.appSlug === REVIEWER_APP_SLUG)
+    .sort((a, b) => (ms(b.completedAt) || 0) - (ms(a.completedAt) || 0));
+  if (checks.length === 0) {
+    return deny('no-ai-review-check', `no ${AI_REVIEW_CHECK_NAME} check-run from ${REVIEWER_APP_SLUG} on ${pull.headSha}`);
+  }
+  if (checks[0].status !== 'completed' || checks[0].conclusion !== 'success') {
+    return deny(
+      'ai-review-check-not-success',
+      `the latest ${AI_REVIEW_CHECK_NAME} check on ${pull.headSha} is ${checks[0].status}/${String(checks[0].conclusion)}`,
+    );
+  }
+
+  // The latest AI review comment, and the CI run it was posted inside.
+  const reviews = review.comments
+    .filter((c) => c.login === REVIEWER_LOGIN && REVIEW_HEADING.test(c.body) && !Number.isNaN(ms(c.createdAt)))
+    .sort((a, b) => ms(b.createdAt) - ms(a.createdAt) || b.id - a.id);
+  if (reviews.length === 0) return deny('no-ai-review-comment', `#${pull.number} has no AI review comment`);
+  const latest = reviews[0];
+  const label = latest.body.match(REVIEW_HEADING)?.[1];
+  if (label !== 'pass') {
+    return deny('latest-review-not-pass', `the latest AI review on #${pull.number} is ai-review:${String(label)}`);
+  }
+  const runs = review.workflowRuns.filter(
+    (r) =>
+      r.path === AI_REVIEW_WORKFLOW_PATH &&
+      r.event === 'pull_request' &&
+      r.status === 'completed' &&
+      r.headSha === pull.headSha,
+  );
+  if (runs.length === 0) {
+    return deny('no-ai-review-run', `no completed ${AI_REVIEW_WORKFLOW_PATH} run on ${pull.headSha}`);
+  }
+  const at = ms(latest.createdAt);
+  if (!runs.some((r) => ms(r.runStartedAt) <= at && at <= ms(r.updatedAt))) {
+    return deny(
+      'comment-outside-ci-run',
+      `the pass comment ${latest.url} was not posted during any ${AI_REVIEW_WORKFLOW_PATH} run on ${pull.headSha}`,
+    );
+  }
+  return { ok: true, url: latest.url };
 }
 
 // ─── IO: gathering the evidence ─────────────────────────────────────────────
