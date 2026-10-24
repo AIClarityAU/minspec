@@ -203,6 +203,8 @@ re-run or are closed as superseded, and logs it per cycle so the trade can be re
   under headroom, using a rolling per-agent burn rate from successive readings. Tracks reality.
   Cost: a new stateful estimator that can be wrong on a cold start, and much harder to test.
 
+> **Proposed (recommended): option (a), fixed steps.** Cost of the recommendation: it ignores how fast agents actually burn quota, so the step may need re-tuning once FR-10/FR-9 data exists. Not a resolution: the header reserves Clarify decisions for a human, who confirms or changes this before approval. One extra slot per `MINSPEC_DRAIN_WIDTH_STEP` points of binding headroom, default 10pp, clamped to the maximum. Would set aside: (b) measured burn, a stateful estimator that can be wrong on a cold start.
+
 **D2. Same-file collisions.**
 - (a) **(rec)** Accept competing pull requests and bound them by measurement: log the
   collision/rework rate (FR-10) and drop the maximum to 1 automatically for the rest of the
@@ -215,6 +217,8 @@ re-run or are closed as superseded, and logs it per cycle so the trade can be re
 - (c) Keep dispatch serial and widen only remediation. Cost: builds stay the bottleneck, so the
   founder's outcome is only partly met.
 
+> **Proposed (recommended): option (a), accept and bound by measurement.** Cost of the recommendation: some rework tokens are spent before the tripwire trips, and the merge queue's `strict` base updates (#1394) get more frequent. Not a resolution: the header reserves Clarify decisions for a human, who confirms or changes this before approval. Log the collision/rework rate and drop the maximum to 1 for the rest of the cycle past the tripwire (default 25% of the last 8 drain pull requests). Would set aside: (b) serialise on declared scope, (c) serial dispatch.
+
 **D3. Default maximum when unset.**
 - (a) **(rec)** 6: half the cores, leaving room for the founder's own sessions. Cost: on an
   otherwise idle host it under-fills by up to half.
@@ -222,6 +226,8 @@ re-run or are closed as superseded, and logs it per cycle so the trade can be re
   pressure alongside interactive sessions.
 - (c) Keep 1 and require opt-in. Cost: the machine stays idle by default, which is the
   defect #2853 reports.
+
+> **Proposed (recommended): option (a), default maximum 6.** Cost of the recommendation: on an otherwise idle host it under-fills by up to half. Not a resolution: the header reserves Clarify decisions for a human, who confirms or changes this before approval. Would set aside: (b) 8, (c) keep 1 and opt in.
 
 ## Alternatives rejected
 
