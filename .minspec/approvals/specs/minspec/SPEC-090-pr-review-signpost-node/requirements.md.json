@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-090-pr-review-signpost-node/requirements.md",
+  "specHash": "573bb7a124254fd9c3eb746d9265dd4266cdc5c42d098845eae6db340af51977",
+  "approvedAt": "2026-10-24T21:41:08.505Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:agent/issue-182",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/2384#issuecomment-6389408222"
+}
