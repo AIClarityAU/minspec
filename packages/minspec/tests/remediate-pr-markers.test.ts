@@ -43,7 +43,7 @@ const CAPPED = '<!-- minspec-remediate-capped -->';
 
 // The constants above must BE the script's constants, or every test below is theatre.
 function markersInSource(): string[] {
-  return ['ATTEMPT_MARKER', 'CRASH_MARKER', 'CAPPED_MARKER'].map((name) => {
+  return ['ATTEMPT_MARKER', 'CRASH_MARKER', 'CAPPED_MARKER', 'RERUN_MARKER'].map((name) => {
     const m = new RegExp(`^${name}="([^"]+)"`, 'm').exec(SRC);
     if (!m) throw new Error(`${name} not found in remediate-pr.sh`);
     return m[1];
@@ -252,7 +252,7 @@ describe('remediate-pr.sh --check-markers: the isolation gate compares by POSITI
     expect(r.stderr).not.toMatch(/Unknown arg/);
   });
 
-  it('accepts the three markers the script actually ships', () => {
+  it('accepts the four markers the script actually ships', () => {
     const r = run(['--check-markers', ...markersInSource()]);
     expect(r.code).toBe(0);
     expect(r.stderr).toBe('');
