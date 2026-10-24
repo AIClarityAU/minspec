@@ -53,7 +53,16 @@ interface Opts {
   autonomy?: string;
   tokenScript?: 'ok' | 'missing' | 'fails';
   extraEnv?: Record<string, string>;
+  /** Raw stdout of `gh pr view` (default: a drain PR for #3000 whose Closes link is confirmed). */
+  view?: string;
+  viewExit?: number;
 }
+
+const VIEW_OK = {
+  headRefName: 'agent/issue-3000',
+  closingIssuesReferences: [{ number: 3000 }],
+  comments: [{ body: 'looks good' }],
+};
 
 function run(args: string[], o: Opts = {}) {
   const ghLog = path.join(tmp, 'gh.log');
@@ -65,6 +74,7 @@ function run(args: string[], o: Opts = {}) {
 printf 'TOKEN=%s ARGS=%s\\n' "\${GH_TOKEN:-}" "$*" >> ${JSON.stringify(ghLog)}
 case "$1 $2" in
   "pr diff") printf '%s\\n' ${JSON.stringify(o.diff ?? SPEC)}; exit ${o.diffExit ?? 0} ;;
+  "pr view") printf '%s\\n' ${JSON.stringify(o.view ?? JSON.stringify(VIEW_OK))}; exit ${o.viewExit ?? 0} ;;
   "pr merge") exit ${o.mergeExit ?? 0} ;;
   *) exit 0 ;;
 esac
@@ -191,6 +201,31 @@ describe('fail closed: nothing is armed', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('usage');
     expect(writes(r.gh)).toEqual([]);
+  }, TIMEOUT);
+});
+
+describe('human claims: a covered PR the bot must still not merge (#3050)', () => {
+  const view = (v: object) => JSON.stringify({ ...VIEW_OK, ...v });
+  it.each([
+    ['no closing link at all', { view: view({ closingIssuesReferences: [] }) }, 'closes-link-unconfirmed'],
+    ['a closing link to a different issue', { view: view({ closingIssuesReferences: [{ number: 1 }] }) }, 'closes-link-unconfirmed'],
+    ['a non-drain branch with no link', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [] }) }, 'closes-link-unconfirmed'],
+    ['a creator-shepherd handoff comment', { view: view({ comments: [{ body: 'x <!-- minspec-shepherd-handoff -->' }] }) }, 'handed-to-human'],
+    ['an unreadable PR view', { viewExit: 1 }, 'pr-claims-unreadable'],
+    ['a PR view that is not JSON', { view: 'nope' }, 'pr-claims-unreadable'],
+    ['a PR view without a comments list', { view: JSON.stringify({ headRefName: 'agent/issue-3000', closingIssuesReferences: [{ number: 3000 }] }) }, 'pr-claims-unreadable'],
+  ] as const)('%s: denied before the judge, nothing written', (_n, o, reason) => {
+    const r = run(['2966', '--arm'], o);
+    expect(r.status).toBe(1);
+    expect(r.verdict).toMatchObject({ proceed: false, reason });
+    expect(r.judgeArgs).toBeUndefined();
+    expect(writes(r.gh)).toEqual([]);
+  }, TIMEOUT);
+
+  it('a non-drain branch with a confirmed link still proceeds', () => {
+    const r = run(['2966'], { view: view({ headRefName: 'cos/dlg-merge-1021', closingIssuesReferences: [{ number: 2981 }] }) });
+    expect(r.status).toBe(0);
+    expect(r.verdict).toMatchObject({ proceed: true });
   }, TIMEOUT);
 });
 
