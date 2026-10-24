@@ -169,6 +169,20 @@ describe('invariant 1: the drain never runs on the host', () => {
     }
   });
 
+  it('boot-time container startup waits inside one start instead of burning the start limit (#3047)', () => {
+    const unit = fs.readFileSync(UNIT, 'utf-8');
+    const pre = unit.match(/^ExecStartPre=(.*)$/m)?.[1] ?? '';
+    expect(pre).toContain('docker exec claude-agent true');
+    expect(pre).toMatch(/exit 1/);
+    const wait = Number(pre.match(/\{1\.\.(\d+)\}/)?.[1]) * Number(pre.match(/sleep (\d+)/)?.[1]);
+    const startTimeout = Number(unit.match(/^TimeoutStartSec=(\d+)$/m)?.[1]);
+    // The wait is bounded and fits inside the start timeout, so it is one start, not many.
+    expect(wait).toBeGreaterThan(0);
+    expect(startTimeout).toBeGreaterThan(wait);
+    // systemd expands $VAR in unit lines; the one-liner must carry no $ at all.
+    expect(pre).not.toContain('$');
+  });
+
   it('the unit runs the supervisor through docker exec and never restarts a refusal', () => {
     const unit = fs.readFileSync(UNIT, 'utf-8');
     const execStart = unit.match(/^ExecStart=(.*)$/m)?.[1] ?? '';

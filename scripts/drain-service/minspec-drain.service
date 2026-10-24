@@ -14,6 +14,13 @@
 #                              that, so the unit fails and says so.
 #   StartLimit*                more than 6 starts in an hour (a drain that keeps failing)
 #                              leaves the unit FAILED and visible, not restarting forever.
+#   ExecStartPre               at boot the user manager starts this unit while the container is
+#                              still being created. A bare docker exec then fails at once, and
+#                              each failure spends one of the StartLimitBurst starts, so six
+#                              boot-time failures in ~6 min left the unit FAILED before the
+#                              container was up (#3047). The wait runs INSIDE one start, up to
+#                              600 s (TimeoutStartSec leaves room), until the container takes
+#                              an exec; waiting costs one start, not one per retry.
 #   ExecStop                   killing the docker exec client does not stop the process it
 #                              started in the container, so stop runs drain-service.sh stop,
 #                              which SIGTERMs the supervisor and, through it, the drain.
@@ -32,6 +39,8 @@ StartLimitBurst=6
 
 [Service]
 Type=simple
+TimeoutStartSec=660
+ExecStartPre=/usr/bin/env bash -c 'for _ in {1..120}; do docker exec claude-agent true >/dev/null 2>&1 && exit 0; sleep 5; done; echo "claude-agent not ready for exec after 600 s" >&2; exit 1'
 Environment=PATH=/run/current-system/sw/bin:/etc/profiles/per-user/%u/bin:%h/.nix-profile/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/bin/env docker exec -u %u -e HOME=%h -w %h/code/MinSpecPro claude-agent %h/code/MinSpecPro/scripts/drain-service/drain-service.sh run
 ExecStop=/usr/bin/env docker exec -u %u -e HOME=%h claude-agent %h/code/MinSpecPro/scripts/drain-service/drain-service.sh stop
