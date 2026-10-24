@@ -835,6 +835,14 @@ main requires a pull request to be up to date before it merges, and the stalenes
 scripts/ holds the dev-time automation that starts headless agents: issue dispatch, triage, the review scripts, pull request remediation and the tooling radar. DR-008 (dispatch security) decided, for that automation, that credentials are kept out of the agent's reach, and that unattended runs are for issues whose text is trusted. Neither was held by code. This record decides how far each is now held, and names what is not.
 <!-- /dr-summary:DR-105 -->
 
+## [DR-106 — Two ranked core tenets head the constitution - make the founder's job smaller first, minimise tokens counting rework second - with a 2%-of-weekly-budget tie-break](DR-106.md)
+
+*Status: proposed · Date: 2026-10-17*
+
+<!-- dr-summary:DR-106 auto=ed677406570b -->
+On 2026-10-17 the founder asked for a review of the constitution, rules, memory, principles and decision records against two priorities, in this order (queue item in2): The core-tenets review (2026-10-17, run outside this repository) found the corpus leaning toward over-specification. The figures, and where each can be checked:
+<!-- /dr-summary:DR-106 -->
+
 ## [DR-107 — Decision records split in two - direction records the founder accepts, engineering records accepted on an AI review pass and listed in a weekly digest](DR-107.md)
 
 *Status: accepted · Date: 2026-10-17*
@@ -869,7 +877,7 @@ The verdict-carry record ("A pass is carried across a push that changes nothing 
 
 ## [DR-111 — A pull request that carries only the founder's own editor approval is merged by the bot - the approval is the keystroke, and a fail-closed check refuses anything else](DR-111.md)
 
-*Status: proposed · Date: 2026-10-22*
+*Status: accepted · Date: 2026-10-22*
 
 <!-- dr-summary:DR-111 auto=5e69cbb62816 -->
 The constitution's merge-gate conservation rule (DR-070 §4) says no unit of work ever reaches main with zero human keystrokes. For agent-built work the keystroke is the founder's merge. For an editor approval, the founder's keystroke already happened: Alt-A in the editor is the explicit human act DR-012 defines approval to be, recorded under his identity (DR-056 refuses an agent identity at record time). The pull request that carries it adds no new content for him to judge, so asking for…

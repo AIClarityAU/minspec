@@ -219,6 +219,76 @@ classify_pr() {
   echo "skip-unhandled-state"
 }
 
+# ── Pure failing-check derivation (#3023) ──────────────────────────────────────
+# Does the rollup carry a red check that CODE can fix? Prints yes|no for a PR's JSON.
+# Excluded from "fixable": the `ai-review` check (its own review path) and the
+# `ready-to-merge` merge gate (workflow `ready-to-merge`, job `gate`, or a status
+# context of that name). The gate turns green only when a verified `ai-review:pass`
+# sits on the current head, and its job runs the BASE branch's guard — no commit on the
+# branch can change it, so a remediation agent can only burn runs and escalate (#3023).
+# FAILURE/ERROR/TIMED_OUT/CANCELLED conclusions count; a still-running check does not.
+#
+# #3030: the rollup keeps SUPERSEDED runs (a concurrency-cancelled run stays listed beside
+# the later green re-run of the same check), so every entry must NOT be classified — only
+# the LATEST per check identity (workflow + name/context, newest startedAt/completedAt;
+# ties keep the later array position). Without this a cancelled-then-rerun check marks a
+# green PR red indefinitely. ROLLUP_LATEST_JQ is the single shared definition: every
+# rollup predicate below prepends it, so no predicate can read the stale entries.
+ROLLUP_LATEST_JQ='
+def latest_checks:
+  [ (.statusCheckRollup // []) | to_entries[]
+    | .value + {_i: .key} ]
+  | group_by([(.workflowName // ""), (.name // .context // "")])
+  | map(sort_by([(.startedAt // .completedAt // ""), (.completedAt // ""), ._i]) | last);
+'
+derive_failing_non_review() {
+  jq -r "$ROLLUP_LATEST_JQ"'
+    [ latest_checks[]
+      | select((.name // "") != "ai-review")
+      | select((.name // "") != "ready-to-merge")
+      | select((.context // "") != "ready-to-merge")
+      | select((.workflowName // "") != "ready-to-merge")
+      | (.conclusion // "") ]
+    | map(select(. == "FAILURE" or . == "ERROR" or . == "TIMED_OUT" or . == "CANCELLED"))
+    | if length > 0 then "yes" else "no" end' <<<"$1"
+}
+
+# ── Rerun-first gate (#3042) ───────────────────────────────────────────────────
+# A red check can be an outside-service fault (a rate limit, a network error) that no
+# commit on the PR can cause or fix; an agent spent on it cannot reproduce it and just
+# escalates. So before the FIRST agent-remediate-checks spend, rerun the failed jobs once.
+#
+# derive_failed_run_ids: the workflow-run ids behind the latest red non-review checks,
+# one per line, unique. A run id is read ONLY as the digits after `/actions/runs/` in the
+# check's detailsUrl — never a log, never free text. A red check with no such URL (a
+# status context) yields no id; the caller then falls through to the agent.
+derive_failed_run_ids() {
+  jq -r "$ROLLUP_LATEST_JQ"'
+    [ latest_checks[]
+      | select((.name // "") != "ai-review")
+      | select((.name // "") != "ready-to-merge")
+      | select((.context // "") != "ready-to-merge")
+      | select((.workflowName // "") != "ready-to-merge")
+      | select((.conclusion // "") == "FAILURE" or (.conclusion // "") == "ERROR"
+               or (.conclusion // "") == "TIMED_OUT" or (.conclusion // "") == "CANCELLED")
+      | ((.detailsUrl // .targetUrl // "") | capture("/actions/runs/(?<id>[0-9]+)")? | .id) ]
+    | map(select(. != null)) | unique | .[]' <<<"$1"
+}
+
+# rerun_decision <rerun_markers_already_posted> <run_ids_newline_separated>
+#   → rerun | agent
+# Rerun only when it has not been tried on this PR AND there is a run to rerun. Any
+# unreadable count is non-numeric → treated as "already tried": over-counting spends the
+# agent (the old behaviour), under-counting would rerun forever.
+rerun_decision() {
+  local count="${1-}" ids="${2-}"
+  if [[ "$count" =~ ^[0-9]+$ && "$count" -eq 0 && -n "$ids" ]]; then
+    printf 'rerun\n'
+  else
+    printf 'agent\n'
+  fi
+}
+
 # ── Marker vocabulary + pure counting helpers ──────────────────────────────────
 # Markers embedded in remediation comments so prior outcomes can be COUNTED on a PR
 # (bounding the runaway loop) without a stateful store — one per outcome class:
@@ -251,6 +321,9 @@ classify_pr() {
 ATTEMPT_MARKER="<!-- minspec-auto-remediation -->"
 CRASH_MARKER="<!-- minspec-remediate-crash -->"
 CAPPED_MARKER="<!-- minspec-remediate-capped -->"
+#   RERUN_MARKER   — (#3042) the one free rerun of a red check, spent BEFORE any agent; in
+#                    NEITHER budget counter, so a rerun never consumes remediation quota.
+RERUN_MARKER="<!-- minspec-remediate-rerun -->"
 
 # Pairwise isolation gate. Compared by POSITION, never by value: an earlier version
 # tested `[[ $a != $b ]]` first, which let two IDENTICAL markers pass — the maximal-
@@ -275,7 +348,7 @@ assert_markers_isolated() {
   done
   return 0
 }
-if ! assert_markers_isolated "$ATTEMPT_MARKER" "$CRASH_MARKER" "$CAPPED_MARKER"; then
+if ! assert_markers_isolated "$ATTEMPT_MARKER" "$CRASH_MARKER" "$CAPPED_MARKER" "$RERUN_MARKER"; then
   exit 1
 fi
 
@@ -382,6 +455,23 @@ if [[ "${1:-}" == "--classify" ]]; then
     exit 2
   fi
   classify_pr "$1" "$2" "$3" "$4" "$5" "$6" "${7:-no}"
+  exit 0
+fi
+if [[ "${1:-}" == "--derive-failing" ]]; then
+  derive_failing_non_review "$(cat)"
+  exit 0
+fi
+if [[ "${1:-}" == "--derive-failed-runs" ]]; then
+  derive_failed_run_ids "$(cat)"
+  exit 0
+fi
+if [[ "${1:-}" == "--rerun-decision" ]]; then
+  shift
+  if [[ $# -ne 2 ]]; then
+    echo "Usage: remediate-pr.sh --rerun-decision <rerun_markers_posted> <run_ids>" >&2
+    exit 2
+  fi
+  rerun_decision "$1" "$2"
   exit 0
 fi
 if [[ "${1:-}" == "--count-markers" ]]; then
@@ -585,22 +675,17 @@ fi
 # a real red check. FAILURE/ERROR/TIMED_OUT/CANCELLED conclusions count as failing;
 # NEUTRAL/SKIPPED/SUCCESS do not. A still-running check (no conclusion) is NOT a
 # failure — we wait, we don't remediate mid-flight.
-FAILING_NON_REVIEW=$(jq -r '
-  [ .statusCheckRollup[]
-    | select((.name // "") != "ai-review")
-    | (.conclusion // "") ]
-  | map(select(. == "FAILURE" or . == "ERROR" or . == "TIMED_OUT" or . == "CANCELLED"))
-  | if length > 0 then "yes" else "no" end' <<<"$PR_JSON")
-AI_REVIEW_BAD=$(jq -r '
-  [ .statusCheckRollup[]
+FAILING_NON_REVIEW=$(derive_failing_non_review "$PR_JSON")
+AI_REVIEW_BAD=$(jq -r "$ROLLUP_LATEST_JQ"'
+  [ latest_checks[]
     | select((.name // "") == "ai-review")
     | (.conclusion // "") ]
   | map(select(. == "FAILURE" or . == "ERROR"))
   | if length > 0 then "yes" else "no" end' <<<"$PR_JSON")
 # Is the ai-review check still running from a prior push? Don't stack a second
 # remediation on top of an in-flight re-review.
-AI_REVIEW_PENDING=$(jq -r '
-  [ .statusCheckRollup[]
+AI_REVIEW_PENDING=$(jq -r "$ROLLUP_LATEST_JQ"'
+  [ latest_checks[]
     | select((.name // "") == "ai-review")
     | (.status // "") ]
   | map(select(. == "QUEUED" or . == "IN_PROGRESS" or . == "PENDING" or . == "WAITING"))
@@ -749,6 +834,28 @@ if [[ "$ACTION" == agent-* ]]; then
     fi
     exit 0
   fi
+  # Rerun-first gate (#3042): a red check may be an outside-service fault. Rerun the failed
+  # jobs ONCE, before any agent is spent; remediate only if a later sweep still sees red.
+  # The marker is posted BEFORE the rerun so a lost marker can never mean an unbounded
+  # rerun loop; it sits in neither budget counter.
+  if [[ "$ACTION" == "agent-remediate-checks" ]]; then
+    RERUNS=$(count_marker "$RERUN_MARKER")
+    FAILED_RUN_IDS=$(derive_failed_run_ids "$PR_JSON")
+    if [[ "$(rerun_decision "$RERUNS" "$FAILED_RUN_IDS")" == "rerun" ]]; then
+      post_marked_comment "$RERUN_MARKER" 'A required check is red. Before spending a remediation agent, re-running the failed jobs once: a fault outside this PR (rate limit, network) clears on rerun. If the check is still red on the next sweep, remediation proceeds.'
+      RERUN_FAILED=0
+      while IFS= read -r RUN_ID; do
+        [[ -n "$RUN_ID" ]] || continue
+        if gh run rerun "$RUN_ID" --repo "$REPO" --failed >/dev/null 2>&1; then
+          echo "  Re-ran failed jobs of run $RUN_ID (#3042 rerun-first) — no agent spent this sweep."
+        else
+          echo "  WARNING: could not rerun run $RUN_ID — it will be remediated by an agent instead." >&2
+          RERUN_FAILED=1
+        fi
+      done <<<"$FAILED_RUN_IDS"
+      if (( RERUN_FAILED == 0 )); then exit 0; fi
+    fi
+  fi
   echo "  Attempt $((ATTEMPTS + 1))/$MAX_ATTEMPTS (crashes so far: $CRASHES/$MAX_CRASHES)."
 fi
 
@@ -830,8 +937,8 @@ else
   # agent-remediate-checks: name the failing checks; the agent REPRODUCES locally
   # (deterministic) and fixes — we never feed CI log text (an untrusted-output
   # injection channel) into the prompt.
-  FAILED_NAMES=$(jq -r '
-    [ .statusCheckRollup[]
+  FAILED_NAMES=$(jq -r "$ROLLUP_LATEST_JQ"'
+    [ latest_checks[]
       | select((.name // "") != "ai-review")
       | select((.conclusion // "") == "FAILURE" or (.conclusion // "") == "ERROR"
                or (.conclusion // "") == "TIMED_OUT" or (.conclusion // "") == "CANCELLED")
