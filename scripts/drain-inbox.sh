@@ -881,10 +881,28 @@ ensure_fresh_run_dir() {
   # COMPILED deps — including @aiclarity/shared's gitignored `out/` — which can lag
   # origin/main's source. Those helpers are best-effort and degrade if it mismatches
   # (the render block is skipped, not corrupted), so the staleness is accepted, not fatal.
-  [[ -d "${PRIMARY_ROOT}/node_modules" ]] \
-    && ln -sfn "${PRIMARY_ROOT}/node_modules" "${DRAIN_RUN_DIR}/node_modules" 2>/dev/null || true
-  [[ -d "${PRIMARY_ROOT}/packages/minspec/node_modules" ]] \
-    && ln -sfn "${PRIMARY_ROOT}/packages/minspec/node_modules" "${DRAIN_RUN_DIR}/packages/minspec/node_modules" 2>/dev/null || true
+  # Module source (#3048): PRIMARY_ROOT is the toplevel of SCRIPT_DIR, so a drain launched
+  # from a fresh worktree gets that worktree, which has no node_modules. Fall back to the
+  # git common dir's primary worktree (first `git worktree list --porcelain` entry), and
+  # warn loudly when nothing can be linked - the tsx helpers (ranker, auto-merge gate,
+  # render-review-signals) would otherwise fail 127 and degrade the drain silently.
+  local mod_root="$PRIMARY_ROOT"
+  if [[ ! -d "${mod_root}/node_modules" ]]; then
+    local first_wt
+    first_wt="$(git -C "$PRIMARY_ROOT" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
+    if [[ -n "$first_wt" && -d "${first_wt}/node_modules" ]]; then
+      echo "[drain] NOTE: ${PRIMARY_ROOT} has no node_modules; linking from primary worktree ${first_wt} (#3048)." >&2
+      mod_root="$first_wt"
+    else
+      echo "[drain] WARNING: no node_modules found in ${PRIMARY_ROOT} or the primary worktree - tsx helpers (ranker, auto-merge gate, render-review-signals) will fail 127 (#3048)." >&2
+    fi
+  fi
+  if [[ -d "${mod_root}/node_modules" ]]; then
+    ln -sfn "${mod_root}/node_modules" "${DRAIN_RUN_DIR}/node_modules" 2>/dev/null || true
+  fi
+  if [[ -d "${mod_root}/packages/minspec/node_modules" ]]; then
+    ln -sfn "${mod_root}/packages/minspec/node_modules" "${DRAIN_RUN_DIR}/packages/minspec/node_modules" 2>/dev/null || true
+  fi
 
   # VERIFY the run dir is ACTUALLY at origin/main before trusting it (#773 review,
   # MAJOR). Only then repoint children + tell them freshness is validated. If the reset
