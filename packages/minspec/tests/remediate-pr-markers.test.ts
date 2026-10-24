@@ -65,7 +65,13 @@ function countMarkers(marker: string, comments: Comment[] | string, authors?: st
 // first argument, so "exit code 1" alone cannot tell a gate REJECTING its input from a
 // build that never had the gate. Tests below assert the distinguishing message.
 function run(args: string[], input?: string): { code: number; stdout: string; stderr: string } {
-  const r = spawnSync('bash', [SCRIPT, ...args], { encoding: 'utf-8', input: input ?? '' });
+  // MINSPEC_CAVEMAN_MODE=off: sourcing agent-context.sh prints a "Caveman trial" notice on
+  // stderr whenever the trial is on (default), which is not what these tests assert about.
+  const r = spawnSync('bash', [SCRIPT, ...args], {
+    encoding: 'utf-8',
+    input: input ?? '',
+    env: { ...process.env, MINSPEC_CAVEMAN_MODE: 'off' },
+  });
   return { code: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
