@@ -11,15 +11,16 @@
  *
  * Fix: the catalog fetch is now pinned to `ref=$BUMBLEBEE_VERSION` (the same
  * variable, same default) — bumping the scanner and the catalog ref is one
- * change, not two independent ones that can drift apart. This test stubs `gh`
- * on PATH and asserts every threat_intel API call the shipped script makes
- * carries that ref — proving the version skew is no longer possible by
+ * change, not two independent ones that can drift apart. This test stubs `curl`
+ * on PATH and asserts every codeload fetch the shipped script makes
+ * carries that ref (#3008 moved the fetch from gh api to a codeload tarball) — proving the version skew is no longer possible by
  * construction, not just plausible from reading the diff.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { useShellTimeout } from './helpers/shell-timeout';
 import { execFileSync, spawnSync } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
 
@@ -27,27 +28,18 @@ import { useShellTimeout } from './helpers/shell-timeout';
 // the literal call-site count alone understates the real process count.
 useShellTimeout();
 
+useShellTimeout();
+
 const FETCH_SCRIPT = path.resolve(__dirname, '../../../scripts/fetch-bumblebee-catalogs.sh');
 
-const FAKE_GH = `#!/usr/bin/env bash
-set -euo pipefail
-echo "$*" >> "$FAKE_GH_CALLS_LOG"
-case "$1 $2" in
-  "api repos/perplexityai/bumblebee/contents/threat_intel?ref=$BUMBLEBEE_VERSION")
-    if [[ "$3" == "--jq" ]]; then
-      echo "fake-catalog.json"
-    fi
-    ;;
-  "api repos/perplexityai/bumblebee/contents/threat_intel/fake-catalog.json?ref=$BUMBLEBEE_VERSION")
-    if [[ "$3" == "--jq" ]]; then
-      base64 <<< '{"schema_version":"0.1.0"}'
-    fi
-    ;;
-  *)
-    echo "fake-gh: unhandled invocation: $*" >&2
-    exit 1
-    ;;
-esac
+// Fake curl (#3008: the fetch is one codeload tarball, not gh api calls). Logs its args,
+// then writes the fixture tarball to the -o target and prints the HTTP code for -w.
+const FAKE_CURL = `#!/usr/bin/env bash
+echo "$*" >> "$FAKE_CURL_CALLS_LOG"
+out=""
+while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift 2;; *) shift;; esac; done
+cp "$FAKE_TARBALL" "$out"
+printf 200
 `;
 
 function writeExecutable(filePath: string, contents: string): void {
@@ -61,7 +53,12 @@ let binDir: string;
 beforeEach(() => {
   scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'fetch-bumblebee-scratch-'));
   binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fetch-bumblebee-bin-'));
-  writeExecutable(path.join(binDir, 'gh'), FAKE_GH);
+  writeExecutable(path.join(binDir, 'curl'), FAKE_CURL);
+  const src = path.join(scratch, 'src', 'bumblebee-fixture', 'threat_intel');
+  fs.mkdirSync(src, { recursive: true });
+  fs.writeFileSync(path.join(src, 'fake-catalog.json'), '{"schema_version":"0.1.0"}');
+  fs.writeFileSync(path.join(src, 'README.md'), 'not a catalog');
+  execFileSync('tar', ['-czf', path.join(scratch, 'fixture.tgz'), '-C', path.join(scratch, 'src'), 'bumblebee-fixture']);
 });
 
 afterEach(() => {
@@ -71,7 +68,7 @@ afterEach(() => {
 
 function runFetch(bumblebeeVersion: string): { calls: string[]; target: string } {
   const target = path.join(scratch, 'catalogs');
-  const callsLog = path.join(scratch, 'gh-calls.log');
+  const callsLog = path.join(scratch, 'curl-calls.log');
   fs.writeFileSync(callsLog, '');
 
   execFileSync('bash', [FETCH_SCRIPT, target], {
@@ -80,7 +77,8 @@ function runFetch(bumblebeeVersion: string): { calls: string[]; target: string }
       HOME: process.env.HOME,
       LANG: process.env.LANG,
       BUMBLEBEE_VERSION: bumblebeeVersion,
-      FAKE_GH_CALLS_LOG: callsLog,
+      FAKE_CURL_CALLS_LOG: callsLog,
+      FAKE_TARBALL: path.join(scratch, 'fixture.tgz'),
     },
     encoding: 'utf-8',
   });
@@ -93,22 +91,20 @@ function runFetch(bumblebeeVersion: string): { calls: string[]; target: string }
 }
 
 describe('fetch-bumblebee-catalogs.sh — pins catalog fetch to BUMBLEBEE_VERSION (#848)', () => {
-  it('every threat_intel API call carries ref=$BUMBLEBEE_VERSION', () => {
+  it('every codeload fetch carries the BUMBLEBEE_VERSION ref', () => {
     const { calls } = runFetch('v0.1.2');
-    const threatIntelCalls = calls.filter((c) => c.includes('contents/threat_intel'));
-    expect(threatIntelCalls.length).toBeGreaterThan(0);
-    for (const call of threatIntelCalls) {
-      expect(call).toContain('ref=v0.1.2');
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      expect(call).toContain('/tar.gz/v0.1.2');
     }
   });
 
   it('changing BUMBLEBEE_VERSION changes the pinned ref (no hardcoded default)', () => {
     const { calls } = runFetch('v9.9.9-different');
-    const threatIntelCalls = calls.filter((c) => c.includes('contents/threat_intel'));
-    expect(threatIntelCalls.length).toBeGreaterThan(0);
-    for (const call of threatIntelCalls) {
-      expect(call).toContain('ref=v9.9.9-different');
-      expect(call).not.toContain('ref=v0.1.2');
+    expect(calls.length).toBeGreaterThan(0);
+    for (const call of calls) {
+      expect(call).toContain('/tar.gz/v9.9.9-different');
+      expect(call).not.toContain('v0.1.2');
     }
   });
 
@@ -190,11 +186,11 @@ describe('fetch-bumblebee-catalogs.sh — pins catalog fetch to BUMBLEBEE_VERSIO
     expect(fetch, 'fetch script must default BUMBLEBEE_CATALOG_REF to BUMBLEBEE_VERSION').toMatch(
       /BUMBLEBEE_CATALOG_REF="\$\{BUMBLEBEE_CATALOG_REF:-\$BUMBLEBEE_VERSION\}"/,
     );
-    expect(fetch, 'catalog fetch must use ref=${BUMBLEBEE_CATALOG_REF}').toMatch(
-      /ref=\$\{BUMBLEBEE_CATALOG_REF\}/,
+    expect(fetch, 'catalog fetch must use tar.gz/${BUMBLEBEE_CATALOG_REF}').toMatch(
+      /tar\.gz\/\$\{BUMBLEBEE_CATALOG_REF\}/,
     );
     expect(fetch, 'catalog fetch must NOT ref off BUMBLEBEE_VERSION directly (that would re-couple)').not.toMatch(
-      /ref=\$\{BUMBLEBEE_VERSION\}/,
+      /tar\.gz\/\$\{BUMBLEBEE_VERSION\}/,
     );
   });
 });
