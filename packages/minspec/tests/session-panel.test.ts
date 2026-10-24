@@ -1168,12 +1168,6 @@ suite('hook wiring, by execution', () => {
     fs.copyFileSync(UNIT, path.join(dir, 'session-panel.py'));
     return path.join(dir, 'session-start.sh');
   }
-  /** scope-check.sh sources lib/session-scope.sh from beside itself, so a copy needs the lib too. */
-  function copyPromptHook(dir: string): void {
-    fs.copyFileSync(PROMPT_HOOK, path.join(dir, 'scope-check.sh'));
-    fs.mkdirSync(path.join(dir, 'lib'), { recursive: true });
-    fs.copyFileSync(path.join(path.dirname(PROMPT_HOOK), 'lib', 'session-scope.sh'), path.join(dir, 'lib', 'session-scope.sh'));
-  }
   const hookEnv = (): NodeJS.ProcessEnv => {
     const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
     delete env.CLAUDE_CONFIG_DIR;
@@ -1226,7 +1220,7 @@ suite('hook wiring, by execution', () => {
     expect(start.stdout).not.toContain('\u001b');
     expect(start.stdout).toContain('Session Start');
 
-    copyPromptHook(path.dirname(hook));
+    fs.copyFileSync(PROMPT_HOOK, path.join(path.dirname(hook), 'scope-check.sh'));
     const prompt = spawnSync('bash', [path.join(path.dirname(hook), 'scope-check.sh')], {
       input: JSON.stringify(promptInput(OTHER)),
       encoding: 'utf-8',
@@ -1244,7 +1238,7 @@ suite('hook wiring, by execution', () => {
   it('does not block a prompt when python cannot even open the unit (exit 2 without the BLOCKED banner)', () => {
     const hook = isolatedHook();
     fs.rmSync(path.join(path.dirname(hook), 'session-panel.py'));
-    copyPromptHook(path.dirname(hook));
+    fs.copyFileSync(PROMPT_HOOK, path.join(path.dirname(hook), 'scope-check.sh'));
     const cwd = fs.mkdtempSync(path.join(scratch, 'cwd-'));
     const prompt = spawnSync('bash', [path.join(path.dirname(hook), 'scope-check.sh')], {
       input: JSON.stringify(promptInput(OTHER)),
@@ -1263,7 +1257,7 @@ suite('hook wiring, by execution', () => {
     const hook = isolatedHook();
     const noisy = 'import warnings\nwarnings.warn("a deprecation nobody asked about")\n';
     fs.writeFileSync(path.join(path.dirname(hook), 'session-panel.py'), noisy);
-    copyPromptHook(path.dirname(hook));
+    fs.copyFileSync(PROMPT_HOOK, path.join(path.dirname(hook), 'scope-check.sh'));
     const cwd = fs.mkdtempSync(path.join(scratch, 'cwd-'));
     const start = spawnSync('bash', [hook], { input: JSON.stringify(startInput()), encoding: 'utf-8', env: hookEnv(), cwd, timeout: 20_000 });
     const prompt = spawnSync('bash', [path.join(path.dirname(hook), 'scope-check.sh')], {
