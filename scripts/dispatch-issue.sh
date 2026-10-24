@@ -557,6 +557,138 @@ if [[ "${ISSUE:-}" == "--may-merge" ]]; then
   if autonomy_may_merge "merge this PR (seam)" "$(cat)"; then exit 0; else exit 1; fi
 fi
 
+# autonomy_may_merge_delegated <pr> (#2981, DR-108)
+#
+#   stdout: one verdict JSON.  exit: 0 = the delegated merge may proceed, 1 = it may not.
+#
+# The delegated twin of autonomy_may_merge, for an EXISTING open spec PR that step 6b
+# held as needs-human-review. Same populator, same decider; the only thing added is the
+# one bridge DR-108 §1 allows between them:
+#
+#   1. autonomy_stop_classes_for_paths derives the stop classes for the PR's diff, exactly
+#      as step 6b did when it held the PR.
+#   2. scripts/lib/delegated-merge.ts judges, read-only, whether DLG-001 clears the
+#      `approval-or-acceptance` class at the PR's CURRENT head (spec requirements only,
+#      still specifying, tier T1..T4, ai-review:pass on that head, tripwire within cap,
+#      not memory-fabric; every unreadable input denies). It returns the classes left
+#      after stopClassesAfterDelegation, which can remove that one class and no other.
+#   3. autonomy_may_proceed asks mayProceed with the LEFTOVER classes, so the project's
+#      `autonomy` setting still decides: under `ask` nothing merges, delegation or not.
+#
+# Never arms anything itself; the `--delegated-spec-merge ... --arm` seam below does, and
+# only on a proceed. The judge's command can be replaced for tests
+# (MINSPEC_DELEGATED_MERGE_JUDGE_CMD); the decision downstream of it cannot.
+autonomy_may_merge_delegated() {
+  local pr="${1-}" changed="" classes="" judged="" rc=0 after="" head="" dlg=""
+  local deny_fmt='{"proceed":false,"reason":"%s","detail":"%s","autonomy":"ask"}\n'
+  if [[ ! "$pr" =~ ^[1-9][0-9]*$ ]]; then
+    printf "$deny_fmt" "cli-usage" "a PR number is required"
+    return 1
+  fi
+  if ! changed=$(gh pr diff "$pr" --repo "$REPO" --name-only 2>/dev/null) \
+     || [[ -z "${changed//[$'\n\r\t ']/}" ]]; then
+    printf "$deny_fmt" "diff-unreadable" "could not enumerate PR #${pr}'s changed files, or there were none; failing closed"
+    return 1
+  fi
+  if ! classes=$(autonomy_stop_classes_for_paths "$changed"); then
+    printf "$deny_fmt" "stop-class-derivation-failed" "the stop-class derivation exited non-zero; failing closed"
+    return 1
+  fi
+  local -a judge
+  if [[ -n "${MINSPEC_DELEGATED_MERGE_JUDGE_CMD:-}" ]]; then
+    judge=("$MINSPEC_DELEGATED_MERGE_JUDGE_CMD")
+  elif [[ -x "${AUTONOMY_REPO_ROOT}/node_modules/.bin/tsx" ]]; then
+    judge=("${AUTONOMY_REPO_ROOT}/node_modules/.bin/tsx" "${SCRIPT_DIR}/lib/delegated-merge.ts")
+  else
+    printf "$deny_fmt" "judge-unrunnable" "no pinned tsx runner at ${AUTONOMY_REPO_ROOT}/node_modules/.bin/tsx; failing closed"
+    return 1
+  fi
+  judged=$("${judge[@]}" --pr "$pr" --repo "$REPO" --repo-root "$AUTONOMY_REPO_ROOT" \
+             --base origin/main --stop-classes "$classes" 2>/dev/null) && rc=0 || rc=$?
+  judged=$(printf '%s\n' "$judged" | grep -v '^[[:space:]]*$' | tail -n 1 || true)  # swallow-ok: grep -v exits 1 on all-blank output, which leaves judged empty and is refused on the next line
+  if (( rc != 0 )) || [[ "$(printf '%s' "$judged" | jq -r '.arm' 2>/dev/null)" != "true" ]]; then
+    local jj=""
+    jj=$(printf '%s' "$judged" | jq -c . 2>/dev/null) || jj=""
+    [[ -n "$jj" ]] || jj=null
+    jq -cn --argjson j "$jj" --arg rc "$rc" \
+      '{proceed:false, reason:("delegation-" + (($j // {}).reason // "judge-unreadable")),
+        detail:(($j // {}).detail // ("the delegated-merge judge exited " + $rc + " with no readable verdict; failing closed")),
+        autonomy:"ask"}' 2>/dev/null \
+      || printf "$deny_fmt" "judge-unreadable" "the delegated-merge judge gave no readable verdict; failing closed"
+    return 1
+  fi
+  after=$(printf '%s' "$judged" | jq -r '.classesAfter | if type == "array" then join(",") else error("no list") end' 2>/dev/null) \
+    || { printf "$deny_fmt" "judge-unreadable" "the judge's classesAfter is not a list; failing closed"; return 1; }
+  head=$(printf '%s' "$judged" | jq -r '.headSha // ""' 2>/dev/null || true)  # swallow-ok: an unreadable SHA leaves head empty and is refused on the next line
+  dlg=$(printf '%s' "$judged" | jq -r '.delegationId // ""' 2>/dev/null || true)  # swallow-ok: as above, refused on the next line
+  if [[ ! "$head" =~ ^[0-9a-f]{40}$ || -z "$dlg" ]]; then
+    printf "$deny_fmt" "judge-unreadable" "the judge's verdict names no head SHA or delegation; failing closed"
+    return 1
+  fi
+  local verdict=""
+  if ! verdict=$(autonomy_may_proceed \
+      "arm GitHub-native auto-merge on spec PR #${pr} at ${head} under delegation ${dlg} (DR-108, #2981)" \
+      "$after" \
+      "hold the spec PR for the founder's merge keystroke - he has said that keystroke is not needed for a spec covered by ${dlg} (queue item dlg2981, 2026-10-21), so holding stalls the drain on the held cap for no check"); then
+    printf '%s\n' "$verdict"
+    return 1
+  fi
+  printf '%s' "$verdict" | jq -c --argjson j "$judged" \
+    '. + {headSha:$j.headSha, delegationId:$j.delegationId, verdictBy:$j.verdictBy}' 2>/dev/null \
+    || { printf "$deny_fmt" "verdict-unreadable" "the autonomy verdict could not be combined with the judge's; failing closed"; return 1; }
+}
+
+# Seam (#2981): ISSUE=--delegated-spec-merge <pr> [--arm]. Without --arm it is a dry run:
+# it prints the verdict and writes nothing. With --arm, on a proceed only, it arms
+# GitHub-native auto-merge bound to the judged head (--match-head-commit), through this
+# script's `gh` wrapper, so the write is minted as minspec-sdd[bot] or aborts (#1355);
+# never --admin. GitHub then merges only when the required checks (ready-to-merge: a
+# provenance-verified ai-review:pass on the head) are green. Exit 0 = armed (or would be),
+# 1 = denied, 2 = admitted but the arm failed.
+if [[ "${ISSUE:-}" == "--delegated-spec-merge" ]]; then
+  _dsm_pr="${2-}" _dsm_mode="${3-}"
+  if [[ -n "$_dsm_mode" && "$_dsm_mode" != "--arm" ]]; then
+    echo "usage: dispatch-issue.sh --delegated-spec-merge <pr> [--arm]" >&2
+    exit 1
+  fi
+  # The delegated arm IS a GitHub-native auto-merge, so the project's DR-061 opt-in
+  # governs it exactly as it governs step 6b: off (or the SPEC-024 consequence-hybrid
+  # gate owning merges) means no arm, delegation or not. Checked before any read.
+  if ! native_automerge_enabled; then
+    printf '%s\n' '{"proceed":false,"reason":"native-automerge-off","detail":"native auto-merge (DR-061) is not enabled for this project, or the consequence-hybrid gate owns merges; the delegated arm is native auto-merge and is off with it","autonomy":"ask"}'
+    exit 1
+  fi
+  gh_bot_warm_read
+  if ! _dsm_verdict=$(autonomy_may_merge_delegated "$_dsm_pr"); then
+    printf '%s\n' "$_dsm_verdict"
+    exit 1
+  fi
+  if [[ "$_dsm_mode" != "--arm" ]]; then
+    printf '%s\n' "$_dsm_verdict" | jq -c '. + {armed:false, dryRun:true}'
+    exit 0
+  fi
+  _dsm_head=$(printf '%s' "$_dsm_verdict" | jq -r '.headSha')
+  _dsm_dlg=$(printf '%s' "$_dsm_verdict" | jq -r '.delegationId')
+  _dsm_by=$(printf '%s' "$_dsm_verdict" | jq -r '.verdictBy')
+  # Flag order is `--auto --squash`, the reverse of step 6b's, on purpose: the step-6b
+  # source-text suites (drain-selfheal, autonomy-merge-gate SITE A) locate THAT arm by
+  # its literal flag pair. This arm's gating is pinned behaviourally instead, in
+  # delegated-merge-seam.test.ts.
+  if ! gh pr merge "$_dsm_pr" --repo "$REPO" --auto --squash --match-head-commit "$_dsm_head" >/dev/null 2>&1; then
+    printf '%s\n' "$_dsm_verdict" | jq -c '. + {armed:false, error:"arm-failed"}'
+    echo "WARNING: PR #${_dsm_pr}: the delegation admitted the merge but auto-merge could not be armed at ${_dsm_head} (head moved, already merged, or blocked); left held." >&2
+    exit 2
+  fi
+  # The hold label said "a human is the next actor" (#816); once armed that is false.
+  # Best-effort and loud: the arm already stands, and a stale label holds nothing.
+  gh pr edit "$_dsm_pr" --repo "$REPO" --remove-label "needs-human-review" >/dev/null 2>&1 \
+    || echo "WARNING: PR #${_dsm_pr}: armed, but the needs-human-review label could not be removed." >&2
+  gh pr comment "$_dsm_pr" --repo "$REPO" --body "$(printf '## Delegated merge armed - minspec-sdd[bot], not the founder (#2981)\n\nAuto-merge is armed on this spec pull request at `%s` under delegation **%s** (DR-108). The founder did not press merge: his delegation covers T1-T4 MinSpec spec content once an independent AI review passes (queue item dlg2981, 2026-10-21).\n\n- Independent verdict on this head: %s\n- GitHub merges only when the required checks are green on this head; a new push voids the arm.\n- Merging is not approving: the spec lands as `specifying`, and approval is recorded later, separately, by `delegated-approval-caller.ts`.\n\nRejected alternative (DR-086 section 4): hold for the founder'"'"'s merge keystroke.' "$_dsm_head" "$_dsm_dlg" "$_dsm_by")" >/dev/null 2>&1 \
+    || echo "WARNING: PR #${_dsm_pr}: armed, but the audit comment could not be posted." >&2
+  printf '%s\n' "$_dsm_verdict" | jq -c '. + {armed:true}'
+  exit 0
+fi
+
 # SPECIFY_SCOPE_RE (#1169) — the ONLY paths a SPECIFY-ONLY dispatch may touch.
 #
 # A specify-only dispatch replaces the human's pre-build read of the raw issue, so
