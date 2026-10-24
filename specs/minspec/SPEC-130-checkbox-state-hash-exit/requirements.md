@@ -23,7 +23,7 @@ implements: [packages/minspec/tests/checkbox-basis-corpus.test.ts, packages/mins
 affects: [packages/shared/src/canonical.ts, scripts/hooks/canonical.py, packages/minspec/src/lib/scaffold.ts]
 phases:
   specify: in-progress
-  clarify: in-progress
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending
@@ -31,13 +31,13 @@ phases:
 
 # SPEC-130: Checkbox state leaves the approval hash
 
-> **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. The founder
-> answered the four questions under
-> [Resolved Decisions (Clarify)](#resolved-decisions-clarify) (Option A in all four). The
-> spec is NOT yet approved: it stays `status: specifying` until it passes the normal
-> spec-approval gate, and no code changes before that. Every requirement below is written
-> under the chosen option of each question, so no requirement text changed when the answers
-> were recorded.
+> **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human
+> reads it, answers the four questions under
+> [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it through the
+> normal spec-approval gate before any code changes. Every requirement below is written
+> under each question's recommended option, so approving the spec as it stands accepts
+> those recommendations; each question names the requirements that change if a different
+> option is chosen.
 
 Materializes **[#224](https://github.com/AIClarityAU/minspec/issues/224)** - *"normalize
 checkbox state before hashing approved spec files."* Rests on
@@ -340,21 +340,11 @@ Function signatures do not change: `canonicalizeSpec(raw: string): string`,
 - **INV-7 (the stored record is untouched).** No sidecar is written, re-stamped or
   reshaped by this change.
 
-## Resolved Decisions (Clarify)
+## Decisions needed (Clarify)
 
-Four questions, answered by the founder: Option A for all four (answers recorded here; approval is a separate, later gate). Each keeps
-its options and costs below as the record of what was weighed, with the resolution first.
-The requirements were already written under Option A, so none changed.
-
-Provenance: the answers were relayed from the founder's task queue (item `in39`, filed
-2026-10-21T22:00:53Z) and are quoted verbatim in
-https://github.com/AIClarityAU/minspec/pull/3004#issuecomment-6328125417 . The Clarify phase
-is marked done only when the founder approves the spec, because his approval is the
-human-gated record (precedent: SPEC-139, PR #2952).
+Four questions. Each states a recommendation and what that recommendation costs.
 
 ### DQ-1 - Which checkboxes does the hash ignore?
-
-**Resolved: Option A.** Every task-list checkbox anywhere in the body leaves the hash (FR-1, FR-5, Contract step 4).
 
 - **Option A - every task-list line in the body, under any heading (rec).** One line
   pattern, no document structure. Covers acceptance criteria, task documents with arbitrary
@@ -373,8 +363,6 @@ human-gated record (precedent: SPEC-139, PR #2952).
 
 ### DQ-2 - Is a checkbox inside a code sample normalized?
 
-**Resolved: Option A.** The rule is a plain line rule; checkboxes inside code samples and HTML comments are normalized too (FR-1, FR-5 fenced/comment row).
-
 - **Option A - yes; the rule is a line pattern and does not know about code blocks (rec).**
   **Cost: the tick state of a checkbox shown inside a fenced or indented code sample, or an
   HTML comment, in an approved document is not covered by approval.** Two such lines exist
@@ -386,8 +374,6 @@ human-gated record (precedent: SPEC-139, PR #2952).
   normalized. Changes FR-1, FR-5 and the Contract.
 
 ### DQ-3 - What happens to an approval given over a document that was already ticked?
-
-**Resolved: Option A.** No migration is built; the changelog says so (FR-7, FR-9).
 
 Such a record is `stale` once the change ships. This repository has none (FR-7 keeps it
 that way until merge). Adopter repositories were not measured.
@@ -407,8 +393,6 @@ that way until merge). Adopter repositories were not measured.
   which voids its approval.
 
 ### DQ-4 - May a stale approval become fresh with no human act?
-
-**Resolved: Option A.** A record stale only by a tick may resolve fresh; each is reported by path (FR-8).
 
 A record that is stale today **only** because a box was ticked after approval resolves
 `approved` the moment the step ships, with no write. There are none today.

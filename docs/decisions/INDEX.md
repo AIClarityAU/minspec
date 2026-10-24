@@ -866,12 +866,4 @@ The core-tenets review proposed one voter for docs and T1, and four for machiner
 <!-- dr-summary:DR-110 auto=be6169d668c2 -->
 The verdict-carry record ("A pass is carried across a push that changes nothing the voters are given", accepted 2026-10-13, #2701; it is the record named in this one's supersedes_partial:, and bodies here do not spell local ids of that range out, per the parent-register reference gate, #2148) carries an ai-review pass across a push when the bytes the voters are given are identical, and it explicitly rejected a position-insensitive identity.
 <!-- /dr-summary:DR-110 -->
-
-## [DR-111 — A pull request that carries only the founder's own editor approval is merged by the bot - the approval is the keystroke, and a fail-closed check refuses anything else](DR-111.md)
-
-*Status: proposed · Date: 2026-10-22*
-
-<!-- dr-summary:DR-111 auto=5e69cbb62816 -->
-The constitution's merge-gate conservation rule (DR-070 §4) says no unit of work ever reaches main with zero human keystrokes. For agent-built work the keystroke is the founder's merge. For an editor approval, the founder's keystroke already happened: Alt-A in the editor is the explicit human act DR-012 defines approval to be, recorded under his identity (DR-056 refuses an agent identity at record time). The pull request that carries it adds no new content for him to judge, so asking for…
-<!-- /dr-summary:DR-111 -->
 <!-- minspec:dr-index:end -->
