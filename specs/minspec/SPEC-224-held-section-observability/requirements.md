@@ -1,7 +1,7 @@
 ---
 id: SPEC-224
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a refresh that reports success while a section silently lags its template is a false signpost
@@ -19,8 +19,8 @@ implements_reason: >-
 affects: [packages/minspec/src/lib/merge-refresh.ts, packages/minspec/src/lib/scaffold.ts, packages/minspec/src/commands/init.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
