@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-230-quota-scaled-drain-concurrency/requirements.md",
+  "specHash": "564e5f9de6313784e1c2ec424cf1f58f98cf0b69be0978bf75dcbbe75316a2da",
+  "approvedAt": "2026-10-24T11:21:28.771Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:agent/issue-2853",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3026#issuecomment-6381995785"
+}

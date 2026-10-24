@@ -1,7 +1,7 @@
 ---
 id: SPEC-230
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute - the dev-time autonomous build/merge pipeline (this is its admission-width layer)
@@ -15,9 +15,9 @@ relates_to: [SPEC-044, SPEC-062, SPEC-074, SPEC-078, "#2853", "#1208", "#2514", 
 implements: [packages/minspec/tests/drain-concurrency-width.test.ts]
 affects: [scripts/drain-inbox.sh, scripts/remediate-pr.sh, packages/minspec/tests/drain-concurrency.test.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
