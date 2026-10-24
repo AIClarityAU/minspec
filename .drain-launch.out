@@ -1,0 +1,2 @@
+📬  0 inbox + 110 ready issue(s) pending (agent-ready + agent-ready-specify)
+🔁  Continuous drain in background (PID 2707451, session 2527911, every 20m; dies with the session; log: /tmp/minspec-drain-inbox.log)
