@@ -203,7 +203,7 @@ re-run or are closed as superseded, and logs it per cycle so the trade can be re
   under headroom, using a rolling per-agent burn rate from successive readings. Tracks reality.
   Cost: a new stateful estimator that can be wrong on a cold start, and much harder to test.
 
-> **RESOLVED 2026-10-24 - option (a), fixed steps** (recommended option accepted under the standing autonomy grant; not a founder pick). One extra slot per `MINSPEC_DRAIN_WIDTH_STEP` points of binding headroom, default 10pp, clamped to the maximum. Rejected: (b) measured burn, a stateful estimator that can be wrong on a cold start.
+> **Proposed (recommended): option (a), fixed steps.** Not a resolution: the header reserves Clarify decisions for a human, who confirms or changes this before approval. One extra slot per `MINSPEC_DRAIN_WIDTH_STEP` points of binding headroom, default 10pp, clamped to the maximum. Would set aside: (b) measured burn, a stateful estimator that can be wrong on a cold start.
 
 **D2. Same-file collisions.**
 - (a) **(rec)** Accept competing pull requests and bound them by measurement: log the
@@ -217,7 +217,7 @@ re-run or are closed as superseded, and logs it per cycle so the trade can be re
 - (c) Keep dispatch serial and widen only remediation. Cost: builds stay the bottleneck, so the
   founder's outcome is only partly met.
 
-> **RESOLVED 2026-10-24 - option (a), accept and bound by measurement** (recommended option accepted under the standing autonomy grant; not a founder pick). Log the collision/rework rate and drop the maximum to 1 for the rest of the cycle past the tripwire (default 25% of the last 8 drain pull requests). Rejected: (b) serialise on declared scope, (c) serial dispatch.
+> **Proposed (recommended): option (a), accept and bound by measurement.** Not a resolution: the header reserves Clarify decisions for a human, who confirms or changes this before approval. Log the collision/rework rate and drop the maximum to 1 for the rest of the cycle past the tripwire (default 25% of the last 8 drain pull requests). Would set aside: (b) serialise on declared scope, (c) serial dispatch.
 
 **D3. Default maximum when unset.**
 - (a) **(rec)** 6: half the cores, leaving room for the founder's own sessions. Cost: on an
@@ -227,7 +227,7 @@ re-run or are closed as superseded, and logs it per cycle so the trade can be re
 - (c) Keep 1 and require opt-in. Cost: the machine stays idle by default, which is the
   defect #2853 reports.
 
-> **RESOLVED 2026-10-24 - option (a), default maximum 6** (recommended option accepted under the standing autonomy grant; not a founder pick). Rejected: (b) 8, (c) keep 1 and opt in.
+> **Proposed (recommended): option (a), default maximum 6.** Not a resolution: the header reserves Clarify decisions for a human, who confirms or changes this before approval. Would set aside: (b) 8, (c) keep 1 and opt in.
 
 ## Alternatives rejected
 
