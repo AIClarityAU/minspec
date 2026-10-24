@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-217-docs-lane-governance-from-config/requirements.md",
+  "specHash": "dabd0caeacda75eee4bf3b962091ee8da903696632d78e9905a5a92b8ef3eca1",
+  "approvedAt": "2026-10-24T22:09:09.978Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:agent/issue-1970",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/2928#issuecomment-6389933679"
+}
