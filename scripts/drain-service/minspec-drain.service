@@ -32,7 +32,10 @@
 [Unit]
 Description=MinSpec inbox drain, kept running inside the claude-agent container (#3011)
 Documentation=file://%h/code/MinSpecPro/scripts/drain-service/README.md
-After=claude-agent.service
+# No After=claude-agent.service: WantedBy=default.target orders default.target after this unit,
+# and claude-agent.service is itself after default.target, so After= closed a cycle and systemd
+# deleted this unit's start job at boot (2026-10-24 journal). Wants= pulls the container in
+# without ordering; the ExecStartPre wait below is what waits for it.
 Wants=claude-agent.service
 StartLimitIntervalSec=3600
 StartLimitBurst=6
