@@ -169,6 +169,39 @@ describe('invariant 1: the drain never runs on the host', () => {
     }
   });
 
+  it('boot-time container startup waits inside one start instead of burning the start limit (#3047)', () => {
+    const unit = fs.readFileSync(UNIT, 'utf-8');
+    const pre = unit.match(/^ExecStartPre=(.*)$/m)?.[1] ?? '';
+    expect(pre).toContain('docker exec claude-agent true');
+    expect(pre).toMatch(/exit 1/);
+    const wait = Number(pre.match(/\{1\.\.(\d+)\}/)?.[1]) * Number(pre.match(/sleep (\d+)/)?.[1]);
+    const startTimeout = Number(unit.match(/^TimeoutStartSec=(\d+)$/m)?.[1]);
+    // The wait is bounded and fits inside the start timeout, so it is one start, not many.
+    expect(wait).toBeGreaterThan(0);
+    expect(startTimeout).toBeGreaterThan(wait);
+    // systemd expands $VAR in unit lines; the one-liner must carry no $ at all.
+    expect(pre).not.toContain('$');
+  });
+
+  it('the unit cannot form an ordering cycle with its own install target (#3047)', () => {
+    const unit = fs.readFileSync(UNIT, 'utf-8');
+    const list = (key: string) =>
+      [...unit.matchAll(new RegExp(`^${key}=(.*)$`, 'gm'))].flatMap((m) => m[1].trim().split(/\s+/));
+    // WantedBy=X orders X after this unit. A unit this one is After= that is itself ordered
+    // after X closes the loop, and systemd deletes this unit's start job at boot (2026-10-24
+    // journal: "Job minspec-drain.service/start deleted to break ordering cycle"), so the
+    // ExecStartPre readiness wait never runs. claude-agent.service is ordered after
+    // default.target on the host (it is a default.target service); that is the known edge.
+    const orderedAfter: Record<string, string[]> = { 'claude-agent.service': ['default.target'] };
+    for (const target of list('WantedBy')) {
+      for (const dep of [...list('After'), ...list('Requires'), ...list('BindsTo')]) {
+        expect(orderedAfter[dep] ?? [], `After=${dep} with WantedBy=${target} forms an ordering cycle`).not.toContain(target);
+      }
+    }
+    // Wants= pulls the container unit in without ordering; the ExecStartPre wait does the ordering.
+    expect(list('Wants')).toContain('claude-agent.service');
+  });
+
   it('the unit runs the supervisor through docker exec and never restarts a refusal', () => {
     const unit = fs.readFileSync(UNIT, 'utf-8');
     const execStart = unit.match(/^ExecStart=(.*)$/m)?.[1] ?? '';
