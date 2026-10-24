@@ -13,6 +13,10 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// Module scope (#1399): shells out; vitest's 5s default flakes under load (#2598).
+useShellTimeout();
 
 function findRepoRoot(): string {
   let dir = __dirname;

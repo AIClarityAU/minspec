@@ -55,9 +55,14 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { drainBaseEnv, useHostileAmbientDrainKnobs, HOSTILE_AMBIENT_KNOBS } from './helpers/drain-env';
+import { useShellTimeout } from './helpers/shell-timeout';
 
-// Module scope, like useShellTimeout: every test below runs with the leak primed (#2574).
+// Module scope: every test below runs with the leak primed (#2574).
 useHostileAmbientDrainKnobs();
+// #2598: this suite's run()-style wrapper around execFileSync is called across many
+// `drain-inbox.sh` invocations — more real child processes than the literal call count
+// suggested until the shell-timeout-coverage gate learned to see through wrappers.
+useShellTimeout();
 
 const DRAIN = path.resolve(__dirname, '../../../scripts/drain-inbox.sh');
 const nowSec = () => Math.floor(Date.now() / 1000);

@@ -24,6 +24,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite spawns real child processes per assertion (the shell-timeout-coverage
+// gate now counts calls through local wrappers); module scope per #1399.
+useShellTimeout();
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const DRAIN_SRC = path.join(REPO_ROOT, 'scripts', 'drain-inbox.sh');

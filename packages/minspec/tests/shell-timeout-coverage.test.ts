@@ -52,10 +52,79 @@ function listTestFiles(): string[] {
   return out.sort();
 }
 
+const SHELL_FN_PATTERN = '(?:execFileSync|spawnSync|execSync)';
+const SHELL_CALL_RE = new RegExp(`\\b${SHELL_FN_PATTERN}\\s*\\(`, 'g');
+
 /** Count real call sites, not the import line or a mention in prose. */
 function shellCallCount(src: string): number {
-  const matches = src.match(/\b(execFileSync|spawnSync|execSync)\s*\(/g);
+  const matches = src.match(SHELL_CALL_RE);
   return matches ? matches.length : 0;
+}
+
+/**
+ * #2598 — a suite that shells out through its OWN wrapper (`const run = (args) =>
+ * execFileSync(...)`, called many times) has one literal call site inside the wrapper's
+ * body but spawns one process per call site at the wrapper, not at the definition.
+ * `gitattributes.test.ts` had two literal sites and called its `run()` wrapper eight
+ * times — ten real child processes, counted as two — and passed this gate right up until
+ * it timed out under load.
+ *
+ * Find wrapper NAMES: a `const`/`let`/`function` whose own body calls one of the three
+ * shell functions directly. Two shapes, because an arrow wrapper is usually a one-line
+ * expression body with no braces (`=> execFileSync(...)`), while a function declaration
+ * always has one:
+ *
+ *   const NAME = (...) => execFileSync(...);        // expression body, ends at `;`
+ *   const NAME = (...) => { ...execFileSync...\n };  // block body
+ *   function NAME(...) { ...execFileSync...\n }
+ *
+ * HEURISTIC, NOT A PARSER, same caveat the rec in #2598 called out: the block-body and
+ * function-body scans end at the first line that is otherwise blank but for a closing
+ * `}` (any leading indent is allowed, so ordinary formatting is fine), so a wrapper whose
+ * closing brace shares a line with other code, or whose body contains a nested blank-but-
+ * for-`}` line before its own end (e.g. an inline object literal closed on its own line),
+ * can under- or over-match. A false negative only means a wrapper-heavy suite stays
+ * invisible to this gate — no worse than before this function existed. A false positive
+ * just means some unrelated identifier gets treated as a "wrapper" and its call count
+ * gets added in; since the exemption list below takes a reason, that is the escape hatch.
+ */
+function findWrapperNames(src: string): string[] {
+  const names = new Set<string>();
+  const shellCallInBody = new RegExp(`\\b${SHELL_FN_PATTERN}\\s*\\(`);
+
+  const arrowPattern = /\b(?:const|let)\s+(\w+)\s*=\s*\([^)]*\)\s*(?::[^=]+)?=>\s*(\{[\s\S]*?\n[ \t]*\}|[^\n;]*)/g;
+  for (const m of src.matchAll(arrowPattern)) {
+    if (shellCallInBody.test(m[2])) names.add(m[1]);
+  }
+
+  const fnPattern = /\bfunction\s+(\w+)\s*\([^)]*\)\s*\{([\s\S]*?\n[ \t]*\})/g;
+  for (const m of src.matchAll(fnPattern)) {
+    if (shellCallInBody.test(m[2])) names.add(m[1]);
+  }
+
+  return [...names];
+}
+
+/**
+ * Calls to a wrapper NAME found by `findWrapperNames`, elsewhere in the file. A
+ * `function NAME(` declaration itself matches the same `NAME(` text as a call would, so
+ * it is subtracted once; an arrow (`const NAME = (...)`) never matches `NAME(` at all, so
+ * there is nothing to subtract there.
+ */
+function wrapperCallCount(src: string, names: string[]): number {
+  let total = 0;
+  for (const name of names) {
+    const callPattern = new RegExp(`\\b${name}\\s*\\(`, 'g');
+    const matches = src.match(callPattern) ?? [];
+    const selfDeclares = new RegExp(`\\bfunction\\s+${name}\\s*\\(`).test(src) ? 1 : 0;
+    total += Math.max(0, matches.length - selfDeclares);
+  }
+  return total;
+}
+
+/** Literal shell calls plus calls made through the file's own wrappers around them. */
+function totalShellCalls(src: string): number {
+  return shellCallCount(src) + wrapperCallCount(src, findWrapperNames(src));
 }
 
 /**
@@ -84,7 +153,7 @@ describe('#1285 shell-driving suites raise their testTimeout', () => {
   for (const file of listTestFiles()) {
     const base = path.basename(file);
     const src = fs.readFileSync(file, 'utf8');
-    const calls = shellCallCount(src);
+    const calls = totalShellCalls(src);
     if (calls < SHELL_CALL_THRESHOLD) continue;
     if (base in EXEMPT) continue;
     if (raisesTimeout(src)) continue;
@@ -120,6 +189,42 @@ describe('#1285 shell-driving suites raise their testTimeout', () => {
     `;
     expect(shellCallCount(fake)).toBeGreaterThanOrEqual(SHELL_CALL_THRESHOLD);
     expect(raisesTimeout(fake)).toBe(false);
+  });
+
+  it('counts calls through a local wrapper, not just the literal sites (#2598)', () => {
+    // gitattributes.test.ts's exact shape: one wrapper (`run`) with a single literal
+    // execFileSync site, called many times. The literal count alone (1) stays under
+    // threshold; counting the wrapper's call sites must push it over.
+    const wrapped = `
+      const run = (args) => execFileSync('git', args, { cwd: tmpDir });
+      run(['init']); run(['add']); run(['commit']); run(['checkout']); run(['config']);
+    `;
+    expect(shellCallCount(wrapped)).toBeLessThan(SHELL_CALL_THRESHOLD);
+    expect(totalShellCalls(wrapped)).toBeGreaterThanOrEqual(SHELL_CALL_THRESHOLD);
+    expect(findWrapperNames(wrapped)).toEqual(['run']);
+  });
+
+  it('counts a function-declaration wrapper the same way, without double-counting itself', () => {
+    const wrapped = `
+      function run(args) {
+        return spawnSync('git', args).stdout;
+      }
+      run(['a']); run(['b']); run(['c']); run(['d']); run(['e']);
+    `;
+    // One literal spawnSync site inside the wrapper body, plus five call sites — not six,
+    // because \`function run(\` itself must not also be counted as a call to \`run(\`.
+    expect(totalShellCalls(wrapped)).toBe(1 + 5);
+  });
+
+  it('does not treat an unrelated function as a wrapper just because the file also shells out', () => {
+    const notAWrapper = `
+      function helper(x) { return x + 1; }
+      execFileSync('a'); execFileSync('b'); execFileSync('c');
+      helper(1); helper(2); helper(3); helper(4); helper(5); helper(6);
+    `;
+    // helper() never calls a shell function in its own body, so its six call sites must
+    // not be added — only the three literal execFileSync sites count.
+    expect(totalShellCalls(notAWrapper)).toBe(3);
   });
 
   it('recognises BOTH the helper and the hand-rolled form', () => {

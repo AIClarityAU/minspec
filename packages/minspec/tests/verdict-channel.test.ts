@@ -26,6 +26,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite's own `git()`/`decide()` wrappers around spawnSync run a real git
+// repo plus the shipped gate per-case; the literal call-site count alone understates it.
+useShellTimeout();
 
 const REPO = path.resolve(__dirname, '../../..');
 const GUARD = path.join(REPO, '.github/scripts/ai-review-guard.js');
