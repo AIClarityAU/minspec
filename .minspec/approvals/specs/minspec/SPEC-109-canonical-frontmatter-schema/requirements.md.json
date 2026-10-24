@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-109-canonical-frontmatter-schema/requirements.md",
+  "specHash": "8ef93bef235ce4b86dffb127c08f95ab78223229b23b787e3cc22145e2a98d72",
+  "approvedAt": "2026-10-24T20:53:56.573Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:agent/issue-96",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/2529#issuecomment-6384079898"
+}
