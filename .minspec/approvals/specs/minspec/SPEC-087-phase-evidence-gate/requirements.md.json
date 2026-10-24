@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-087-phase-evidence-gate/requirements.md",
+  "specHash": "c80b82ce91da7d7e7f73830992e5fb864c7a77c6c7145aaa7247b324d1e7b29a",
+  "approvedAt": "2026-10-24T20:53:44.604Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:agent/issue-109",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/2375#issuecomment-6389335615"
+}
