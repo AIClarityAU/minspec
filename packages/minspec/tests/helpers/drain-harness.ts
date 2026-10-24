@@ -438,6 +438,10 @@ exit ${STATUS_DECLINED}
     MINSPEC_ISSUE_RANKER: path.join(bin, 'rank.sh'),
     MINSPEC_DRAIN_SELF_REFRESH: '0',
     MINSPEC_DRAIN_GATED_FF: '0',
+    // Step 0c (#2981) lists needs-human-review PRs every cycle; this harness's gh stub
+    // answers that list with a held COUNT for the backpressure tests, so the stage is
+    // off here and has its own suite (drain-delegated-merge.test.ts).
+    MINSPEC_DRAIN_DELEGATED_MERGE: '0',
     MINSPEC_DRAIN_RUN_DIR: path.join(dir, 'run'),
     MINSPEC_DRAIN_PRIMARY_ROOT: path.join(dir, 'root'),
     MINSPEC_DRAIN_LOG: logFile,
