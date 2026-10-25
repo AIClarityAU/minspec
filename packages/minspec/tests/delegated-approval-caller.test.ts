@@ -28,6 +28,7 @@ import {
   branchFor,
   errorDetail,
   linkDependencies,
+  resolveDependencyRoot,
   isApprovableCandidatePath,
   parseCallerArgs,
   parsePorcelainZ,
@@ -109,6 +110,7 @@ beforeEach(() => {
   commit({ [DR_ENG]: dr('DR-900', 'proposed', 'engineering') }, 'docs: DR-900 engineering record (#42)');
   sh(root, 'push', '-q', 'origin', 'main');
   sh(root, 'fetch', '-q', 'origin');
+  fs.mkdirSync(path.join(root, 'node_modules')); // installed deps (#3057 refuses without)
 });
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -586,5 +588,38 @@ describe('#3020: hook-gated commit needs deps in the recording worktree', () => 
     expect(linkDependencies(primary, wt)).toBe(true);
     expect(fs.realpathSync(path.join(wt, 'node_modules'))).toBe(fs.realpathSync(path.join(primary, 'node_modules')));
     expect(linkDependencies(primary, wt)).toBe(false); // already present
+  });
+});
+
+describe('#3057: dependencies resolved from the primary worktree', () => {
+  it('uses repoRoot when it has node_modules, else the primary, else null', () => {
+    expect(resolveDependencyRoot(root, REAL_DEPS.git)).toBe(root);
+    const session = path.join(tmp, 'session');
+    sh(root, 'worktree', 'add', '-q', '-b', 'sess', session);
+    expect(fs.realpathSync(resolveDependencyRoot(session, REAL_DEPS.git)!)).toBe(fs.realpathSync(root));
+    fs.rmSync(path.join(root, 'node_modules'), { recursive: true });
+    expect(resolveDependencyRoot(session, REAL_DEPS.git)).toBeNull();
+  });
+
+  it('writes from a deps-less session worktree and links the primary deps', () => {
+    const session = path.join(tmp, 'session');
+    sh(root, 'worktree', 'add', '-q', '-b', 'sess', session);
+    const rec = newRec();
+    const report = runCaller(opts({ repoRoot: session }), deps(rec));
+    expect(report.results.filter((r) => r.outcome === 'opened').length).toBe(2);
+  });
+
+  it('refuses before creating any branch or worktree when no deps exist anywhere', () => {
+    fs.rmSync(path.join(root, 'node_modules'), { recursive: true });
+    const rec = newRec();
+    const report = runCaller(opts(), deps(rec));
+    expect(report.results.length).toBeGreaterThan(0);
+    for (const r of report.results) {
+      expect(r.outcome).toBe('error');
+      expect(r.reason).toBe('dependencies-missing');
+    }
+    expect(rec.approve).toEqual([]);
+    expect(sh(root, 'branch', '--list', 'dlg-approve/*').trim()).toBe('');
+    noWrites(rec);
   });
 });

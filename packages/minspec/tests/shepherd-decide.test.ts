@@ -95,6 +95,7 @@ const ALL_ACTIONS = [
   'agent-remediate-review',
   'rebase-only',
   'skip-clean',
+  'skip-awaiting-merge-turn',
   'retry-unknown',
   'skip-unhandled-state',
   'some-token-from-the-future',

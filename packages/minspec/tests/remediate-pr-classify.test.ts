@@ -507,3 +507,31 @@ describe('remediate-pr.sh rerun-first gate (#3042)', () => {
     expect(code).toMatch(/assert_markers_isolated "\$ATTEMPT_MARKER" "\$CRASH_MARKER" "\$CAPPED_MARKER" "\$RERUN_MARKER"/);
   });
 });
+
+describe('remediate-pr.sh --classify: sweep defers ai-review:pass BEHIND PRs (#3069)', () => {
+  const sweep = (labels: string, mergeState = 'BEHIND', failing: 'yes' | 'no' = 'no', bad: 'yes' | 'no' = 'no') =>
+    execFileSync(
+      'bash',
+      [SCRIPT, '--classify', 'agent/issue-1', 'MERGEABLE', mergeState, labels, failing, bad, 'no', 'yes'],
+      { encoding: 'utf-8' },
+    ).trim();
+
+  it('a sweep over three green ai-review:pass BEHIND PRs issues zero rebase-only actions', () => {
+    const actions = [1, 2, 3].map(() => sweep('ai-review:pass'));
+    expect(actions.filter((a) => a === 'rebase-only')).toHaveLength(0);
+    expect(actions).toEqual(Array(3).fill('skip-awaiting-merge-turn'));
+  });
+  it('still rebases a BEHIND PR that has no ai-review verdict yet', () => {
+    expect(sweep('')).toBe('rebase-only');
+  });
+  it('still routes red checks / review changes ahead of the deferral', () => {
+    expect(sweep('ai-review:pass', 'BEHIND', 'yes')).toBe('agent-remediate-checks');
+    expect(sweep('ai-review:changes,ai-review:pass', 'BEHIND', 'no', 'yes')).toBe('agent-remediate-review');
+  });
+  it('conflicts are still surfaced', () => {
+    expect(sweep('ai-review:pass', 'DIRTY')).toBe('skip-conflict');
+  });
+  it('the creator-shepherd contract (no 8th arg) still rebases a pass+BEHIND PR', () => {
+    expect(classify('agent/issue-1', 'MERGEABLE', 'BEHIND', 'ai-review:pass', 'no', 'no')).toBe('rebase-only');
+  });
+});

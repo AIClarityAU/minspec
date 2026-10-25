@@ -89,7 +89,7 @@ shepherd_decide() {
       else
         echo "do-fix"
       fi ;;
-    skip-clean)
+    skip-clean|skip-awaiting-merge-turn)
       # Nothing fixable, and unmerged is NOT success — so we never declare done here.
       # But whether to keep POLLING depends on whether anything asynchronous can still
       # change the outcome:
