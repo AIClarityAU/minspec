@@ -20,14 +20,11 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { useShellTimeout } from './helpers/shell-timeout';
 import { execFileSync, spawnSync } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
 
 // #2598: this suite's own `runCheck()`/`runInstallCase()` wrappers are called per-case;
 // the literal call-site count alone understates the real process count.
-useShellTimeout();
-
 useShellTimeout();
 
 const FETCH_SCRIPT = path.resolve(__dirname, '../../../scripts/fetch-bumblebee-catalogs.sh');
