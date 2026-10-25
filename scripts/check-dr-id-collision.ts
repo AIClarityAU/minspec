@@ -49,7 +49,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -118,8 +118,63 @@ interface GhResult {
  */
 const GH_BIN = process.env.DR_ID_GH_BIN?.trim() || 'gh';
 
-/** Run `gh`. Never throws for a non-zero exit — the caller decides what it means. */
+/** A failure caused by the API rate limit, not by a collision or a bad answer (#3077). */
+class RateLimitError extends GateError {}
+
+/** What a rate-limited response looks like in `gh`'s stderr / stdout. */
+const RATE_LIMIT_RE = /rate limit|HTTP 429|RATE_LIMITED/i;
+
+/**
+ * Longest the gate will sleep waiting for the limit window to reset. 5 minutes by
+ * default; `DR_ID_RATE_LIMIT_MAX_WAIT_MS` is a TEST SEAM (like `DR_ID_GH_BIN`) so the
+ * tests do not really sleep. CI never sets it.
+ */
+function maxRateLimitWaitMs(): number {
+  const raw = process.env.DR_ID_RATE_LIMIT_MAX_WAIT_MS?.trim();
+  if (raw !== undefined && raw !== '') {
+    const n = Number.parseInt(raw, 10);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return 5 * 60 * 1000;
+}
+
+function sleepMs(ms: number): void {
+  if (ms <= 0) return;
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * How long until the rate-limit window resets, bounded. Reads `/rate_limit` (which is
+ * itself free of charge) rather than a response header, because a failed `gh api`
+ * does not surface its headers. Unknown reset → wait the bound's 1/5 (a minute at the
+ * default) rather than skipping the wait: an immediate retry into a closed window
+ * would fail again for certain.
+ */
+function rateLimitWaitMs(): number {
+  const cap = maxRateLimitWaitMs();
+  const probe = rawGh(['api', 'rate_limit', '--jq', '[.resources.core.reset, .resources.graphql.reset] | max']);
+  const reset = probe.failed ? NaN : Number.parseInt(probe.stdout.trim(), 10);
+  if (!Number.isFinite(reset)) return Math.min(cap, Math.floor(cap / 5));
+  const untilReset = reset * 1000 - Date.now() + 1000;
+  return Math.max(0, Math.min(cap, untilReset));
+}
+
+/**
+ * Run `gh`, retrying ONCE after the rate-limit window resets. Never throws for a
+ * non-zero exit — the caller decides what it means. A call that is still rate limited
+ * after the wait comes back `failed` with its stderr, and `ghOrFail` names it.
+ */
 function gh(args: string[]): GhResult {
+  const first = rawGh(args);
+  if (!first.failed || !RATE_LIMIT_RE.test(`${first.stderr}\n${first.stdout}`)) return first;
+  const wait = rateLimitWaitMs();
+  console.error(`gh was rate limited; waiting ${Math.round(wait / 1000)}s for the window to reset, then retrying once.`);
+  sleepMs(wait);
+  return rawGh(args);
+}
+
+/** Run `gh` once. */
+function rawGh(args: string[]): GhResult {
   try {
     const stdout = execFileSync(GH_BIN, args, {
       encoding: 'utf-8',
@@ -139,11 +194,20 @@ function gh(args: string[]): GhResult {
 function ghOrFail(args: string[], what: string): string {
   const r = gh(args);
   if (r.failed) {
-    throw new GateError(
-      `could not ${what} — \`${GH_BIN} ${args.join(' ')}\` failed:\n${r.stderr.trim()}`,
-    );
+    throw ghFailure(`could not ${what} — \`${GH_BIN} ${args.join(' ')}\` failed`, r);
   }
   return r.stdout;
+}
+
+/** Build the right error for a failed call: distinctly "rate limited", or generic. */
+function ghFailure(prefix: string, r: GhResult): GateError {
+  const detail = r.stderr.trim();
+  if (RATE_LIMIT_RE.test(`${r.stderr}\n${r.stdout}`)) {
+    return new RateLimitError(
+      `RATE LIMITED (not a DR id collision) — ${prefix} even after waiting for the limit to reset:\n${detail}`,
+    );
+  }
+  return new GateError(`${prefix}:\n${detail}`);
 }
 
 /**
@@ -212,9 +276,65 @@ function prFileEntries(repo: string, pr: number): PrFileEntry[] {
   }));
 }
 
-/** The decision paths a pull request ADDS (added / renamed / copied), repo-relative. */
-function prClaims(repo: string, pr: number, decisionsDir: string): PrClaims {
-  return { pr, paths: claimedPathsFromPrFiles(prFileEntries(repo, pr), decisionsDir) };
+/**
+ * Every OTHER open PR's claims, in batched GraphQL pages (#3077).
+ *
+ * One REST `pulls/N/files` call per open PR made a run cost O(open PRs) requests and
+ * exhausted the installation rate limit. 50 PRs x their first 100 files per query is a
+ * handful of calls. A PR with more than 100 files (`hasNextPage`) falls back to the
+ * paginated REST listing for that one PR, so no claim is ever read from a truncated list.
+ */
+function otherPrClaims(repo: string, subjectPr: number, decisionsDir: string): PrClaims[] {
+  const [owner, name] = repo.split('/');
+  if (!owner || !name) throw new GateError(`--repo must be OWNER/NAME, got "${repo}"`);
+  const query =
+    'query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){' +
+    'pullRequests(states:OPEN,first:50,after:$cursor){pageInfo{hasNextPage endCursor}' +
+    'nodes{number files(first:100){pageInfo{hasNextPage} nodes{path changeType}}}}}}';
+  const claims: PrClaims[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; ; page++) {
+    if (page > 200) throw new GateError('the open-PR GraphQL listing did not terminate after 200 pages.');
+    const args = ['api', 'graphql', '-f', `query=${query}`, '-f', `owner=${owner}`, '-f', `name=${name}`];
+    if (cursor) args.push('-f', `cursor=${cursor}`);
+    const out = ghOrFail(args, 'list the open pull requests and their files');
+    let parsed: any;
+    try {
+      parsed = JSON.parse(out);
+    } catch {
+      throw new GateError(`could not parse the open-PR GraphQL response as JSON. First 200 chars:\n${out.slice(0, 200)}`);
+    }
+    if (Array.isArray(parsed?.errors) && parsed.errors.length > 0) {
+      const text = JSON.stringify(parsed.errors).slice(0, 400);
+      throw RATE_LIMIT_RE.test(text)
+        ? new RateLimitError(`RATE LIMITED (not a DR id collision) — GraphQL reported: ${text}`)
+        : new GateError(`the open-PR GraphQL query returned errors: ${text}`);
+    }
+    const prs = parsed?.data?.repository?.pullRequests;
+    if (!prs || !Array.isArray(prs.nodes) || typeof prs.pageInfo?.hasNextPage !== 'boolean') {
+      throw new GateError('the open-PR GraphQL response was not the expected shape.');
+    }
+    for (const node of prs.nodes) {
+      const number = Number(node?.number);
+      if (!Number.isFinite(number) || number <= 0 || !node.files || !Array.isArray(node.files.nodes)) {
+        throw new GateError('the open-PR GraphQL response contained a malformed pull request node.');
+      }
+      if (number === subjectPr) continue;
+      if (node.files.pageInfo?.hasNextPage !== false) {
+        claims.push({ pr: number, paths: claimedPathsFromPrFiles(prFileEntries(repo, number), decisionsDir) });
+        continue;
+      }
+      const entries: PrFileEntry[] = node.files.nodes.map((f: { path?: unknown; changeType?: unknown }) => ({
+        filename: String(f.path ?? ''),
+        status: String(f.changeType ?? '').toLowerCase(),
+      }));
+      claims.push({ pr: number, paths: claimedPathsFromPrFiles(entries, decisionsDir) });
+    }
+    if (!prs.pageInfo.hasNextPage) break;
+    cursor = String(prs.pageInfo.endCursor ?? '');
+    if (!cursor) throw new GateError('the open-PR GraphQL listing said there was another page but gave no cursor.');
+  }
+  return claims;
 }
 
 /**
@@ -308,25 +428,12 @@ function basePaths(repo: string, base: string, decisionsDir: string): string[] {
   const r = gh(['api', endpoint, '--paginate', '--slurp']);
   if (r.failed) {
     if (/HTTP 404|Not Found/i.test(r.stderr)) return [];
-    throw new GateError(
-      `could not list ${decisionsDir} on ${base} — \`${GH_BIN} api ${endpoint}\` failed:\n${r.stderr.trim()}`,
-    );
+    throw ghFailure(`could not list ${decisionsDir} on ${base} — \`${GH_BIN} api ${endpoint}\` failed`, r);
   }
   return parseJsonRows(r.stdout, `${decisionsDir}@${base} listing`)
     .filter((row) => row.type === 'file')
     .map((row) => String(row.path ?? ''))
     .filter((p) => p.length > 0);
-}
-
-/** Every open pull request number in the repo. */
-function openPrNumbers(repo: string): number[] {
-  const out = ghOrFail(
-    ['pr', 'list', '--repo', repo, '--state', 'open', '--json', 'number', '--limit', '500'],
-    'list the open pull requests',
-  );
-  return parseJsonRows(out, 'open-PR list')
-    .map((row) => Number(row.number))
-    .filter((n) => Number.isFinite(n) && n > 0);
 }
 
 /** Canonical DR ids present in the LOCAL checkout's decisions dir. */
@@ -390,9 +497,7 @@ function main(): void {
   const base = basePaths(args.repo, args.base, decisionsDir);
   assertBaseListingPlausible(args.base, decisionsDir, base, subject);
 
-  const others = openPrNumbers(args.repo)
-    .filter((n) => n !== args.pr)
-    .map((n) => prClaims(args.repo, n, decisionsDir));
+  const others = otherPrClaims(args.repo, args.pr, decisionsDir);
 
   const input: DrIdCollisionInput = {
     decisionsDir,
@@ -454,8 +559,24 @@ try {
 } catch (e) {
   const why = e instanceof GateError ? e.message : `unexpected error: ${(e as Error).message}`;
   console.error(`DR id collision check FAILED CLOSED — ${why}`);
+  const limited = e instanceof RateLimitError;
   if (process.env.GITHUB_ACTIONS) {
-    console.error('::error title=DR id check could not run::failing closed (DR-066) — see the log');
+    console.error(
+      limited
+        ? '::error title=DR id check rate limited::the GitHub API rate limit, not a DR id collision — failing closed (DR-066); re-run the check'
+        : '::error title=DR id check could not run::failing closed (DR-066) — see the log',
+    );
+  }
+  if (limited && process.env.GITHUB_STEP_SUMMARY) {
+    try {
+      appendFileSync(
+        process.env.GITHUB_STEP_SUMMARY,
+        '### DR id uniqueness: rate limited\n\nThe GitHub API rate limit was hit and did not clear after one bounded wait. ' +
+          'This is **not** a DR id collision. Re-run the check.\n',
+      );
+    } catch {
+      // The summary is a convenience; the red and the log line above already carry it.
+    }
   }
   process.exit(1);
 }
