@@ -1,7 +1,7 @@
 ---
 id: SPEC-130
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-002  # Signpost Integrity - an approval voided by recording progress is a false "needs re-approval" signpost
@@ -22,9 +22,9 @@ implements: [packages/minspec/tests/checkbox-basis-corpus.test.ts, packages/mins
 # requires.
 affects: [packages/shared/src/canonical.ts, scripts/hooks/canonical.py, packages/minspec/src/lib/scaffold.ts]
 phases:
-  specify: in-progress
-  clarify: in-progress
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

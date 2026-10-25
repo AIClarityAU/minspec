@@ -253,6 +253,42 @@ derive_failing_non_review() {
     | if length > 0 then "yes" else "no" end' <<<"$1"
 }
 
+# ── Rerun-first gate (#3042) ───────────────────────────────────────────────────
+# A red check can be an outside-service fault (a rate limit, a network error) that no
+# commit on the PR can cause or fix; an agent spent on it cannot reproduce it and just
+# escalates. So before the FIRST agent-remediate-checks spend, rerun the failed jobs once.
+#
+# derive_failed_run_ids: the workflow-run ids behind the latest red non-review checks,
+# one per line, unique. A run id is read ONLY as the digits after `/actions/runs/` in the
+# check's detailsUrl — never a log, never free text. A red check with no such URL (a
+# status context) yields no id; the caller then falls through to the agent.
+derive_failed_run_ids() {
+  jq -r "$ROLLUP_LATEST_JQ"'
+    [ latest_checks[]
+      | select((.name // "") != "ai-review")
+      | select((.name // "") != "ready-to-merge")
+      | select((.context // "") != "ready-to-merge")
+      | select((.workflowName // "") != "ready-to-merge")
+      | select((.conclusion // "") == "FAILURE" or (.conclusion // "") == "ERROR"
+               or (.conclusion // "") == "TIMED_OUT" or (.conclusion // "") == "CANCELLED")
+      | ((.detailsUrl // .targetUrl // "") | capture("/actions/runs/(?<id>[0-9]+)")? | .id) ]
+    | map(select(. != null)) | unique | .[]' <<<"$1"
+}
+
+# rerun_decision <rerun_markers_already_posted> <run_ids_newline_separated>
+#   → rerun | agent
+# Rerun only when it has not been tried on this PR AND there is a run to rerun. Any
+# unreadable count is non-numeric → treated as "already tried": over-counting spends the
+# agent (the old behaviour), under-counting would rerun forever.
+rerun_decision() {
+  local count="${1-}" ids="${2-}"
+  if [[ "$count" =~ ^[0-9]+$ && "$count" -eq 0 && -n "$ids" ]]; then
+    printf 'rerun\n'
+  else
+    printf 'agent\n'
+  fi
+}
+
 # ── Marker vocabulary + pure counting helpers ──────────────────────────────────
 # Markers embedded in remediation comments so prior outcomes can be COUNTED on a PR
 # (bounding the runaway loop) without a stateful store — one per outcome class:
@@ -285,6 +321,9 @@ derive_failing_non_review() {
 ATTEMPT_MARKER="<!-- minspec-auto-remediation -->"
 CRASH_MARKER="<!-- minspec-remediate-crash -->"
 CAPPED_MARKER="<!-- minspec-remediate-capped -->"
+#   RERUN_MARKER   — (#3042) the one free rerun of a red check, spent BEFORE any agent; in
+#                    NEITHER budget counter, so a rerun never consumes remediation quota.
+RERUN_MARKER="<!-- minspec-remediate-rerun -->"
 
 # Pairwise isolation gate. Compared by POSITION, never by value: an earlier version
 # tested `[[ $a != $b ]]` first, which let two IDENTICAL markers pass — the maximal-
@@ -309,7 +348,7 @@ assert_markers_isolated() {
   done
   return 0
 }
-if ! assert_markers_isolated "$ATTEMPT_MARKER" "$CRASH_MARKER" "$CAPPED_MARKER"; then
+if ! assert_markers_isolated "$ATTEMPT_MARKER" "$CRASH_MARKER" "$CAPPED_MARKER" "$RERUN_MARKER"; then
   exit 1
 fi
 
@@ -340,10 +379,10 @@ count_markers_json() {
   out=$(jq --arg m "$marker" --arg authors "$authors" '
     ($authors
       | split(",")
-      | map(sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "") | ascii_downcase)
+      | map(sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "") | ascii_downcase | sub("\\[bot\\]$"; ""))
       | map(select(length > 0))) as $allow
     | [ .comments[]?
-        | (((.author.login) // "") | ascii_downcase) as $login
+        | (((.author.login) // "") | ascii_downcase | sub("\\[bot\\]$"; "")) as $login
         | select(($allow | length) == 0 or (($allow | index($login)) != null))
         | ((.body // "") | sub("[[:space:]]+$"; ""))
         | select(endswith($m))
@@ -358,7 +397,34 @@ count_markers_json() {
 # Treating that as provable would let the cap-notice dedup below run on an any-author
 # count — the exact silent gate it exists to prevent. One character that is neither
 # whitespace nor a comma is necessary and sufficient for a surviving element.
-authors_provable() { [[ "${1-}" =~ [^[:space:],] ]]; }
+# It must ALSO look like a GitHub login (#3037): a `gh api user` 403 body printed on stdout
+# is a non-empty string with non-space characters, and was accepted as an allowlist that
+# matched no comment author, so every budget counted 0 and the cap never fired. At least one
+# trimmed element must be login-shaped; `[bot]` is optional because gh reports App authors
+# without it (count_markers_json normalises it on both sides).
+login_shaped() { [[ "${1-}" =~ ^[A-Za-z0-9-]+(\[bot\])?$ ]]; }
+authors_provable() {
+  local csv="${1-}" el
+  local -a parts
+  IFS=',' read -r -a parts <<<"$csv"
+  for el in "${parts[@]}"; do
+    el="${el#"${el%%[![:space:]]*}"}"
+    el="${el%"${el##*[![:space:]]}"}"
+    login_shaped "$el" && return 0
+  done
+  return 1
+}
+
+# Resolve this token's login, or print nothing. Only a zero exit AND a login-shaped value
+# is accepted: on an App installation token `gh api user` exits 1 yet prints the 403 JSON
+# body on STDOUT, which a bare `|| true` used to capture as the "login" (#3037).
+resolve_self_login() {
+  local out
+  out=$(gh api user --jq '.login' 2>/dev/null) || return 0
+  out="${out%%$'\n'*}"
+  login_shaped "$out" && printf '%s\n' "$out"
+  return 0
+}
 
 # Should the one-shot "capped — needs a human" notice be posted this sweep?
 #   $1 — the author allowlist CSV (as passed to count_markers_json)
@@ -422,6 +488,19 @@ if [[ "${1:-}" == "--derive-failing" ]]; then
   derive_failing_non_review "$(cat)"
   exit 0
 fi
+if [[ "${1:-}" == "--derive-failed-runs" ]]; then
+  derive_failed_run_ids "$(cat)"
+  exit 0
+fi
+if [[ "${1:-}" == "--rerun-decision" ]]; then
+  shift
+  if [[ $# -ne 2 ]]; then
+    echo "Usage: remediate-pr.sh --rerun-decision <rerun_markers_posted> <run_ids>" >&2
+    exit 2
+  fi
+  rerun_decision "$1" "$2"
+  exit 0
+fi
 if [[ "${1:-}" == "--count-markers" ]]; then
   shift
   if [[ $# -lt 1 || $# -gt 2 ]]; then
@@ -429,6 +508,10 @@ if [[ "${1:-}" == "--count-markers" ]]; then
     exit 2
   fi
   count_markers_json "$1" "$(cat)" "${2:-}"
+  exit 0
+fi
+if [[ "${1:-}" == "--resolve-self-login" ]]; then
+  resolve_self_login
   exit 0
 fi
 if [[ "${1:-}" == "--check-markers" ]]; then
@@ -746,7 +829,7 @@ if [[ "$ACTION" == agent-* ]]; then
   # Budget counters must only ever degrade toward OVER-counting (cap sooner: annoying but
   # safe). UNDER-counting un-bounds the loop, so an unresolved identity falls all the way
   # back to any-author rather than trusting an operator string we cannot corroborate.
-  SELF_LOGIN=$(gh api user --jq '.login' 2>/dev/null || true)  # swallow-ok: authors_provable is false for empty, which routes to always-post; the unprovable case is already the safe direction and is documented above
+  SELF_LOGIN=$(resolve_self_login)  # empty on any failure: authors_provable is false for empty, which routes to any-author counting and always-post (the safe direction, documented above)
   if authors_provable "$SELF_LOGIN"; then
     AUTHOR_ALLOW="${SELF_LOGIN}${MINSPEC_REMEDIATE_AUTHOR_LOGINS:+,${MINSPEC_REMEDIATE_AUTHOR_LOGINS}}"
   else
@@ -781,6 +864,28 @@ if [[ "$ACTION" == agent-* ]]; then
       post_marked_comment "$CAPPED_MARKER" "$(printf '## 🛑 Auto-remediation capped — needs a human\n\nThis PR hit an automated-remediation cap — **%s** — without clearing its gate, so automated attempts have stopped. It is labelled `needs-human-review`; a human needs to take it from here.' "$CAP_HIT")"
     fi
     exit 0
+  fi
+  # Rerun-first gate (#3042): a red check may be an outside-service fault. Rerun the failed
+  # jobs ONCE, before any agent is spent; remediate only if a later sweep still sees red.
+  # The marker is posted BEFORE the rerun so a lost marker can never mean an unbounded
+  # rerun loop; it sits in neither budget counter.
+  if [[ "$ACTION" == "agent-remediate-checks" ]]; then
+    RERUNS=$(count_marker "$RERUN_MARKER")
+    FAILED_RUN_IDS=$(derive_failed_run_ids "$PR_JSON")
+    if [[ "$(rerun_decision "$RERUNS" "$FAILED_RUN_IDS")" == "rerun" ]]; then
+      post_marked_comment "$RERUN_MARKER" 'A required check is red. Before spending a remediation agent, re-running the failed jobs once: a fault outside this PR (rate limit, network) clears on rerun. If the check is still red on the next sweep, remediation proceeds.'
+      RERUN_FAILED=0
+      while IFS= read -r RUN_ID; do
+        [[ -n "$RUN_ID" ]] || continue
+        if gh run rerun "$RUN_ID" --repo "$REPO" --failed >/dev/null 2>&1; then
+          echo "  Re-ran failed jobs of run $RUN_ID (#3042 rerun-first) — no agent spent this sweep."
+        else
+          echo "  WARNING: could not rerun run $RUN_ID — it will be remediated by an agent instead." >&2
+          RERUN_FAILED=1
+        fi
+      done <<<"$FAILED_RUN_IDS"
+      if (( RERUN_FAILED == 0 )); then exit 0; fi
+    fi
   fi
   echo "  Attempt $((ATTEMPTS + 1))/$MAX_ATTEMPTS (crashes so far: $CRASHES/$MAX_CRASHES)."
 fi
