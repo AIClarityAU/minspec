@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-219-stable-session-address/requirements.md",
+  "specHash": "7d871f69a32d5f9c0a93a8d461b44e52c3d5779df43af85d2fa2918145106b0a",
+  "approvedAt": "2026-10-25T02:12:41.234Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:agent/issue-2013",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/2943#issuecomment-6392010398"
+}
