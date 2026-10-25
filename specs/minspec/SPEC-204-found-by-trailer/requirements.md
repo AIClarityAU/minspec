@@ -1,7 +1,7 @@
 ---
 id: SPEC-204
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - RCDD is part of the methodology; this adds the field that lets its output be aggregated
@@ -14,9 +14,9 @@ relates_to: [DR-059, "#1293", "#1050", "#1758"]
 implements: [.githooks/commit-msg, scripts/facts.ts, scripts/lib/found-by.ts]
 affects: [package.json]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
