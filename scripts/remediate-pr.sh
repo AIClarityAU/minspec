@@ -147,6 +147,10 @@ classify_pr() {
   # and drove here deliberately — keeps its existing 6-argument contract and is never
   # told to stand down from its own PR.
   local live_nonself_claim="${7:-no}"
+  # #3069: the DRAIN SWEEP (not the creator-shepherd) passes "yes" so a BEHIND PR that
+  # is already ai-review:pass is left for its one-at-a-time merge-time refresh instead
+  # of being merged-into on every cycle (which restarts CI on every green PR).
+  local sweep_defer_pass="${8:-no}"
 
   # 1. Scope gate — only automation branches.
   if ! [[ "$branch" =~ $AUTOMATION_BRANCH_RE ]]; then
@@ -175,6 +179,13 @@ classify_pr() {
   fi
   # 6. Behind base only — mechanical merge, no agent.
   if [[ "$merge_state" == "BEHIND" ]]; then
+    # #3069: conflicts, red checks and ai-review:changes were all ruled out above, so a
+    # BEHIND + ai-review:pass PR is only waiting for its merge turn. Under strict
+    # required checks every merge re-BEHINDs the rest, so refreshing it now is wasted
+    # CI; it is refreshed one at a time at merge time.
+    if [[ "$sweep_defer_pass" == "yes" && ",$labels_csv," == *",ai-review:pass,"* ]]; then
+      echo "skip-awaiting-merge-turn"; return 0
+    fi
     echo "rebase-only"; return 0
   fi
   # 7. UNKNOWN (#1803) — GitHub computes mergeStateStatus LAZILY, so a cold read
@@ -379,10 +390,10 @@ count_markers_json() {
   out=$(jq --arg m "$marker" --arg authors "$authors" '
     ($authors
       | split(",")
-      | map(sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "") | ascii_downcase)
+      | map(sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "") | ascii_downcase | sub("\\[bot\\]$"; ""))
       | map(select(length > 0))) as $allow
     | [ .comments[]?
-        | (((.author.login) // "") | ascii_downcase) as $login
+        | (((.author.login) // "") | ascii_downcase | sub("\\[bot\\]$"; "")) as $login
         | select(($allow | length) == 0 or (($allow | index($login)) != null))
         | ((.body // "") | sub("[[:space:]]+$"; ""))
         | select(endswith($m))
@@ -397,7 +408,34 @@ count_markers_json() {
 # Treating that as provable would let the cap-notice dedup below run on an any-author
 # count — the exact silent gate it exists to prevent. One character that is neither
 # whitespace nor a comma is necessary and sufficient for a surviving element.
-authors_provable() { [[ "${1-}" =~ [^[:space:],] ]]; }
+# It must ALSO look like a GitHub login (#3037): a `gh api user` 403 body printed on stdout
+# is a non-empty string with non-space characters, and was accepted as an allowlist that
+# matched no comment author, so every budget counted 0 and the cap never fired. At least one
+# trimmed element must be login-shaped; `[bot]` is optional because gh reports App authors
+# without it (count_markers_json normalises it on both sides).
+login_shaped() { [[ "${1-}" =~ ^[A-Za-z0-9-]+(\[bot\])?$ ]]; }
+authors_provable() {
+  local csv="${1-}" el
+  local -a parts
+  IFS=',' read -r -a parts <<<"$csv"
+  for el in "${parts[@]}"; do
+    el="${el#"${el%%[![:space:]]*}"}"
+    el="${el%"${el##*[![:space:]]}"}"
+    login_shaped "$el" && return 0
+  done
+  return 1
+}
+
+# Resolve this token's login, or print nothing. Only a zero exit AND a login-shaped value
+# is accepted: on an App installation token `gh api user` exits 1 yet prints the 403 JSON
+# body on STDOUT, which a bare `|| true` used to capture as the "login" (#3037).
+resolve_self_login() {
+  local out
+  out=$(gh api user --jq '.login' 2>/dev/null) || return 0
+  out="${out%%$'\n'*}"
+  login_shaped "$out" && printf '%s\n' "$out"
+  return 0
+}
 
 # Should the one-shot "capped — needs a human" notice be posted this sweep?
 #   $1 — the author allowlist CSV (as passed to count_markers_json)
@@ -450,11 +488,11 @@ if [[ "${1:-}" == "--classify" ]]; then
   # Require 6 or 7 positional args, but allow empties (labels_csv is often "") — so
   # validate the COUNT, not each value (a `${n:?}` would reject an empty label). The
   # 7th (live_nonself_claim) is optional so the creator's 6-arg contract is unchanged.
-  if [[ $# -ne 6 && $# -ne 7 ]]; then
-    echo "Usage: remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> <labels_csv> <failing_non_review> <ai_review_bad> [<live_nonself_claim>]" >&2
+  if [[ $# -lt 6 || $# -gt 8 ]]; then
+    echo "Usage: remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> <labels_csv> <failing_non_review> <ai_review_bad> [<live_nonself_claim> [<sweep_defer_pass>]]" >&2
     exit 2
   fi
-  classify_pr "$1" "$2" "$3" "$4" "$5" "$6" "${7:-no}"
+  classify_pr "$1" "$2" "$3" "$4" "$5" "$6" "${7:-no}" "${8:-no}"
   exit 0
 fi
 if [[ "${1:-}" == "--derive-failing" ]]; then
@@ -481,6 +519,10 @@ if [[ "${1:-}" == "--count-markers" ]]; then
     exit 2
   fi
   count_markers_json "$1" "$(cat)" "${2:-}"
+  exit 0
+fi
+if [[ "${1:-}" == "--resolve-self-login" ]]; then
+  resolve_self_login
   exit 0
 fi
 if [[ "${1:-}" == "--check-markers" ]]; then
@@ -714,7 +756,7 @@ if [[ -n "$ITEM" && "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
   fi
 fi
 
-ACTION=$(classify_pr "$BRANCH" "$MERGEABLE" "$MERGE_STATE" "$LABELS_CSV" "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD" "$LIVE_NONSELF_CLAIM")
+ACTION=$(classify_pr "$BRANCH" "$MERGEABLE" "$MERGE_STATE" "$LABELS_CSV" "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD" "$LIVE_NONSELF_CLAIM" yes)
 echo "PR #$PR [$BRANCH] mergeable=$MERGEABLE state=$MERGE_STATE failing_checks=$FAILING_NON_REVIEW ai_review_bad=$AI_REVIEW_BAD item=${ITEM:-none} live_owned=$LIVE_NONSELF_CLAIM → $ACTION"
 
 case "$ACTION" in
@@ -752,6 +794,10 @@ case "$ACTION" in
     exit 0 ;;
   skip-clean)
     echo "  No fixable problem — nothing to do."; exit 0 ;;
+  skip-awaiting-merge-turn)
+    # #3069: ai-review:pass and only BEHIND — no side effect, no attempt consumed; the
+    # merge-time updater refreshes it one at a time.
+    echo "  ai-review:pass and only BEHIND — not refreshing now (updated at its merge turn)."; exit 0 ;;
   skip-unhandled-state)
     # #1803: a mergeStateStatus this classifier doesn't recognise (a future GitHub
     # value, an empty read, or garbage) reached the terminal fallthrough. That used
@@ -798,7 +844,7 @@ if [[ "$ACTION" == agent-* ]]; then
   # Budget counters must only ever degrade toward OVER-counting (cap sooner: annoying but
   # safe). UNDER-counting un-bounds the loop, so an unresolved identity falls all the way
   # back to any-author rather than trusting an operator string we cannot corroborate.
-  SELF_LOGIN=$(gh api user --jq '.login' 2>/dev/null || true)  # swallow-ok: authors_provable is false for empty, which routes to always-post; the unprovable case is already the safe direction and is documented above
+  SELF_LOGIN=$(resolve_self_login)  # empty on any failure: authors_provable is false for empty, which routes to any-author counting and always-post (the safe direction, documented above)
   if authors_provable "$SELF_LOGIN"; then
     AUTHOR_ALLOW="${SELF_LOGIN}${MINSPEC_REMEDIATE_AUTHOR_LOGINS:+,${MINSPEC_REMEDIATE_AUTHOR_LOGINS}}"
   else
