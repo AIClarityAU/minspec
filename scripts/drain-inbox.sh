@@ -101,6 +101,8 @@
 #                                    (a cap the meter cannot see), until a cycle completes
 #                                    cleanly. 0 disables the veto.
 #   MINSPEC_DRAIN_POLL=30          — session-liveness poll granularity while waiting.
+#   MINSPEC_DRAIN_WALL_JUMP_SLACK=60 — seconds a wait chunk may overrun on the WALL clock
+#                                    before the loop logs it as a suspend/freeze (#3064).
 #   MINSPEC_DRAIN_PAUSE_FILE       — pause marker (default <primary>/.minspec/drain-pause).
 #                                    Present => the loop finishes the cycle in flight, then
 #                                    idle-polls instead of starting the next; removed =>
@@ -248,6 +250,8 @@ PRIMARY_ROOT="${MINSPEC_DRAIN_PRIMARY_ROOT:-$(git -C "$SCRIPT_DIR" rev-parse --s
 INTERVAL="${MINSPEC_DRAIN_INTERVAL:-1200}"           # 20 min between cycles
 QUOTA_BACKOFF="${MINSPEC_DRAIN_QUOTA_BACKOFF:-1800}"  # 30 min pause on a quota hit
 POLL="${MINSPEC_DRAIN_POLL:-30}"                     # liveness-poll granularity
+WALL_JUMP_SLACK="${MINSPEC_DRAIN_WALL_JUMP_SLACK:-60}" # wall-clock overrun that is logged (#3064)
+[[ "$WALL_JUMP_SLACK" =~ ^[0-9]+$ ]] || WALL_JUMP_SLACK=60
 MAX_LIFETIME="${MINSPEC_DRAIN_MAX_LIFETIME:-28800}"  # 8 h hard cap (backstop)
 MAX_CONSEC_FAIL="${MINSPEC_DRAIN_MAX_FAILURES:-3}"   # stop after N straight errors
 
@@ -881,10 +885,28 @@ ensure_fresh_run_dir() {
   # COMPILED deps — including @aiclarity/shared's gitignored `out/` — which can lag
   # origin/main's source. Those helpers are best-effort and degrade if it mismatches
   # (the render block is skipped, not corrupted), so the staleness is accepted, not fatal.
-  [[ -d "${PRIMARY_ROOT}/node_modules" ]] \
-    && ln -sfn "${PRIMARY_ROOT}/node_modules" "${DRAIN_RUN_DIR}/node_modules" 2>/dev/null || true
-  [[ -d "${PRIMARY_ROOT}/packages/minspec/node_modules" ]] \
-    && ln -sfn "${PRIMARY_ROOT}/packages/minspec/node_modules" "${DRAIN_RUN_DIR}/packages/minspec/node_modules" 2>/dev/null || true
+  # Module source (#3048): PRIMARY_ROOT is the toplevel of SCRIPT_DIR, so a drain launched
+  # from a fresh worktree gets that worktree, which has no node_modules. Fall back to the
+  # git common dir's primary worktree (first `git worktree list --porcelain` entry), and
+  # warn loudly when nothing can be linked - the tsx helpers (ranker, auto-merge gate,
+  # render-review-signals) would otherwise fail 127 and degrade the drain silently.
+  local mod_root="$PRIMARY_ROOT"
+  if [[ ! -d "${mod_root}/node_modules" ]]; then
+    local first_wt
+    first_wt="$(git -C "$PRIMARY_ROOT" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
+    if [[ -n "$first_wt" && -d "${first_wt}/node_modules" ]]; then
+      echo "[drain] NOTE: ${PRIMARY_ROOT} has no node_modules; linking from primary worktree ${first_wt} (#3048)." >&2
+      mod_root="$first_wt"
+    else
+      echo "[drain] WARNING: no node_modules found in ${PRIMARY_ROOT} or the primary worktree - tsx helpers (ranker, auto-merge gate, render-review-signals) will fail 127 (#3048)." >&2
+    fi
+  fi
+  if [[ -d "${mod_root}/node_modules" ]]; then
+    ln -sfn "${mod_root}/node_modules" "${DRAIN_RUN_DIR}/node_modules" 2>/dev/null || true
+  fi
+  if [[ -d "${mod_root}/packages/minspec/node_modules" ]]; then
+    ln -sfn "${mod_root}/packages/minspec/node_modules" "${DRAIN_RUN_DIR}/packages/minspec/node_modules" 2>/dev/null || true
+  fi
 
   # VERIFY the run dir is ACTUALLY at origin/main before trusting it (#773 review,
   # MAJOR). Only then repoint children + tell them freshness is validated. If the reset
@@ -1198,6 +1220,76 @@ record_delegated_approvals() {
     1) echo "[drain] WARNING: delegated approval REFUSED this cycle (caller exit 1) - nothing recorded. The reason is in the report above; this is not an empty queue." >&2 ;;
     *) echo "[drain] WARNING: delegated approval FAILED for at least one artifact (caller exit ${rc}) - see the report above." >&2 ;;
   esac
+  return 0
+}
+
+# arm_delegated_spec_merges: Step 0c of a cycle (#2981, DR-108). Spec PRs that step 6b
+# held as needs-human-review merge without the founder once delegation DLG-001 covers
+# them (queue item dlg2981, 2026-10-21: "y - my aproval is already the Alt-A"). For each
+# open, held PR whose files are all under specs/, this runs dispatch-issue.sh's
+# `--delegated-spec-merge <pr> --arm` seam, which owns EVERY decision (the delegation
+# judge, then mayProceed on the classes left over) and arms auto-merge bound to the head
+# it judged, as minspec-sdd[bot]. The prefilter here only saves a judge run on PRs that
+# could never qualify; it admits nothing. Never --admin, never a merge of its own.
+#
+# Not a gate, so it never fails the cycle. A denial is the expected answer for most PRs
+# and is printed as one line with its reason; an arm that failed after admission, an
+# unreadable PR list, or a list cut off at its limit is printed LOUDLY on stderr.
+# Off: MINSPEC_DRAIN_DELEGATED_MERGE=0. Per-cycle cap: MINSPEC_DRAIN_DELEGATED_MERGE_MAX.
+arm_delegated_spec_merges() {
+  if [[ "${MINSPEC_DRAIN_DELEGATED_MERGE:-1}" == "0" ]]; then
+    echo "[drain] delegated spec merge: off (MINSPEC_DRAIN_DELEGATED_MERGE=0)."
+    return 0
+  fi
+  local max="${MINSPEC_DRAIN_DELEGATED_MERGE_MAX:-10}" limit=500
+  if [[ ! "$max" =~ ^[1-9][0-9]*$ ]]; then
+    echo "[drain] WARNING: delegated spec merge NOT run: MINSPEC_DRAIN_DELEGATED_MERGE_MAX='${max}' is not a positive integer." >&2
+    return 0
+  fi
+  local rows count candidates pr out rc armed=0 tried=0
+  if ! rows=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit "$limit" \
+       --json number,isDraft,autoMergeRequest,files 2>/dev/null); then
+    echo "[drain] WARNING: delegated spec merge NOT run: the held PR list could not be read. This is not an empty queue." >&2
+    return 0
+  fi
+  if ! count=$(printf '%s' "$rows" | jq 'length' 2>/dev/null); then
+    echo "[drain] WARNING: delegated spec merge NOT run: the held PR list did not parse." >&2
+    return 0
+  fi
+  if (( count >= limit )); then
+    echo "[drain] WARNING: delegated spec merge NOT run: the held PR list returned ${count}, its limit; it may be cut off." >&2
+    return 0
+  fi
+  # Already-armed PRs are skipped (the arm stands); so are drafts and any PR with a
+  # file outside specs/. Oldest first, so the longest-held spec goes first.
+  candidates=$(printf '%s' "$rows" | jq -r '[.[]
+      | select(.isDraft | not) | select(.autoMergeRequest == null)
+      | select((.files | length) > 0 and all(.files[]; .path | startswith("specs/")))
+      | .number] | sort | .[]' 2>/dev/null) || {
+    echo "[drain] WARNING: delegated spec merge NOT run: could not filter the held PR list." >&2
+    return 0
+  }
+  if [[ -z "$candidates" ]]; then
+    echo "[drain] delegated spec merge: no held spec-only PRs."
+    return 0
+  fi
+  while read -r pr; do
+    [[ -n "$pr" ]] || continue
+    if (( tried >= max )); then
+      echo "[drain] delegated spec merge: per-cycle cap ${max} reached; the rest wait for the next cycle."
+      break
+    fi
+    tried=$((tried + 1))
+    out=$(bash "$DISPATCH" --delegated-spec-merge "$pr" --arm 2>/dev/null) && rc=0 || rc=$?
+    out=$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -n 1 || true)  # swallow-ok: grep -v exits 1 when the seam printed nothing, which is reported below as an unreadable result
+    case "$rc" in
+      0) armed=$((armed + 1))
+         echo "[drain] delegated spec merge: #${pr} armed - $(printf '%s' "$out" | jq -r '"\(.delegationId) at \(.headSha)"' 2>/dev/null || echo "$out")" ;;
+      1) echo "[drain] delegated spec merge: #${pr} held - $(printf '%s' "$out" | jq -r '"\(.reason): \(.detail)"' 2>/dev/null || echo "unreadable verdict: ${out:-<none>}")" ;;
+      *) echo "[drain] WARNING: delegated spec merge: #${pr} was admitted but NOT armed (seam exit ${rc}): ${out:-<no output>}" >&2 ;;
+    esac
+  done <<< "$candidates"
+  echo "[drain] delegated spec merge: ${armed} armed of ${tried} judged."
   return 0
 }
 
@@ -1538,6 +1630,10 @@ run_cycle() {
   # runs every cycle whatever the queue holds (the empty-queue return below skips the
   # PR sweep, and approvals must not wait on it).
   record_delegated_approvals
+
+  # Step 0c: delegated merges of held spec PRs (#2981, DR-108). Beside 0b and for the
+  # same reason: it must run every cycle, including the empty-queue ones.
+  arm_delegated_spec_merges
 
   # Step 1: triage inbox issues → labels T1/T2 as agent-ready
   # A failed inbox query must not read as an empty inbox (#1855). Triage is not
@@ -2879,13 +2975,24 @@ quota_backoff_sleep() {
 # session dies so the loop reacts within MINSPEC_DRAIN_POLL, not a whole interval.
 # The sleep is backgrounded and waited on so a SIGTERM trap fires at once instead
 # of after the chunk (#1187): bash defers a trap until a FOREGROUND child returns.
+#
+# `sleep` counts MONOTONIC time, which stops while the host is suspended, so a chunk
+# can take hours on the wall clock. That once left the log silent for 8.6 hours inside
+# one 1200 s wait and read as a stall (#3064). A chunk the wall clock overran by more
+# than WALL_JUMP_SLACK is therefore logged, once per chunk, as it ends. The wait itself
+# is not shortened: it still sleeps what it was asked to.
 wait_interval() {
-  local remaining="$1" chunk
+  local remaining="$1" chunk before overrun
   while (( remaining > 0 )); do
     session_alive "$SESSION_PID" || return 0
     chunk=$(( remaining < POLL ? remaining : POLL ))
+    before=$EPOCHSECONDS
     sleep "$chunk" &
     wait $! || true  # swallow-ok: wait returns >128 when a trapped signal interrupts it; the trap handler does the work
+    overrun=$(( EPOCHSECONDS - before - chunk ))
+    if (( overrun > WALL_JUMP_SLACK )); then
+      echo "[drain] wall clock moved $(( overrun + chunk ))s during a ${chunk}s wait at $(date -u +%Y-%m-%dT%H:%M:%SZ): the host was suspended or this process was frozen, so nothing ran or logged in that time (#3064). The wait goes on where it stopped. max_lifetime counts wall-clock time, so a long suspend can end the loop at its next check."
+    fi
     remaining=$(( remaining - chunk ))
   done
 }
