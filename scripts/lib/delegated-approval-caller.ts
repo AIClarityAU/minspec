@@ -493,6 +493,16 @@ function recordOne(
   }
   if (fs.existsSync(wt)) return at('skipped', 'worktree-exists', `${wt} exists; it is left for inspection`);
 
+  // The pre-commit gate needs installed dependencies; refuse before any branch exists (#3057).
+  const depsRoot = opts.write ? resolveDependencyRoot(repoRoot, deps.git) : repoRoot;
+  if (depsRoot === null) {
+    return at(
+      'error',
+      'dependencies-missing',
+      `no node_modules in ${repoRoot} or in the primary worktree; run npm install there (the recording commit's pre-commit gate needs it)`,
+    );
+  }
+
   fs.mkdirSync(wtRoot, { recursive: true });
   try {
     deps.git(repoRoot, ['worktree', 'add', '--quiet', '-b', branch, wt, base]);
@@ -544,7 +554,7 @@ function recordOne(
     // The pre-commit validate gate runs `npm run validate` (tsx + hoisted deps); a fresh
     // worktree has no node_modules, the validator crashes, and the gate fails closed (#3020).
     // Linked AFTER the stray check and never staged: add/commit take explicit paths only.
-    linkDependencies(repoRoot, wt);
+    linkDependencies(depsRoot, wt);
     deps.git(wt, ['add', '--', ...changed]);
     deps.git(wt, [...gitId, 'commit', '--quiet', '-m', subject, '-m', why, '--', ...changed]);
     deps.git(
@@ -620,6 +630,23 @@ function prBody(c: Candidate, rec: CliRecord, delegationId: string, isDr: boolea
 
 /** Node's uncaught-error banner: three lines that precede the actual message (#3020). */
 const NODE_CRASH_NOISE = /^(node:internal\/|const err = |throw |\^+$)/;
+
+/**
+ * The directory whose `node_modules` the recording worktree should use: `repoRoot` when it
+ * has them, else the primary worktree (first `git worktree list --porcelain` entry) when it
+ * does, else null (#3057: a session worktree used as --repo-root has no deps of its own).
+ */
+export function resolveDependencyRoot(repoRoot: string, git: CallerDeps['git']): string | null {
+  if (fs.existsSync(path.join(repoRoot, 'node_modules'))) return repoRoot;
+  try {
+    const first = git(repoRoot, ['worktree', 'list', '--porcelain']).split('\n')[0] ?? '';
+    const primary = first.startsWith('worktree ') ? first.slice('worktree '.length).trim() : '';
+    if (primary !== '' && fs.existsSync(path.join(primary, 'node_modules'))) return primary;
+  } catch {
+    /* unreadable: treated as no fallback */
+  }
+  return null;
+}
 
 /**
  * Make the primary checkout's installed dependencies visible to the recording worktree.

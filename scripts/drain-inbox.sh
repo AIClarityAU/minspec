@@ -101,6 +101,8 @@
 #                                    (a cap the meter cannot see), until a cycle completes
 #                                    cleanly. 0 disables the veto.
 #   MINSPEC_DRAIN_POLL=30          — session-liveness poll granularity while waiting.
+#   MINSPEC_DRAIN_WALL_JUMP_SLACK=60 — seconds a wait chunk may overrun on the WALL clock
+#                                    before the loop logs it as a suspend/freeze (#3064).
 #   MINSPEC_DRAIN_PAUSE_FILE       — pause marker (default <primary>/.minspec/drain-pause).
 #                                    Present => the loop finishes the cycle in flight, then
 #                                    idle-polls instead of starting the next; removed =>
@@ -248,6 +250,8 @@ PRIMARY_ROOT="${MINSPEC_DRAIN_PRIMARY_ROOT:-$(git -C "$SCRIPT_DIR" rev-parse --s
 INTERVAL="${MINSPEC_DRAIN_INTERVAL:-1200}"           # 20 min between cycles
 QUOTA_BACKOFF="${MINSPEC_DRAIN_QUOTA_BACKOFF:-1800}"  # 30 min pause on a quota hit
 POLL="${MINSPEC_DRAIN_POLL:-30}"                     # liveness-poll granularity
+WALL_JUMP_SLACK="${MINSPEC_DRAIN_WALL_JUMP_SLACK:-60}" # wall-clock overrun that is logged (#3064)
+[[ "$WALL_JUMP_SLACK" =~ ^[0-9]+$ ]] || WALL_JUMP_SLACK=60
 MAX_LIFETIME="${MINSPEC_DRAIN_MAX_LIFETIME:-28800}"  # 8 h hard cap (backstop)
 MAX_CONSEC_FAIL="${MINSPEC_DRAIN_MAX_FAILURES:-3}"   # stop after N straight errors
 
@@ -2971,13 +2975,24 @@ quota_backoff_sleep() {
 # session dies so the loop reacts within MINSPEC_DRAIN_POLL, not a whole interval.
 # The sleep is backgrounded and waited on so a SIGTERM trap fires at once instead
 # of after the chunk (#1187): bash defers a trap until a FOREGROUND child returns.
+#
+# `sleep` counts MONOTONIC time, which stops while the host is suspended, so a chunk
+# can take hours on the wall clock. That once left the log silent for 8.6 hours inside
+# one 1200 s wait and read as a stall (#3064). A chunk the wall clock overran by more
+# than WALL_JUMP_SLACK is therefore logged, once per chunk, as it ends. The wait itself
+# is not shortened: it still sleeps what it was asked to.
 wait_interval() {
-  local remaining="$1" chunk
+  local remaining="$1" chunk before overrun
   while (( remaining > 0 )); do
     session_alive "$SESSION_PID" || return 0
     chunk=$(( remaining < POLL ? remaining : POLL ))
+    before=$EPOCHSECONDS
     sleep "$chunk" &
     wait $! || true  # swallow-ok: wait returns >128 when a trapped signal interrupts it; the trap handler does the work
+    overrun=$(( EPOCHSECONDS - before - chunk ))
+    if (( overrun > WALL_JUMP_SLACK )); then
+      echo "[drain] wall clock moved $(( overrun + chunk ))s during a ${chunk}s wait at $(date -u +%Y-%m-%dT%H:%M:%SZ): the host was suspended or this process was frozen, so nothing ran or logged in that time (#3064). The wait goes on where it stopped. max_lifetime counts wall-clock time, so a long suspend can end the loop at its next check."
+    fi
     remaining=$(( remaining - chunk ))
   done
 }
