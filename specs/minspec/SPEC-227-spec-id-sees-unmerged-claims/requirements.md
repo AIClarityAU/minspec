@@ -1,7 +1,7 @@
 ---
 id: SPEC-227
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - concurrent multi-session coordination; two sessions picking one spec id is that problem
@@ -18,9 +18,9 @@ relates_to: [SPEC-053, SPEC-134, SPEC-135, SPEC-136, SPEC-139, SPEC-044, SPEC-07
 implements: [packages/shared/src/claimed-spec-ids.ts, packages/shared/tests/claimed-spec-ids.test.ts, scripts/check-spec-id-collision.ts, .github/workflows/spec-id-collision.yml, packages/minspec/tests/spec-id-cross-pr.test.ts]
 affects: [packages/minspec/src/lib/spec-manager.ts, scripts/facts.ts, scripts/dispatch-issue.sh, scripts/validate-frontmatter.ts, scripts/lib/spec-id-collision.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
