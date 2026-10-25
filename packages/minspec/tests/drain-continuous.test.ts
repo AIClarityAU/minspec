@@ -464,6 +464,45 @@ describe('drain-inbox.sh — pause marker + signal cleanup (#1187)', () => {
     expect(logOf(s)).toMatch(/stopping on SIGTERM/);
   }, 40000);
 
+  // T3 (#3064): the host slept for 8 h 17 m inside one 1200 s inter-cycle wait. `sleep`
+  // counts monotonic time, so the wait froze with the host and the log said nothing for
+  // 8.6 hours; it read as a stall. A `sleep` that takes 5 s whatever it is asked for
+  // stands in for the suspend: each 1 s chunk then overruns the wall clock by 4 s, past
+  // a slack of 2. The paused path idles in wait_interval without touching a cycle.
+  function slowSleepSandbox(slowSecs: number | null) {
+    const s = sandbox();
+    if (slowSecs !== null) {
+      const realSleep = execFileSync('sh', ['-c', 'command -v sleep'], { encoding: 'utf-8' }).trim();
+      fs.writeFileSync(path.join(s.dir, 'bin', 'sleep'), `#!/bin/sh\nexec ${realSleep} ${slowSecs}\n`, { mode: 0o755 });
+    }
+    s.env = { ...s.env, MINSPEC_DRAIN_WALL_JUMP_SLACK: '2' };
+    fs.writeFileSync(s.pause, '');
+    return s;
+  }
+
+  it('T3 (#3064): a wait chunk the wall clock overran (host suspend) is logged, with the jump and a UTC time', async () => {
+    const s = slowSleepSandbox(5);
+    const pid = start(s);
+    try {
+      expect(await waitFor(() => /wall clock moved/.test(logOf(s)), 20000), logOf(s)).toBe(true);
+      expect(logOf(s)).toMatch(/\[drain\] wall clock moved [0-9]+s during a 1s wait at \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ/);
+    } finally {
+      try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+    }
+  }, 40000);
+
+  it('CONTROL (#3064): an ordinary wait at the same slack logs no jump', async () => {
+    const s = slowSleepSandbox(null);
+    const pid = start(s);
+    try {
+      expect(await waitFor(() => /PAUSED/.test(logOf(s)))).toBe(true);
+      await sleepMs(4000); // several 1 s chunks
+      expect(logOf(s)).not.toMatch(/wall clock moved/);
+    } finally {
+      try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+    }
+  }, 40000);
+
   it('source: pause is checked between cycles (top of the loop), never inside run_cycle', () => {
     const loop = DRAIN_SRC.slice(DRAIN_SRC.indexOf('run_loop() {'), DRAIN_SRC.indexOf('# Parse EVERY argument'));
     expect(loop).toMatch(/drain_paused/);

@@ -147,6 +147,10 @@ classify_pr() {
   # and drove here deliberately — keeps its existing 6-argument contract and is never
   # told to stand down from its own PR.
   local live_nonself_claim="${7:-no}"
+  # #3069: the DRAIN SWEEP (not the creator-shepherd) passes "yes" so a BEHIND PR that
+  # is already ai-review:pass is left for its one-at-a-time merge-time refresh instead
+  # of being merged-into on every cycle (which restarts CI on every green PR).
+  local sweep_defer_pass="${8:-no}"
 
   # 1. Scope gate — only automation branches.
   if ! [[ "$branch" =~ $AUTOMATION_BRANCH_RE ]]; then
@@ -175,6 +179,13 @@ classify_pr() {
   fi
   # 6. Behind base only — mechanical merge, no agent.
   if [[ "$merge_state" == "BEHIND" ]]; then
+    # #3069: conflicts, red checks and ai-review:changes were all ruled out above, so a
+    # BEHIND + ai-review:pass PR is only waiting for its merge turn. Under strict
+    # required checks every merge re-BEHINDs the rest, so refreshing it now is wasted
+    # CI; it is refreshed one at a time at merge time.
+    if [[ "$sweep_defer_pass" == "yes" && ",$labels_csv," == *",ai-review:pass,"* ]]; then
+      echo "skip-awaiting-merge-turn"; return 0
+    fi
     echo "rebase-only"; return 0
   fi
   # 7. UNKNOWN (#1803) — GitHub computes mergeStateStatus LAZILY, so a cold read
@@ -487,11 +498,11 @@ if [[ "${1:-}" == "--classify" ]]; then
   # Require 6 or 7 positional args, but allow empties (labels_csv is often "") — so
   # validate the COUNT, not each value (a `${n:?}` would reject an empty label). The
   # 7th (live_nonself_claim) is optional so the creator's 6-arg contract is unchanged.
-  if [[ $# -ne 6 && $# -ne 7 ]]; then
-    echo "Usage: remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> <labels_csv> <failing_non_review> <ai_review_bad> [<live_nonself_claim>]" >&2
+  if [[ $# -lt 6 || $# -gt 8 ]]; then
+    echo "Usage: remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> <labels_csv> <failing_non_review> <ai_review_bad> [<live_nonself_claim> [<sweep_defer_pass>]]" >&2
     exit 2
   fi
-  classify_pr "$1" "$2" "$3" "$4" "$5" "$6" "${7:-no}"
+  classify_pr "$1" "$2" "$3" "$4" "$5" "$6" "${7:-no}" "${8:-no}"
   exit 0
 fi
 if [[ "${1:-}" == "--derive-failing" ]]; then
@@ -755,7 +766,7 @@ if [[ -n "$ITEM" && "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
   fi
 fi
 
-ACTION=$(classify_pr "$BRANCH" "$MERGEABLE" "$MERGE_STATE" "$LABELS_CSV" "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD" "$LIVE_NONSELF_CLAIM")
+ACTION=$(classify_pr "$BRANCH" "$MERGEABLE" "$MERGE_STATE" "$LABELS_CSV" "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD" "$LIVE_NONSELF_CLAIM" yes)
 echo "PR #$PR [$BRANCH] mergeable=$MERGEABLE state=$MERGE_STATE failing_checks=$FAILING_NON_REVIEW ai_review_bad=$AI_REVIEW_BAD item=${ITEM:-none} live_owned=$LIVE_NONSELF_CLAIM → $ACTION"
 
 case "$ACTION" in
@@ -793,6 +804,10 @@ case "$ACTION" in
     exit 0 ;;
   skip-clean)
     echo "  No fixable problem — nothing to do."; exit 0 ;;
+  skip-awaiting-merge-turn)
+    # #3069: ai-review:pass and only BEHIND — no side effect, no attempt consumed; the
+    # merge-time updater refreshes it one at a time.
+    echo "  ai-review:pass and only BEHIND — not refreshing now (updated at its merge turn)."; exit 0 ;;
   skip-unhandled-state)
     # #1803: a mergeStateStatus this classifier doesn't recognise (a future GitHub
     # value, an empty read, or garbage) reached the terminal fallthrough. That used
