@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-223-carve-out-disjointness-validator/requirements.md",
+  "specHash": "15634babe58f8eef844224326e3d89cb1848472d9e2ff763974f051faa4429e0",
+  "approvedAt": "2026-10-25T00:31:24.836Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:agent/issue-2026",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/2955#issuecomment-6391230490"
+}
