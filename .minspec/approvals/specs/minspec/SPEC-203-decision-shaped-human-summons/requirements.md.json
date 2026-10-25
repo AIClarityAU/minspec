@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-203-decision-shaped-human-summons/requirements.md",
+  "specHash": "a42706384f2e3e095eab458364cdb357dfd7767d8cc2e206c06d0ffa8e068e90",
+  "approvedAt": "2026-10-25T06:15:41.757Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:agent/issue-1292",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/2838#issuecomment-6394215764"
+}
