@@ -428,8 +428,15 @@ false positive/negative from that check",
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, on 2026-10-25, under delegation DLG-001 (DR-108). No human chose them; they
+are ratified only by approval of this spec.
+
 - **DQ-1 — When may MinSpec demand a phase?** This is the methodology change the issue
   flagged as possibly needing a decision record.
+  **Recorded selection: Option (A),** it fits the lifecycle DR-069 already decided and
+  the 23 approved-without-a-plan directories, whereas (B) would contradict DR-069.
+
   - **(A) Evidence backs the phase map — demanded when the claim is made. (rec)**
     Approval demands the specification (and Clarify at T4); a plan or task breakdown is
     demanded the moment the map says it is done or a later phase has started. Fits the
@@ -447,6 +454,10 @@ false positive/negative from that check",
     about.
 
 - **DQ-2 — What happens to a spec written entirely in headings MinSpec does not know?**
+  **Recorded selection: Option (A),** reporting unattributable as a warning avoids
+  promoting the original defect into a wrong refusal and adds no new configuration
+  surface.
+
   - **(A) Report `unattributable` as a warning (FR-6 as written). (rec)** *Cost:* a
     single-file spec in a wholly foreign vocabulary can never be hard-blocked by this rule,
     so for those specs the gate stays advisory.
@@ -463,6 +474,10 @@ false positive/negative from that check",
   SPEC-015 (status lanes — `tasks: done`, no `tasks.md`) and SPEC-025 (constitution
   proposer — `plan: done` and `tasks: done`, neither file). The real detector may clear
   either through an aliased heading; the implementer measures before choosing.
+  **Recorded selection: Option (A),** a fatal corpus rule in this repository's validate,
+  after reconciling the two specs, avoids adding to the 176 ignored warnings and leaves
+  adopters untouched.
+
   - **(A) Fatal in this repository's `npm run validate`, after those specs are reconciled
     in the same change. (rec)** *Cost:* reconciling means correcting two specs' phase maps
     or adding their missing files, and adopters do not get the corpus rule at all — the

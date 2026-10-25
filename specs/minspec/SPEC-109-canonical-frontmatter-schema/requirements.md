@@ -400,10 +400,14 @@ Read from local remote-tracking refs on 2026-10-03; none of the three is on `mai
 
 ## Decisions needed (Clarify)
 
+All 6 decisions are resolved: an agent session recorded each option this document already recommended, on 2026-10-25, under delegation DLG-001 (DR-108). No human chose them; they are ratified only by approval of this spec.
+
 Requirements above are written under each recommended option. Choosing another option changes
 only the requirements that question names.
 
 ### DQ-1 — Where does the declaration live?
+
+**Recorded selection: Option A,** because `scripts/validate-frontmatter.ts` already imports from `packages/minspec/src/lib/`, so both validators reach the new leaf module with no new dependency edge.
 
 - **Option A (rec): a new leaf module in the extension, `packages/minspec/src/lib/spec-frontmatter-schema.ts`.**
   `scripts/validate-frontmatter.ts` already imports from `packages/minspec/src/lib/`, so both
@@ -417,6 +421,8 @@ only the requirements that question names.
   and unexecuted (#54), so this would be the first real migration into it.
 
 ### DQ-2 — Field-order backfill: when, and at what cost?
+
+**Recorded selection: Option A,** because it avoids up to 16 founder re-approvals for a change with no semantic content; files are reordered when next edited for a substantive reason.
 
 DR-025 §4 decided the older files are backfilled to canonical order "after the gate exists".
 It also recorded that this voids approvals. Measured now: 19 files are out of FR-2 order and
@@ -435,6 +441,8 @@ up to 16 of them carry an approval record.
 
 ### DQ-3 — What happens to the legacy `title:` and `created:`?
 
+**Recorded selection: Option A,** because demoting `title:` and `created:` to optional legacy fields avoids voiding approvals on the 10 and 6 files while the title a human sees comes from the `# ` heading.
+
 10 files carry `title:`, 6 carry `created:`. Readers exist: the display title
 (`spec-manager.ts:310`), and `createSpec` writes both (`spec-manager.ts:369-375`).
 
@@ -451,6 +459,8 @@ up to 16 of them carry an approval record.
   shape this spec exists to end.
 
 ### DQ-4 — Which FR-4 rules fail `npm run validate` in this repository?
+
+**Recorded selection: Option A,** because an absent `tier` or `status` is not cosmetic and the corpus already satisfies every presence rule except the three FR-20 files, so the gate lands green.
 
 Today `id` and `epic` fail; `status`, primary `tier` and `type` do not reach the corpus gate
 at all. DR-025 §3 says the validator gate is soft, and DR-099 notes that later records added
@@ -470,6 +480,8 @@ blocking gates where they argued for them.
 
 ### DQ-5 — Sequence relative to the risk-profile migration (#90)?
 
+**Recorded selection: Option A,** because the round-trip defect is live now and SPEC-097 is held out of Plan until #91 (reach validation) clears, which has no date.
+
 Issue #96 suggests folding into or sequencing after #90.
 
 - **Option A (rec): land this first, with `tier` as an optional scalar.** The round-trip
@@ -481,6 +493,8 @@ Issue #96 suggests folding into or sequencing after #90.
   stays open.
 
 ### DQ-6 — Is this the spec for #107 as well?
+
+**Recorded selection: Option A,** because one spec materializes DR-025 for both issues and avoids two specs editing the same table and validator function in sequence.
 
 DR-025's tracked follow-up is #107 ("implement the canonical schema, validator field-order
 gate, skill-template alignment, and G1/G2 backfill"). No spec on `main` or on any local

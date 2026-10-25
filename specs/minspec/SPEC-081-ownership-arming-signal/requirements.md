@@ -246,7 +246,14 @@ from success" property, on the same rule. Constitution invariant 2 (no silent ga
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are resolved: an agent session recorded each option this document already
+recommended, on 2026-10-25, under delegation DLG-001 (DR-108). No human chose them; they
+are ratified only by approval of this spec.
+
 ### DQ-1 — What evidence arms the rule when `plan` is absent?
+
+**Recorded selection: Option (a),** a committed approval record is direct, offline
+evidence of past Clarify and is already read by the spec-gate.
 
 - **(a) (rec) A committed approval record exists (approved or stale).** Approval is the act
   that creates `plan: in-progress`, so it is direct evidence of "past Clarify", it is
@@ -265,6 +272,10 @@ from success" property, on the same rule. Constitution invariant 2 (no silent ga
   a block.
 
 ### DQ-2 — Severity of the newly-armed findings during rollout
+
+**Recorded selection: Option (a),** ships both findings as warnings with the count and
+joins the dial at zero, per the grandfather ratchet in SPEC-038 FR-7, avoiding a flag
+day.
 
 This repo is at `ownershipDeclaration: "error"`. Shipping FR-2 under that dial turns the 12
 undeclared specs into 12 errors and a red `main` for every open pull request.
@@ -287,6 +298,10 @@ undeclared specs into 12 errors and a red `main` for every open pull request.
 
 ### DQ-3 — Does FR-5 freeze stale-approved phaseless specs immediately?
 
+**Recorded selection: Option (a),** gating stale-approved phaseless specs on merge is
+the protection SPEC-038 exists to give, and exempting them is the silent hole this spec
+closes.
+
 FR-5 makes the spec-gate compute owned sets for 23 phaseless approved specs. Those with a
 **stale** approval and a declaration start denying edits to their owned files on merge.
 The #1513 batch-3 commit message reports SPEC-011, 012, 013 and 014 as already stale on
@@ -305,6 +320,9 @@ an unmodified tree (claim from that commit, not re-measured here).
   failure mode.
 
 ### DQ-4 — When should the 12 missing declarations be authored?
+
+**Recorded selection: Option (a),** after SPEC-070 each declaration costs zero re-
+approvals, so they land in small reviewable batches without approval churn.
 
 Not built by this spec (FR-8), but its cost depends on ordering.
 

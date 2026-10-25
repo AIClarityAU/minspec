@@ -241,7 +241,10 @@ a changed return type, so none of the 21 call sites changes (see Alternatives).
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are resolved: an agent session recorded each option this document already recommended, on 2026-10-25, under delegation DLG-001 (DR-108). No human chose them; they are ratified only by approval of this spec.
+
 - **CQ-1 - What the Node validator does with a broken config.**
+  **Recorded selection: Option (a),** the spec's reason is that it matches invariant 2's fail-closed rule and agrees with SPEC-075's shipped validate.py.
   - **(a) Fail: report through `fail()`, exit non-zero (rec).** Matches invariant 2's "a
     missing or errored witness fails the gate closed and visibly": the config is the
     witness for what severity three rules run at, and with it unreadable the validator
@@ -261,6 +264,7 @@ a changed return type, so none of the 21 call sites changes (see Alternatives).
     attributed to rules that are not the cause, which is the misattribution #1471 was
     filed against.
 - **CQ-2 - How the extension shows it.**
+  **Recorded selection: Option (a),** the spec recommends one non-modal warning per distinct problem per session, since an output channel line alone is effectively silent.
   - **(a) One non-modal warning per distinct problem per session, at activation and on
     change of the file (rec).** **Cost:** needs a new file watcher on
     `.minspec/config.json` and a small dedupe set keyed on file content; the extension
@@ -271,6 +275,7 @@ a changed return type, so none of the 21 call sites changes (see Alternatives).
   - **(c) A status-bar item while the file is broken.** **Cost:** a persistent surface for
     a rare condition, and a new status-bar contribution to design and test.
 - **CQ-3 - Whether an unrecognised severity token is in scope.**
+  **Recorded selection: Option (a),** the spec's reason is that an unrecognised severity token is the same silent downgrade through the same loader, so leaving it out would make the acceptance claim true for one spelling only.
   - **(a) Yes, for the three severity keys only (rec).** A `"statusLineAnnotation":
     "Error"` is the same downgrade the issue describes (Context item 4), through the same
     loader, onto the same surface; leaving it out makes the issue's acceptance claim, "a
@@ -282,6 +287,7 @@ a changed return type, so none of the 21 call sites changes (see Alternatives).
     approver files it if (b) is chosen).
 - **CQ-4 - Whether the pre-commit hook should also fire on a staged
   `.minspec/config.json`.** Context item 7: a config-only commit is never validated
+  **Recorded selection: Option (a),** the spec's reason is that CI catches it on the push and .githooks/ is machinery with its own review gate.
   locally today.
   - **(a) No, not in this spec (rec).** CI catches it on the push, and `.githooks/` is
     machinery with its own review gate. **Cost:** a broken config can be committed
