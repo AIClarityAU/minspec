@@ -20,6 +20,13 @@ the unit is the opt-in: the service starts the drain with `--continuous`, whatev
 `.minspec/auto-drain` says. If a drain is already running (a keeper's, or the
 session-start hook's), the service adopts it, waits for it to end, then starts its own.
 
+## Concurrency
+
+The drain the service starts runs 8 agents in parallel per cycle, the value the keeper
+sessions used. Override it with `MINSPEC_DRAIN_CONCURRENCY` in the service's environment;
+`drain-inbox.sh` clamps a bad value. `drain-inbox.sh` on its own (the session-start drain)
+still defaults to 1. The quota cap still throttles the drain whatever the concurrency.
+
 ## Pause and resume
 
 The pause marker is a file in the primary checkout, so it outlives restarts of the unit
