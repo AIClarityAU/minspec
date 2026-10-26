@@ -100,13 +100,14 @@ gate (FR-2 to FR-4) as the enforcing part. Locating every copy is a plan-phase t
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended. An
+Selections below are recorded on the option this document already marks recommended (item 2
+is the exception: its premise was false, see there). An
 agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
 on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
 chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
 (DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
-context, not verified. No human chose any single item. Decisions 1, 2 and 5 are left open
-(adopter reach, an unverified premise, and no recommendation); this section stays open, and
+context, not verified. No human chose any single item. Decisions 1 and 5 are left open
+(adopter reach, and no recommendation); this section stays open, and
 the spec is not ready to approve, until the founder answers.
 
 1. **Where the commit-time gate lives.**
@@ -119,15 +120,25 @@ the spec is not ready to approve, until the founder answers.
      shipped surface and needs the opt-in guard in FR-9.
    - B. CI only: smaller surface, but the stranded half is sealed into branch history before
      anyone is told.
-2. **Does the approval flow itself ever produce a split commit?** SPEC-140 describes
-   recovery pushing from a throwaway worktree; I have not verified it always carries both
-   halves. If it can split, FR-2 would block the extension's own flow, so the plan must
-   check this first. Option: exempt the approval-recover commit by an explicit marker
-   **(rec)**, at the cost of one more trusted path to keep honest; or fix the producer.
+2. **Does the approval flow itself ever produce a split commit?** The recovery code is
+   `lib/approval-recover.ts` (SPEC-140 describes the checkout settling after recovery, not
+   recovery itself). If recovery could split the halves, FR-2 would block the extension's
+   own flow, so the plan must check this first. Option: exempt the approval-recover commit
+   by an explicit marker, at the cost of one more trusted path to keep honest; or fix the
+   producer.
 
-   **Not recorded:** evidence-incomplete: this document says it has not verified whether
-   SPEC-140's recovery flow ever splits the two halves, and the plan must check that first.
-   Needs the founder's answer.
+   **Recorded selection: no exemption; fix the producer so recovery fails closed.** An agent
+   session recorded this after reading the code at commit 4012113d; no human chose this item,
+   and it departs from the exemption option above. Evidence: `commands/approve.ts:398-402`
+   passes the spec path and the sidecar together, `lib/approval-recover.ts:273` stages
+   exactly those paths and `:296` makes one commit, so recovery already lands both halves in
+   one commit and satisfies FR-2. There is no recovery marker to key an exemption on (a
+   subject line is forgeable, and the only env var set is `DR_INDEX_GATE_OFF=1`, a different
+   gate's switch), and the bash pre-commit hooks stay active in the recovery worktree, so an
+   FR-2 hook gate would fire on that commit and pass. The one real split path is
+   `lib/approval-recover.ts:221-226`, which silently drops any listed path missing on disk
+   (`fs.existsSync`): a missing sidecar would commit the spec alone. Recovery should instead
+   fail closed when any requested path is missing.
 3. **Which lifecycle fields count.** Use the canonicalization strip-list as the single source
    **(rec)**, which cannot drift from the hash but couples the gate to that module; or a
    fixed list (`status`, `phases`), which is simpler but can drift.
