@@ -15,6 +15,11 @@ const HEADING = /^(#{1,6})\s+(.*)$/;
 const DECISIONS_NEEDED = /decisions?\s+needed/i;
 /** A decision item: `**D1.`, `- **DQ-2 —`, `### DQ-1 (…)`, `Q3:` at the start of a line. */
 const ITEM = /^\s*(?:[-*+]\s+)?(?:#{1,6}\s+)?\**(?:D|DQ|Q|OQ)-?\d+\b/;
+/**
+ * A numbered decision with a bold lead, `1. **Where the gate lives.**` (SPEC-225). Missed
+ * before, so a spec whose decisions were a numbered list read as having none open.
+ */
+const NUMBERED_ITEM = /^\s*(\d+)[.)]\s+\*\*/;
 /** "ALL RESOLVED", "All four questions are RESOLVED", "all answered". */
 const ALL_RESOLVED = /\ball\b[^.\n]{0,40}\b(?:resolved|answered|decided)\b/i;
 
@@ -54,8 +59,7 @@ export function findOpenClarify(content: string): ClarifyVerdict {
   for (const sec of sections(content)) {
     if (ALL_RESOLVED.test(sec)) continue;
     for (const line of sec.split('\n')) {
-      if (!ITEM.test(line)) continue;
-      const label = /(?:D|DQ|Q|OQ)-?\d+/.exec(line)?.[0];
+      const label = ITEM.test(line) ? /(?:D|DQ|Q|OQ)-?\d+/.exec(line)?.[0] : NUMBERED_ITEM.exec(line)?.[1];
       if (label !== undefined && !items.includes(label)) items.push(label);
     }
   }
