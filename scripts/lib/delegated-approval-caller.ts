@@ -56,6 +56,7 @@ import { BOT_ACTOR, evaluateDelegation, parseDelegations, type Delegation, type 
 import { actForPath, frontmatterField } from './approval-actor';
 import { readContentPullRequest } from './content-pr';
 import { readRepeatFixShare, utcToday } from './repeat-fix-share';
+import { openClarifyDetail } from './clarify-open';
 
 /** The commit identity of `minspec-sdd[bot]` (the App's bot user). */
 export const BOT_EMAIL = '299695933+minspec-sdd[bot]@users.noreply.github.com';
@@ -393,6 +394,14 @@ export function runCaller(opts: CallerOptions, deps: CallerDeps): CallerReport {
       if (isTerminalSpecStatus(status as SpecStatus)) continue;
     } else if (status !== 'proposed') {
       continue;
+    }
+    if (act === 'spec-approval') {
+      // Same shared check the CLI applies (#3059): refuse visibly before any GitHub read.
+      const open = openClarifyDetail(content);
+      if (open !== undefined) {
+        skip(artifact, 'clarify-open', open);
+        continue;
+      }
     }
     const tier = frontmatterField(content, 'tier');
     if (tier === undefined || !TIERS.includes(tier as Tier)) {
