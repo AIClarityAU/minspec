@@ -885,7 +885,7 @@ The constitution's merge-gate conservation rule (DR-070 §4) says no unit of wor
 
 ## [DR-112 — The bot merges a pull request once CI is green, a second independent AI review agrees, and the merge is pinned to the reviewed commit - including machinery, by admin bypass, where only the self-certification gates are red](DR-112.md)
 
-*Status: proposed · Date: 2026-10-24*
+*Status: accepted · Date: 2026-10-24*
 
 <!-- dr-summary:DR-112 auto=fb18ca00a43a -->
 The rule being lifted: on 2026-07-28 the founder made --admin human-only: "Never use the App token to bypass branch protection or a required check. A PR that needs --admin waits for the human merge keystroke." It is restated in ~/.claude/CLAUDE.md, in DR-086 (section 2.1 and its Amendment A: "--admin remains human-only and no failing check may be bypassed"), in DR-070 section 4 ("No unit of work ever has zero human keystrokes"), and in the chief-of-staff-runner skill. GitHub enforces it today…
