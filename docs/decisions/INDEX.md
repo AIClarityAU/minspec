@@ -882,4 +882,12 @@ The verdict-carry record ("A pass is carried across a push that changes nothing 
 <!-- dr-summary:DR-111 auto=5e69cbb62816 -->
 The constitution's merge-gate conservation rule (DR-070 §4) says no unit of work ever reaches main with zero human keystrokes. For agent-built work the keystroke is the founder's merge. For an editor approval, the founder's keystroke already happened: Alt-A in the editor is the explicit human act DR-012 defines approval to be, recorded under his identity (DR-056 refuses an agent identity at record time). The pull request that carries it adds no new content for him to judge, so asking for…
 <!-- /dr-summary:DR-111 -->
+
+## [DR-112 — The bot merges a pull request once CI is green, a second independent AI review agrees, and the merge is pinned to the reviewed commit - including machinery, by admin bypass, where only the self-certification gates are red](DR-112.md)
+
+*Status: proposed · Date: 2026-10-24*
+
+<!-- dr-summary:DR-112 auto=fb18ca00a43a -->
+The rule being lifted: on 2026-07-28 the founder made --admin human-only: "Never use the App token to bypass branch protection or a required check. A PR that needs --admin waits for the human merge keystroke." It is restated in ~/.claude/CLAUDE.md, in DR-086 (section 2.1 and its Amendment A: "--admin remains human-only and no failing check may be bypassed"), in DR-070 section 4 ("No unit of work ever has zero human keystrokes"), and in the chief-of-staff-runner skill. GitHub enforces it today…
+<!-- /dr-summary:DR-112 -->
 <!-- minspec:dr-index:end -->
