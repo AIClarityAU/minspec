@@ -215,21 +215,14 @@ that backstop.
 
 ## Decisions needed (Clarify)
 
-All 6 decisions are answered: an agent session recorded each option this document already
-recommended, under the founder's standing instruction of 2026-10-26 (inbox items in66/in67,
-relayed by the chief-of-staff proxy) to settle Clarify on the recommended options. No human
-chose an individual option; they are ratified only by approval of this spec. That
-instruction is held outside this repository (the founder's inbox, read by the chief-of-staff
-proxy), so a reader cannot check it from here: treat each selection as the recommendation it
-restates until this spec is approved. The frontmatter `clarify:` field is not edited here.
-This spec's own D5 (a) would treat a relayed instruction as non-human; the same caution is
-why approval of this spec, not this record, ratifies the selections.
+All 6 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
 
 ### D1 - What the tag looks like
 
-**Recorded selection: Option a, `[human]` / `[agent]` immediately after the arrow.**
-Selected on its recommended option under the founder's standing instruction of 2026-10-26
-(inbox items in66/in67, relayed by the chief-of-staff proxy).
+**Recorded selection: Option (a),** `[human]` / `[agent]` immediately after ➡️: a fixed position in
+plain ASCII that one regex reads and that still reads naturally.
 
 - **a** `[human]` / `[agent]` immediately after ➡️ **(rec)** - fixed position, plain ASCII,
   one regex, still reads naturally. Cost: two extra words on every line the founder reads.
@@ -240,9 +233,8 @@ Selected on its recommended option under the founder's standing instruction of 2
 
 ### D2 - Where the parser lives
 
-**Recorded selection: Option a, the parser lives in `packages/shared`
-(`@aiclarity/shared`).** Selected on its recommended option under the founder's standing
-instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy).
+**Recorded selection: Option (a),** `packages/shared` (`@aiclarity/shared`), which is Tier 0, already
+holds pure parsers and is usable from both scripts and the extension.
 
 - **a** `packages/shared` (`@aiclarity/shared`) **(rec)** - Tier 0, no vscode, already
   holds pure parsers (`project-prefix.ts`), usable from scripts and the extension. Cost: it
@@ -252,10 +244,8 @@ instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff 
 
 ### D3 - Who gets the convention text
 
-**Recorded selection: Option a, this repo only, as a project-specific CLAUDE.md section
-beside "Merge asks in THIS repo".** Selected on its recommended option under the founder's
-standing instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff
-proxy).
+**Recorded selection: Option (a),** this repo only, as a project-specific CLAUDE.md section beside
+"Merge asks in THIS repo", following the merge-funnel precedent.
 
 - **a** This repo only, as a project-specific CLAUDE.md section beside "Merge asks in THIS
   repo" **(rec)** - the problem needs peer sessions, which solo adopters do not run, and it
@@ -266,9 +256,8 @@ proxy).
 
 ### D4 - Which act-site refusals, if any, this spec builds
 
-**Recorded selection: Option a, no act-site refusal here; one issue per unwitnessed act
-class.** Selected on its recommended option under the founder's standing instruction of
-2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy).
+**Recorded selection: Option (a),** no act-site refusal here; one issue per unwitnessed act class,
+so each refusal gets its own design.
 
 The issue's own conclusion is that the safety boundary belongs where the act happens. Of
 the four acts in #1857, `--admin` merge already has one and the other three do not.
@@ -284,10 +273,8 @@ the four acts in #1857, `--admin` merge already has one and the other three do n
 
 ### D5 - How a receiving session knows the sender is not the human (FR-11)
 
-**Recorded selection: Option a, treat an instruction whose text says it comes from another
-session as non-human, and state that FR-11 is model-trusted.** Selected on its recommended
-option under the founder's standing instruction of 2026-10-26 (inbox items in66/in67,
-relayed by the chief-of-staff proxy).
+**Recorded selection: Option (a),** treat any instruction whose text says it comes from another
+session as non-human, and state that FR-11 is model-trusted; it is buildable now.
 
 - **a** Treat any instruction whose text says it comes from another session as non-human,
   and state that FR-11 is model-trusted **(rec)** - buildable now. Cost: a sender that does
@@ -298,9 +285,8 @@ relayed by the chief-of-staff proxy).
 
 ### D6 - Two values or three
 
-**Recorded selection: Option a, two values: human-only and agent-ok.** Selected on its
-recommended option under the founder's standing instruction of 2026-10-26 (inbox items
-in66/in67, relayed by the chief-of-staff proxy).
+**Recorded selection: Option (a),** two values, human-only and agent-ok, matching the issue and
+FR-2's default.
 
 - **a** Two: human-only and agent-ok **(rec)** - matches the issue and FR-2's default.
   Cost: "the human decides, then an agent executes" and "only the human can physically do
