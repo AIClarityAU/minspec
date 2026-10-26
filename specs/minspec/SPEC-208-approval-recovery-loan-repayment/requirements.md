@@ -297,6 +297,12 @@ here only so a reader of either can find this one.
 
 ## Decisions needed (Clarify)
 
+3 of 4 decisions carry a recorded selection: an agent session recorded the option this
+document already recommended, on 2026-10-27, under the founder's standing instruction of
+2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on
+the recommended options. No human chose an individual option; they are ratified only by
+approval of this spec. Still open, with no selection recorded: D-4.
+
 - **D-1 How much of the loan to repay.**
   - (a) **(rec) Extract the transport (A), close the copy-time gap (B), record it (C).** This
     removes the duplication DR-080 §5 actually names, and the TOCTOU (check then later use)
@@ -308,6 +314,9 @@ here only so a reader of either can find this one.
     recovery stays open with no owner.
   - (c) B and C only, no extraction. Cost: it closes the security-relevant gap but leaves the
     debt DR-080 promised to repay, so #1375 stays open.
+  **Recorded selection: Option (a), extract the transport (A), close the copy-time gap (B),
+  record it (C).** Selected on its recommended option under the founder's standing
+  instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy).
 - **D-2 How FR-7 closes the gap.**
   - (a) **(rec) Copy from disk, compare with the captured bytes, refuse on mismatch.** What
     ships is both what was approved and what is on disk. Cost: a user whose file was edited
@@ -315,6 +324,9 @@ here only so a reader of either can find this one.
   - (b) Write the captured bytes directly. This never refuses. Cost: the pushed bytes can
     differ from the working tree, which leaves residue SPEC-140 will not clear, and it hides
     the fact that a concurrent edit happened.
+  **Recorded selection: Option (a), copy from disk, compare with the captured bytes, refuse
+  on mismatch.** Selected on its recommended option under the founder's standing instruction
+  of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy).
 - **D-3 Docs-lane's base branch.** Docs-lane hard-codes `main` (`push-docs-lane.ts:265`,
   `:278`), while recovery uses the guard's resolved default branch.
   - (a) **(rec) Leave it as is in this spec.** No behaviour change in the refactor. Cost:
@@ -322,6 +334,9 @@ here only so a reader of either can find this one.
     recovery. File it as an issue.
   - (b) Pass the resolved default branch in the same PR. Cost: a behaviour change rides
     inside a refactor, which makes AC-3's "behaviour preserved" claim harder to review.
+  **Recorded selection: Option (a), leave docs-lane's base branch as is in this spec.**
+  Selected on its recommended option under the founder's standing instruction of 2026-10-26
+  (inbox items in66/in67, relayed by the chief-of-staff proxy).
 - **D-4 Timeout for the transport's network steps.** Recovery uses 60 s today and the shared
   runner uses 30 s.
   - (a) **(rec) The transport passes 60 s for fetch and push, and the runner default for
@@ -330,7 +345,6 @@ here only so a reader of either can find this one.
     signature (`approval-pr.ts`, now in `affects:`) and so needs SPEC-050 re-approval.
   - (b) Use 30 s everywhere. Cost: recovery's push budget halves, and a slow link that
     recovers today would time out to `offline`.
-  **Recorded selection: Option (a), the transport passes 60 s for fetch and push and the runner default for everything else.** Selected by the founder, 2026-10-26 (queue item clr1027, answer 'all rec' relayed by the chief-of-staff proxy).
 
 ## Out of scope
 

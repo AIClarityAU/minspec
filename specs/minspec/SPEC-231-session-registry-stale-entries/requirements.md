@@ -105,6 +105,12 @@ whether MinSpec may delete from it at all.
 
 ## Decisions needed (Clarify)
 
+1 of 3 decisions carries a recorded selection: an agent session recorded the option this
+document already recommended, on 2026-10-27, under the founder's standing instruction of
+2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on
+the recommended options. No human chose an individual option; they are ratified only by
+approval of this spec. Still open, with no selection recorded: D1, D2.
+
 **D1. Where does cleanup run?**
 - (a) `session-panel.py` session-start hook, **(rec)**: already reads and tests liveness, one
   predicate. Cost: a read-only-looking hook gains a delete side effect.
@@ -118,10 +124,12 @@ whether MinSpec may delete from it at all.
 - (b) No; file upstream to Claude Code and only report. Cost: leak stays until upstream acts,
   and nothing here can force that.
 
-**Recorded selection: Option (a), yes after the grace period.** Selected by the founder, 2026-10-26 (queue item clr1027, answer 'all rec' relayed by the chief-of-staff proxy).
-
 **D3. Grace period for dead entries.** 24 h **(rec)** (lets a human inspect a crash; cost:
 slower reclaim) vs 0 (cost: removes evidence of a just-crashed session).
+
+**Recorded selection: 24 h. It takes effect only if D1 and D2, still open, allow deletion.**
+Selected on its recommended option under the founder's standing instruction of 2026-10-26
+(inbox items in66/in67, relayed by the chief-of-staff proxy).
 
 ## Alternatives rejected
 

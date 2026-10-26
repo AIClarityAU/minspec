@@ -291,7 +291,18 @@ gets back into the pipeline.
 
 ## Decisions needed (Clarify)
 
+4 of 5 decisions carry a recorded selection: an agent session recorded the option this
+document already recommended, on 2026-10-27, under the founder's standing instruction of
+2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on
+the recommended options. No human chose an individual option; they are ratified only by
+approval of this spec. Still open, with no selection recorded: D-2.
+
 ### D-1 - How does a founder's answer get back into the pipeline?
+
+**Recorded selection: Option (a), labels and scripts only; each summons names the existing
+label or script that answers it.** Selected on its recommended option under the founder's
+standing instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff
+proxy).
 
 The issue offers two shapes. Both satisfy FR-5.
 
@@ -315,8 +326,6 @@ finds himself answering in prose often.
 
 ### D-2 - Where is "In plain terms" enforced?
 
-**Recorded selection: Option (a), enforced inside `ready-to-merge` for bot-authored PRs.** Selected by the founder, 2026-10-26 (queue item clr1027, answer 'all rec' relayed by the chief-of-staff proxy).
-
 - **(a) Inside `ready-to-merge`, for bot-authored PRs. (rec)** `ready-to-merge` is already a
   required check, so the rule gates merge without a ruleset change. **Cost:** a missing
   section blocks an otherwise green PR until the body is edited, and `ready-to-merge` grows
@@ -331,6 +340,10 @@ finds himself answering in prose often.
 
 ### D-3 - Which panel findings reach the summons, and do unsummoned PRs keep losing them?
 
+**Recorded selection: Option (a), every severity, but only into a summons; the wider leak is
+a separate issue.** Selected on its recommended option under the founder's standing
+instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy).
+
 - **(a) Every severity, but only into a summons; the wider leak is a separate issue. (rec)**
   Matches the issue's acceptance line. **Cost:** a PR that merges with no summons still drops
   its minor findings, so the leak is narrowed, not closed.
@@ -340,12 +353,20 @@ finds himself answering in prose often.
 
 ### D-4 - Does the renderer also cover triage's `needs-review` / `needs-info`?
 
+**Recorded selection: Option (a), no; triage's `needs-review` / `needs-info` are a second
+slice.** Selected on its recommended option under the founder's standing instruction of
+2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy).
+
 - **(a) No, second slice. (rec)** They already carry a rationale. **Cost:** two summons
   shapes coexist for a while.
 - **(b) Yes, now.** One shape everywhere. **Cost:** touches the triage path, which has its own
   verdict-record contract (DR-091), and roughly doubles the test surface.
 
 ### D-5 - Ship the convention to adopters?
+
+**Recorded selection: Option (a), no; this repository only.** Selected on its recommended
+option under the founder's standing instruction of 2026-10-26 (inbox items in66/in67,
+relayed by the chief-of-staff proxy).
 
 - **(a) No, this repository only. (rec)** The summons sites are this repository's own
   pipeline scripts, and invariant 3 forbids changing behaviour where nobody opted in.

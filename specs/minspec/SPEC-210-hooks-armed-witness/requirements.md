@@ -196,6 +196,12 @@ mocked config read), run with a control that shows the check fails when the defe
 
 ## Decisions needed (Clarify)
 
+2 of 3 decisions carry a recorded selection: an agent session recorded the option this
+document already recommended, on 2026-10-27, under the founder's standing instruction of
+2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on
+the recommended options. No human chose an individual option; they are ratified only by
+approval of this spec. Still open, with no selection recorded: D2.
+
 - **D1. Should the session-start witness repair as well as warn?**
   - **(a) Warn only (rec).** It matches the issue's recommendation ("assert the post-condition
     rather than adding another installer") and minspec's own #2671 witness, and a session
@@ -205,19 +211,24 @@ mocked config read), run with a control that shows the check fails when the defe
     It closes the window for agent sessions immediately. Cost: a session start writes git config
     with no click. That is the same silent-side-effect installer shape the root cause names,
     one step earlier.
+  **Recorded selection: Option (a), warn only.** Selected on its recommended option under
+  the founder's standing instruction of 2026-10-26 (inbox items in66/in67, relayed by the
+  chief-of-staff proxy).
 - **D2. Should adopters who already ran the ruleset advisory be re-offered `gitleaks`?**
   - **(a) Re-offer once, on the next refresh, as a separately dismissible offer (rec).** The two
     repos in the issue get the gate without hand-editing a ruleset. Cost: one more toast for
     every existing adopter, including ones who deliberately leave secret scanning advisory.
   - (b) New inits only. No new prompt. Cost: every existing adopter, including both repos in
     the issue, keeps a non-gating CI witness until someone notices.
-  **Recorded selection: Option (a), re-offer `gitleaks` once, on the next refresh, as a separately dismissible offer.** Selected by the founder, 2026-10-26 (queue item clr1027, answer 'all rec' relayed by the chief-of-staff proxy).
 - **D3. Root `package.json` with a `prepare` script (the issue's alternative): rejected
   (rec).** Recorded so the reader can overturn it. It ties arming to someone running
   `npm install`, which CI and headless clones also skip (the same assumption, moved one step
   back), and it puts a Node manifest into non-Node adopter repos. Cost of rejecting: a Node
   adopter who always runs `npm install` would have been armed with no session-start hook at
   all.
+  **Recorded selection: The root `package.json` `prepare` script stays rejected, as
+  recommended.** Selected on its recommended option under the founder's standing instruction
+  of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy).
 
 ## Alternatives considered
 

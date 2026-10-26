@@ -241,7 +241,17 @@ request. Today only the gate can tell them apart.
 
 ## Decisions needed (Clarify)
 
+2 of 3 decisions carry a recorded selection: an agent session recorded the option this
+document already recommended, on 2026-10-27, under the founder's standing instruction of
+2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on
+the recommended options. No human chose an individual option; they are ratified only by
+approval of this spec. Still open, with no selection recorded: DQ-3.
+
 ### DQ-1 - Is the prompt paragraph enough, or do the role files change too?
+
+**Recorded selection: Option (a), one paragraph in `review-branch.sh`'s shared prompt, with
+no role-file edits.** Selected on its recommended option under the founder's standing
+instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy).
 
 - **(a) One paragraph in `review-branch.sh`'s shared prompt, no role-file edits (rec).**
   Every voter gets the same wording from one place, and the role files stay
@@ -255,6 +265,10 @@ request. Today only the gate can tell them apart.
 
 ### DQ-2 - Is the facts block part of the verdict-carry hash?
 
+**Recorded selection: Option (a), no; the facts block sits outside `REVIEW_INPUT`, like the
+`Base:`/`Head:` lines.** Selected on its recommended option under the founder's standing
+instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy).
+
 - **(a) No: place it outside `REVIEW_INPUT`, like the `Base:`/`Head:` lines (rec).** An
   unrelated pull request opening or closing does not throw away a carried pass on this
   one. Cost: a pass carried forward may have been given against facts that are now out of
@@ -267,8 +281,6 @@ request. Today only the gate can tell them apart.
   chosen, the `open pull requests read` line should be dropped from the hashed form.
 
 ### DQ-3 - Where does the base-trusted producer run?
-
-**Recorded selection: Option (a), a new step in `ai-review.yml` using the App token the carry step already uses, running the base checkout's code.** Selected by the founder, 2026-10-26 (queue item clr1027, answer 'all rec' relayed by the chief-of-staff proxy).
 
 - **(a) A new step in `ai-review.yml`, using the App token the carry step already uses,
   that runs the base checkout's code (rec).** One workflow, one token pattern, facts made

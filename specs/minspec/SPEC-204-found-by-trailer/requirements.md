@@ -122,6 +122,12 @@ reports the distribution per path class and time window.
 
 ## Decisions needed (Clarify)
 
+2 of 4 decisions carry a recorded selection: an agent session recorded the option this
+document already recommended, on 2026-10-27, under the founder's standing instruction of
+2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on
+the recommended options. No human chose an individual option; they are ratified only by
+approval of this spec. Still open, with no selection recorded: D2, D4.
+
 - **D1 - Repo-only, or also the hook MinSpec scaffolds into adopters?**
   `packages/minspec/src/lib/template-registry.ts` ships its own `commit-msg` hook (the
   `Root cause:` gate, lines ~587 and ~1659) to adopter repos.
@@ -133,6 +139,10 @@ reports the distribution per path class and time window.
     Cost: new config surface, a second hand-copied vocabulary to keep pinned, and a machinery PR.
   - (c) Also the shipped template, on by default. Rejected: it changes behaviour for existing
     adopters on re-scaffold (constitution invariant 3).
+  **Recorded selection: Option (a), this repo only: edit `.githooks/commit-msg` and leave
+  the shipped template alone.** Selected on its recommended option under the founder's
+  standing instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff
+  proxy).
 - **D2 - Is `usage` rate worth a path-class mapping of its own, or reuse the existing set?**
   The classes `gate-critical` / `operational-machinery` come from the issue; the repo has one
   canonical machinery set (`packages/minspec/src/lib/machinery-paths.ts`, #1758).
@@ -150,8 +160,10 @@ reports the distribution per path class and time window.
   - (b) Treat `Revert` subjects as `fix`-like and require the trailer. Cost: a hook change on a
     subject pattern git generates automatically, so the trailer would have to be added by hand
     after every `git revert`.
+  **Recorded selection: Option (a), out of scope; the vocabulary stays on `fix` only.**
+  Selected on its recommended option under the founder's standing instruction of 2026-10-26
+  (inbox items in66/in67, relayed by the chief-of-staff proxy).
 - **D4 - Value semantics for a fix to a fix found while iterating.** `build` vs `usage` is the
   author's call. Proposed rule, for the hook's help text: if the defect was visible to someone
   other than the author before the fix was started, it is `usage`. Founder to confirm or
   reword; the rule lives in the help text only and is not enforced.
-  **Recorded selection: Accept the proposed rule as worded: if the defect was visible to someone other than the author before the fix was started, it is `usage`.** Selected by the founder, 2026-10-26 (queue item clr1027, answer 'all rec' relayed by the chief-of-staff proxy).
