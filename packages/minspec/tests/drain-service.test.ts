@@ -113,6 +113,8 @@ beforeEach(() => {
     MINSPEC_DRAIN_SERVICE_LOCK: file('svc.lock'),
     MINSPEC_DRAIN_SERVICE_POLL: '1',
     MINSPEC_DRAIN_SERVICE_STOP_GRACE: '5',
+    MINSPEC_DRAIN_SERVICE_RETRY_BASE: '1',
+    MINSPEC_DRAIN_SERVICE_RETRY_MAX: '1',
     STUB_CALLS: file('calls'),
     STUB_PAUSE: file('pause'),
   };
@@ -238,10 +240,11 @@ describe('invariant 2: at most one drain', () => {
     await until(() => sv.out().includes('adopting'));
     expect(calls().filter((c) => c.startsWith('--continuous'))).toEqual([]);
     holder.kill('SIGKILL');
-    const code = await sv.done;
-    // The adopted drain wrote no exit line, so its end is reported as a failure.
-    expect(code).toBe(1);
-    expect(calls().filter((c) => c.startsWith('--continuous'))).toEqual([]);
+    // The adopted drain wrote no exit line, so its end is a failure: retried in this start.
+    await until(() => sv.out().includes('retrying in'));
+    // After the retry the supervisor starts its own drain, which ends normally.
+    expect(await sv.done).toBe(0);
+    expect(calls().filter((c) => c.startsWith('--continuous')).length).toBe(1);
   });
 
   it('a second supervisor exits 75', async () => {
@@ -276,19 +279,26 @@ describe('invariant 4: a failure is visible', () => {
     expect(r.stdout).toContain('[drain] loop exited.');
   });
 
-  it('consecutive cycle errors exit 1 with the drain line in the journal', () => {
+  it('consecutive cycle errors are reported, then retried inside the same start (#3095)', async () => {
     env.STUB_END = '[drain] 3 consecutive cycle errors — stopping loop cleanly';
-    const r = runSync('docker-init');
-    expect(r.status).toBe(1);
-    expect(r.stdout).toContain('consecutive cycle errors');
-    expect(r.stdout).toContain('FAILED');
+    const sv = runBackground('docker-init');
+    await until(() => calls().filter((c) => c.startsWith('--continuous')).length >= 2, 15_000);
+    expect(sv.out()).toContain('consecutive cycle errors');
+    expect(sv.out()).toContain('FAILED');
+    expect(sv.proc.exitCode).toBeNull();
+    sv.proc.kill('SIGTERM');
+    expect(await sv.done).toBe(0);
   });
 
-  it('a failed launch exits 1', () => {
+  it('N failed launches inside one start do not exit the supervisor (#3095)', async () => {
     env.STUB_RC = '1';
-    const r = runSync('docker-init');
-    expect(r.status).toBe(1);
-    expect(r.stdout).toContain('drain launch exited 1');
+    const sv = runBackground('docker-init');
+    await until(() => calls().filter((c) => c.startsWith('--continuous')).length >= 3, 15_000);
+    expect(sv.out()).toContain('drain launch exited 1');
+    expect(sv.out()).toContain('retrying in');
+    expect(sv.proc.exitCode).toBeNull();
+    sv.proc.kill('SIGTERM');
+    expect(await sv.done).toBe(0);
   });
 });
 
