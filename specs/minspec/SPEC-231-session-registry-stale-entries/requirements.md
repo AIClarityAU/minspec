@@ -105,6 +105,10 @@ whether MinSpec may delete from it at all.
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 **D1. Where does cleanup run?**
 - (a) `session-panel.py` session-start hook, **(rec)**: already reads and tests liveness, one
   predicate. Cost: a read-only-looking hook gains a delete side effect.
@@ -112,14 +116,22 @@ whether MinSpec may delete from it at all.
   running in every opted-in repo.
 - (c) Do not delete; only report (status quo plus count). Cost: files keep accumulating.
 
+**Recorded selection: Option (a),** the `session-panel.py` session-start hook, which already reads
+and tests liveness with one predicate.
+
 **D2. May MinSpec delete files it did not write, in a user-global directory?**
 - (a) Yes after grace period, **(rec)**: dead-by-`procStart` is a hard fact. Cost: relies on an
   undocumented CLI format (can break on a CLI upgrade; FR-2 "unknown" limits damage).
 - (b) No; file upstream to Claude Code and only report. Cost: leak stays until upstream acts,
   and nothing here can force that.
 
+**Recorded selection: Option (a),** yes, after the grace period; dead-by-`procStart` is a hard fact
+and FR-2's "unknown" limits the damage of a CLI format change.
+
 **D3. Grace period for dead entries.** 24 h **(rec)** (lets a human inspect a crash; cost:
 slower reclaim) vs 0 (cost: removes evidence of a just-crashed session).
+
+**Recorded selection: 24 h,** which lets a human inspect a crash before the entry goes.
 
 ## Alternatives rejected
 
