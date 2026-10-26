@@ -168,6 +168,7 @@ if [[ ! -d "${REPO_ROOT}/.minspec" ]]; then
 fi
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/lib/agent-context.sh"
+agent_caveman_init
 # Agent writes carry the BOT's identity, never the human's (#1355). This arms a
 # `gh` wrapper; acquiring the token is LAZY, so reads pass through untouched and
 # only the first WRITE mints — aborting there, loudly, if it cannot.
@@ -284,7 +285,53 @@ PUBLISH_PATH_RE='^sites/|^\.github/workflows/deploy-sites\.yml$'
 # ai-review.yml covers, so this second witness was inert for them. #1758 also folded in
 # `.circleci/`/`.buildkite/`/`.husky/` (unused here, zero-cost) so all three definitions
 # — this one, ai-review.yml, and auto-merge-gate.ts's BOUNDARY_DIR_PREFIXES — agree.
-MACHINERY_PATH_RE='^\.github/|^scripts/|^\.githooks/|^\.circleci/|^\.buildkite/|^\.husky/|^packages/minspec/src/lib/(template-registry|ci-review-templates)\.ts$'
+MACHINERY_PATH_RE='^\.github/|^scripts/|^\.githooks/|^\.circleci/|^\.buildkite/|^\.husky/|^packages/minspec/src/lib/(template-registry|ci-review-templates|machinery-paths)\.ts$'
+
+# MACHINERY_CARVE_OUT_RE (#2018) — the EXEMPTIONS from the line above: exact paths that
+# sit under a machinery prefix but decide nothing, and that nothing which decides reads.
+# `scripts/` is a directory prefix, so it admits a read-only oracle and a report
+# generator; classifying those as machinery costs a human keystroke that decides nothing.
+#
+# WHY A SECOND PATTERN RATHER THAN A NARROWER FIRST ONE: POSIX ERE has no negative
+# lookahead and both shell consumers of MACHINERY_PATH_RE are `grep -E`, so "under
+# ^scripts/ EXCEPT these two" is not expressible as a pattern tweak. It is a separate
+# `grep -vE` stage applied BEFORE the machinery test (machinery_carve_out_filter below).
+#
+# CANONICAL SOURCE (#1758, extended #2018): packages/minspec/src/lib/machinery-paths.ts —
+# a HAND-COPY of its buildMachineryCarveOutRegexSource(), pinned character-for-character
+# by packages/minspec/tests/machinery-carve-outs.test.ts, which also fails if a carved
+# path stops existing or is ever referenced from a workflow, a hook or another script.
+# Unlike ai-review.yml's copy this one needs no repo-scope guard: dispatch-issue.sh is
+# not a managed region and is never scaffolded into a consuming repo.
+MACHINERY_CARVE_OUT_RE='^scripts/facts\.ts$|^scripts/review-churn-report\.sh$'
+
+# Read newline-separated paths on stdin, write them back with the #2018 carve-outs
+# removed. Interposed before every MACHINERY_PATH_RE test so there is ONE carve-out
+# stage rather than one per call site.
+#
+# FAILS CLOSED IN BOTH DEGENERATE CASES — it emits the list UNFILTERED, so the caller
+# sees exactly what it saw before carve-outs existed and HOLDS rather than arms:
+#   • MACHINERY_CARVE_OUT_RE empty/unset. `grep -vE ''` matches every line and would
+#     delete the entire change set, silently disarming this second witness (constitution
+#     invariant 2 — a gate that cannot read its own exemption list must hold).
+#   • grep exits >= 2, a real error. Exit 1 is NOT an error: it means every line was
+#     filtered out, which is the answer, not a failure — so it is classified, never
+#     swallowed.
+machinery_carve_out_filter() {
+  local paths out status=0
+  paths="$(cat)"
+  if [[ -z "${MACHINERY_CARVE_OUT_RE:-}" ]]; then
+    printf '%s\n' "$paths"
+    return 0
+  fi
+  out="$(grep -vE "${MACHINERY_CARVE_OUT_RE}" <<<"$paths")" || status=$?
+  if (( status > 1 )); then
+    printf '%s\n' "$paths"
+    return 0
+  fi
+  printf '%s\n' "$out"
+  return 0
+}
 
 # paths_have_approvable_doc (#833, extended #981): does a set of changed paths
 # (newline-separated on stdin) touch something a HUMAN — not `ai-review:pass` — must own
@@ -329,8 +376,18 @@ MACHINERY_PATH_RE='^\.github/|^scripts/|^\.githooks/|^\.circleci/|^\.buildkite/|
 # if ANY path matches, else 1. Fail-closed on an unknown/unreadable changed-set is NOT
 # this pure classifier's job — it lives at the arm site (the nonzero + empty branches),
 # so "no match" is never conflated with "could not tell".
+# #2018 — the input is piped through machinery_carve_out_filter, so a carved-out path is
+# invisible to EVERY alternation here, not just the machinery one. That is safe because a
+# carve-out is required to be disjoint from the other three mandates (it must lie under a
+# MACHINERY_DIR_PREFIXES prefix, and it must match none of DOCS_CORPUS_RE, `^\.minspec/`,
+# `^\.cursorrules$` or PUBLISH_PATH_RE) — asserted in
+# packages/minspec/tests/machinery-carve-outs.test.ts rather than left as an assumption,
+# because `.github/workflows/deploy-sites.yml` is proof the sets CAN overlap in principle.
+# Filtering once, before the combined grep, keeps this a single expression: a per-mandate
+# filter would need the machinery alternation split out into its own copy, and a second
+# copy of that regex is exactly the #1758 drift.
 paths_have_approvable_doc() {
-  grep -qE "${DOCS_CORPUS_RE}"'|^\.minspec/|^\.cursorrules$'"|${PUBLISH_PATH_RE}|${MACHINERY_PATH_RE}"
+  grep -qE "${DOCS_CORPUS_RE}"'|^\.minspec/|^\.cursorrules$'"|${PUBLISH_PATH_RE}|${MACHINERY_PATH_RE}" < <(machinery_carve_out_filter)
 }
 
 # Pure seam: prove the withhold classifier without gh/dispatch. Paths on stdin.
@@ -421,7 +478,9 @@ autonomy_stop_classes_for_paths() {
   # §2.1 — publish paths and machinery, one class between them (no duplicate row).
   local outward=0
   grep -qE "${PUBLISH_PATH_RE}" <<<"$changed_files" && outward=1
-  grep -qE "${MACHINERY_PATH_RE}" <<<"$changed_files" && outward=1
+  # #2018 — carve-outs removed first; a path that decides nothing cannot make a merge
+  # irreversible-or-outward-facing.
+  grep -qE "${MACHINERY_PATH_RE}" < <(machinery_carve_out_filter <<<"$changed_files") && outward=1
   (( outward == 1 )) && classes+=('irreversible-or-outward-facing')
 
   # §2.2 — human-owned CONTENT. Ask the classifier itself, never a second copy of
@@ -432,6 +491,13 @@ autonomy_stop_classes_for_paths() {
   # reported as human-owned content it never touched.
   if paths_have_approvable_doc <<<"$changed_files"; then
     local residual=""
+    # #2018 — this subtraction still uses the RAW MACHINERY_PATH_RE, so a carved-out path
+    # is removed from the residual even though it was not classed as machinery above.
+    # That cannot change the verdict: a carve-out is required to match none of the other
+    # mandates, so `paths_have_approvable_doc` declines it anyway and its presence in the
+    # residual could never add 'approval-or-acceptance'. Left un-carved deliberately — the
+    # carve-out's purpose is to stop a path HOLDING a merge, and adding paths back into a
+    # subtraction whose only consumer already rejects them would be motion, not effect.
     residual=$(grep -vE "${PUBLISH_PATH_RE}|${MACHINERY_PATH_RE}" <<<"$changed_files" || true)  # swallow-ok: grep -v exits 1 when it filters everything out, which is the answer (no residual paths), not a failure; the input is a here-string and cannot fail
     if [[ -n "${residual//[$'\n\r\t ']/}" ]] && paths_have_approvable_doc <<<"$residual"; then
       classes+=('approval-or-acceptance')
@@ -489,6 +555,183 @@ if [[ "${ISSUE:-}" == "--autonomy-stop-classes" ]]; then
 fi
 if [[ "${ISSUE:-}" == "--may-merge" ]]; then
   if autonomy_may_merge "merge this PR (seam)" "$(cat)"; then exit 0; else exit 1; fi
+fi
+
+# autonomy_may_merge_delegated <pr> (#2981, DR-108)
+#
+#   stdout: one verdict JSON.  exit: 0 = the delegated merge may proceed, 1 = it may not.
+#
+# The delegated twin of autonomy_may_merge, for an EXISTING open spec PR that step 6b
+# held as needs-human-review. Same populator, same decider; the only thing added is the
+# one bridge DR-108 §1 allows between them:
+#
+#   1. autonomy_stop_classes_for_paths derives the stop classes for the PR's diff, exactly
+#      as step 6b did when it held the PR.
+#   2. scripts/lib/delegated-merge.ts judges, read-only, whether DLG-001 clears the
+#      `approval-or-acceptance` class at the PR's CURRENT head (spec requirements only,
+#      still specifying, tier T1..T4, ai-review:pass on that head, tripwire within cap,
+#      not memory-fabric; every unreadable input denies). It returns the classes left
+#      after stopClassesAfterDelegation, which can remove that one class and no other.
+#   3. autonomy_may_proceed asks mayProceed with the LEFTOVER classes, so the project's
+#      `autonomy` setting still decides: under `ask` nothing merges, delegation or not.
+#
+# Never arms anything itself; the `--delegated-spec-merge ... --arm` seam below does, and
+# only on a proceed. The judge's command can be replaced for tests
+# (MINSPEC_DELEGATED_MERGE_JUDGE_CMD); the decision downstream of it cannot.
+# delegated_merge_human_claims <pr> (#3050)
+#
+# Two reasons the bot must not merge a held spec PR, whatever the delegation says. Both
+# say a decision is still someone's, which a delegation of SPEC APPROVAL does not cover:
+#   1. an unconfirmed closing link. A drain PR is dispatched for issue N (branch
+#      `agent/issue-N`); merging it closes whatever GitHub says it closes
+#      (`closingIssuesReferences`), so that list must contain N. A branch that is not a
+#      drain branch names no issue, so it needs at least one confirmed link.
+#   2. a creator-shepherd handoff. `shepherd_hand_off` stamps SHEPHERD_HANDOFF_MARKER on a
+#      comment when the creating session gives the PR to the founder; a bot merge would
+#      take that decision from him.
+# Prints the denial reason and detail (tab-separated) and returns 1 on a claim OR on any
+# unreadable input; returns 0 only when both are positively clear.
+delegated_merge_human_claims() {
+  local pr="$1" view="" head="" refs="" handoffs="" issue=""
+  local marker="<!-- minspec-shepherd-handoff -->"
+  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments 2>/dev/null) \
+     || ! head=$(printf '%s' "$view" | jq -r '.headRefName' 2>/dev/null) \
+     || ! refs=$(printf '%s' "$view" | jq -r '.closingIssuesReferences | if type == "array" then .[].number else error("no list") end' 2>/dev/null) \
+     || ! handoffs=$(printf '%s' "$view" | jq -r --arg m "$marker" '.comments | if type == "array" then [.[] | select((.body // "") | contains($m))] | length else error("no list") end' 2>/dev/null); then
+    printf 'pr-claims-unreadable\tcould not read PR #%s closing links and comments; failing closed\n' "$pr"
+    return 1
+  fi
+  if [[ "$handoffs" != "0" ]]; then
+    printf 'handed-to-human\tPR #%s was handed to the founder by its creator (shepherd handoff comment); a bot merge would take his decision\n' "$pr"
+    return 1
+  fi
+  if [[ "$head" =~ ^agent/issue-([0-9]+)$ ]]; then
+    issue="${BASH_REMATCH[1]}"
+    if ! grep -qxF "$issue" <<<"$refs"; then
+      printf 'closes-link-unconfirmed\tPR #%s was dispatched for issue #%s but GitHub does not confirm that it closes it (#2228); merging would close the wrong issue or none\n' "$pr" "$issue"
+      return 1
+    fi
+  elif [[ -z "${refs//[$'\n\r\t ']/}" ]]; then
+    printf 'closes-link-unconfirmed\tPR #%s has no confirmed closing link; merging would close no issue\n' "$pr"
+    return 1
+  fi
+  return 0
+}
+
+autonomy_may_merge_delegated() {
+  local pr="${1-}" changed="" classes="" judged="" rc=0 after="" head="" dlg=""
+  local deny_fmt='{"proceed":false,"reason":"%s","detail":"%s","autonomy":"ask"}\n'
+  if [[ ! "$pr" =~ ^[1-9][0-9]*$ ]]; then
+    printf "$deny_fmt" "cli-usage" "a PR number is required"
+    return 1
+  fi
+  if ! changed=$(gh pr diff "$pr" --repo "$REPO" --name-only 2>/dev/null) \
+     || [[ -z "${changed//[$'\n\r\t ']/}" ]]; then
+    printf "$deny_fmt" "diff-unreadable" "could not enumerate PR #${pr}'s changed files, or there were none; failing closed"
+    return 1
+  fi
+  if ! classes=$(autonomy_stop_classes_for_paths "$changed"); then
+    printf "$deny_fmt" "stop-class-derivation-failed" "the stop-class derivation exited non-zero; failing closed"
+    return 1
+  fi
+  local claim=""
+  if ! claim=$(delegated_merge_human_claims "$pr"); then
+    printf "$deny_fmt" "${claim%%$'\t'*}" "${claim#*$'\t'}"
+    return 1
+  fi
+  local -a judge
+  if [[ -n "${MINSPEC_DELEGATED_MERGE_JUDGE_CMD:-}" ]]; then
+    judge=("$MINSPEC_DELEGATED_MERGE_JUDGE_CMD")
+  elif [[ -x "${AUTONOMY_REPO_ROOT}/node_modules/.bin/tsx" ]]; then
+    judge=("${AUTONOMY_REPO_ROOT}/node_modules/.bin/tsx" "${SCRIPT_DIR}/lib/delegated-merge.ts")
+  else
+    printf "$deny_fmt" "judge-unrunnable" "no pinned tsx runner at ${AUTONOMY_REPO_ROOT}/node_modules/.bin/tsx; failing closed"
+    return 1
+  fi
+  judged=$("${judge[@]}" --pr "$pr" --repo "$REPO" --repo-root "$AUTONOMY_REPO_ROOT" \
+             --base origin/main --stop-classes "$classes" 2>/dev/null) && rc=0 || rc=$?
+  judged=$(printf '%s\n' "$judged" | grep -v '^[[:space:]]*$' | tail -n 1 || true)  # swallow-ok: grep -v exits 1 on all-blank output, which leaves judged empty and is refused on the next line
+  if (( rc != 0 )) || [[ "$(printf '%s' "$judged" | jq -r '.arm' 2>/dev/null)" != "true" ]]; then
+    local jj=""
+    jj=$(printf '%s' "$judged" | jq -c . 2>/dev/null) || jj=""
+    [[ -n "$jj" ]] || jj=null
+    jq -cn --argjson j "$jj" --arg rc "$rc" \
+      '{proceed:false, reason:("delegation-" + (($j // {}).reason // "judge-unreadable")),
+        detail:(($j // {}).detail // ("the delegated-merge judge exited " + $rc + " with no readable verdict; failing closed")),
+        autonomy:"ask"}' 2>/dev/null \
+      || printf "$deny_fmt" "judge-unreadable" "the delegated-merge judge gave no readable verdict; failing closed"
+    return 1
+  fi
+  after=$(printf '%s' "$judged" | jq -r '.classesAfter | if type == "array" then join(",") else error("no list") end' 2>/dev/null) \
+    || { printf "$deny_fmt" "judge-unreadable" "the judge's classesAfter is not a list; failing closed"; return 1; }
+  head=$(printf '%s' "$judged" | jq -r '.headSha // ""' 2>/dev/null || true)  # swallow-ok: an unreadable SHA leaves head empty and is refused on the next line
+  dlg=$(printf '%s' "$judged" | jq -r '.delegationId // ""' 2>/dev/null || true)  # swallow-ok: as above, refused on the next line
+  if [[ ! "$head" =~ ^[0-9a-f]{40}$ || -z "$dlg" ]]; then
+    printf "$deny_fmt" "judge-unreadable" "the judge's verdict names no head SHA or delegation; failing closed"
+    return 1
+  fi
+  local verdict=""
+  if ! verdict=$(autonomy_may_proceed \
+      "arm GitHub-native auto-merge on spec PR #${pr} at ${head} under delegation ${dlg} (DR-108, #2981)" \
+      "$after" \
+      "hold the spec PR for the founder's merge keystroke - he has said that keystroke is not needed for a spec covered by ${dlg} (queue item dlg2981, 2026-10-21), so holding stalls the drain on the held cap for no check"); then
+    printf '%s\n' "$verdict"
+    return 1
+  fi
+  printf '%s' "$verdict" | jq -c --argjson j "$judged" \
+    '. + {headSha:$j.headSha, delegationId:$j.delegationId, verdictBy:$j.verdictBy}' 2>/dev/null \
+    || { printf "$deny_fmt" "verdict-unreadable" "the autonomy verdict could not be combined with the judge's; failing closed"; return 1; }
+}
+
+# Seam (#2981): ISSUE=--delegated-spec-merge <pr> [--arm]. Without --arm it is a dry run:
+# it prints the verdict and writes nothing. With --arm, on a proceed only, it arms
+# GitHub-native auto-merge bound to the judged head (--match-head-commit), through this
+# script's `gh` wrapper, so the write is minted as minspec-sdd[bot] or aborts (#1355);
+# never --admin. GitHub then merges only when the required checks (ready-to-merge: a
+# provenance-verified ai-review:pass on the head) are green. Exit 0 = armed (or would be),
+# 1 = denied, 2 = admitted but the arm failed.
+if [[ "${ISSUE:-}" == "--delegated-spec-merge" ]]; then
+  _dsm_pr="${2-}" _dsm_mode="${3-}"
+  if [[ -n "$_dsm_mode" && "$_dsm_mode" != "--arm" ]]; then
+    echo "usage: dispatch-issue.sh --delegated-spec-merge <pr> [--arm]" >&2
+    exit 1
+  fi
+  # The delegated arm IS a GitHub-native auto-merge, so the project's DR-061 opt-in
+  # governs it exactly as it governs step 6b: off (or the SPEC-024 consequence-hybrid
+  # gate owning merges) means no arm, delegation or not. Checked before any read.
+  if ! native_automerge_enabled; then
+    printf '%s\n' '{"proceed":false,"reason":"native-automerge-off","detail":"native auto-merge (DR-061) is not enabled for this project, or the consequence-hybrid gate owns merges; the delegated arm is native auto-merge and is off with it","autonomy":"ask"}'
+    exit 1
+  fi
+  gh_bot_warm_read
+  if ! _dsm_verdict=$(autonomy_may_merge_delegated "$_dsm_pr"); then
+    printf '%s\n' "$_dsm_verdict"
+    exit 1
+  fi
+  if [[ "$_dsm_mode" != "--arm" ]]; then
+    printf '%s\n' "$_dsm_verdict" | jq -c '. + {armed:false, dryRun:true}'
+    exit 0
+  fi
+  _dsm_head=$(printf '%s' "$_dsm_verdict" | jq -r '.headSha')
+  _dsm_dlg=$(printf '%s' "$_dsm_verdict" | jq -r '.delegationId')
+  _dsm_by=$(printf '%s' "$_dsm_verdict" | jq -r '.verdictBy')
+  # Flag order is `--auto --squash`, the reverse of step 6b's, on purpose: the step-6b
+  # source-text suites (drain-selfheal, autonomy-merge-gate SITE A) locate THAT arm by
+  # its literal flag pair. This arm's gating is pinned behaviourally instead, in
+  # delegated-merge-seam.test.ts.
+  if ! gh pr merge "$_dsm_pr" --repo "$REPO" --auto --squash --match-head-commit "$_dsm_head" >/dev/null 2>&1; then
+    printf '%s\n' "$_dsm_verdict" | jq -c '. + {armed:false, error:"arm-failed"}'
+    echo "WARNING: PR #${_dsm_pr}: the delegation admitted the merge but auto-merge could not be armed at ${_dsm_head} (head moved, already merged, or blocked); left held." >&2
+    exit 2
+  fi
+  # The hold label said "a human is the next actor" (#816); once armed that is false.
+  # Best-effort and loud: the arm already stands, and a stale label holds nothing.
+  gh pr edit "$_dsm_pr" --repo "$REPO" --remove-label "needs-human-review" >/dev/null 2>&1 \
+    || echo "WARNING: PR #${_dsm_pr}: armed, but the needs-human-review label could not be removed." >&2
+  gh pr comment "$_dsm_pr" --repo "$REPO" --body "$(printf '## Delegated merge armed - minspec-sdd[bot], not the founder (#2981)\n\nAuto-merge is armed on this spec pull request at `%s` under delegation **%s** (DR-108). The founder did not press merge: his delegation covers T1-T4 MinSpec spec content once an independent AI review passes (queue item dlg2981, 2026-10-21).\n\n- Independent verdict on this head: %s\n- GitHub merges only when the required checks are green on this head; a new push voids the arm.\n- Merging is not approving: the spec lands as `specifying`, and approval is recorded later, separately, by `delegated-approval-caller.ts`.\n\nRejected alternative (DR-086 section 4): hold for the founder'"'"'s merge keystroke.' "$_dsm_head" "$_dsm_dlg" "$_dsm_by")" >/dev/null 2>&1 \
+    || echo "WARNING: PR #${_dsm_pr}: armed, but the audit comment could not be posted." >&2
+  printf '%s\n' "$_dsm_verdict" | jq -c '. + {armed:true}'
+  exit 0
 fi
 
 # SPECIFY_SCOPE_RE (#1169) — the ONLY paths a SPECIFY-ONLY dispatch may touch.
@@ -1446,7 +1689,7 @@ run_reviewer_stage() {
       hold_why="$(autonomy_verdict_detail "$autonomy_verdict")"
       grep -qE "${DOCS_CORPUS_RE}"'|^\.minspec/|^\.cursorrules$' <<<"$changed_files" \
         && hold_why="${hold_why} It touches the docs-lane corpus / .minspec governance config (spec/DR/docs/approval-ledger/top-level .md) (#833)."
-      grep -qE "${MACHINERY_PATH_RE}" <<<"$changed_files" \
+      grep -qE "${MACHINERY_PATH_RE}" < <(machinery_carve_out_filter <<<"$changed_files") \
         && hold_why="${hold_why} It touches machinery (.github/ .githooks/ scripts/) — dispatch is the second witness to the ai-review machinery hold (#1264)."
       grep -qE "${PUBLISH_PATH_RE}" <<<"$changed_files" \
         && hold_why="${hold_why} It touches a PUBLISH path (sites/** → public Cloudflare Pages via deploy-sites.yml) — merging IS publishing (#981)."
@@ -1762,6 +2005,7 @@ shepherd_fix() {
   echo "  Dispatching a fresh fix agent into the warm worktree (no re-clone)..."
   (cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$fix_prompt" \
        "${AGENT_CONTEXT_ARGS[@]}" \
+       ${AGENT_CAVEMAN_ARGS[@]+"${AGENT_CAVEMAN_ARGS[@]}"} \
        "${SYS_PROMPT_ARGS[@]}" \
        --model "$RUN_MODEL" \
        --allowedTools "$ALLOWED_TOOLS" \
@@ -2041,6 +2285,7 @@ fi
 # removed (the autocompact override, #1203) is not on the list, so it is still dropped.
 if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude -p "$RUN_PROMPT" \
       "${AGENT_CONTEXT_ARGS[@]}" \
+      ${AGENT_CAVEMAN_ARGS[@]+"${AGENT_CAVEMAN_ARGS[@]}"} \
       "${SYS_PROMPT_ARGS[@]}" \
       --model "$RUN_MODEL" \
       --allowedTools "$ALLOWED_TOOLS" \
@@ -2380,6 +2625,17 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude
         fi
       fi
 
+      # #1779 perf: the other four merge-conjunction terms, named ONCE so the
+      # autonomy verdict below can be gated on them without spelling the
+      # five-term conjunction twice in this file (two half-copies of one
+      # predicate is this repo's recurring drift failure — #1401, #1758).
+      OTHER_GATES_GREEN="no"
+      if [[ "$ELIGIBLE" == "true" && -n "$PR_NUM" \
+            && "$AUTOMERGE_MODE" == "consequence-hybrid" \
+            && "$READY_STATE" == "success" ]]; then
+        OTHER_GATES_GREEN="yes"
+      fi
+
       # DR-086 AUTONOMY CONJUNCT (#1614). This arm never called
       # `paths_have_approvable_doc` at all, so the machinery hold that
       # MACHINERY_PATH_RE was added to double-witness (#1264) had its second
@@ -2394,22 +2650,26 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude
       # node_modules / no tsx / non-zero exit / unparseable stdout) — every one
       # leaves AUTONOMY_PROCEED at "no". Only a verdict that positively says
       # proceed sets it to "yes".
+      #
+      # Computed ONLY when OTHER_GATES_GREEN — the conjunction it feeds cannot
+      # pass otherwise, so running it unconditionally paid a `gh pr diff`
+      # round-trip plus a `tsx` process start on every dispatch, even while
+      # `autonomy` resolves to `ask` and denies unconditionally (#1779).
+      # Correctness is unaffected: AUTONOMY_PROCEED still starts at "no" on
+      # every path, including the skipped one.
       AUTONOMY_VERDICT=""
       AUTONOMY_PROCEED="no"
       SPEC024_CHANGED=""
-      if [[ -n "$PR_NUM" ]]; then
+      if [[ "$OTHER_GATES_GREEN" == "yes" ]]; then
         SPEC024_CHANGED=$(gh pr diff "$PR_NUM" --repo "$REPO" --name-only 2>/dev/null || true)  # swallow-ok: an empty list is the STRONGEST stop class, not an absent one — autonomy_may_merge returns proceed:false on empty input (verified via the --may-merge seam), so AUTONOMY_PROCEED stays no and the merge is refused
-      fi
-      if AUTONOMY_VERDICT=$(autonomy_may_merge \
-            "merge PR #${PR_NUM:-none} via the SPEC-024 consequence-hybrid gate" \
-            "$SPEC024_CHANGED"); then
-        AUTONOMY_PROCEED="yes"
+        if AUTONOMY_VERDICT=$(autonomy_may_merge \
+              "merge PR #${PR_NUM:-none} via the SPEC-024 consequence-hybrid gate" \
+              "$SPEC024_CHANGED"); then
+          AUTONOMY_PROCEED="yes"
+        fi
       fi
 
-      if [[ "$ELIGIBLE" == "true" && -n "$PR_NUM" \
-            && "$AUTOMERGE_MODE" == "consequence-hybrid" \
-            && "$READY_STATE" == "success" \
-            && "$AUTONOMY_PROCEED" == "yes" ]]; then
+      if [[ "$OTHER_GATES_GREEN" == "yes" && "$AUTONOMY_PROCEED" == "yes" ]]; then
         # FR-6: low-blast, all signals green, opted-in, AND the independent
         # reviewer greenlit (ready-to-merge=success) → merge with no human eyes.
         echo "Auto-merge ELIGIBLE for PR #$PR_NUM ($BLAST-blast, ready-to-merge=success): $GATE_REASON"

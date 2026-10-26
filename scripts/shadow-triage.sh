@@ -131,6 +131,15 @@ shadow_resolve_model() {
   status="$(shadow_http "$(shadow_endpoint_url /v1/models)" "$out_file" 20)"
   rc=$?
   if [[ $rc -ne 0 || ! "$status" =~ ^2[0-9][0-9]$ ]]; then rm -f "$out_file"; return 1; fi
+  # A 2xx is not proof of a listing: z.ai answers 200 for a refused key with the error
+  # in the body (#3005). Name that fault instead of letting it surface as an
+  # unparseable listing (`model-resolve-failed`).
+  local refusal
+  refusal="$(shadow_classify_error "$status" < "$out_file")"
+  if [[ "$refusal" == auth-refused:* ]]; then
+    note "z.ai refused the key on the model listing (${refusal}) — skipped."
+    rm -f "$out_file"; return 1
+  fi
   shadow_pick_latest_model < "$out_file"
   rc=$?
   rm -f "$out_file"
@@ -220,7 +229,8 @@ if [[ -n "$(shadow_key)" ]] && ! shadow_key_wellformed "$(shadow_key)"; then
   exit 0
 fi
 if [[ -z "$(shadow_key)" ]]; then
-  note "no z.ai key configured (MINSPEC_ZAI_API_KEY) — skipped; real triage is unaffected."
+  # Names both places looked and why the file was not used — never the value.
+  note "no z.ai key configured (MINSPEC_ZAI_API_KEY unset; key file $(shadow_key_file): $(shadow_key_file_state)) — skipped; real triage is unaffected."
   exit 0
 fi
 

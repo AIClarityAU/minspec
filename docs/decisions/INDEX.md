@@ -803,6 +803,14 @@ MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull req
 The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, and asked on 2026-10-01 for the extension to be published just before the visualiser work, about a week out. The constitution puts a Marketplace publish in Phase 2 and says Phase 2 work may not displace unfinished Phase 1 work, so publishing now needs a recorded exception, with its scope and preconditions stated.
 <!-- /dr-summary:DR-100 -->
 
+## [DR-102 — Checkbox state leaves the canonical approval hash - a ticked task-list item records progress, and the hash covers the contract](DR-102.md)
+
+*Status: accepted · Date: 2026-10-04*
+
+<!-- dr-summary:DR-102 auto=d9ecefef75dc -->
+DR-035 (normalize checkbox state before hashing) made this decision on 2026-06-19 and was accepted. It was never built. It named hashContent() in approval.ts and sha() in spec-gate.py; approval hashing shipped instead through DR-034 (approval foundation) and SPEC-022 (its spec) as canonicalizeSpec() / specHash(), which has no checkbox step (packages/shared/src/canonical.ts:89-123, scripts/hooks/canonical.py:56-80). On 2026-07-12 a documentation-honesty pass (commit 0e7b1d67) changed DR-035's status from accepted to superseded because its body claimed an implementation that did not exist. No record superseded it. The register…
+<!-- /dr-summary:DR-102 -->
+
 ## [DR-103 — New MinSpec versions reach the Marketplace through a release workflow that holds no stored credential - automatic to the pre-release channel, the founder's approval for everyone else](DR-103.md)
 
 *Status: accepted · Date: 2026-10-07*
@@ -826,4 +834,60 @@ main requires a pull request to be up to date before it merges, and the stalenes
 <!-- dr-summary:DR-105 auto=7c01ad0c26da -->
 scripts/ holds the dev-time automation that starts headless agents: issue dispatch, triage, the review scripts, pull request remediation and the tooling radar. DR-008 (dispatch security) decided, for that automation, that credentials are kept out of the agent's reach, and that unattended runs are for issues whose text is trusted. Neither was held by code. This record decides how far each is now held, and names what is not.
 <!-- /dr-summary:DR-105 -->
+
+## [DR-106 — Two ranked core tenets head the constitution - make the founder's job smaller first, minimise tokens counting rework second - with a 2%-of-weekly-budget tie-break](DR-106.md)
+
+*Status: proposed · Date: 2026-10-17*
+
+<!-- dr-summary:DR-106 auto=ed677406570b -->
+On 2026-10-17 the founder asked for a review of the constitution, rules, memory, principles and decision records against two priorities, in this order (queue item in2): The core-tenets review (2026-10-17, run outside this repository) found the corpus leaning toward over-specification. The figures, and where each can be checked:
+<!-- /dr-summary:DR-106 -->
+
+## [DR-107 — Decision records split in two - direction records the founder accepts, engineering records accepted on an AI review pass and listed in a weekly digest](DR-107.md)
+
+*Status: accepted · Date: 2026-10-17*
+
+<!-- dr-summary:DR-107 auto=24170a0e8b9b -->
+DR-086 §2.2 (the approval-or-acceptance stop class) makes every DR acceptance a founder stop. The register held 105 records by 2026-10-10, about five a week (core-tenets-review-1017), and many decide mechanism rather than direction: DR-095 (socket bind-mount), DR-094 (token lifetime), DR-077 (hook parity test), DR-097 and its successor on whole-panel vote reuse (2026-10). Under the core-tenets record core tenet 1 (make the founder's job smaller) a gate must name the error only it catches. For an engineering record that error is already…
+<!-- /dr-summary:DR-107 -->
+
+## [DR-108 — Agents may approve under a delegation the founder gives once, recorded under the bot's own name and never his - impersonation stays banned, delegation is allowed](DR-108.md)
+
+*Status: accepted · Date: 2026-10-17*
+
+<!-- dr-summary:DR-108 auto=9ca2b32c25d7 -->
+The approval-or-acceptance stop class (DR-086 §2.2) says, in code (scripts/lib/autonomy.ts, STOP_CLASSES): "The agent cannot sign these without forging the human." That is true only while the approval record has no field for *who acted, on whose delegation*. The rules-consent review (rules-consent-review-1017) separated two acts:
+<!-- /dr-summary:DR-108 -->
+
+## [DR-109 — The AI review panel scales by risk, but specs are never the low tier - specs get at least the machinery voter count, and one voter is allowed only for non-spec prose](DR-109.md)
+
+*Status: accepted · Date: 2026-10-17*
+
+<!-- dr-summary:DR-109 auto=01ee89682199 -->
+The core-tenets review proposed one voter for docs and T1, and four for machinery and T3/T4 (DR-033 §6, DR-047), to save tokens under core tenet 2. The founder accepted it with an amendment: specs are "the pointy end, where you have to get it right, as everything downstream depends on it". The recommendation also said to measure voter disagreement before landing it.
+<!-- /dr-summary:DR-109 -->
+
+## [DR-110 — The ai-review verdict carry ignores where the base put the change - text hunks lose their blob ids and start line numbers, binary files keep theirs](DR-110.md)
+
+*Status: accepted · Date: 2026-10-18*
+
+<!-- dr-summary:DR-110 auto=be6169d668c2 -->
+The verdict-carry record ("A pass is carried across a push that changes nothing the voters are given", accepted 2026-10-13, #2701; it is the record named in this one's supersedes_partial:, and bodies here do not spell local ids of that range out, per the parent-register reference gate, #2148) carries an ai-review pass across a push when the bytes the voters are given are identical, and it explicitly rejected a position-insensitive identity.
+<!-- /dr-summary:DR-110 -->
+
+## [DR-111 — A pull request that carries only the founder's own editor approval is merged by the bot - the approval is the keystroke, and a fail-closed check refuses anything else](DR-111.md)
+
+*Status: accepted · Date: 2026-10-22*
+
+<!-- dr-summary:DR-111 auto=5e69cbb62816 -->
+The constitution's merge-gate conservation rule (DR-070 §4) says no unit of work ever reaches main with zero human keystrokes. For agent-built work the keystroke is the founder's merge. For an editor approval, the founder's keystroke already happened: Alt-A in the editor is the explicit human act DR-012 defines approval to be, recorded under his identity (DR-056 refuses an agent identity at record time). The pull request that carries it adds no new content for him to judge, so asking for…
+<!-- /dr-summary:DR-111 -->
+
+## [DR-112 — The bot merges a pull request once CI is green, a second independent AI review agrees, and the merge is pinned to the reviewed commit - including machinery, by admin bypass, where only the self-certification gates are red](DR-112.md)
+
+*Status: accepted · Date: 2026-10-24*
+
+<!-- dr-summary:DR-112 auto=fb18ca00a43a -->
+The rule being lifted: on 2026-07-28 the founder made --admin human-only: "Never use the App token to bypass branch protection or a required check. A PR that needs --admin waits for the human merge keystroke." It is restated in ~/.claude/CLAUDE.md, in DR-086 (section 2.1 and its Amendment A: "--admin remains human-only and no failing check may be bypassed"), in DR-070 section 4 ("No unit of work ever has zero human keystrokes"), and in the chief-of-staff-runner skill. GitHub enforces it today…
+<!-- /dr-summary:DR-112 -->
 <!-- minspec:dr-index:end -->

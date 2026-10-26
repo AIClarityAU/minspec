@@ -370,3 +370,168 @@ describe('remediate-pr.sh: the drain honours the owner gate without extra wiring
     expect(arm).toMatch(/exit 0/);
   });
 });
+
+// #3023 — the ready-to-merge gate is not fixable by code: it is green only when a verified
+// ai-review:pass sits on the current head, and its job runs the BASE branch's guard.
+describe('remediate-pr.sh --derive-failing: ready-to-merge gate is not a code-fixable red (#3023)', () => {
+  function derive(rollup: unknown[]): string {
+    return execFileSync('bash', [SCRIPT, '--derive-failing'], {
+      encoding: 'utf-8',
+      input: JSON.stringify({ statusCheckRollup: rollup }),
+    }).trim();
+  }
+
+  it('the gate job of the ready-to-merge workflow alone failing → no', () => {
+    expect(derive([
+      { name: 'test', workflowName: 'ci', conclusion: 'SUCCESS' },
+      { name: 'gate', workflowName: 'ready-to-merge', conclusion: 'FAILURE' },
+    ])).toBe('no');
+  });
+
+  it('a ready-to-merge status context alone failing → no', () => {
+    expect(derive([{ context: 'ready-to-merge', state: 'FAILURE', conclusion: 'FAILURE' }])).toBe('no');
+  });
+
+  it('a real red check alongside the gate still → yes', () => {
+    expect(derive([
+      { name: 'gate', workflowName: 'ready-to-merge', conclusion: 'FAILURE' },
+      { name: 'lint', workflowName: 'ci', conclusion: 'FAILURE' },
+    ])).toBe('yes');
+  });
+
+  it('a differently-named job called gate in another workflow is still fixable → yes', () => {
+    expect(derive([{ name: 'gate', workflowName: 'ci', conclusion: 'FAILURE' }])).toBe('yes');
+  });
+
+  // #3030 — superseded runs stay in the rollup; only the latest per check counts.
+  it('CANCELLED older + SUCCESS newer for one check → no (#3030)', () => {
+    expect(derive([
+      { name: 'DR id uniqueness', workflowName: 'dr', conclusion: 'CANCELLED', startedAt: '2026-10-22T23:20:00Z', completedAt: '2026-10-22T23:23:55Z' },
+      { name: 'DR id uniqueness', workflowName: 'dr', conclusion: 'SUCCESS', startedAt: '2026-10-22T23:30:00Z', completedAt: '2026-10-22T23:31:00Z' },
+    ])).toBe('no');
+  });
+
+  it('order in the array does not matter: SUCCESS listed first, CANCELLED older → no (#3030)', () => {
+    expect(derive([
+      { name: 'x', workflowName: 'ci', conclusion: 'SUCCESS', startedAt: '2026-10-22T23:30:00Z' },
+      { name: 'x', workflowName: 'ci', conclusion: 'CANCELLED', startedAt: '2026-10-22T23:20:00Z' },
+    ])).toBe('no');
+  });
+
+  it('SUCCESS older + FAILURE newer for one check → yes (latest wins both ways)', () => {
+    expect(derive([
+      { name: 'x', workflowName: 'ci', conclusion: 'SUCCESS', startedAt: '2026-10-22T23:20:00Z' },
+      { name: 'x', workflowName: 'ci', conclusion: 'FAILURE', startedAt: '2026-10-22T23:30:00Z' },
+    ])).toBe('yes');
+  });
+
+  it('same name in different workflows is NOT deduped together → yes', () => {
+    expect(derive([
+      { name: 'gate', workflowName: 'a', conclusion: 'FAILURE', startedAt: '2026-10-22T23:20:00Z' },
+      { name: 'gate', workflowName: 'b', conclusion: 'SUCCESS', startedAt: '2026-10-22T23:30:00Z' },
+    ])).toBe('yes');
+  });
+
+  it('ai-review red stays excluded; in-flight check is not a failure', () => {
+    expect(derive([
+      { name: 'ai-review', conclusion: 'FAILURE' },
+      { name: 'test', status: 'IN_PROGRESS' },
+    ])).toBe('no');
+  });
+});
+
+// #3042 — rerun-first gate: a red check caused by an outside-service fault (rate limit,
+// network) must clear on ONE rerun before any paid agent is spent.
+describe('remediate-pr.sh rerun-first gate (#3042)', () => {
+  const RUN_URL = 'https://github.com/AIClarityAU/minspec/actions/runs/123456/job/789';
+  function runIds(rollup: unknown[]): string[] {
+    const out = execFileSync('bash', [SCRIPT, '--derive-failed-runs'], {
+      encoding: 'utf-8',
+      input: JSON.stringify({ statusCheckRollup: rollup }),
+    }).trim();
+    return out === '' ? [] : out.split('\n');
+  }
+  function decide(markers: string, ids: string): string {
+    return execFileSync('bash', [SCRIPT, '--rerun-decision', markers, ids], { encoding: 'utf-8' }).trim();
+  }
+
+  it('a red check with no prior rerun marker and a run id → rerun, not an agent', () => {
+    expect(decide('0', '123456')).toBe('rerun');
+  });
+
+  it('a rerun already spent on this PR → agent (bounded: never a second rerun)', () => {
+    expect(decide('1', '123456')).toBe('agent');
+  });
+
+  it('no run id to rerun (status context) → agent', () => {
+    expect(decide('0', '')).toBe('agent');
+  });
+
+  it('an unreadable marker count fails toward the old behaviour, never an endless rerun', () => {
+    expect(decide('', '123456')).toBe('agent');
+    expect(decide('x', '123456')).toBe('agent');
+  });
+
+  it('extracts the unique run id of each latest red non-review check', () => {
+    expect(runIds([
+      { name: 'Fetch threat catalogs', workflowName: 'scan', conclusion: 'FAILURE', detailsUrl: RUN_URL },
+      { name: 'other', workflowName: 'scan', conclusion: 'FAILURE', detailsUrl: RUN_URL },
+      { name: 'lint', workflowName: 'ci', conclusion: 'FAILURE', detailsUrl: 'https://github.com/o/r/actions/runs/42/job/1' },
+      { name: 'ai-review', conclusion: 'FAILURE', detailsUrl: 'https://github.com/o/r/actions/runs/99/job/1' },
+      { name: 'ok', workflowName: 'ci', conclusion: 'SUCCESS', detailsUrl: 'https://github.com/o/r/actions/runs/7/job/1' },
+    ])).toEqual(['123456', '42']);
+  });
+
+  it('a superseded red run whose rerun is green contributes no id', () => {
+    expect(runIds([
+      { name: 'x', workflowName: 'ci', conclusion: 'FAILURE', startedAt: '2026-10-23T21:30:00Z', detailsUrl: RUN_URL },
+      { name: 'x', workflowName: 'ci', conclusion: 'SUCCESS', startedAt: '2026-10-23T21:40:00Z', detailsUrl: RUN_URL },
+    ])).toEqual([]);
+  });
+
+  it('a red status context with no actions URL yields no id', () => {
+    expect(runIds([{ context: 'ci/legacy', conclusion: 'FAILURE', targetUrl: 'https://ci.example/build/5' }])).toEqual([]);
+  });
+
+  it('the main flow reruns BEFORE the agent path and spends no attempt (source order)', () => {
+    const code = fs.readFileSync(SCRIPT, 'utf-8');
+    const rerun = code.indexOf('gh run rerun "$RUN_ID"');
+    const attempt = code.indexOf('echo "  Attempt $((ATTEMPTS + 1))');
+    const agent = code.indexOf('PROMPT=$(cat <<PROMPT');
+    expect(rerun).toBeGreaterThan(-1);
+    expect(rerun).toBeLessThan(attempt);
+    expect(attempt).toBeLessThan(agent);
+    // marker posted before the rerun, so a lost marker cannot loop reruns
+    expect(code.indexOf('post_marked_comment "$RERUN_MARKER"')).toBeLessThan(rerun);
+    // the rerun marker is in the isolation gate
+    expect(code).toMatch(/assert_markers_isolated "\$ATTEMPT_MARKER" "\$CRASH_MARKER" "\$CAPPED_MARKER" "\$RERUN_MARKER"/);
+  });
+});
+
+describe('remediate-pr.sh --classify: sweep defers ai-review:pass BEHIND PRs (#3069)', () => {
+  const sweep = (labels: string, mergeState = 'BEHIND', failing: 'yes' | 'no' = 'no', bad: 'yes' | 'no' = 'no') =>
+    execFileSync(
+      'bash',
+      [SCRIPT, '--classify', 'agent/issue-1', 'MERGEABLE', mergeState, labels, failing, bad, 'no', 'yes'],
+      { encoding: 'utf-8' },
+    ).trim();
+
+  it('a sweep over three green ai-review:pass BEHIND PRs issues zero rebase-only actions', () => {
+    const actions = [1, 2, 3].map(() => sweep('ai-review:pass'));
+    expect(actions.filter((a) => a === 'rebase-only')).toHaveLength(0);
+    expect(actions).toEqual(Array(3).fill('skip-awaiting-merge-turn'));
+  });
+  it('still rebases a BEHIND PR that has no ai-review verdict yet', () => {
+    expect(sweep('')).toBe('rebase-only');
+  });
+  it('still routes red checks / review changes ahead of the deferral', () => {
+    expect(sweep('ai-review:pass', 'BEHIND', 'yes')).toBe('agent-remediate-checks');
+    expect(sweep('ai-review:changes,ai-review:pass', 'BEHIND', 'no', 'yes')).toBe('agent-remediate-review');
+  });
+  it('conflicts are still surfaced', () => {
+    expect(sweep('ai-review:pass', 'DIRTY')).toBe('skip-conflict');
+  });
+  it('the creator-shepherd contract (no 8th arg) still rebases a pass+BEHIND PR', () => {
+    expect(classify('agent/issue-1', 'MERGEABLE', 'BEHIND', 'ai-review:pass', 'no', 'no')).toBe('rebase-only');
+  });
+});

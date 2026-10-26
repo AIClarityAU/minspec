@@ -184,6 +184,9 @@ exit 0
     PATH: `${binDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
     HOME: process.env.HOME ?? '/tmp',
     MINSPEC_SHADOW_TRIAGE_LOG: shadowLog,
+    // Hermetic: the "no key" cases must not pick up the operator's real key file under
+    // HOME, which would send a real credential to the stub curl's log (zaikey23).
+    MINSPEC_ZAI_API_KEY_FILE: path.join(dir, 'no-such-zai.key'),
     // Pin the model so these cases stay HERMETIC. The shipped default is the
     // `latest` sentinel, which resolves via GET /v1/models — a network call these
     // tests must never make, and which would (correctly) skip the run when it fails,
@@ -513,6 +516,17 @@ describe('shadow-triage — verdict-block schema conformance (#1338 metric 2)', 
 
   it('surrounding model prose does not break conformance', () => {
     expect(conformant(`Here is my analysis.\n\n${SHADOW_VERDICT}\n\nHope that helps!`)).toBe(true);
+  });
+
+  it('a large block stays conformant under pipefail (no SIGPIPE from early grep -q exit, #2874)', () => {
+    // Fields come first, then more than a pipe buffer of rationale: `grep -q` exits on the
+    // first match while a piped writer is still writing, which under `set -o pipefail`
+    // reported a conformant block as non-conformant.
+    const big = SHADOW_VERDICT.replace(
+      'TRIAGE_VERDICT_END',
+      `${'rationale padding line\n'.repeat(20000)}TRIAGE_VERDICT_END`,
+    );
+    for (let i = 0; i < 5; i++) expect(conformant(big)).toBe(true);
   });
 
   it('no block at all is NOT conformant', () => {

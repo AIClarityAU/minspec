@@ -557,7 +557,7 @@ describe('B — check-dr-id-collision.ts fails closed when its witness is missin
       const out = execFileSync('npx', ['tsx', CLI, ...args], {
         cwd: REPO_ROOT,
         encoding: 'utf-8',
-        env: { ...process.env, DR_ID_GH_BIN: bin, GITHUB_ACTIONS: '' },
+        env: { ...process.env, DR_ID_GH_BIN: bin, GITHUB_ACTIONS: '', DR_ID_RATE_LIMIT_MAX_WAIT_MS: '0' },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       return { status: 0, stdout: out, stderr: '' };
@@ -594,18 +594,16 @@ describe('B — check-dr-id-collision.ts fails closed when its witness is missin
   it('reports the collision and the next free id end-to-end against a stub gh', () => {
     // main holds DR-077 + DR-078; the subject PR adds DR-077; PR #1240 adds DR-081.
     // The `api --paginate --slurp` responses use the PAGED shape real gh emits
-    // (an array of per-page arrays); `pr list --json` is flat, as real gh emits.
+    // (an array of per-page arrays); the other open PRs arrive in ONE batched GraphQL response (#3077).
     const script = `#!/bin/sh
 argv="$*"
 case "$argv" in
   *"pulls/1209/files"*)
     echo '[[{"filename":"docs/decisions/DR-077.md","status":"added"},{"filename":"docs/decisions/INDEX.md","status":"modified"}]]' ;;
-  *"pulls/1240/files"*)
-    echo '[[{"filename":"docs/decisions/DR-081.md","status":"added"}]]' ;;
   *"contents/docs/decisions"*)
     echo '[[{"path":"docs/decisions/DR-077.md","type":"file"},{"path":"docs/decisions/DR-078.md","type":"file"},{"path":"docs/decisions/INDEX.md","type":"file"}]]' ;;
-  *"pr list"*)
-    echo '[{"number":1209},{"number":1240}]' ;;
+  *"graphql"*)
+    echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1209,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}},{"number":1240,"files":{"pageInfo":{"hasNextPage":false},"nodes":[{"path":"docs/decisions/DR-081.md","changeType":"ADDED"}]}}]}}}}' ;;
   *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
 esac
 `;
@@ -623,7 +621,63 @@ argv="$*"
 case "$argv" in
   *"pulls/1209/files"*) echo '[[{"filename":"scripts/foo.ts","status":"added"}]]' ;;
   *"contents/docs/decisions"*) echo '[[{"path":"docs/decisions/DR-077.md","type":"file"}]]' ;;
-  *"pr list"*) echo '[{"number":1209}]' ;;
+  *"graphql"*) echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1209,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}' ;;
+  *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
+esac
+`;
+    expect(runCli(ARGS, { script }).status).toBe(0);
+  });
+
+  const GQL_ONE = '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1209,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}';
+
+  /** A stub whose `pulls/1209/files` call is rate limited `failures` times, then succeeds. */
+  function rateLimitedScript(failures: number): string {
+    return `#!/bin/sh
+argv="$*"
+counter="$(dirname "$0")/count"
+case "$argv" in
+  *"rate_limit"*) echo 0 ;;
+  *"pulls/1209/files"*)
+    n=$(cat "$counter" 2>/dev/null || echo 0)
+    n=$((n + 1))
+    echo "$n" > "$counter"
+    if [ "$n" -le ${failures} ]; then echo "gh: API rate limit exceeded for installation. (HTTP 403)" >&2 ; exit 1 ; fi
+    echo '[[{"filename":"scripts/foo.ts","status":"added"}]]' ;;
+  *"contents/docs/decisions"*) echo '[[{"path":"docs/decisions/DR-077.md","type":"file"}]]' ;;
+  *"graphql"*) echo '${GQL_ONE}' ;;
+  *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
+esac
+`;
+  }
+
+  it('waits out one rate-limit 403 and retries, then passes (#3077)', () => {
+    const r = runCli(ARGS, { script: rateLimitedScript(1) });
+    expect(r.status).toBe(0);
+  });
+
+  it('fails closed naming the rate limit when it keeps failing, not as a collision (#3077)', () => {
+    const r = runCli(ARGS, { script: rateLimitedScript(99) });
+    expect(r.status).not.toBe(0);
+    const out = `${r.stdout}${r.stderr}`;
+    expect(out).toMatch(/FAILED CLOSED/);
+    expect(out).toMatch(/RATE LIMITED \(not a DR id collision\)/);
+  });
+
+  it('keeps other errors generic, without the rate-limit wording', () => {
+    const r = runCli(ARGS, { script: '#!/bin/sh\necho "gh: HTTP 403 forbidden" >&2\nexit 1\n' });
+    expect(r.status).not.toBe(0);
+    expect(`${r.stdout}${r.stderr}`).not.toMatch(/RATE LIMITED/);
+  });
+
+  it('never makes a per-PR files call for another open PR (#3077)', () => {
+    // pulls/1240/files is NOT anticipated: the stub exits 1 on it, so a REST-per-PR
+    // regression goes red.
+    const script = `#!/bin/sh
+argv="$*"
+case "$argv" in
+  *"pulls/1209/files"*) echo '[[{"filename":"scripts/foo.ts","status":"added"}]]' ;;
+  *"contents/docs/decisions"*) echo '[[{"path":"docs/decisions/DR-077.md","type":"file"}]]' ;;
+  *"graphql"*) echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1240,"files":{"pageInfo":{"hasNextPage":false},"nodes":[{"path":"a.ts","changeType":"MODIFIED"}]}}]}}}}' ;;
   *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
 esac
 `;
@@ -641,7 +695,7 @@ argv="$*"
 case "$argv" in
   *"pulls/1209/files"*) echo '[[{"filename":"docs/decisions/DR-099.md","status":"added"}]]' ;;
   *"contents/docs/decisions"*) echo '[[]]' ;;
-  *"pr list"*) echo '[{"number":1209}]' ;;
+  *"graphql"*) echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1209,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}' ;;
   *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
 esac
 `;
@@ -713,6 +767,17 @@ describe('C — frontmatterField: only the leading block, only a real declaratio
 
   it('returns undefined when there is no frontmatter at all (pre-MinSpec records)', () => {
     expect(frontmatterField('# DR-001\n\nAn old decision.\n', 'title')).toBeUndefined();
+  });
+
+  // #2465 — a CRLF decision file (Windows checkout; docs/decisions/** is not
+  // LF-pinned in this repo's .gitattributes) must not silently read as having no
+  // frontmatter. `FRONTMATTER_RE` used to anchor on a bare `\n`, so this returned
+  // `undefined` for every CRLF file — which checkDeclaredDrIds (below) then read
+  // as "frontmatter-less", disabling the declared-id half of the duplicate-id gate.
+  it('reads a field from a CRLF frontmatter block (#2465, base-red before the \\r?\\n fix)', () => {
+    const crlf = drWith('DR-088', 'Ownership leaves the hash', '#1481').replace(/\n/g, '\r\n');
+    expect(frontmatterField(crlf, 'title')).toBe('Ownership leaves the hash');
+    expect(frontmatterField(crlf, 'triggered_by')).toBe('#1481');
   });
 });
 
@@ -855,7 +920,7 @@ case "$argv" in
   *"DR-088.md?ref=${HEAD_SHA}"*)     ${headContent === null ? "echo 'null'" : `printf '%s\\n' '${b64(headContent)}'`} ;;
   *"pulls/1756/files"*)              echo '[[{"filename":"docs/decisions/DR-088.md","status":"modified"}]]' ;;
   *"contents/docs/decisions?ref="*)  echo '[[{"path":"docs/decisions/DR-088.md","type":"file"}]]' ;;
-  *"pr list"*)                       echo '[{"number":1756}]' ;;
+  *"graphql"*)                       echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1756,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}' ;;
   *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
 esac
 `;
@@ -905,7 +970,7 @@ argv="$*"
 case "$argv" in
   *"pulls/1756/files"*)              echo '[[{"filename":"scripts/foo.ts","status":"modified"},{"filename":"docs/decisions/INDEX.md","status":"modified"}]]' ;;
   *"contents/docs/decisions?ref="*)  echo '[[{"path":"docs/decisions/DR-088.md","type":"file"}]]' ;;
-  *"pr list"*)                       echo '[{"number":1756}]' ;;
+  *"graphql"*)                       echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1756,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}' ;;
   *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
 esac
 `;
@@ -1010,7 +1075,7 @@ case "$argv" in
   *"DR-088.md?ref=${SHA}"*)          printf '%s\\n' '${b64(drWith('DR-088', 'Ownership leaves the hashh', '#1481'))}' ;;
   *"pulls/1756/files"*)              echo '[[{"filename":"docs/decisions/DR-088.md","status":"modified"}]]' ;;
   *"contents/docs/decisions?ref="*)  echo '[[{"path":"docs/decisions/DR-088.md","type":"file"}]]' ;;
-  *"pr list"*)                       echo '[{"number":1756}]' ;;
+  *"graphql"*)                       echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1756,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}' ;;
   *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
 esac
 `;
@@ -1036,7 +1101,7 @@ argv="$*"
 case "$argv" in
   *"pulls/1756/files"*)              echo '[[{"filename":"scripts/foo.ts","status":"modified"}]]' ;;
   *"contents/docs/decisions?ref="*)  echo '[[{"path":"docs/decisions/DR-088.md","type":"file"}]]' ;;
-  *"pr list"*)                       echo '[{"number":1756}]' ;;
+  *"graphql"*)                       echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1756,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}' ;;
   *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
 esac
 `;

@@ -82,6 +82,33 @@ describe('auto-drain pref path', () => {
     expect(fs.readFileSync(prefPath, 'utf-8').trim()).toBe('off');
   });
 
+  // #2715: the opt-in is per repository. A linked worktree must read the primary
+  // checkout's pref, since session-start hooks always run from a worktree.
+  it('a linked worktree resolves the pref to the primary checkout (#2715)', () => {
+    const git = (cwd: string, ...a: string[]) =>
+      execFileSync('git', a, { cwd, encoding: 'utf-8', stdio: 'pipe' });
+    const primary = fs.mkdtempSync(path.join(os.tmpdir(), 'autodrain-primary-'));
+    const wt = path.join(os.tmpdir(), `autodrain-wt-${path.basename(primary)}`);
+    try {
+      git(primary, 'init', '-q', '-b', 'main');
+      git(primary, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--allow-empty', '-qm', 'i');
+      git(primary, 'worktree', 'add', '-q', '-b', 'wt', wt);
+      fs.mkdirSync(path.join(wt, 'scripts'), { recursive: true });
+      fs.copyFileSync(DRAIN_SRC, path.join(wt, 'scripts', 'drain-inbox.sh'));
+      fs.cpSync(path.join(REPO_ROOT, 'scripts', 'lib'), path.join(wt, 'scripts', 'lib'), {
+        recursive: true,
+      });
+      const out = execFileSync('bash', [path.join(wt, 'scripts', 'drain-inbox.sh'), '--pref-path'], {
+        encoding: 'utf-8',
+      }).trim();
+      expect(fs.realpathSync(path.dirname(path.dirname(out)))).toBe(fs.realpathSync(primary));
+      expect(path.basename(out)).toBe('auto-drain');
+    } finally {
+      fs.rmSync(wt, { recursive: true, force: true });
+      fs.rmSync(primary, { recursive: true, force: true });
+    }
+  });
+
   it('the hook obtains PREF via --pref-path and never recomputes the .minspec path (anti-drift)', () => {
     const hook = fs.readFileSync(HOOK_SRC, 'utf-8');
     // Must delegate to the single source of truth.

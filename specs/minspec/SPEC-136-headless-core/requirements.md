@@ -1,11 +1,11 @@
 ---
 id: SPEC-136
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the checks are the methodology; this makes them reachable where no editor runs
-aspects: [headless, core, validator, tool-server, github-actions, zcode, vm-boundary, plugin, tier-0, offline, no-silent-gate, blast-radius]
+aspects: [headless, core, validator, tool-server, github-actions, zcode, container-boundary, plugin, tier-0, offline, no-silent-gate, blast-radius]
 depends_on: [SPEC-001, DR-004, DR-014, DR-037, DR-074]  # SPEC-001 owns the checks being exposed; DR-004 the network tiers the core must stay inside; DR-014 the package map that says where process-spawning code may live; DR-037 the git hooks and the validator package it already names; DR-074 the blast-radius rule
 relates_to: [SPEC-076, SPEC-038, DR-015, DR-050, DR-056, DR-066, DR-081, DR-084, DR-087, "#2153", "#14", "#37", "#54", "#248", "#531", "#562", "#2263", "#2297", "#2702", "#2703", "#2708"]
 # Ownership declared in Specify, before approval mints a hash (SPEC-038). All eight files
@@ -23,18 +23,21 @@ implements: [packages/core/src/operations.ts, packages/core/src/cli.ts, packages
 affects: [packages/minspec/src/lib/template-registry.ts, packages/minspec/src/lib/scaffold.ts, package.json]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
 
-# SPEC-136: MinSpec's checks run without the editor - one headless core that works inside the ZCode VM, in GitHub Actions and behind any agent
+# SPEC-136: MinSpec's checks run without the editor - one headless core that works inside the ZCode container, in GitHub Actions and behind any agent
 
 ## In plain terms
 
-ZCode now lives in a VM, and this editor must never read what ZCode wrote. So MinSpec
-cannot reach ZCode through shared folders. This spec builds the piece every route you
+ZCode now runs as an AppImage in its own docker container on this machine (the NixOS
+host), and this editor must never read what ZCode wrote. So MinSpec cannot reach ZCode
+through shared folders. (When this was first written ZCode ran in a VM; older text and
+your recorded answers below still say "the VM", which now means ZCode's container. See
+[Terms](#terms).) This spec builds the piece every route you
 named needs first: MinSpec's checks as one small program that runs with no editor, as a
 command and as a local tool server. The ZCode plugin, written next as its own spec,
 wraps it. You can approve a spec inside ZCode in one step, and work there proceeds at
@@ -111,16 +114,24 @@ time this was rewritten; the cited lines were not re-read against it.
 
 Package the checks MinSpec already has (validate, hash, status, next action, hook
 activation) and the approval act as one editor-free Node program with two ways in, a command line and a
-local stdio tool server, so that the same code can run inside the ZCode VM, in GitHub
+local stdio tool server, so that the same code can run inside the ZCode container, in GitHub
 Actions and behind any agent, without the host ever reading what the VM wrote.
 
 ## The boundary (set by the founder 2026-10-13; an invariant of this spec)
 
 - **BND-1 - One bridge.** Nothing on the host reads a file ZCode wrote, except content
   that arrived through git by way of GitHub. No shared folder, no mounted drive, no
-  copied directory.
+  copied directory. With ZCode in a docker container this means: ZCode's working trees
+  live only in the container's own storage (its filesystem or a docker-managed volume),
+  never in a host bind mount; no host path is mounted into the container, read-only or
+  otherwise; and no display, clipboard or audio socket of the host (X11, Wayland,
+  PulseAudio, PipeWire) is shared with it. If the AppImage needs a display, it gets one
+  that lives inside the container or is reached only through a viewer that passes no files.
 - **BND-2 - No listener.** Nothing MinSpec ships opens a network port on the host for
-  the VM to call, and nothing in the VM is given a port on the host.
+  the VM to call, and nothing in the VM is given a port on the host. ZCode's container
+  does not use the host network (`--network host` is forbidden) and publishes no ports
+  (no `-p` or `--publish`), so nothing in it can reach a service that listens only on the
+  host's loopback address, and nothing on the host is reachable through it.
 - **BND-3 - The VM is not the gate.** A check that runs inside the VM is help for the
   agent working there. Whatever is being kept out of the host can switch it off. The
   checks that decide a merge run on GitHub.
@@ -139,6 +150,21 @@ Actions and behind any agent, without the host ever reading what the VM wrote.
   or steers sessions inside the VM, and nothing MinSpec runs in the VM reports to the
   host. The host learns of VM work only from GitHub. (Founder, 2026-10-13: "i don't
   expect COS to see inside zcode.")
+- **BND-6 - Container confinement.** ZCode's container cannot act as the host. It is
+  not given the docker socket (`/var/run/docker.sock` or a rootless equivalent), since
+  anything holding that socket can start a container with the host's filesystem mounted;
+  it is not run `--privileged`; it has no added capabilities (no `--cap-add`) and no
+  security profile switched off (no `seccomp=unconfined`, `apparmor=unconfined` or
+  `label=disable`); it shares no PID or IPC namespace with the host (no `--pid host`, no
+  `--ipc host`); and root inside it is not root on the host (rootless docker or a user
+  namespace remap; a non-root user inside is not enough on its own, because anything that
+  becomes root inside a rootful container is then root on the host). Together with BND-1 this is what keeps the
+  host's credentials (`~/.claude`, `~/.ssh`, the founder's GitHub login, every `.env`)
+  out of the container's reach. This is a property of how the founder starts the
+  container, not of MinSpec's code: nothing MinSpec ships can check it from inside, and
+  measurement 12 records it. **Leftover risk, stated plainly:** a container shares the
+  host's kernel. A kernel exploit run inside the container escapes it, and then BND-1 to
+  BND-6 all fail at once. A VM did not share the kernel; this move accepts that risk.
 
 **Why git through GitHub is the bridge, and its limit.** It is the one channel where
 every change is a reviewable diff and passes checks the VM cannot turn off: all 19
@@ -285,8 +311,14 @@ would need the project files, which are in the VM.
 - **Core.** The new package: MinSpec's existing checks, callable with no editor.
 - **Operation.** One thing the core does: validate, hash, status, next, activate,
   approve.
-- **ZCode project.** A project opened in ZCode inside the VM and never opened on the
-  host (for example `~/code/Lovefest`). The host does not read it and does not build it.
+- **ZCode container.** The docker container on the host in which ZCode runs as an
+  AppImage. Where this document, including the founder's recorded answers, says "the VM",
+  it means this container: ZCode ran in a VM when those words were written, and the move
+  to a container changes the boundary only as BND-1, BND-2 and BND-6 now state.
+- **Host.** The NixOS machine ZCode's container runs on, and every other container on
+  it. Anything outside ZCode's container is the host.
+- **ZCode project.** A project opened in ZCode whose working tree exists only inside
+  ZCode's container (for example `~/code/Lovefest`). The host does not read it and does not build it.
 - **Host-built repository.** Any repository the host's builders, sessions or checks act
   on, MinSpec itself included.
 - **Tool server.** A local program an agent talks to over standard input and output
@@ -348,6 +380,14 @@ would need the project files, which are in the VM.
 - **FR-12 - Not a user command.** The command line is for hooks, workflows and agents.
   No MinSpec document, prompt or shipped rule may tell a person to type it in place of a
   Command Palette entry (answered 2026-10-13).
+- **FR-26 - The tool server declares what each tool does to the project (added
+  2026-10-16, #2736 point 4).** The tool server MUST declare `validate`, `hash`, `status`
+  and `next` as read-only and not destructive, and MUST declare `activate`, which writes
+  git configuration (FR-6), as destructive. The declarations come from the same table as
+  the operations (FR-11), so a tool cannot be offered without one. A test MUST fail when
+  a listed tool has no declaration, or when a tool FR-6 lets write is declared read-only.
+  This is what lets an agent host that restricts a planning mode to read-only tools, such
+  as ZCode's `plan` mode, allow the four checks and still stop `activate`.
 
 ### D. Getting it into the VM and onto GitHub
 
@@ -431,7 +471,8 @@ agent has a shell. No rule in this section pretends otherwise.
 
 **What this guarantees.** Host-built repositories never carry an approval that was made
 in the VM, provided the VM's GitHub grant excludes them (FR-21) and the host builds no
-ZCode project (FR-22). The guarantee rests on that separation and on nothing else.
+ZCode project (FR-22), and the container cannot read host credentials (BND-6). The
+guarantee rests on that separation and on nothing else.
 
 **What it does not guarantee.** Anything inside a ZCode project. There, nothing proves an
 approval was his: the agent has a shell and can set the author address (FR-19 note), and
@@ -504,6 +545,9 @@ key, no outside review for approvals in ZCode projects.
 - [ ] **Two ways, one set** - the command line and the tool server offer exactly the
       same operations. (FR-11)
 - [ ] **No port** - the tool server binds no socket. (FR-10, BND-2)
+- [ ] **Tools say what they do** - the tool server's list declares `validate`, `hash`,
+      `status` and `next` read-only and `activate` destructive, and no listed tool lacks
+      a declaration. (FR-26)
 - [ ] **Fails loudly** - a spec that cannot be read makes `validate` exit non-zero with
       the file named. (FR-9)
 - [ ] **Usable in the VM** - inside the VM, with nothing shared from the host, the core
@@ -520,7 +564,7 @@ key, no outside review for approvals in ZCode projects.
   never shown as the merge gate (FR-18).
 - **INV-3 - Blast radius** (constitution invariant 3, DR-074). The core acts only on a
   project with `.minspec/` (FR-8) and touches nothing machine-wide (FR-17).
-- **INV-4 - The VM boundary** (BND-1 to BND-5 above). FR-10, FR-14, FR-18, FR-19 to
+- **INV-4 - The VM boundary** (BND-1 to BND-6 above). FR-10, FR-14, FR-18, FR-19 to
   FR-25. An approval made in the VM stays in its project (BND-4, FR-22).
 - **INV-5 - Tier map** (DR-014). Code that starts a process stays out of
   `packages/shared`; the core is its own package.
@@ -591,7 +635,7 @@ founder, **not measured**: no host session can see the VM. If measurement 8 show
 token reaches more than ZCode repositories, FR-21 is not met and the stated fallback is
 Option B of OQ-1.
 
-## To measure inside the VM before Plan (only the founder can)
+## To measure before Plan (only the founder can)
 
 No agent session can reach the VM. Each result goes into the design notes with the
 ZCode version.
@@ -617,6 +661,13 @@ ZCode version.
     commit, with a touch each time?
 11. Do ZCode-project repositories run the AI review at all? If not, FR-23 cannot be met
     there.
+12. Run on the host: `docker inspect` of ZCode's container, recording its mounts
+    (`Mounts`, every bind and volume), `HostConfig.NetworkMode` and
+    `HostConfig.PortBindings`, `HostConfig.Privileged`, `HostConfig.CapAdd`,
+    `HostConfig.SecurityOpt`, `HostConfig.PidMode` and `HostConfig.IpcMode`,
+    `Config.User` and `HostConfig.UsernsMode`, whether docker itself runs rootful or
+    rootless (`docker info`, `SecurityOptions`), and whether any X11 or Wayland socket or
+    audio socket is mounted in. BND-1, BND-2 and BND-6 depend on the answer.
 
 ## Decision records
 
@@ -627,7 +678,7 @@ ZCode version.
   check, advisory first) are relied on, not amended: the VM boundary keeps VM approvals
   out of the repositories they govern (BND-4, FR-22). If OQ-1 is answered B, they are
   extended and a decision record must say how.
-- **The VM boundary itself** (BND-1 to BND-5) is a founder decision that outlives this
+- **The VM boundary itself** (BND-1 to BND-6) is a founder decision that outlives this
   spec and belongs in a decision record or the constitution. Not written here.
 
 ## Risks

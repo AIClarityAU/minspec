@@ -272,16 +272,23 @@ describe('#1306 — orphaned agent-running claims are released', () => {
     expect(out).toContain('releasing orphaned agent-running on #88');
   });
 
+  // The liveness witness is a HOST-WIDE `pgrep -f "dispatch-issue.sh <n>"`, so these
+  // "no live process" cases need an issue number no other suite runs a real
+  // dispatch-issue.sh for. 4242 collided with agent-launch-harness's DISPATCH_ISSUE:
+  // a parallel file's live dispatch made the reaper `continue` silently, and the
+  // unreadable-claim case lost its "leaving it alone" line.
+  const NO_DISPATCH_ISSUE = '13069';
+
   it('leaves a RECENT claim alone even with no live process (age witness)', () => {
     const nowIso = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
-    const out = runReconciler('reconcile_stale_claims', { running: '4242\n' }, [
+    const out = runReconciler('reconcile_stale_claims', { running: `${NO_DISPATCH_ISSUE}\n` }, [
       [claimEvent(nowIso)],
     ]);
     expect(out).not.toContain('releasing orphaned');
   });
 
   it('fails toward no-op when the claim time is unreadable', () => {
-    const out = runReconciler('reconcile_stale_claims', { running: '4242\n' });
+    const out = runReconciler('reconcile_stale_claims', { running: `${NO_DISPATCH_ISSUE}\n` });
     expect(out).toContain('leaving it alone');
     expect(ghCalls()).not.toContain('--remove-label agent-running');
   });

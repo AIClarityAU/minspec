@@ -115,6 +115,13 @@ export interface DrainFixture {
   inbox?: number[];
   /** Open pull requests. Listing any turns the remediation sweep on. */
   openPrs?: number[];
+  /**
+   * What GitHub answers when the drain counts the drain's own open pull requests held for
+   * a human (`needs-human-review` on an `agent/issue-*` branch, #2939). A number is the
+   * count; `'fail'` makes that one query exit 1. Unset reads as 0, so every fixture that
+   * predates the count keeps its spec-writing on.
+   */
+  heldPrs?: number | 'fail';
   /** The reading on disk when the drain starts. `null` = no file at all. */
   reading: Reading | null;
   /** What the meter reads once the dispatch of that issue has finished. */
@@ -201,6 +208,8 @@ export interface Drain {
   triaged(): number[];
   /** Pull requests the remediator was run for. */
   remediated(): number[];
+  /** How many times the drain counted its held pull requests (#2939). */
+  heldAsked(): number;
   /** Did anything try to run `claude`? It never should. */
   claudeCalled(): boolean;
 }
@@ -292,7 +301,17 @@ if [[ "$1" == "issue" && "$2" == "view" ]]; then
   [[ -f "${dir}/issue.$3.json" ]] && cat "${dir}/issue.$3.json"
   exit 0
 fi
-if [[ "$1" == "pr" && "$2" == "list" && " $* " == *" --state open "* ]]; then cat "${dir}/queue.prs"; exit 0; fi
+if [[ "$1" == "pr" && "$2" == "list" && "$label" == "needs-human-review" ]]; then
+  echo "pr list --label needs-human-review" >> "${dir}/held-asked"
+  ${f.heldPrs === 'fail' ? 'echo "HTTP 502: Bad Gateway (https://api.github.com/graphql)" >&2; exit 1' : `echo ${f.heldPrs ?? 0}; exit 0`}
+fi
+if [[ "$1" == "pr" && "$2" == "list" && " $* " == *" --state open "* ]]; then
+  # Honour --limit the way gh does (default 30), and answer in the row shape the drain's
+  # --jq template produces, so a drain that omits --limit sees only 30 PRs (#2975).
+  lim=30; prev=""
+  for a in "$@"; do [[ "$prev" == "--limit" ]] && lim="$a"; prev="$a"; done
+  head -n "$lim" "${dir}/queue.prs" | sed 's/$/ false/'; exit 0
+fi
 exit 0
 `,
   );
@@ -419,6 +438,10 @@ exit ${STATUS_DECLINED}
     MINSPEC_ISSUE_RANKER: path.join(bin, 'rank.sh'),
     MINSPEC_DRAIN_SELF_REFRESH: '0',
     MINSPEC_DRAIN_GATED_FF: '0',
+    // Step 0c (#2981) lists needs-human-review PRs every cycle; this harness's gh stub
+    // answers that list with a held COUNT for the backpressure tests, so the stage is
+    // off here and has its own suite (drain-delegated-merge.test.ts).
+    MINSPEC_DRAIN_DELEGATED_MERGE: '0',
     MINSPEC_DRAIN_RUN_DIR: path.join(dir, 'run'),
     MINSPEC_DRAIN_PRIMARY_ROOT: path.join(dir, 'root'),
     MINSPEC_DRAIN_LOG: logFile,
@@ -451,6 +474,7 @@ exit ${STATUS_DECLINED}
     forgeries: () => lines(path.join(dir, 'forgeries')),
     triaged: () => numbers(path.join(dir, 'triaged')),
     remediated: () => numbers(path.join(dir, 'remediated')),
+    heldAsked: () => lines(path.join(dir, 'held-asked')).length,
     claudeCalled: () => fs.existsSync(path.join(dir, 'claude-called')),
   };
   return { drain, env, logFile };

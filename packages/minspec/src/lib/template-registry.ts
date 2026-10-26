@@ -551,7 +551,7 @@ check instead of bricking the commit. Know the limit of what's actually shipped:
 \`python3\` and shell tiers match paths under \`specs/\` literally, and the Node validator
 (\`@aiclarity/minspec-validator\`) is not yet published, so it is never the one that runs. If
 \`{{specsDir}}/\` differs from \`specs/\`, no tier that exists today sees your specs, and a
-clean commit is not evidence the frontmatter is valid.
+clean commit is not evidence the frontmatter is valid (#2684).
 
 ### Decision frontmatter
 
@@ -567,7 +567,7 @@ another DR resolves against an id that was never there to begin with.
 Enforced by the same shell case inside the pre-commit hook's SDD-validation stage that checks
 spec frontmatter, and by \`validate.py\`'s \`DR_ID_RE\` tier. The path is matched literally
 against \`docs/decisions/\`, so a project that has relocated \`{{decisionsDir}}/\` is not covered
-by the lower tiers — the same known limit the spec-frontmatter gate carries.
+by the lower tiers — the same known limit the spec-frontmatter gate carries (#2684).
 
 ### Deferred-work gate
 
@@ -1564,7 +1564,7 @@ minspec_shell_gate() {
         # The path is literal, matching the \\\`specs/\\\` case above — this hook is a
         # managed region rendered without template context, so a project that has
         # relocated its decisions directory is not covered. That is a known limit
-        # of both gates, not a new one.
+        # of both gates, not a new one (#2684).
         case "$(basename -- "$f")" in
           INDEX.md|README.md) ;;
           *)
@@ -1820,6 +1820,9 @@ DR_ID_RE = re.compile(r"^DR-\\d+$")
 # A DR is any .md under the decisions dir except the register's own listing
 # (no id: of its own) and a conventional README (prose, not a record) — #1908.
 DR_EXEMPT_FILENAMES = {"INDEX.md", "README.md"}
+# The section the founder reads to accept a DR. A hand-written DR skipped it because
+# only the generator template carried it (#2921). WARN until the corpus is backfilled.
+DR_PLAIN_TERMS_RE = re.compile(r"^#{1,6}[ \\t]+In plain terms\\b", re.IGNORECASE | re.MULTILINE)
 
 
 def clean_frontmatter_value(raw):
@@ -2225,6 +2228,11 @@ def main():
                     "FAIL " + norm + ": invalid \`id: DR-NNN\` frontmatter (got \`" + dr_id + "\`)\\n"
                 )
                 errors += 1
+
+            if not DR_PLAIN_TERMS_RE.search(FM_RE.sub("", content, count=1)):
+                sys.stderr.write(
+                    "WARN " + norm + ": decision record lacks a \`## In plain terms\` section (#2921)\\n"
+                )
 
         if is_domain:
             if clean_frontmatter_value(fm.get("type", "")) != "domain":

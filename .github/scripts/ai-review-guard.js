@@ -445,7 +445,7 @@ function parseResetInstant(text, nowMs) {
 //
 // WHAT THIS SECTION IS. The ai-review workflow embeds a `patch-fingerprint:` marker -
 // a hash of the three-dot diff - in the verdict check-run's output. It is a
-// MEASUREMENT record: `scripts/review-churn-report.sh` reads it back to count how often
+// MEASUREMENT record: the review-churn report script reads it back to count how often
 // a round re-reviewed a patch an earlier round had already passed.
 //
 // WHAT READS IT TO SKIP A REVIEW: nothing. `findReattestableVerdict` below is
@@ -487,6 +487,87 @@ function patchFingerprint(diffText) {
   const norm = String(diffText == null ? '' : diffText).replace(/\r\n?/g, '\n').replace(/\s+$/, '');
   if (norm === '') return null; // an empty patch is never re-attestable (see #1680)
   return require('crypto').createHash('sha256').update(norm, 'utf8').digest('hex');
+}
+
+/**
+ * The line `review-branch.sh --print-input` closes the diff block with. Inside the diff
+ * no line can equal it: every body line starts with ' ', '+', '-' or '\', and the
+ * script defangs the tag in the payload before wrapping it. A test pins this literal
+ * against the script.
+ */
+const REVIEW_INPUT_DIFF_CLOSE = '</untrusted_diff>';
+
+/**
+ * A line that marks a file section of `git diff` as binary: the plain form review-branch.sh
+ * prints, and the `--binary` form in case that ever changes. In a text section no body
+ * line can match, since each starts with ' ', '+', '-' or '\'.
+ */
+const BINARY_DIFF_MARKER = /^(?:Binary files .* differ|GIT binary patch)$/;
+
+/**
+ * Fingerprint of the reviewable input, as the verdict carry keys it (#1688; queue item
+ * tm1, founder "go" 2026-10-17). It is `patchFingerprint` over the input with exactly two
+ * things taken out, and only inside the diff block:
+ *
+ *   - the blob ids on a diff's `index <old>..<new> <mode>` line (the mode stays), and
+ *   - the START line numbers on a hunk header `@@ -a,b +c,d @@` (the lengths, and the
+ *     function text git prints after the second `@@`, stay).
+ *
+ * WHY. Both follow the BASE copy of a file, not the change. When main edits a file the
+ * pull request also edits, anywhere outside the hunk's context, a base merge leaves every
+ * added, removed and context line identical and still moves the old blob id and the line
+ * numbers. Hashing them refused the carry on exactly the push it exists for: measured
+ * 2026-10-18, 2 of the 4 base merges refused in a 26-push sample.
+ *
+ * WHAT IT STILL SEES. Every body line byte-for-byte, whitespace included (which is why
+ * this is not `git patch-id`); the context lines, so a base edit next to the change is
+ * reviewed again; the hunk lengths and the function text in the header; file headers,
+ * modes, renames; and the approval facts after the diff block, untouched.
+ *
+ * BINARY FILES KEEP THEIR BLOB IDS (#2926 security finding). `review-branch.sh` runs a
+ * plain `git diff`, so a changed binary file is one constant line ("Binary files a/x and
+ * b/x differ") and its blob ids are the only trace of what changed. The ids are dropped
+ * only from a file section that shows its content as text hunks and has no binary
+ * marker; a binary section, or any section with no hunk at all, is hashed as written.
+ *
+ * WHAT IT ACCEPTS, stated: a change whose text is identical but that now sits at a
+ * different line, with identical context, carries. The voters would read the same
+ * lines with different numbers. This is NOT a class DR-104 accepted: DR-104 rejected a
+ * position-insensitive identity, and this reversal is recorded, proposed, in DR-110.
+ *
+ * A malformed input (no closing line) is hashed with nothing taken out: never wider
+ * than before. Empty is null, as for patchFingerprint.
+ */
+function reviewInputFingerprint(inputText) {
+  const text = String(inputText == null ? '' : inputText).replace(/\r\n?/g, '\n');
+  if (patchFingerprint(text) === null) return null;
+  const lines = text.split('\n');
+  const end = lines.indexOf(REVIEW_INPUT_DIFF_CLOSE);
+  if (end === -1) return patchFingerprint(text);
+  const HUNK = /^@@ -\d+(,\d+)? \+\d+(,\d+)? @@(.*)$/;
+  // Walk one file section (`diff --git` up to the next one) at a time. The blob ids are
+  // dropped only from a section whose content is shown as text hunks and that carries no
+  // binary marker; anywhere else they are the only trace of the content and stay.
+  let start = 0;
+  while (start < end) {
+    let stop = start + 1;
+    while (stop < end && !lines[stop].startsWith('diff --git ')) stop += 1;
+    const section = lines.slice(start, stop);
+    const shownAsText =
+      section.some((l) => HUNK.test(l)) && !section.some((l) => BINARY_DIFF_MARKER.test(l));
+    for (let i = start; i < stop; i += 1) {
+      const line = lines[i];
+      let m = /^index [0-9a-f]+\.\.[0-9a-f]+((?: [0-7]{6})?)$/.exec(line);
+      if (m) {
+        if (shownAsText) lines[i] = `index ..${m[1]}`;
+        continue;
+      }
+      m = HUNK.exec(line);
+      if (m) lines[i] = `@@ -${m[1] || ''} +${m[2] || ''} @@${m[3]}`;
+    }
+    start = stop;
+  }
+  return patchFingerprint(`review-input/v2\n${lines.join('\n')}`);
 }
 
 /** Render the marker embedded in a check-run's output so a later run can read it. */
@@ -736,7 +817,7 @@ function findReattestableVerdict({ checkRuns, patchHash, allowlist } = {}) {
     if (c.status !== 'completed' || c.conclusion !== 'success') continue;
     const slug = c.app && c.app.slug;
     const identities = [slug, slug ? `${slug}[bot]` : null].filter(Boolean);
-    if (!identities.some((i) => allowed.includes(i))) continue;
+    if (!identities.some((i) => isAuthorizedReviewer(i, allowed))) continue;
     const text = [c.output && c.output.title, c.output && c.output.summary, c.output && c.output.text]
       .filter(Boolean)
       .join('\n');
@@ -1216,7 +1297,7 @@ function carriedLabelFault({ current = [], carried } = {}) {
  */
 function planVerdictCarry(raw) {
   const o = raw && typeof raw === 'object' ? raw : {};
-  const inputHash = patchFingerprint(o.inputText);
+  const inputHash = reviewInputFingerprint(o.inputText);
   const panelKey = reviewPanelKey({ lsTree: o.lsTree, coverage: o.coverage });
 
   // The response is handed on WHOLE - count and all - and never unwrapped to its
@@ -1341,6 +1422,90 @@ function decideStalenessStrip({ action, labels, headRound } = {}) {
   };
 }
 
+// #3015 — GitHub API rate limits on the gate's provenance reads.
+//
+// The gate shares one installation token with every other workflow in the repo, so a
+// burst of PR updates can exhaust it mid-run (PR 2557, run 40139595165: core limit
+// 5000/5000, reset ~5 min out). Every read then threw, was swallowed into a warning,
+// and the gate reported a provenance finding it never made. The status POST then hit
+// the same limit, so the run died without posting at all.
+//
+// A rate limit is: 429, or 403 carrying `retry-after` or `x-ratelimit-remaining: 0`.
+// A plain 403 (missing permission) is NOT one - retrying it only delays a real fault.
+function errorHeaders(e) {
+  return (e && e.response && e.response.headers) || {};
+}
+
+function isRateLimitError(e) {
+  if (!e) return false;
+  const status = Number(e.status || (e.response && e.response.status));
+  if (status === 429) return true;
+  if (status !== 403) return false;
+  const h = errorHeaders(e);
+  return h['retry-after'] !== undefined || String(h['x-ratelimit-remaining']) === '0';
+}
+
+// How long GitHub says to wait, in ms, or null when it does not say. `retry-after`
+// (seconds, secondary limits) wins; else `x-ratelimit-reset` (epoch seconds) plus a
+// one-second pad against runner/GitHub clock skew, floored at that pad.
+const RATE_LIMIT_SKEW_PAD_MS = 1000;
+function rateLimitWaitMs(e, nowMs) {
+  const h = errorHeaders(e);
+  const after = Number(h['retry-after']);
+  if (h['retry-after'] !== undefined && Number.isFinite(after) && after >= 0) return after * 1000;
+  const reset = Number(h['x-ratelimit-reset']);
+  if (h['x-ratelimit-reset'] !== undefined && Number.isFinite(reset)) {
+    return Math.max(0, reset * 1000 - nowMs) + RATE_LIMIT_SKEW_PAD_MS;
+  }
+  return null;
+}
+
+// Run `fn`, retrying ONLY rate-limit failures with bounded backoff that honours the
+// wait GitHub names. Fails closed: when attempts run out, or GitHub's named wait is
+// beyond the remaining budget (not worth holding a runner for), the last error is
+// rethrown with `rateLimited = true` so the caller can say "re-run", not "forged".
+// Any other error is rethrown on the first attempt, untouched.
+async function withRateLimitRetry(
+  fn,
+  {
+    sleep,
+    now = Date.now,
+    maxAttempts = 4,
+    maxTotalWaitMs = 5 * 60 * 1000,
+    defaultBackoffMs = [5000, 15000, 30000],
+    onRetry,
+  } = {},
+) {
+  if (typeof sleep !== 'function') throw new TypeError('withRateLimitRetry needs a sleep function');
+  let waited = 0;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (!isRateLimitError(e)) throw e;
+      const named = rateLimitWaitMs(e, now());
+      const wait =
+        named !== null
+          ? named
+          : defaultBackoffMs[Math.min(attempt - 1, defaultBackoffMs.length - 1)];
+      if (attempt >= maxAttempts || waited + wait > maxTotalWaitMs) {
+        e.rateLimited = true;
+        throw e;
+      }
+      if (typeof onRetry === 'function') onRetry({ attempt, waitMs: wait, error: e });
+      await sleep(wait);
+      waited += wait;
+    }
+  }
+}
+
+function readFailureReason(what, e) {
+  if (e && (e.rateLimited === true || isRateLimitError(e))) {
+    return `GitHub API rate-limited reading ${what}, not a provenance finding — re-run once the limit resets`;
+  }
+  return `could not read ${what} — provenance unverifiable until it can be read`;
+}
+
 // #359 + #397 (durable) — provenance-recency verification of a *surviving* pass.
 //
 // The revert/strip guards above are add-time / push-time *cleanup* and can fail
@@ -1366,7 +1531,19 @@ function decideStalenessStrip({ action, labels, headRound } = {}) {
 // is covered defence-in-depth by the `synchronize` staleness strip (which now
 // fails the run if it cannot remove the label) and by the allowlist check a
 // forger cannot satisfy; the primary trust anchor here is the applier identity.
-function verifyPassProvenance({ labelActor, labelAppliedAt, headCommittedAt, allowlist } = {}) {
+//
+// #3015 — `timelineReadError` / `headReadError` are the errors (if any) the workflow
+// caught reading the label timeline / head commit. They never make a pass verify;
+// they only stop a failed READ being reported as a provenance FINDING ("no record of
+// who applied"), which sent readers hunting a forged label when a re-run was the fix.
+function verifyPassProvenance({
+  labelActor,
+  labelAppliedAt,
+  headCommittedAt,
+  allowlist,
+  timelineReadError,
+  headReadError,
+} = {}) {
   const list = Array.isArray(allowlist) ? allowlist : [];
   if (list.length === 0) {
     return {
@@ -1376,6 +1553,9 @@ function verifyPassProvenance({ labelActor, labelAppliedAt, headCommittedAt, all
     };
   }
   if (!labelActor) {
+    if (timelineReadError) {
+      return { verified: false, reason: readFailureReason('the PR label timeline', timelineReadError) };
+    }
     return {
       verified: false,
       reason: 'no record of who applied ai-review:pass — provenance unverifiable',
@@ -1389,6 +1569,9 @@ function verifyPassProvenance({ labelActor, labelAppliedAt, headCommittedAt, all
   }
   const applied = Date.parse(labelAppliedAt);
   const committed = Date.parse(headCommittedAt);
+  if (!Number.isFinite(committed) && headReadError) {
+    return { verified: false, reason: readFailureReason('the head commit', headReadError) };
+  }
   if (!Number.isFinite(applied) || !Number.isFinite(committed)) {
     return {
       verified: false,
@@ -1996,6 +2179,8 @@ module.exports = {
   renderCarriedComment,
   carriedLabelFault,
   planVerdictCarry,
+  reviewInputFingerprint,
+  REVIEW_INPUT_DIFF_CLOSE,
   parseResetInstant,
   VERDICT_SCHEMA,
   defangProtocolTokens,
@@ -2006,6 +2191,10 @@ module.exports = {
   decideProvenanceRevert,
   decideStalenessStrip,
   verifyPassProvenance,
+  isRateLimitError,
+  rateLimitWaitMs,
+  withRateLimitRetry,
+  readFailureReason,
   verifyHeadPassStatus,
   verifyHeadPassCheckRun,
   verifyHeadPassWitness,
