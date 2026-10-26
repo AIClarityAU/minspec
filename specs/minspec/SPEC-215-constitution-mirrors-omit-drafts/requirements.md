@@ -184,9 +184,10 @@ compaction must use. Without one, three hand-copied checks have already drifted 
 Each question names a recommended option **(rec)** and what that option costs. The
 requirements above are written under every recommendation.
 
-All 4 decisions are resolved: an agent session recorded each option this document already
-recommended, on 2026-10-27, under delegation DLG-001 (DR-108, the delegated-approval
-record). No human chose them; they are ratified only by approval of this spec.
+Each selection below was recorded by an agent session on the option this document
+already marks (rec), under delegation DLG-001 (DR-108, the delegated-approval record).
+No human chose them. This section is not marked resolved: Clarify stays open until
+the spec is approved.
 
 - **DQ-1 - How mirrors treat DRAFT entries.**
   **Recorded selection: Option (a),** leave DRAFT entries out and print one count line,

@@ -215,9 +215,10 @@ that backstop.
 
 ## Decisions needed (Clarify)
 
-All 6 decisions are resolved: an agent session recorded each option this document already
-recommended, on 2026-10-27, under delegation DLG-001 (DR-108, the delegated-approval
-record). No human chose them; they are ratified only by approval of this spec.
+Each selection below was recorded by an agent session on the option this document
+already marks (rec), under delegation DLG-001 (DR-108, the delegated-approval record).
+No human chose them. This section is not marked resolved: Clarify stays open until
+the spec is approved.
 
 ### D1 - What the tag looks like
 
