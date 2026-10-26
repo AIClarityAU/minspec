@@ -330,6 +330,7 @@ here only so a reader of either can find this one.
     signature (`approval-pr.ts`, now in `affects:`) and so needs SPEC-050 re-approval.
   - (b) Use 30 s everywhere. Cost: recovery's push budget halves, and a slow link that
     recovers today would time out to `offline`.
+  **Recorded selection: Option (a), the transport passes 60 s for fetch and push and the runner default for everything else.** Selected by the founder, 2026-10-26 (queue item clr1027, answer 'all rec' relayed by the chief-of-staff proxy).
 
 ## Out of scope
 

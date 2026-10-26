@@ -268,6 +268,8 @@ request. Today only the gate can tell them apart.
 
 ### DQ-3 - Where does the base-trusted producer run?
 
+**Recorded selection: Option (a), a new step in `ai-review.yml` using the App token the carry step already uses, running the base checkout's code.** Selected by the founder, 2026-10-26 (queue item clr1027, answer 'all rec' relayed by the chief-of-staff proxy).
+
 - **(a) A new step in `ai-review.yml`, using the App token the carry step already uses,
   that runs the base checkout's code (rec).** One workflow, one token pattern, facts made
   in the same run that uses them. Cost: the ai-review job gains a dependency-install step

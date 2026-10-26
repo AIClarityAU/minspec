@@ -211,6 +211,7 @@ mocked config read), run with a control that shows the check fails when the defe
     every existing adopter, including ones who deliberately leave secret scanning advisory.
   - (b) New inits only. No new prompt. Cost: every existing adopter, including both repos in
     the issue, keeps a non-gating CI witness until someone notices.
+  **Recorded selection: Option (a), re-offer `gitleaks` once, on the next refresh, as a separately dismissible offer.** Selected by the founder, 2026-10-26 (queue item clr1027, answer 'all rec' relayed by the chief-of-staff proxy).
 - **D3. Root `package.json` with a `prepare` script (the issue's alternative): rejected
   (rec).** Recorded so the reader can overturn it. It ties arming to someone running
   `npm install`, which CI and headless clones also skip (the same assumption, moved one step

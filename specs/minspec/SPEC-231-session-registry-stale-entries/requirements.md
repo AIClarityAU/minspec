@@ -118,6 +118,8 @@ whether MinSpec may delete from it at all.
 - (b) No; file upstream to Claude Code and only report. Cost: leak stays until upstream acts,
   and nothing here can force that.
 
+**Recorded selection: Option (a), yes after the grace period.** Selected by the founder, 2026-10-26 (queue item clr1027, answer 'all rec' relayed by the chief-of-staff proxy).
+
 **D3. Grace period for dead entries.** 24 h **(rec)** (lets a human inspect a crash; cost:
 slower reclaim) vs 0 (cost: removes evidence of a just-crashed session).
 

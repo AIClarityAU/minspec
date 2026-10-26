@@ -315,6 +315,8 @@ finds himself answering in prose often.
 
 ### D-2 - Where is "In plain terms" enforced?
 
+**Recorded selection: Option (a), enforced inside `ready-to-merge` for bot-authored PRs.** Selected by the founder, 2026-10-26 (queue item clr1027, answer 'all rec' relayed by the chief-of-staff proxy).
+
 - **(a) Inside `ready-to-merge`, for bot-authored PRs. (rec)** `ready-to-merge` is already a
   required check, so the rule gates merge without a ruleset change. **Cost:** a missing
   section blocks an otherwise green PR until the body is edited, and `ready-to-merge` grows

@@ -154,3 +154,4 @@ reports the distribution per path class and time window.
   author's call. Proposed rule, for the hook's help text: if the defect was visible to someone
   other than the author before the fix was started, it is `usage`. Founder to confirm or
   reword; the rule lives in the help text only and is not enforced.
+  **Recorded selection: Accept the proposed rule as worded: if the defect was visible to someone other than the author before the fix was started, it is `usage`.** Selected by the founder, 2026-10-26 (queue item clr1027, answer 'all rec' relayed by the chief-of-staff proxy).
