@@ -54,6 +54,7 @@ import {
   type DelegationWitnesses,
 } from './approval-actor';
 import { readRepeatFixShare, utcToday } from './repeat-fix-share';
+import { openClarifyDetail } from './clarify-open';
 import { readContentPullRequest } from './content-pr';
 import { readSpecFile, advanceSpecToImplementing } from '../../packages/minspec/src/lib/spec';
 import { isTerminalSpecStatus } from '../../packages/minspec/src/lib/spec-vocabulary';
@@ -213,6 +214,11 @@ export function planDelegatedApproval(input: PlanInput): PlanResult {
 
   const delegations = witnesses.delegations ?? [];
   const act = actForPath(artifactPath);
+  // No human reads this spec, so an open Clarify decision cannot be waved through (#3059).
+  if (act === 'spec-approval') {
+    const open = openClarifyDetail(artifactContent);
+    if (open !== undefined) return no('clarify-open', open);
+  }
   // The delegation to cite: the first that covers this repo and act. `checkApprovalActor`
   // re-judges it in full, so picking a non-covering one only produces a refusal.
   const cand = delegations.find(
