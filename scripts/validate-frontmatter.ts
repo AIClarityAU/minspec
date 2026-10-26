@@ -21,6 +21,7 @@ import {
   validateDrSequence,
   validateDrIndexStatus,
   validateDrAmendments,
+  validatePendingDrAmendments,
   detectDoubledFrontmatter,
 } from '../packages/minspec/src/lib/adr-manager';
 import {
@@ -491,6 +492,23 @@ try {
   // not own; but say so out loud. (The identical silent catch in Rules 6/8 predates
   // this and is left alone rather than widened here — noted for a separate sweep.)
   warn(`DR-amendment check could not run (${err instanceof Error ? err.message : String(err)}) — Rule 16 validated NOTHING this run; do not read the green as a clean register.`);
+}
+
+// Rule 16 advisory twin (WARN, #3106): the same check for PROPOSED sources. Rule 16 is
+// fatal at acceptance but exempts proposed DRs, so without this nothing warned while the
+// target notes could still be staged in the proposing PR — the gate first fired on the
+// founder's own acceptance PR, which cannot contain the fix. Warn-only: a pending
+// amendment is what proposed means. Accept ADR refuses on the same condition.
+try {
+  for (const g of validatePendingDrAmendments(resolveDecisionsDir())) {
+    warn(
+      `${join(resolveDecisionsDir(), `${g.target}.md`)}: DR amendment pending — ${g.source} (proposed) ${g.relation} ${g.target}, ` +
+        `but ${g.target} never mentions ${g.source}; stage an "Amended by ${g.source} (on acceptance)" note in the proposing PR, ` +
+        `or acceptance will fail Rule 16.`,
+    );
+  }
+} catch (err) {
+  warn(`Pending DR-amendment check could not run (${err instanceof Error ? err.message : String(err)}) — the Rule 16 advisory validated NOTHING this run.`);
 }
 
 // Rule 9 (non-fatal — Slice-1, #161): dangling-reference checker. Scans every
