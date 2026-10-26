@@ -11,8 +11,9 @@
  *   2. At most one drain: a live lock holder is adopted, never joined by a second, and a
  *      second supervisor exits 75.
  *   3. Pause survives restart: with the marker present a fresh supervisor starts nothing.
- *   4. A failure is visible: the drain's own last lines reach the journal and the exit
- *      code is non-zero.
+ *   4. A failure is visible: the drain's own last lines reach the journal, and the failure
+ *      is retried with backoff inside the same start (#3095) rather than exiting
+ *      non-zero; a normal end or SIGTERM exits 0.
  *
  * drain-service.sh reads pid 1's name from a path no environment variable can move. The
  * tests source the script and set that shell variable to a fixture, which is the only

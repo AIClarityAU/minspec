@@ -30,13 +30,13 @@
 #      lifetime end, or a container restart never turns a paused drain back on.
 #   4. A failure is visible. When a drain ends, the lines it wrote to the drain log
 #      since this script started waiting on it are printed here (the unit's journal),
-#      and the exit code says how it ended: 0 for a normal end (lifetime cap, or a SIGTERM someone
-#      else sent), 1 for
-#      the loop's "consecutive cycle errors" stop, a launch that failed, or a drain
-#      that vanished without its exit line. Those failures are printed and then RETRIED with
-#      backoff inside the same start (#3095): exiting would spend one of the unit's
-#      StartLimitBurst starts per failure, and a burst of transient failures after a host
-#      resume used up the limit and left the unit failed for good. Only a normal end exits 0.
+#      and a failure is never silent. The failures are: the loop's "consecutive cycle
+#      errors" stop, a launch that failed, and a drain that vanished without its exit
+#      line. Each is printed and then RETRIED with backoff inside the same start (#3095),
+#      not turned into exit 1: exiting would spend one of the unit's StartLimitBurst
+#      starts per failure, and a burst of transient failures after a host resume used up
+#      the limit and left the unit failed for good. A normal end (lifetime cap, or a
+#      SIGTERM someone else sent) exits 0.
 #
 # A deliberate stop is `systemctl --user stop minspec-drain`. Killing a `docker exec`
 # client does not kill the process it started in the container, so the unit's
