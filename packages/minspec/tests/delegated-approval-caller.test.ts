@@ -591,6 +591,30 @@ describe('#3020: hook-gated commit needs deps in the recording worktree', () => 
   });
 });
 
+describe('open Clarify questions (#3059)', () => {
+  it('skips a spec with an unanswered decision, by name, and never runs the CLI', () => {
+    commit(
+      {
+        'specs/minspec/SPEC-901-open/requirements.md': spec(
+          'SPEC-901',
+          'specifying',
+          '\n\n## Decisions needed (Clarify)\n\n**D1. Pick one.**\n- (a) x\n',
+        ),
+      },
+      'feat: SPEC-901 (#43)',
+    );
+    sh(root, 'push', '-q', 'origin', 'main');
+    sh(root, 'fetch', '-q', 'origin');
+    const rec = newRec();
+    const report = runCaller(opts({ write: false }), deps(rec));
+    const r = report.results.find((x) => x.artifact.includes('SPEC-901'));
+    expect(r?.outcome).toBe('skipped');
+    expect(r?.reason).toBe('clarify-open');
+    expect(r?.detail).toContain('D1');
+    expect(rec.approve.map((a) => a.artifact)).not.toContain('specs/minspec/SPEC-901-open/requirements.md');
+  });
+});
+
 describe('#3057: dependencies resolved from the primary worktree', () => {
   it('uses repoRoot when it has node_modules, else the primary, else null', () => {
     expect(resolveDependencyRoot(root, REAL_DEPS.git)).toBe(root);
