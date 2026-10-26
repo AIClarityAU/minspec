@@ -585,7 +585,13 @@ fi
 #   1. an unconfirmed closing link. A drain PR is dispatched for issue N (branch
 #      `agent/issue-N`); merging it closes whatever GitHub says it closes
 #      (`closingIssuesReferences`), so that list must contain N. A branch that is not a
-#      drain branch names no issue, so it needs at least one confirmed link.
+#      drain branch names no issue, so it needs at least one confirmed link, with ONE
+#      exception (#3115): a PR authored by minspec-sdd[bot] whose body carries no closing
+#      keyword at all (`Closes/Fixes/Resolves #N`). It claims to close nothing, so there
+#      is no link to confirm and merging takes no one's decision. Without it the
+#      Clarify-selections PR (#3083), the only route that settles Clarify, was refused
+#      forever and every delegated approval stalled behind it. A human author, a missing
+#      or non-bot author, or a closing keyword GitHub did not link (#2228) still denies.
 #   2. a creator-shepherd handoff. `shepherd_hand_off` stamps SHEPHERD_HANDOFF_MARKER on a
 #      comment when the creating session gives the PR to the founder; a bot merge would
 #      take that decision from him.
@@ -594,7 +600,7 @@ fi
 delegated_merge_human_claims() {
   local pr="$1" view="" head="" refs="" handoffs="" issue=""
   local marker="<!-- minspec-shepherd-handoff -->"
-  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments 2>/dev/null) \
+  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments,author,body 2>/dev/null) \
      || ! head=$(printf '%s' "$view" | jq -r '.headRefName' 2>/dev/null) \
      || ! refs=$(printf '%s' "$view" | jq -r '.closingIssuesReferences | if type == "array" then .[].number else error("no list") end' 2>/dev/null) \
      || ! handoffs=$(printf '%s' "$view" | jq -r --arg m "$marker" '.comments | if type == "array" then [.[] | select((.body // "") | contains($m))] | length else error("no list") end' 2>/dev/null); then
@@ -611,11 +617,28 @@ delegated_merge_human_claims() {
       printf 'closes-link-unconfirmed\tPR #%s was dispatched for issue #%s but GitHub does not confirm that it closes it (#2228); merging would close the wrong issue or none\n' "$pr" "$issue"
       return 1
     fi
-  elif [[ -z "${refs//[$'\n\r\t ']/}" ]]; then
+  elif [[ -z "${refs//[$'\n\r\t ']/}" ]] && ! delegated_merge_claims_no_issue "$view"; then
     printf 'closes-link-unconfirmed\tPR #%s has no confirmed closing link; merging would close no issue\n' "$pr"
     return 1
   fi
   return 0
+}
+
+# delegated_merge_claims_no_issue <pr-view-json> (#3115)
+#
+# Exit 0 only when the PR was authored by minspec-sdd[bot] (gh reports an App author as
+# `app/minspec-sdd` with is_bot true; the REST form is `minspec-sdd[bot]`) AND its body is
+# a string carrying no GitHub closing keyword followed by an issue reference. Anything
+# unreadable, any other author, or any closing keyword exits 1, so the caller denies.
+delegated_merge_claims_no_issue() {
+  local v="$1"
+  printf '%s' "$v" | jq -e '
+    (.author | type == "object")
+    and (.author.is_bot == true)
+    and ((.author.login == "app/minspec-sdd") or (.author.login == "minspec-sdd[bot]"))
+    and (.body | type == "string")
+    and ((.body | test("\\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\\b:?\\s+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+"; "i")) | not)
+  ' >/dev/null 2>&1
 }
 
 autonomy_may_merge_delegated() {

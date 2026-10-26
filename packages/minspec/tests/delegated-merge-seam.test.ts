@@ -227,6 +227,36 @@ describe('human claims: a covered PR the bot must still not merge (#3050)', () =
     expect(r.status).toBe(0);
     expect(r.verdict).toMatchObject({ proceed: true });
   }, TIMEOUT);
+
+  // #3115: a bot-authored, non-drain spec PR that names no issue to close (the Clarify
+  // selections PR #3083) was refused forever as "closes-link-unconfirmed", although
+  // merging it closes nothing and takes no decision from anyone. It is the only route
+  // that settles Clarify, so the refusal stalled every delegated approval behind it.
+  const BOT = { login: 'app/minspec-sdd', is_bot: true };
+  const NO_ISSUE = { headRefName: 'cos/specifying-1025', closingIssuesReferences: [], author: BOT, body: 'Records Clarify selections (see #3081, #3074).' };
+
+  it('a bot-authored non-drain PR that claims to close nothing proceeds', () => {
+    const r = run(['2966'], { view: view(NO_ISSUE) });
+    expect(r.status).toBe(0);
+    expect(r.verdict).toMatchObject({ proceed: true });
+  }, TIMEOUT);
+
+  it.each([
+    ['a human-authored non-drain PR with no link', { author: { login: 'harvest316', is_bot: false } }],
+    ['a non-drain PR with no author field', { author: undefined }],
+    ['a bot impersonation: bot login but is_bot false', { author: { login: 'app/minspec-sdd', is_bot: false } }],
+    ['another bot', { author: { login: 'app/dependabot', is_bot: true } }],
+    ['a Closes trailer GitHub did not link (#2228)', { body: 'Fixes the thing.\n\nCloses #3000' }],
+    ['a cross-repo Resolves trailer GitHub did not link', { body: 'resolved: AIClarityAU/minspec#3000' }],
+    ['a PR body that is not a string', { body: null }],
+    ['a drain branch with no link, even bot-authored', { headRefName: 'agent/issue-3000' }],
+  ] as const)('%s: still closes-link-unconfirmed, nothing written', (_n, o) => {
+    const r = run(['2966', '--arm'], { view: view({ ...NO_ISSUE, ...o }) });
+    expect(r.status).toBe(1);
+    expect(r.verdict).toMatchObject({ proceed: false, reason: 'closes-link-unconfirmed' });
+    expect(r.judgeArgs).toBeUndefined();
+    expect(writes(r.gh)).toEqual([]);
+  }, TIMEOUT);
 });
 
 describe('--arm: bound to the judged head, under the bot, never --admin', () => {
