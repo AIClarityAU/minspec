@@ -233,7 +233,18 @@ Cost of the offline read, same repo, same time:
 
 ## Decisions needed (Clarify)
 
+Selections below are recorded on the option this document already marks recommended, by an
+agent session on 2026-10-27. Selected on its recommended option under the founder's standing
+instruction of 2026-10-26 (inbox item in66, relayed by the chief-of-staff proxy). The
+founder did not see these items one by one. DQ-1 and DQ-3 are left open (a re-approval of an
+approved spec, and a required-check change); this section stays open, and the spec is not
+ready to approve, until the founder answers.
+
 ### DQ-1 - Per-product id ranges contradict the global uniqueness gate
+
+**Not recorded:** option (a) needs SPEC-053's text updated, and SPEC-053 is already approved
+(`status: planning`, approval record committed), so it forces a re-approval; it also ends
+the per-product id ranges adopters may rely on. Needs the founder's answer.
 
 `nextSpecId(specsDir, product)` scopes the max to one product (#57, SPEC-053), so a new
 product starts at SPEC-001. Rule 18 checks uniqueness **across all products**
@@ -252,6 +263,10 @@ interleaved with minspec's).
 
 ### DQ-2 - Should the editor ever refresh the remote view?
 
+**Recorded selection: (a),** never; local refs only, with freshness stated (FR-6). Selected
+on its recommended option under the founder's standing instruction of 2026-10-26 (inbox item
+in66, relayed by the chief-of-staff proxy).
+
 - **(a) (rec) Never.** Local refs only, freshness stated (FR-6); CI is the online
   witness. Cost: an adopter who rarely fetches gets a stale view, and learns of a clash
   at PR time rather than at creation.
@@ -260,6 +275,9 @@ interleaved with minspec's).
   fallback; disproportionate to a clash the CI gate already catches.
 
 ### DQ-3 - Make `spec-id-collision` a required check?
+
+**Not recorded:** option (a) makes `spec-id-collision` a required check, which is a ruleset
+change. Needs the founder's answer.
 
 The DR twin is still advisory: a workflow cannot make itself required.
 
@@ -270,6 +288,10 @@ The DR twin is still advisory: a workflow cannot make itself required.
   how #1916's clash went unflagged until its required checks turned red.
 
 ### DQ-4 - Extend the reader to decision-record ids?
+
+**Recorded selection: (a),** not in this spec; the reader takes a pattern parameter so a
+follow-up can reuse it. Selected on its recommended option under the founder's standing
+instruction of 2026-10-26 (inbox item in66, relayed by the chief-of-staff proxy).
 
 `nextAdrNumber` (`packages/minspec/src/lib/adr-manager.ts:106-121`) has the identical
 blindness. Its CI gate exists; its offline allocator does not see branches either.

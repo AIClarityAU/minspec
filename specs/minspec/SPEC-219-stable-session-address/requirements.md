@@ -94,7 +94,18 @@ unless the sender notices and reroutes it.
 
 ## Decisions needed (Clarify)
 
+Selections below are recorded on the option this document already marks recommended, by an
+agent session on 2026-10-27. Selected on its recommended option under the founder's standing
+instruction of 2026-10-26 (inbox item in66, relayed by the chief-of-staff proxy). The
+founder did not see these items one by one. D1 is left open (its recommendation is an act
+outside this repo); this section stays open, and the spec is not ready to approve, until the
+founder answers.
+
 **D1 - Where does this land?** (gating; blocks Plan)
+
+**Not recorded:** the recommended option routes the fix to the owner of the host messaging
+layer, outside this repo, which is an outward-facing act. Needs the founder's answer.
+
 - (a) **(rec)** File/route upstream to the owner of the host messaging layer, and keep this
   spec as the contract plus acceptance tests for it. Cost: MinSpec cannot ship the fix
   itself, so timing is outside our control and nothing improves here until it lands.
@@ -106,6 +117,11 @@ unless the sender notices and reroutes it.
   (5 sends) because the TTL is shorter than composition time.
 
 **D2 - Ref-wins versus a stable alias.** (the issue's two options)
+
+**Recorded selection: (a),** accept a stale name when the ref matches. Selected on its
+recommended option under the founder's standing instruction of 2026-10-26 (inbox item in66,
+relayed by the chief-of-staff proxy).
+
 - (a) **(rec)** Accept a stale name when the ref matches. Smallest change, uses data already
   in every row. Cost: a sender who picked the wrong session but the right-looking ref
   gets no name-mismatch error; only FR-5's notice reveals it.
@@ -117,6 +133,10 @@ rejected as a likely mistake?** (a) **(rec)** No, ref wins (FR-3 as written); co
 mis-typed ref that happens to be live delivers to the wrong session. (b) Yes, reject on
 conflict; cost: reintroduces failures for the legitimate stale-name case when the old name
 was since taken by another session.
+
+**Recorded selection: (a),** no: the ref wins (FR-3 as written). Selected on its recommended
+option under the founder's standing instruction of 2026-10-26 (inbox item in66, relayed by
+the chief-of-staff proxy).
 
 ## Out of scope
 
