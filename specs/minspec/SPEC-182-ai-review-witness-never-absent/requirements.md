@@ -153,4 +153,4 @@ from the head, with no version handshake (#1834), which makes the failure reacha
 - **D6 - Record a DR?** FR-2's guard-free second witness and the FR-5/FR-6 preflight contract
   are design choices. Clarify/Plan decides whether they need a DR (constitution invariant 2,
   "independent second witness") or stay spec-only.
-  **Recorded selection: Yes, a DR should record FR-2's guard-free second witness and the FR-5/FR-6 preflight contract (selection only; the DR is not written by this record).** Selected by the founder, 2026-10-26 (queue item clr1027, answer 'all rec' relayed by the chief-of-staff proxy).
+  **Recorded selection: Yes, a DR should record FR-2's guard-free second witness and the FR-5/FR-6 preflight contract (selection only; the DR is not written by this record).** Selected by the founder, 2026-10-26 (queue item clr1027, answer 'all rec' relayed by the chief-of-staff proxy). D6 has no (rec) option, so this is not inferred from 'all rec': the relayed answer names it, verbatim "SPEC-182 D6 yes, record a DR".
