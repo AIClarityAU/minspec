@@ -22,8 +22,10 @@ session-start hook's), the service adopts it, waits for it to end, then starts i
 
 ## Concurrency
 
-The drain the service starts runs 8 agents in parallel per cycle, the value the keeper
-sessions used. Override it with `MINSPEC_DRAIN_CONCURRENCY` in the service's environment;
+The drain the service starts runs 8 agents in parallel per cycle, (DR-114). The
+drain-keeper-1015b..d briefs (2026-10-15) started the drain with
+`MINSPEC_DRAIN_CONCURRENCY=8`; the live drain observed on 2026-10-23 ran serial
+(SPEC-230 requirements.md:50). Override it with `MINSPEC_DRAIN_CONCURRENCY` in the service's environment;
 `drain-inbox.sh` clamps a bad value. `drain-inbox.sh` on its own (the session-start drain)
 still defaults to 1. The quota cap still throttles the drain whatever the concurrency.
 

@@ -61,8 +61,8 @@
 #   MINSPEC_DRAIN_SERVICE_RETRY_BASE  first backoff after a failed launch/end (default 15, doubles)
 #   MINSPEC_DRAIN_SERVICE_RETRY_MAX   backoff ceiling in seconds (default 600)
 #   MINSPEC_DRAIN_CONCURRENCY    parallel agents per cycle for the drain this script starts
-#                                (default 8, the value the keeper sessions used; drain-inbox.sh
-#                                clamps bad values). The unit passes none, so 8 is what runs.
+#                                (default 8, DR-114; drain-inbox.sh clamps
+#                                bad values). The unit passes none, so 8 is what runs.
 
 set -uo pipefail
 
@@ -80,7 +80,7 @@ STOP_GRACE="${MINSPEC_DRAIN_SERVICE_STOP_GRACE:-90}"
 # Backoff between retries of a failed launch or failed drain end, inside ONE start (#3095).
 RETRY_BASE="${MINSPEC_DRAIN_SERVICE_RETRY_BASE:-15}"
 RETRY_MAX="${MINSPEC_DRAIN_SERVICE_RETRY_MAX:-600}"
-# The service's default is the keepers' 8; drain-inbox.sh's own default (1, used by the
+# The service's default is 8 (DR-114); drain-inbox.sh's own default (1, used by the
 # session-start drain) is unchanged. Set only for the drain this script launches.
 export MINSPEC_DRAIN_CONCURRENCY="${MINSPEC_DRAIN_CONCURRENCY:-8}"
 
