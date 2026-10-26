@@ -287,7 +287,21 @@ which option it took is not established here. DQ-4 asks the human to settle it o
 
 ## Decisions needed (Clarify)
 
+Selections below are recorded on the option this document already marks recommended. An
+agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
+on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
+chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
+(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
+context, not verified. No human chose any single item. DQ-1, DQ-3 and DQ-4 are left open
+(each reaches adopter repos or follows from one that does); this section stays open, and the
+spec is not ready to approve, until the founder answers.
+
 - **DQ-1 - How the adopter gets the derived list.**
+
+  **Not recorded:** option (D) has MinSpec take over a workflow file adopters wrote, which
+  reaches adopter repos and is outward-facing by DQ-4's own reading. Needs the founder's
+  answer.
+
   - **(D) (rec) MinSpec ships `minspec-ci-parity.yml` as a managed template** whose region
     is rendered from FR-1 (the issue's recommended option, and SPEC-079's DQ-1 (D)). One
     move fixes both specs. MinSpec already writes five workflows into every adopter
@@ -315,6 +329,11 @@ which option it took is not established here. DQ-4 asks the human to settle it o
 
 - **DQ-2 - Files that are only scaffolded under a condition** (today the two
   `.claude/hooks/session-title.*` files, scaffolded only when `tools.claude`).
+
+  **Recorded selection: (i),** leave conditionally scaffolded files out of parity and list
+  them by name. An agent session copied this document's (rec) option; no human chose this
+  item.
+
   - **(i) (rec) Leave them out of parity and list them by name** in the rendered comment and
     in the FR-4 test. This matches today: neither adopter checks them. *Cost:* the two hooks
     stay unchecked, and so does any future conditional file, until (iii) is built.
@@ -327,6 +346,10 @@ which option it took is not established here. DQ-4 asks the human to settle it o
 
 - **DQ-3 - Repos with `.minspec/` that have no parity workflow today** (#1817 reports two
   adopters with none).
+
+  **Not recorded:** option (a) scaffolds a new CI job, with a weekly fetch from minspec's
+  `main`, into adopter repos. Needs the founder's answer.
+
   - **(a) (rec) Scaffold it there too, on the next refresh**, like any other managed file.
     They opted in through `.minspec/`, so invariant 3 allows it. *Cost:* a new CI job appears
     in those repos, its weekly schedule makes one fetch each week from minspec's `main`, and
@@ -342,11 +365,18 @@ which option it took is not established here. DQ-4 asks the human to settle it o
   specs cannot pick different options. *Cost:* both specs wait on that one DR. Under (E),
   no DR is needed for this spec; record that at Clarify.
 
+  **Not recorded:** the recommended DR follows from DQ-1 option (D), which is not recorded.
+  Needs the founder's answer.
+
 - **DQ-5 - Sequencing.** SPEC-068 (refresh direction gate) is `status: planning`, not built.
   Under (D), a refresh from an older build could write an older parity list, which is
   DR-092's backward-write case. *Recommendation:* **do not block on SPEC-068.** FR-6 makes
   an old list visible as drift on the next scheduled run, so the failure is loud, not
   silent. *Cost:* an older build can still briefly shorten an adopter's list until that run.
+
+  **Recorded selection: do not block on SPEC-068,** since FR-6 makes an older list visible
+  as drift on the next scheduled run. An agent session copied this document's (rec) option;
+  no human chose this item.
 
 ## Out of Scope
 
