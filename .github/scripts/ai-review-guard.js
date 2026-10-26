@@ -1422,6 +1422,90 @@ function decideStalenessStrip({ action, labels, headRound } = {}) {
   };
 }
 
+// #3015 — GitHub API rate limits on the gate's provenance reads.
+//
+// The gate shares one installation token with every other workflow in the repo, so a
+// burst of PR updates can exhaust it mid-run (PR 2557, run 40139595165: core limit
+// 5000/5000, reset ~5 min out). Every read then threw, was swallowed into a warning,
+// and the gate reported a provenance finding it never made. The status POST then hit
+// the same limit, so the run died without posting at all.
+//
+// A rate limit is: 429, or 403 carrying `retry-after` or `x-ratelimit-remaining: 0`.
+// A plain 403 (missing permission) is NOT one - retrying it only delays a real fault.
+function errorHeaders(e) {
+  return (e && e.response && e.response.headers) || {};
+}
+
+function isRateLimitError(e) {
+  if (!e) return false;
+  const status = Number(e.status || (e.response && e.response.status));
+  if (status === 429) return true;
+  if (status !== 403) return false;
+  const h = errorHeaders(e);
+  return h['retry-after'] !== undefined || String(h['x-ratelimit-remaining']) === '0';
+}
+
+// How long GitHub says to wait, in ms, or null when it does not say. `retry-after`
+// (seconds, secondary limits) wins; else `x-ratelimit-reset` (epoch seconds) plus a
+// one-second pad against runner/GitHub clock skew, floored at that pad.
+const RATE_LIMIT_SKEW_PAD_MS = 1000;
+function rateLimitWaitMs(e, nowMs) {
+  const h = errorHeaders(e);
+  const after = Number(h['retry-after']);
+  if (h['retry-after'] !== undefined && Number.isFinite(after) && after >= 0) return after * 1000;
+  const reset = Number(h['x-ratelimit-reset']);
+  if (h['x-ratelimit-reset'] !== undefined && Number.isFinite(reset)) {
+    return Math.max(0, reset * 1000 - nowMs) + RATE_LIMIT_SKEW_PAD_MS;
+  }
+  return null;
+}
+
+// Run `fn`, retrying ONLY rate-limit failures with bounded backoff that honours the
+// wait GitHub names. Fails closed: when attempts run out, or GitHub's named wait is
+// beyond the remaining budget (not worth holding a runner for), the last error is
+// rethrown with `rateLimited = true` so the caller can say "re-run", not "forged".
+// Any other error is rethrown on the first attempt, untouched.
+async function withRateLimitRetry(
+  fn,
+  {
+    sleep,
+    now = Date.now,
+    maxAttempts = 4,
+    maxTotalWaitMs = 5 * 60 * 1000,
+    defaultBackoffMs = [5000, 15000, 30000],
+    onRetry,
+  } = {},
+) {
+  if (typeof sleep !== 'function') throw new TypeError('withRateLimitRetry needs a sleep function');
+  let waited = 0;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (!isRateLimitError(e)) throw e;
+      const named = rateLimitWaitMs(e, now());
+      const wait =
+        named !== null
+          ? named
+          : defaultBackoffMs[Math.min(attempt - 1, defaultBackoffMs.length - 1)];
+      if (attempt >= maxAttempts || waited + wait > maxTotalWaitMs) {
+        e.rateLimited = true;
+        throw e;
+      }
+      if (typeof onRetry === 'function') onRetry({ attempt, waitMs: wait, error: e });
+      await sleep(wait);
+      waited += wait;
+    }
+  }
+}
+
+function readFailureReason(what, e) {
+  if (e && (e.rateLimited === true || isRateLimitError(e))) {
+    return `GitHub API rate-limited reading ${what}, not a provenance finding — re-run once the limit resets`;
+  }
+  return `could not read ${what} — provenance unverifiable until it can be read`;
+}
+
 // #359 + #397 (durable) — provenance-recency verification of a *surviving* pass.
 //
 // The revert/strip guards above are add-time / push-time *cleanup* and can fail
@@ -1447,7 +1531,19 @@ function decideStalenessStrip({ action, labels, headRound } = {}) {
 // is covered defence-in-depth by the `synchronize` staleness strip (which now
 // fails the run if it cannot remove the label) and by the allowlist check a
 // forger cannot satisfy; the primary trust anchor here is the applier identity.
-function verifyPassProvenance({ labelActor, labelAppliedAt, headCommittedAt, allowlist } = {}) {
+//
+// #3015 — `timelineReadError` / `headReadError` are the errors (if any) the workflow
+// caught reading the label timeline / head commit. They never make a pass verify;
+// they only stop a failed READ being reported as a provenance FINDING ("no record of
+// who applied"), which sent readers hunting a forged label when a re-run was the fix.
+function verifyPassProvenance({
+  labelActor,
+  labelAppliedAt,
+  headCommittedAt,
+  allowlist,
+  timelineReadError,
+  headReadError,
+} = {}) {
   const list = Array.isArray(allowlist) ? allowlist : [];
   if (list.length === 0) {
     return {
@@ -1457,6 +1553,9 @@ function verifyPassProvenance({ labelActor, labelAppliedAt, headCommittedAt, all
     };
   }
   if (!labelActor) {
+    if (timelineReadError) {
+      return { verified: false, reason: readFailureReason('the PR label timeline', timelineReadError) };
+    }
     return {
       verified: false,
       reason: 'no record of who applied ai-review:pass — provenance unverifiable',
@@ -1470,6 +1569,9 @@ function verifyPassProvenance({ labelActor, labelAppliedAt, headCommittedAt, all
   }
   const applied = Date.parse(labelAppliedAt);
   const committed = Date.parse(headCommittedAt);
+  if (!Number.isFinite(committed) && headReadError) {
+    return { verified: false, reason: readFailureReason('the head commit', headReadError) };
+  }
   if (!Number.isFinite(applied) || !Number.isFinite(committed)) {
     return {
       verified: false,
@@ -2089,6 +2191,10 @@ module.exports = {
   decideProvenanceRevert,
   decideStalenessStrip,
   verifyPassProvenance,
+  isRateLimitError,
+  rateLimitWaitMs,
+  withRateLimitRetry,
+  readFailureReason,
   verifyHeadPassStatus,
   verifyHeadPassCheckRun,
   verifyHeadPassWitness,
