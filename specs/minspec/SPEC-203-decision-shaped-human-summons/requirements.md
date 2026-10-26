@@ -291,21 +291,14 @@ gets back into the pipeline.
 
 ## Decisions needed (Clarify)
 
-4 of 5 decisions carry a recorded selection: an agent session recorded the option this
-document already recommended, under the founder's standing instruction of 2026-10-26 (inbox
-items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on the recommended
-options. No human chose an individual option; they are ratified only by approval of this
-spec. Still open, with no selection recorded: D-2. That instruction is held outside this
-repository (the founder's inbox, read by the chief-of-staff proxy), so a reader cannot check
-it from here: treat each selection as the recommendation it restates until this spec is
-approved. The frontmatter `clarify:` field is not edited here.
+All 5 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
 
 ### D-1 - How does a founder's answer get back into the pipeline?
 
-**Recorded selection: Option (a), labels and scripts only; each summons names the existing
-label or script that answers it.** Selected on its recommended option under the founder's
-standing instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff
-proxy).
+**Recorded selection: Option (a),** labels and scripts only; each summons names the existing label or
+script that answers it, so no new comment-triggered writer is needed.
 
 The issue offers two shapes. Both satisfy FR-5.
 
@@ -329,6 +322,9 @@ finds himself answering in prose often.
 
 ### D-2 - Where is "In plain terms" enforced?
 
+**Recorded selection: Option (a),** inside `ready-to-merge` for bot-authored PRs; it is already a
+required check, so the rule gates merge with no ruleset change.
+
 - **(a) Inside `ready-to-merge`, for bot-authored PRs. (rec)** `ready-to-merge` is already a
   required check, so the rule gates merge without a ruleset change. **Cost:** a missing
   section blocks an otherwise green PR until the body is edited, and `ready-to-merge` grows
@@ -343,9 +339,8 @@ finds himself answering in prose often.
 
 ### D-3 - Which panel findings reach the summons, and do unsummoned PRs keep losing them?
 
-**Recorded selection: Option (a), every severity, but only into a summons; the wider leak is
-a separate issue.** Selected on its recommended option under the founder's standing
-instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy).
+**Recorded selection: Option (a),** every severity, but only into a summons; the wider leak is a
+separate issue.
 
 - **(a) Every severity, but only into a summons; the wider leak is a separate issue. (rec)**
   Matches the issue's acceptance line. **Cost:** a PR that merges with no summons still drops
@@ -356,9 +351,8 @@ instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff 
 
 ### D-4 - Does the renderer also cover triage's `needs-review` / `needs-info`?
 
-**Recorded selection: Option (a), no; triage's `needs-review` / `needs-info` are a second
-slice.** Selected on its recommended option under the founder's standing instruction of
-2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy).
+**Recorded selection: Option (a),** no, triage's `needs-review` / `needs-info` are a second slice;
+they already carry a rationale.
 
 - **(a) No, second slice. (rec)** They already carry a rationale. **Cost:** two summons
   shapes coexist for a while.
@@ -367,9 +361,8 @@ slice.** Selected on its recommended option under the founder's standing instruc
 
 ### D-5 - Ship the convention to adopters?
 
-**Recorded selection: Option (a), no; this repository only.** Selected on its recommended
-option under the founder's standing instruction of 2026-10-26 (inbox items in66/in67,
-relayed by the chief-of-staff proxy).
+**Recorded selection: Option (a),** this repository only; invariant 3 forbids changing behaviour
+where nobody opted in.
 
 - **(a) No, this repository only. (rec)** The summons sites are this repository's own
   pipeline scripts, and invariant 3 forbids changing behaviour where nobody opted in.

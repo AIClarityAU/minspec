@@ -241,20 +241,14 @@ request. Today only the gate can tell them apart.
 
 ## Decisions needed (Clarify)
 
-2 of 3 decisions carry a recorded selection: an agent session recorded the option this
-document already recommended, under the founder's standing instruction of 2026-10-26 (inbox
-items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on the recommended
-options. No human chose an individual option; they are ratified only by approval of this
-spec. Still open, with no selection recorded: DQ-3. That instruction is held outside this
-repository (the founder's inbox, read by the chief-of-staff proxy), so a reader cannot check
-it from here: treat each selection as the recommendation it restates until this spec is
-approved. The frontmatter `clarify:` field is not edited here.
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
 
 ### DQ-1 - Is the prompt paragraph enough, or do the role files change too?
 
-**Recorded selection: Option (a), one paragraph in `review-branch.sh`'s shared prompt, with
-no role-file edits.** Selected on its recommended option under the founder's standing
-instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy).
+**Recorded selection: Option (a),** one paragraph in `review-branch.sh`'s shared prompt, with no
+role-file edits, so every voter gets the same wording from one place.
 
 - **(a) One paragraph in `review-branch.sh`'s shared prompt, no role-file edits (rec).**
   Every voter gets the same wording from one place, and the role files stay
@@ -268,9 +262,8 @@ instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff 
 
 ### DQ-2 - Is the facts block part of the verdict-carry hash?
 
-**Recorded selection: Option (a), no; the facts block sits outside `REVIEW_INPUT`, like the
-`Base:`/`Head:` lines.** Selected on its recommended option under the founder's standing
-instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy).
+**Recorded selection: Option (a),** no; the facts block sits outside `REVIEW_INPUT`, like the
+`Base:`/`Head:` lines, so an unrelated pull request does not discard a carried pass.
 
 - **(a) No: place it outside `REVIEW_INPUT`, like the `Base:`/`Head:` lines (rec).** An
   unrelated pull request opening or closing does not throw away a carried pass on this
@@ -284,6 +277,9 @@ instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff 
   chosen, the `open pull requests read` line should be dropped from the hashed form.
 
 ### DQ-3 - Where does the base-trusted producer run?
+
+**Recorded selection: Option (a),** a new step in `ai-review.yml`, using the App token the carry
+step already uses, that runs the base checkout's code, so the facts are base-trusted.
 
 - **(a) A new step in `ai-review.yml`, using the App token the carry step already uses,
   that runs the base checkout's code (rec).** One workflow, one token pattern, facts made

@@ -196,14 +196,9 @@ mocked config read), run with a control that shows the check fails when the defe
 
 ## Decisions needed (Clarify)
 
-2 of 3 decisions carry a recorded selection: an agent session recorded the option this
-document already recommended, under the founder's standing instruction of 2026-10-26 (inbox
-items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on the recommended
-options. No human chose an individual option; they are ratified only by approval of this
-spec. Still open, with no selection recorded: D2. That instruction is held outside this
-repository (the founder's inbox, read by the chief-of-staff proxy), so a reader cannot check
-it from here: treat each selection as the recommendation it restates until this spec is
-approved. The frontmatter `clarify:` field is not edited here.
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
 
 - **D1. Should the session-start witness repair as well as warn?**
   - **(a) Warn only (rec).** It matches the issue's recommendation ("assert the post-condition
@@ -214,24 +209,24 @@ approved. The frontmatter `clarify:` field is not edited here.
     It closes the window for agent sessions immediately. Cost: a session start writes git config
     with no click. That is the same silent-side-effect installer shape the root cause names,
     one step earlier.
-  **Recorded selection: Option (a), warn only.** Selected on its recommended option under
-  the founder's standing instruction of 2026-10-26 (inbox items in66/in67, relayed by the
-  chief-of-staff proxy).
+  **Recorded selection: Option (a),** warn only, matching the issue's recommendation to assert the
+  post-condition rather than add another installer.
 - **D2. Should adopters who already ran the ruleset advisory be re-offered `gitleaks`?**
   - **(a) Re-offer once, on the next refresh, as a separately dismissible offer (rec).** The two
     repos in the issue get the gate without hand-editing a ruleset. Cost: one more toast for
     every existing adopter, including ones who deliberately leave secret scanning advisory.
   - (b) New inits only. No new prompt. Cost: every existing adopter, including both repos in
     the issue, keeps a non-gating CI witness until someone notices.
+  **Recorded selection: Option (a),** re-offer once, on the next refresh, as a separately
+  dismissible offer, so existing adopters get the gate without hand-editing a ruleset.
 - **D3. Root `package.json` with a `prepare` script (the issue's alternative): rejected
   (rec).** Recorded so the reader can overturn it. It ties arming to someone running
   `npm install`, which CI and headless clones also skip (the same assumption, moved one step
   back), and it puts a Node manifest into non-Node adopter repos. Cost of rejecting: a Node
   adopter who always runs `npm install` would have been armed with no session-start hook at
   all.
-  **Recorded selection: The root `package.json` `prepare` script stays rejected, as
-  recommended.** Selected on its recommended option under the founder's standing instruction
-  of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy).
+  **Recorded selection: rejected, as recommended,** arming would still depend on someone
+  running `npm install`, which CI and headless clones skip.
 
 ## Alternatives considered
 
