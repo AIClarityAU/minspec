@@ -40,6 +40,9 @@ echo "$*" >> "$STUB_CALLS"
 case "$1" in
   --paused) [[ -e "$STUB_PAUSE" ]] && exit 0; exit 1 ;;
   --continuous)
+    # A failed launch forks no loop: an orphan would hold the lock and be adopted
+    # by the supervisor's next pass, racing the retry assertions.
+    [[ "\${STUB_RC:-0}" != 0 ]] && exit "$STUB_RC"
     (
       echo "$BASHPID" > "$MINSPEC_DRAIN_LOCK"
       trap 'echo "[drain] stopping on SIGTERM"; rm -f "$MINSPEC_DRAIN_LOCK"; exit 143' TERM
