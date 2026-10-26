@@ -191,19 +191,20 @@ this change.
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended, by an
-agent session on 2026-10-27. Selected on its recommended option under the founder's standing
-instruction of 2026-10-26 (inbox item in66, relayed by the chief-of-staff proxy). The
-founder did not see these items one by one. DQ-3 is left open (its recommendation is
-evidence-incomplete by this document's own note); this section stays open, and the spec is
-not ready to approve, until the founder answers.
+Selections below are recorded on the option this document already marks recommended. An
+agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
+on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
+chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
+(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
+context, not verified. No human chose any single item. DQ-3 is left open (its recommendation
+is evidence-incomplete by this document's own note); this section stays open, and the spec
+is not ready to approve, until the founder answers.
 
 **DQ-1 — `.minspec/` present but `config.json` absent.** The extension treats this as "all
 defaults" (`config.ts:210-212`).
 
-**Recorded selection: `a`,** fail closed: refuse to arm and say why. Selected on its
-recommended option under the founder's standing instruction of 2026-10-26 (inbox item in66,
-relayed by the chief-of-staff proxy).
+**Recorded selection: `a`,** fail closed: refuse to arm and say why. An agent session copied
+this document's (rec) option; no human chose this item.
 
 - `a` **(rec)** Fail closed: refuse to arm and say why. *Cost:* a repo initialised without a
   config file (hand-built, or an older init) loses the lane until it commits one, which is one
@@ -214,9 +215,8 @@ relayed by the chief-of-staff proxy).
 
 **DQ-2 — Union with defaults, or configured directories only.**
 
-**Recorded selection: `a`,** union with defaults (FR-3). Selected on its recommended option
-under the founder's standing instruction of 2026-10-26 (inbox item in66, relayed by the
-chief-of-staff proxy).
+**Recorded selection: `a`,** union with defaults (FR-3). An agent session copied this
+document's (rec) option; no human chose this item.
 
 - `a` **(rec)** Union (FR-3). *Cost:* an adopter whose `docs/decisions/` is an ordinary, non-DR
   folder gets over-refusals there. Those are fail-safe but noisy.
@@ -242,8 +242,7 @@ merge. Needs the founder's answer.
 **DQ-4 — Derive `allowed` from config in the same change (the issue's recommendation).**
 
 **Recorded selection: `a`,** keep `allowed` hardcoded (FR-11) and track derivation
-separately. Selected on its recommended option under the founder's standing instruction of
-2026-10-26 (inbox item in66, relayed by the chief-of-staff proxy).
+separately. An agent session copied this document's (rec) option; no human chose this item.
 
 - `a` **(rec)** No: keep `allowed` hardcoded (FR-11) and track it separately. A mismatch there
   fails **closed**: a spec under a non-default `specsDir` is refused from the lane, loudly.
@@ -262,9 +261,8 @@ separately. Selected on its recommended option under the founder's standing inst
 never see them. For such an adopter the extension and the lane disagree about where DRs live.
 
 **Recorded selection: `a`,** document that `.minspec/config.json` is the only source CI
-honours, with a follow-up for the extension warning. Selected on its recommended option
-under the founder's standing instruction of 2026-10-26 (inbox item in66, relayed by the
-chief-of-staff proxy).
+honours, with a follow-up for the extension warning. An agent session copied this document's
+(rec) option; no human chose this item.
 
 - `a` **(rec)** In this spec, document that `.minspec/config.json` is the only source CI honours.
   File a follow-up so the extension warns when a workspace setting differs from the file.

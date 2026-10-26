@@ -287,12 +287,14 @@ which option it took is not established here. DQ-4 asks the human to settle it o
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended, by an
-agent session on 2026-10-27. Selected on its recommended option under the founder's standing
-instruction of 2026-10-26 (inbox item in66, relayed by the chief-of-staff proxy). The
-founder did not see these items one by one. DQ-1, DQ-3 and DQ-4 are left open (each reaches
-adopter repos or follows from one that does); this section stays open, and the spec is not
-ready to approve, until the founder answers.
+Selections below are recorded on the option this document already marks recommended. An
+agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
+on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
+chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
+(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
+context, not verified. No human chose any single item. DQ-1, DQ-3 and DQ-4 are left open
+(each reaches adopter repos or follows from one that does); this section stays open, and the
+spec is not ready to approve, until the founder answers.
 
 - **DQ-1 - How the adopter gets the derived list.**
 
@@ -329,8 +331,8 @@ ready to approve, until the founder answers.
   `.claude/hooks/session-title.*` files, scaffolded only when `tools.claude`).
 
   **Recorded selection: (i),** leave conditionally scaffolded files out of parity and list
-  them by name. Selected on its recommended option under the founder's standing instruction
-  of 2026-10-26 (inbox item in66, relayed by the chief-of-staff proxy).
+  them by name. An agent session copied this document's (rec) option; no human chose this
+  item.
 
   - **(i) (rec) Leave them out of parity and list them by name** in the rendered comment and
     in the FR-4 test. This matches today: neither adopter checks them. *Cost:* the two hooks
@@ -373,8 +375,8 @@ ready to approve, until the founder answers.
   silent. *Cost:* an older build can still briefly shorten an adopter's list until that run.
 
   **Recorded selection: do not block on SPEC-068,** since FR-6 makes an older list visible
-  as drift on the next scheduled run. Selected on its recommended option under the founder's
-  standing instruction of 2026-10-26 (inbox item in66, relayed by the chief-of-staff proxy).
+  as drift on the next scheduled run. An agent session copied this document's (rec) option;
+  no human chose this item.
 
 ## Out of Scope
 

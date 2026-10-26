@@ -100,12 +100,14 @@ gate (FR-2 to FR-4) as the enforcing part. Locating every copy is a plan-phase t
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended, by an
-agent session on 2026-10-27. Selected on its recommended option under the founder's standing
-instruction of 2026-10-26 (inbox item in66, relayed by the chief-of-staff proxy). The
-founder did not see these items one by one. Decisions 1, 2 and 5 are left open (adopter
-reach, an unverified premise, and no recommendation); this section stays open, and the spec
-is not ready to approve, until the founder answers.
+Selections below are recorded on the option this document already marks recommended. An
+agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
+on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
+chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
+(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
+context, not verified. No human chose any single item. Decisions 1, 2 and 5 are left open
+(adopter reach, an unverified premise, and no recommendation); this section stays open, and
+the spec is not ready to approve, until the founder answers.
 
 1. **Where the commit-time gate lives.**
 
@@ -130,15 +132,14 @@ is not ready to approve, until the founder answers.
    **(rec)**, which cannot drift from the hash but couples the gate to that module; or a
    fixed list (`status`, `phases`), which is simpler but can drift.
 
-   **Recorded selection: the canonicalization strip-list,** as the single source. Selected
-   on its recommended option under the founder's standing instruction of 2026-10-26 (inbox
-   item in66, relayed by the chief-of-staff proxy).
+   **Recorded selection: the canonicalization strip-list,** as the single source. An agent
+   session copied this document's (rec) option; no human chose this item.
 4. **Required or advisory in CI.** Advisory first **(rec)**, cost: a window where a split can
    still merge; required later by a human act on the ruleset.
 
    **Recorded selection: advisory first,** making it required later is a separate human act
-   on the ruleset. Selected on its recommended option under the founder's standing
-   instruction of 2026-10-26 (inbox item in66, relayed by the chief-of-staff proxy).
+   on the ruleset. An agent session copied this document's (rec) option; no human chose this
+   item.
 5. **Scope of the commit message wording** for the project-external agent guidance: this repo
    can only change prose it holds. Whether the out-of-repo copy is updated is a human act.
 

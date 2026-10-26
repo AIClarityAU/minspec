@@ -233,12 +233,14 @@ Cost of the offline read, same repo, same time:
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended, by an
-agent session on 2026-10-27. Selected on its recommended option under the founder's standing
-instruction of 2026-10-26 (inbox item in66, relayed by the chief-of-staff proxy). The
-founder did not see these items one by one. DQ-1 and DQ-3 are left open (a re-approval of an
-approved spec, and a required-check change); this section stays open, and the spec is not
-ready to approve, until the founder answers.
+Selections below are recorded on the option this document already marks recommended. An
+agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
+on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
+chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
+(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
+context, not verified. No human chose any single item. DQ-1 and DQ-3 are left open (a
+re-approval of an approved spec, and a required-check change); this section stays open, and
+the spec is not ready to approve, until the founder answers.
 
 ### DQ-1 - Per-product id ranges contradict the global uniqueness gate
 
@@ -263,9 +265,8 @@ interleaved with minspec's).
 
 ### DQ-2 - Should the editor ever refresh the remote view?
 
-**Recorded selection: (a),** never; local refs only, with freshness stated (FR-6). Selected
-on its recommended option under the founder's standing instruction of 2026-10-26 (inbox item
-in66, relayed by the chief-of-staff proxy).
+**Recorded selection: (a),** never; local refs only, with freshness stated (FR-6). An agent
+session copied this document's (rec) option; no human chose this item.
 
 - **(a) (rec) Never.** Local refs only, freshness stated (FR-6); CI is the online
   witness. Cost: an adopter who rarely fetches gets a stale view, and learns of a clash
@@ -290,8 +291,8 @@ The DR twin is still advisory: a workflow cannot make itself required.
 ### DQ-4 - Extend the reader to decision-record ids?
 
 **Recorded selection: (a),** not in this spec; the reader takes a pattern parameter so a
-follow-up can reuse it. Selected on its recommended option under the founder's standing
-instruction of 2026-10-26 (inbox item in66, relayed by the chief-of-staff proxy).
+follow-up can reuse it. An agent session copied this document's (rec) option; no human chose
+this item.
 
 `nextAdrNumber` (`packages/minspec/src/lib/adr-manager.ts:106-121`) has the identical
 blindness. Its CI gate exists; its offline allocator does not see branches either.

@@ -201,12 +201,14 @@ no new stored value. It only changes what is said about a fact SPEC-068 already 
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended, by an
-agent session on 2026-10-27. Selected on its recommended option under the founder's standing
-instruction of 2026-10-26 (inbox item in66, relayed by the chief-of-staff proxy). The
-founder did not see these items one by one. DQ-1 is left open (its recommendation amends an
-already-approved spec); this section stays open, and the spec is not ready to approve, until
-the founder answers.
+Selections below are recorded on the option this document already marks recommended. An
+agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
+on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
+chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
+(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
+context, not verified. No human chose any single item. DQ-1 is left open (its recommendation
+amends an already-approved spec); this section stays open, and the spec is not ready to
+approve, until the founder answers.
 
 - **DQ-1 — Fold into SPEC-068, or ship as this spec's own increment?** SPEC-068 is
   `plan: in-progress` — unbuilt — and FR-1 here is a small, natural extension of its own
@@ -240,8 +242,8 @@ the founder answers.
 
   **Recorded selection: always print the short epoch/build-identity line,** keeping the
   stronger "may not resolve an external check" framing behind a `--verbose` or equivalent
-  diagnostic flag. Selected on its recommended option under the founder's standing
-  instruction of 2026-10-26 (inbox item in66, relayed by the chief-of-staff proxy).
+  diagnostic flag. An agent session copied this document's (rec) option; no human chose this
+  item.
 
 - **DQ-3 — Does this spec need its own DR?** No new irreversible choice is made here — the
   epoch comparison, the provenance record, and the fail-closed direction are all DR-092's
@@ -252,9 +254,8 @@ the founder answers.
   that widening would need its own DR under DR-050's consent framing.
 
   **Recorded selection: no DR required,** recorded explicitly; this holds unless DQ-1
-  resolves to not folding and FR-2's remedy then reaches the network. Selected on its
-  recommended option under the founder's standing instruction of 2026-10-26 (inbox item
-  in66, relayed by the chief-of-staff proxy).
+  resolves to not folding and FR-2's remedy then reaches the network. An agent session
+  copied this document's (rec) option; no human chose this item.
 
 ## Out of Scope
 
