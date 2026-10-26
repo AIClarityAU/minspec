@@ -215,10 +215,10 @@ that backstop.
 
 ## Decisions needed (Clarify)
 
-Each selection below was recorded by an agent session on the option this document
-already marks (rec), under delegation DLG-001 (DR-108, the delegated-approval record).
-No human chose them. This section is not marked resolved: Clarify stays open until
-the spec is approved.
+Each selection below restates the option this document already marks (rec). It was
+copied by an agent session; neither a human nor a delegation chose it, and DLG-001
+(DR-108) does not cover recording Clarify selections. This section is not marked
+resolved: it needs the founder's answer before approval.
 
 ### D1 - What the tag looks like
 
