@@ -122,6 +122,11 @@ reports the distribution per path class and time window.
 
 ## Decisions needed (Clarify)
 
+3 of 4 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec. D4 names no
+recommended option, so it stays open for Clarify.
+
 - **D1 - Repo-only, or also the hook MinSpec scaffolds into adopters?**
   `packages/minspec/src/lib/template-registry.ts` ships its own `commit-msg` hook (the
   `Root cause:` gate, lines ~587 and ~1659) to adopter repos.
@@ -133,6 +138,8 @@ reports the distribution per path class and time window.
     Cost: new config surface, a second hand-copied vocabulary to keep pinned, and a machinery PR.
   - (c) Also the shipped template, on by default. Rejected: it changes behaviour for existing
     adopters on re-scaffold (constitution invariant 3).
+  **Recorded selection: Option (a),** this repo only: edit `.githooks/commit-msg` and leave the
+  shipped template alone, so existing adopters see no change (invariant 3).
 - **D2 - Is `usage` rate worth a path-class mapping of its own, or reuse the existing set?**
   The classes `gate-critical` / `operational-machinery` come from the issue; the repo has one
   canonical machinery set (`packages/minspec/src/lib/machinery-paths.ts`, #1758).
@@ -143,6 +150,9 @@ reports the distribution per path class and time window.
     module itself).
   - (b) Define classes by top-level directory only. Cost: cannot separate the gate itself from
     dispatch plumbing, which is the distinction relaxation decisions turn on.
+  **Recorded selection: Option (a),** reuse the canonical machinery set, with the gate-critical
+  subset as a short explicit list in `found-by.ts`, so the gate stays separable from dispatch
+  plumbing.
 - **D3 - Should `revert` commits be countable?** A revert is strong evidence of a shipped
   defect but carries no root cause today.
   - **(a) Out of scope (rec)** - keep the vocabulary on `fix` only. Cost: reverts, plausibly the
@@ -150,6 +160,7 @@ reports the distribution per path class and time window.
   - (b) Treat `Revert` subjects as `fix`-like and require the trailer. Cost: a hook change on a
     subject pattern git generates automatically, so the trailer would have to be added by hand
     after every `git revert`.
+  **Recorded selection: Option (a),** out of scope; the vocabulary stays on `fix` only.
 - **D4 - Value semantics for a fix to a fix found while iterating.** `build` vs `usage` is the
   author's call. Proposed rule, for the hook's help text: if the defect was visible to someone
   other than the author before the fix was started, it is `usage`. Founder to confirm or
