@@ -8,6 +8,7 @@ import {
   setAdrStatus,
   adrHasFrontmatter,
   listAdrs,
+  validatePendingDrAmendments,
   ADR_STATUS_VALUES,
   type AdrStatus,
 } from '../lib/adr-manager';
@@ -241,6 +242,20 @@ async function applyStatus(
     if (status === 'accepted') {
       approver = gitConfigEmail(folder ?? path.dirname(filePath));
       assertHumanApprover(approver);
+
+      // #3106: Rule 16 (scripts/validate-frontmatter.ts) fails an ACCEPTED DR whose
+      // supersedes / supersedes_partial / amends targets never mention it. Accepting
+      // flips one status and touches no target, so an unprepared target makes the
+      // acceptance PR red with no way to fix it inside that PR. Refuse BEFORE any write
+      // and say which targets need the note; the fix belongs in the proposing PR.
+      const unprepared = validatePendingDrAmendments(path.dirname(filePath)).filter((g) => g.source === id);
+      if (unprepared.length > 0) {
+        const targets = [...new Set(unprepared.map((g) => g.target))].join(', ');
+        throw new Error(
+          `${id} cannot be accepted yet: ${targets} never mention${unprepared.length === 1 ? 's' : ''} ${id}. ` +
+            `Add an "Amended by ${id}" note to each, then accept (otherwise CI Rule 16 fails the acceptance).`,
+        );
+      }
     }
 
     // Pre-MinSpec DRs have no frontmatter. `setAdrStatus` will synthesize one,
