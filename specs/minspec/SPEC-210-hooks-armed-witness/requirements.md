@@ -200,7 +200,10 @@ mocked config read), run with a control that shows the check fails when the defe
 document already recommended, under the founder's standing instruction of 2026-10-26 (inbox
 items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on the recommended
 options. No human chose an individual option; they are ratified only by approval of this
-spec. Still open, with no selection recorded: D2.
+spec. Still open, with no selection recorded: D2. That instruction is held outside this
+repository (the founder's inbox, read by the chief-of-staff proxy), so a reader cannot check
+it from here: treat each selection as the recommendation it restates until this spec is
+approved. The frontmatter `clarify:` field is not edited here.
 
 - **D1. Should the session-start witness repair as well as warn?**
   - **(a) Warn only (rec).** It matches the issue's recommendation ("assert the post-condition

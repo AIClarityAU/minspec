@@ -109,7 +109,10 @@ whether MinSpec may delete from it at all.
 document already recommended, under the founder's standing instruction of 2026-10-26 (inbox
 items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on the recommended
 options. No human chose an individual option; they are ratified only by approval of this
-spec. Still open, with no selection recorded: D1, D2.
+spec. Still open, with no selection recorded: D1, D2. That instruction is held outside this
+repository (the founder's inbox, read by the chief-of-staff proxy), so a reader cannot check
+it from here: treat each selection as the recommendation it restates until this spec is
+approved. The frontmatter `clarify:` field is not edited here.
 
 **D1. Where does cleanup run?**
 - (a) `session-panel.py` session-start hook, **(rec)**: already reads and tests liveness, one
