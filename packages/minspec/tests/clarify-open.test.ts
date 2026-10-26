@@ -17,4 +17,13 @@ describe('findOpenClarify (#3059)', () => {
   it('ignores a heading inside a code fence', () => {
     expect(findOpenClarify('```\n## Decisions needed\n**D1. x**\n```\n').open).toBe(false);
   });
+  it('flags a numbered-list decision (SPEC-225 shape, #3060 missed it)', () => {
+    const t =
+      '## Decisions needed (Clarify)\n\n1. **Where the gate lives.**\n   - A. hook **(rec)**\n   - B. CI only\n' +
+      '2. **Which fields count.** Use the strip-list **(rec)**.\n\n## Risks\n\n1. not a decision\n';
+    expect(findOpenClarify(t)).toEqual({ open: true, items: ['1', '2'] });
+  });
+  it('a numbered list under an all-resolved section is not open', () => {
+    expect(findOpenClarify('## Decisions needed (Clarify) - all resolved\n\n1. **Where.** Hook.\n').open).toBe(false);
+  });
 });

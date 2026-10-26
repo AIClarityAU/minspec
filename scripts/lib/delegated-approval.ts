@@ -56,7 +56,7 @@ import {
 import { readRepeatFixShare, utcToday } from './repeat-fix-share';
 import { openClarifyDetail } from './clarify-open';
 import { readContentPullRequest } from './content-pr';
-import { readSpecFile, advanceSpecToImplementing } from '../../packages/minspec/src/lib/spec';
+import { readSpecFile, parseSpec, advanceSpecToImplementing } from '../../packages/minspec/src/lib/spec';
 import { isTerminalSpecStatus } from '../../packages/minspec/src/lib/spec-vocabulary';
 import { loadConfig } from '../../packages/minspec/src/lib/config';
 import { validateSpec } from '../../packages/minspec/src/lib/spec-validator';
@@ -563,9 +563,13 @@ function main(): number {
  * (`packages/minspec/src/commands/approve.ts`): a terminal spec, an incomplete spec
  * (`validateSpec` errors), or one the phase advance would put into violation. Returns
  * the reason, or undefined when the spec may be approved.
+ *
+ * `content`, when given, is judged instead of the bytes at `abs`: the caller pre-checks
+ * the base's bytes before any worktree exists (`abs` still locates the spec's directory,
+ * config and sibling shards under `repoRoot`). One predicate for both, so they cannot drift.
  */
-export function specNotApprovable(repoRoot: string, abs: string): string | undefined {
-  const parsed = readSpecFile(abs);
+export function specNotApprovable(repoRoot: string, abs: string, content?: string): string | undefined {
+  const parsed = content === undefined ? readSpecFile(abs) : parseSpec(content);
   const status = parsed.frontmatter.status;
   if (isTerminalSpecStatus(status)) return `the spec is ${String(status)}, past the approval gate`;
   const result = validateSpec(parsed, loadConfig(repoRoot), {
