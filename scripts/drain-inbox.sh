@@ -1246,10 +1246,25 @@ arm_delegated_spec_merges() {
     echo "[drain] WARNING: delegated spec merge NOT run: MINSPEC_DRAIN_DELEGATED_MERGE_MAX='${max}' is not a positive integer." >&2
     return 0
   fi
-  local rows count candidates pr out rc armed=0 tried=0
-  if ! rows=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit "$limit" \
-       --json number,isDraft,autoMergeRequest,files 2>/dev/null); then
-    echo "[drain] WARNING: delegated spec merge NOT run: the held PR list could not be read. This is not an empty queue." >&2
+  local rows count candidates pr out rc armed=0 tried=0 errfile gh_err="" attempt
+  errfile=$(mktemp) || errfile=/dev/null
+  # One retry (#3098): the read failed intermittently (2 of 9 cycles) and skipped every
+  # delegated merge for the whole cycle. Each attempt's stderr is kept so a persistent
+  # failure names its cause in the WARNING instead of discarding it.
+  rows=""
+  rc=1
+  for attempt in 1 2; do
+    if rows=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit "$limit" \
+         --json number,isDraft,autoMergeRequest,files 2>"$errfile"); then
+      rc=0
+      break
+    fi
+    gh_err=$(tr '\n' ' ' < "$errfile" 2>/dev/null | cut -c1-500 || true)  # swallow-ok: diagnostic text only; the failure itself is reported below
+    (( attempt == 1 )) && sleep "${MINSPEC_DRAIN_DELEGATED_MERGE_RETRY_SLEEP:-5}"
+  done
+  [[ "$errfile" == /dev/null ]] || rm -f "$errfile"
+  if (( rc != 0 )); then
+    echo "[drain] WARNING: delegated spec merge NOT run: the held PR list could not be read after 2 attempts (gh stderr: ${gh_err:-<empty>}). This is not an empty queue." >&2
     return 0
   fi
   if ! count=$(printf '%s' "$rows" | jq 'length' 2>/dev/null); then
