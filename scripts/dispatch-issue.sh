@@ -578,6 +578,31 @@ fi
 # Never arms anything itself; the `--delegated-spec-merge ... --arm` seam below does, and
 # only on a proceed. The judge's command can be replaced for tests
 # (MINSPEC_DELEGATED_MERGE_JUDGE_CMD); the decision downstream of it cannot.
+# delegated_merge_handoffs_spent <pr> <marker> (#3120)
+#
+# Exit 0 only when EVERY handoff comment predates the PR's newest commit. A handoff is a
+# claim about the head it was posted against: shepherd_hand_off writes it when automation
+# gives up (the ceiling, the attempt cap, a fix that produced nothing), and a commit
+# pushed after it means automation took the PR back, so the old handoff no longer speaks
+# for the founder. Without this, #2799, #2830 and #2945 stayed refused for good after
+# being remediated and green for a week. A handoff at or after the newest commit, or any
+# unreadable commit list, comment or timestamp, exits 1 and the handoff stays live.
+delegated_merge_handoffs_spent() {
+  local pr="$1" marker="$2" live=""
+  if ! live=$(gh pr view "$pr" --repo "$REPO" --json commits,comments 2>/dev/null \
+       | jq -r --arg m "$marker" '
+           (.commits | if type == "array" and length > 0
+                       then [.[] | .committedDate | fromdateiso8601] | max
+                       else error("no commits") end) as $head
+           | .comments | if type == "array" then . else error("no list") end
+           | [.[] | select((.body // "") | contains($m))
+                  | select((.createdAt | fromdateiso8601) >= $head)]
+           | length' 2>/dev/null); then
+    return 1
+  fi
+  [[ "$live" == "0" ]]
+}
+
 # delegated_merge_human_claims <pr> (#3050)
 #
 # Two reasons the bot must not merge a held spec PR, whatever the delegation says. Both
@@ -616,31 +641,6 @@ delegated_merge_human_claims() {
     return 1
   fi
   return 0
-}
-
-# delegated_merge_handoffs_spent <pr> <marker> (#3120)
-#
-# Exit 0 only when EVERY handoff comment predates the PR's newest commit. A handoff is a
-# claim about the head it was posted against: shepherd_hand_off writes it when automation
-# gives up (the ceiling, the attempt cap, a fix that produced nothing), and a commit
-# pushed after it means automation took the PR back, so the old handoff no longer speaks
-# for the founder. Without this, #2799, #2830 and #2945 stayed refused for good after
-# being remediated and green for a week. A handoff at or after the newest commit, or any
-# unreadable commit list, comment or timestamp, exits 1 and the handoff stays live.
-delegated_merge_handoffs_spent() {
-  local pr="$1" marker="$2" live=""
-  if ! live=$(gh pr view "$pr" --repo "$REPO" --json commits,comments 2>/dev/null \
-       | jq -r --arg m "$marker" '
-           (.commits | if type == "array" and length > 0
-                       then [.[] | .committedDate | fromdateiso8601] | max
-                       else error("no commits") end) as $head
-           | .comments | if type == "array" then . else error("no list") end
-           | [.[] | select((.body // "") | contains($m))
-                  | select((.createdAt | fromdateiso8601) >= $head)]
-           | length' 2>/dev/null); then
-    return 1
-  fi
-  [[ "$live" == "0" ]]
 }
 
 autonomy_may_merge_delegated() {
