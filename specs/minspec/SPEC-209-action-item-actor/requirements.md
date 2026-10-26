@@ -215,10 +215,15 @@ that backstop.
 
 ## Decisions needed (Clarify)
 
-All 6 decisions are resolved: an agent session recorded each option this document already
+All 6 decisions are answered: an agent session recorded each option this document already
 recommended, under the founder's standing instruction of 2026-10-26 (inbox items in66/in67,
 relayed by the chief-of-staff proxy) to settle Clarify on the recommended options. No human
-chose an individual option; they are ratified only by approval of this spec.
+chose an individual option; they are ratified only by approval of this spec. That
+instruction is held outside this repository (the founder's inbox, read by the chief-of-staff
+proxy), so a reader cannot check it from here: treat each selection as the recommendation it
+restates until this spec is approved. The frontmatter `clarify:` field is not edited here.
+This spec's own D5 (a) would treat a relayed instruction as non-human; the same caution is
+why approval of this spec, not this record, ratifies the selections.
 
 ### D1 - What the tag looks like
 

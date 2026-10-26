@@ -184,10 +184,13 @@ compaction must use. Without one, three hand-copied checks have already drifted 
 Each question names a recommended option **(rec)** and what that option costs. The
 requirements above are written under every recommendation.
 
-All 4 decisions are resolved: an agent session recorded each option this document already
+All 4 decisions are answered: an agent session recorded each option this document already
 recommended, under the founder's standing instruction of 2026-10-26 (inbox items in66/in67,
 relayed by the chief-of-staff proxy) to settle Clarify on the recommended options. No human
-chose an individual option; they are ratified only by approval of this spec.
+chose an individual option; they are ratified only by approval of this spec. That
+instruction is held outside this repository (the founder's inbox, read by the chief-of-staff
+proxy), so a reader cannot check it from here: treat each selection as the recommendation it
+restates until this spec is approved. The frontmatter `clarify:` field is not edited here.
 
 - **DQ-1 - How mirrors treat DRAFT entries.**
   - **(a) (rec)** Leave them out, and print one count line (FR-2, FR-3). Cost: pending rules
