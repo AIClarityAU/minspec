@@ -38,7 +38,21 @@ nothing errors. This spec adds one read-only check: enumerate local checkouts th
 Sibling in shape to #2173 (a coverage claim trusted rather than computed) and to SPEC-228
 (a parity witness whose file list is hand-maintained instead of enumerated).
 
-## Root-cause diagnosis (measured 2026-10-27, live container)
+## Root-cause diagnosis (measured 2026-10-26 23:50 UTC, live container)
+
+The timestamp is UTC, read from `date -u` (the host clock reads 2026-10-27 10:50 AEDT at the
+same instant). Everything below is outside this repository, so it cannot be checked from a
+checkout of it. The figures were re-measured at that time, and anyone with access to the
+host's `~/code` can reproduce them with:
+
+```sh
+ls -d ~/code/*/.minspec | sed 's#/.minspec##;s#.*/##' | sort   # 19 repos carrying the marker
+for f in ~/code/*.code-workspace; do echo "== $f"; grep -o '"path"[^,}]*' "$f"; done
+grep -n 'VoIP SMS Inbox' ~/code/mmo.code-workspace
+```
+
+These are a snapshot. FR-1 exists so the counts are computed each time rather than trusted
+from this prose.
 
 - **Mechanism.** The project list is hand-maintained in three JSONC files
   (`~/code/mmo.code-workspace`, `~/code/forge.code-workspace`,
