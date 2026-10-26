@@ -69,3 +69,43 @@ export function openClarifyDetail(content: string): string | undefined {
     ? `open Clarify decision(s) under "Decisions needed": ${v.items.join(', ')}; answer them before approval`
     : undefined;
 }
+
+/**
+ * The Clarify PHASE must be recorded as finished (#3102). The text heuristic above only
+ * sees decision items it can recognise; a spec with no detectable decision text and
+ * `phases.clarify: pending` slipped past it. SDD FR-2 requires Clarify for T3-T4, and a
+ * delegated approval has no human to notice it never happened, so the phase field itself
+ * is checked, as a second witness beside the text.
+ */
+const CLARIFY_RECORDED = new Set(['done', 'skipped']);
+
+function frontmatterBlock(content: string): string[] {
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  if (lines[0]?.trim() !== '---') return [];
+  const end = lines.indexOf('---', 1);
+  return end === -1 ? [] : lines.slice(1, end);
+}
+
+/** `phases.clarify` as written (comment stripped), or undefined when absent. */
+export function clarifyPhase(content: string): string | undefined {
+  const fm = frontmatterBlock(content);
+  const start = fm.findIndex((l) => /^phases:\s*(#.*)?$/.test(l));
+  if (start === -1) return undefined;
+  for (let i = start + 1; i < fm.length && /^\s+\S/.test(fm[i]); i++) {
+    const m = /^\s+clarify:\s*["']?([A-Za-z-]+)["']?\s*(?:#.*)?$/.exec(fm[i]);
+    if (m) return m[1].toLowerCase();
+  }
+  return undefined;
+}
+
+/**
+ * One-line refusal detail when a T3/T4 spec's Clarify phase is not recorded done/skipped,
+ * or undefined. T1/T2 never required Clarify, so they are not judged here. Fail closed:
+ * a T3/T4 spec with no readable `phases.clarify` is refused.
+ */
+export function clarifyPhaseDetail(content: string, tier: string | undefined): string | undefined {
+  if (tier !== 'T3' && tier !== 'T4') return undefined;
+  const phase = clarifyPhase(content);
+  if (phase !== undefined && CLARIFY_RECORDED.has(phase)) return undefined;
+  return `${tier} spec has phases.clarify: ${phase ?? '(absent)'}; the Clarify phase must be done or skipped before approval`;
+}

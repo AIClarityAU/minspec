@@ -54,7 +54,7 @@ import {
   type DelegationWitnesses,
 } from './approval-actor';
 import { readRepeatFixShare, utcToday } from './repeat-fix-share';
-import { openClarifyDetail } from './clarify-open';
+import { openClarifyDetail, clarifyPhaseDetail } from './clarify-open';
 import { readContentPullRequest } from './content-pr';
 import { readSpecFile, advanceSpecToImplementing } from '../../packages/minspec/src/lib/spec';
 import { isTerminalSpecStatus } from '../../packages/minspec/src/lib/spec-vocabulary';
@@ -218,6 +218,8 @@ export function planDelegatedApproval(input: PlanInput): PlanResult {
   if (act === 'spec-approval') {
     const open = openClarifyDetail(artifactContent);
     if (open !== undefined) return no('clarify-open', open);
+    const phase = clarifyPhaseDetail(artifactContent, tier);
+    if (phase !== undefined) return no('clarify-pending', phase);
   }
   // The delegation to cite: the first that covers this repo and act. `checkApprovalActor`
   // re-judges it in full, so picking a non-covering one only produces a refusal.
@@ -568,6 +570,8 @@ export function specNotApprovable(repoRoot: string, abs: string): string | undef
   const parsed = readSpecFile(abs);
   const status = parsed.frontmatter.status;
   if (isTerminalSpecStatus(status)) return `the spec is ${String(status)}, past the approval gate`;
+  const clarify = clarifyPhaseDetail(parsed.raw, parsed.frontmatter.tier);
+  if (clarify !== undefined) return clarify;
   const result = validateSpec(parsed, loadConfig(repoRoot), {
     knownEpicRefs: epicRefSet(repoRoot),
     siblingShardFiles: readShardIdFiles(path.dirname(abs)),

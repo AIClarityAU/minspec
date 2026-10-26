@@ -69,7 +69,7 @@ const DELEGATIONS = JSON.stringify({
 });
 
 const spec = (id: string, status: string, extra = '') =>
-  `---\nid: ${id}\nstatus: ${status}\ntier: T3\n---\n\n# ${id}\n\n- FR-1. Content ${id}.${extra}\n`;
+  `---\nid: ${id}\nstatus: ${status}\ntier: T3\nphases:\n  clarify: done\n---\n\n# ${id}\n\n- FR-1. Content ${id}.${extra}\n`;
 const dr = (id: string, status: string, kind: string) =>
   `---\nid: ${id}\nstatus: ${status}\nkind: ${kind}\ntier: T2\n---\n\n# ${id}\n\nBody of ${id}.\n`;
 
@@ -645,5 +645,20 @@ describe('#3057: dependencies resolved from the primary worktree', () => {
     expect(rec.approve).toEqual([]);
     expect(sh(root, 'branch', '--list', 'dlg-approve/*').trim()).toBe('');
     noWrites(rec);
+  });
+});
+
+describe('pending Clarify phase (#3102)', () => {
+  it('skips a T3 spec with phases.clarify pending and no decision list, and never runs the CLI', () => {
+    const pending = spec('SPEC-902', 'specifying').replace('clarify: done', 'clarify: pending');
+    commit({ 'specs/minspec/SPEC-902-pending/requirements.md': pending }, 'feat: SPEC-902 (#44)');
+    sh(root, 'push', '-q', 'origin', 'main');
+    sh(root, 'fetch', '-q', 'origin');
+    const rec = newRec();
+    const report = runCaller(opts({ write: false }), deps(rec));
+    const r = report.results.find((x) => x.artifact.includes('SPEC-902'));
+    expect(r?.outcome).toBe('skipped');
+    expect(r?.reason).toBe('clarify-pending');
+    expect(rec.approve.map((a) => a.artifact)).not.toContain('specs/minspec/SPEC-902-pending/requirements.md');
   });
 });

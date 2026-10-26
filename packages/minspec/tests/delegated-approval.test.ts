@@ -37,6 +37,9 @@ const BODY = `---
 id: SPEC-900
 status: planning
 tier: T3
+phases:
+  specify: done
+  clarify: done
 ---
 
 # Fixture
@@ -337,7 +340,20 @@ describe('the bot refuses what the founder\'s Approve Spec refuses', () => {
     const dir = path.join(root, 'specs', 'SPEC-900-x');
     fs.mkdirSync(dir, { recursive: true });
     const abs = path.join(dir, 'requirements.md');
-    fs.writeFileSync(abs, '---\nid: SPEC-900\ntitle: x\nstatus: specifying\ntier: T3\n---\n\n# x\n');
+    fs.writeFileSync(abs, '---\nid: SPEC-900\ntitle: x\nstatus: specifying\ntier: T3\nphases:\n  clarify: done\n---\n\n# x\n');
     expect(specNotApprovable(root, abs)).toMatch(/not complete/);
+  });
+  it('#3102: a T3 spec with phases.clarify pending and no decision list is refused', () => {
+    const pending = BODY.replace('clarify: done', 'clarify: pending');
+    const r = planDelegatedApproval(input({ artifactContent: pending, review: evidence({ artifactAtHead: pending }) }));
+    expect(reason(r)).toBe('clarify-pending');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dlgclar-'));
+    fs.mkdirSync(path.join(root, '.minspec'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.minspec', 'config.json'), JSON.stringify({ version: '1', specsDir: 'specs' }));
+    const dir = path.join(root, 'specs', 'SPEC-901-x');
+    fs.mkdirSync(dir, { recursive: true });
+    const abs = path.join(dir, 'requirements.md');
+    fs.writeFileSync(abs, pending);
+    expect(specNotApprovable(root, abs)).toMatch(/phases\.clarify: pending/);
   });
 });

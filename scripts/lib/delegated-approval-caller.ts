@@ -56,7 +56,7 @@ import { BOT_ACTOR, evaluateDelegation, parseDelegations, type Delegation, type 
 import { actForPath, frontmatterField } from './approval-actor';
 import { readContentPullRequest } from './content-pr';
 import { readRepeatFixShare, utcToday } from './repeat-fix-share';
-import { openClarifyDetail } from './clarify-open';
+import { openClarifyDetail, clarifyPhaseDetail } from './clarify-open';
 
 /** The commit identity of `minspec-sdd[bot]` (the App's bot user). */
 export const BOT_EMAIL = '299695933+minspec-sdd[bot]@users.noreply.github.com';
@@ -404,6 +404,13 @@ export function runCaller(opts: CallerOptions, deps: CallerDeps): CallerReport {
       }
     }
     const tier = frontmatterField(content, 'tier');
+    if (act === 'spec-approval') {
+      const phase = clarifyPhaseDetail(content, tier);
+      if (phase !== undefined) {
+        skip(artifact, 'clarify-pending', phase);
+        continue;
+      }
+    }
     if (tier === undefined || !TIERS.includes(tier as Tier)) {
       skip(artifact, 'tier-unknown', 'no tier T1..T4 declared');
       continue;

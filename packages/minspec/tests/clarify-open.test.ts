@@ -18,3 +18,24 @@ describe('findOpenClarify (#3059)', () => {
     expect(findOpenClarify('```\n## Decisions needed\n**D1. x**\n```\n').open).toBe(false);
   });
 });
+
+import { clarifyPhaseDetail } from '../../../scripts/lib/clarify-open';
+
+describe('clarifyPhaseDetail (#3102)', () => {
+  const fm = (clarify: string, tier = 'T3') =>
+    `---\nid: SPEC-1\ntier: ${tier}\nphases:\n  specify: done\n  clarify: ${clarify}\n  plan: pending\n---\n\n# x\n`;
+  it('refuses a T3/T4 spec whose Clarify phase is pending or in progress', () => {
+    expect(clarifyPhaseDetail(fm('pending'), 'T3')).toMatch(/phases\.clarify: pending/);
+    expect(clarifyPhaseDetail(fm('in-progress', 'T4'), 'T4')).toMatch(/in-progress/);
+  });
+  it('accepts done and skipped, with a trailing comment', () => {
+    expect(clarifyPhaseDetail(fm('done'), 'T3')).toBeUndefined();
+    expect(clarifyPhaseDetail(fm('skipped'), 'T3')).toBeUndefined();
+    expect(clarifyPhaseDetail(fm('done   # resolved'), 'T3')).toBeUndefined();
+  });
+  it('fails closed on an absent phases map for T3, and ignores T1/T2', () => {
+    expect(clarifyPhaseDetail('---\nid: SPEC-1\ntier: T3\n---\n', 'T3')).toMatch(/absent/);
+    expect(clarifyPhaseDetail(fm('pending', 'T2'), 'T2')).toBeUndefined();
+    expect(clarifyPhaseDetail(fm('pending'), undefined)).toBeUndefined();
+  });
+});
