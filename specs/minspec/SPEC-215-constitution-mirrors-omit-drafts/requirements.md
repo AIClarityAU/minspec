@@ -184,15 +184,13 @@ compaction must use. Without one, three hand-copied checks have already drifted 
 Each question names a recommended option **(rec)** and what that option costs. The
 requirements above are written under every recommendation.
 
-Each selection below restates the option this document already marks (rec). It was
-copied by an agent session; neither a human nor a delegation chose it, and DLG-001
-(DR-108) does not cover recording Clarify selections. This section is not marked
-resolved: it needs the founder's answer before approval.
+All 4 decisions are resolved: an agent session recorded each option this document already
+recommended, on 2026-10-27, under the founder's standing instruction of 2026-10-26 (inbox
+items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on the recommended
+options. No human chose an individual option; they are ratified only by approval of this
+spec.
 
 - **DQ-1 - How mirrors treat DRAFT entries.**
-  **Recorded selection: Option (a),** leave DRAFT entries out and print one count line,
-  so the omission is not silent (INV-1).
-
   - **(a) (rec)** Leave them out, and print one count line (FR-2, FR-3). Cost: pending rules
     are invisible to an agent that reads only CLAUDE.md, so a rule the author wanted
     followed before formally accepting it is not followed.
@@ -202,10 +200,10 @@ resolved: it needs the founder's answer before approval.
     "must never be violated" heading it sits under. #1937 rates this the weakest option.
   - The issue's own recommendation is (a) without the count line. The count line is added
     here so the omission is not silent (INV-1). It is cheap to drop at Clarify if not wanted.
+  **Recorded selection: Option (a), leave DRAFT entries out and print one count line.**
+  Selected on its recommended option under the founder's standing instruction of 2026-10-26
+  (inbox items in66/in67, relayed by the chief-of-staff proxy).
 - **DQ-2 - Which marker forms count as DRAFT.**
-  **Recorded selection: Option (a),** case-sensitive `DRAFT:` and `DRAFT?:`, optionally
-  bold, fixes the whole defect without hiding an accepted rule that starts with "Draft".
-
   - **(a) (rec)** Case-sensitive `DRAFT:` and `DRAFT?:`, either one optionally wrapped in
     bold (`**DRAFT:**`, `**DRAFT?:**`). Compaction strips all four (FR-8). Cost: compaction
     now also accepts `DRAFT?:` entries, which the author marked as less certain. The
@@ -215,25 +213,29 @@ resolved: it needs the founder's answer before approval.
     partly fixed.
   - (c) Any leading `DRAFT` token, matched case-insensitively. Cost: could hide an accepted
     rule that happens to start with "Draft". AC-4 exists to rule this out.
+  **Recorded selection: Option (a), case-sensitive `DRAFT:` and `DRAFT?:`, either optionally
+  wrapped in bold.** Selected on its recommended option under the founder's standing
+  instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy).
 - **DQ-3 - Do the `.cursorrules` Principles get the same treatment?**
-  **Recorded selection: Option (a),** principles go through the same predicate, count
-  line and placeholder rule, since the defect has the same shape there.
-
   - **(a) (rec)** Yes. Principles go through the same predicate, the same count line and the
     same placeholder rule. Cost: this goes beyond the issue's invariant-only wording, and
     the #2520 test assertion changes (AC-7).
   - (b) No, invariants only. Cost: `.cursorrules` keeps presenting seeded DRAFT principles
     as the project's adopted principles. The heading is softer, but the defect has the
     same shape.
+  **Recorded selection: Option (a), yes; Principles go through the same predicate, count
+  line and placeholder rule.** Selected on its recommended option under the founder's
+  standing instruction of 2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff
+  proxy).
 - **DQ-4 - Numbering in CLAUDE.md once DRAFT entries are left out.**
-  **Recorded selection: Option (a),** keep the constitution's ordinals with gaps, so
-  "invariant N" means the same rule in CLAUDE.md and in the constitution.
-
   - **(a) (rec)** Keep the constitution's ordinals, with gaps (FR-5). Cost: a numbered list
     that skips numbers looks odd and may be "corrected" by hand inside a managed section.
   - (b) Renumber 1..N. Cost: "invariant 3" means different rules in CLAUDE.md and in the
     constitution, and prose that cites ordinals (this repo's CLAUDE.md does) quietly points
     at the wrong rule.
+  **Recorded selection: Option (a), keep the constitution's ordinals, with gaps.** Selected
+  on its recommended option under the founder's standing instruction of 2026-10-26 (inbox
+  items in66/in67, relayed by the chief-of-staff proxy).
 
 ## Why no new DR
 
