@@ -292,10 +292,10 @@ gets back into the pipeline.
 ## Decisions needed (Clarify)
 
 4 of 5 decisions carry a recorded selection: an agent session recorded the option this
-document already recommended, on 2026-10-27, under the founder's standing instruction of
-2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on
-the recommended options. No human chose an individual option; they are ratified only by
-approval of this spec. Still open, with no selection recorded: D-2.
+document already recommended, under the founder's standing instruction of 2026-10-26 (inbox
+items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on the recommended
+options. No human chose an individual option; they are ratified only by approval of this
+spec. Still open, with no selection recorded: D-2.
 
 ### D-1 - How does a founder's answer get back into the pipeline?
 

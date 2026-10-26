@@ -197,10 +197,10 @@ mocked config read), run with a control that shows the check fails when the defe
 ## Decisions needed (Clarify)
 
 2 of 3 decisions carry a recorded selection: an agent session recorded the option this
-document already recommended, on 2026-10-27, under the founder's standing instruction of
-2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on
-the recommended options. No human chose an individual option; they are ratified only by
-approval of this spec. Still open, with no selection recorded: D2.
+document already recommended, under the founder's standing instruction of 2026-10-26 (inbox
+items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on the recommended
+options. No human chose an individual option; they are ratified only by approval of this
+spec. Still open, with no selection recorded: D2.
 
 - **D1. Should the session-start witness repair as well as warn?**
   - **(a) Warn only (rec).** It matches the issue's recommendation ("assert the post-condition

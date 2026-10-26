@@ -106,10 +106,10 @@ whether MinSpec may delete from it at all.
 ## Decisions needed (Clarify)
 
 1 of 3 decisions carries a recorded selection: an agent session recorded the option this
-document already recommended, on 2026-10-27, under the founder's standing instruction of
-2026-10-26 (inbox items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on
-the recommended options. No human chose an individual option; they are ratified only by
-approval of this spec. Still open, with no selection recorded: D1, D2.
+document already recommended, under the founder's standing instruction of 2026-10-26 (inbox
+items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on the recommended
+options. No human chose an individual option; they are ratified only by approval of this
+spec. Still open, with no selection recorded: D1, D2.
 
 **D1. Where does cleanup run?**
 - (a) `session-panel.py` session-start hook, **(rec)**: already reads and tests liveness, one
