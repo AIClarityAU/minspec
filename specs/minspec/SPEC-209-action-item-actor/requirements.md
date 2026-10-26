@@ -216,10 +216,9 @@ that backstop.
 ## Decisions needed (Clarify)
 
 All 6 decisions are resolved: an agent session recorded each option this document already
-recommended, on 2026-10-27, under the founder's standing instruction of 2026-10-26 (inbox
-items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on the recommended
-options. No human chose an individual option; they are ratified only by approval of this
-spec.
+recommended, under the founder's standing instruction of 2026-10-26 (inbox items in66/in67,
+relayed by the chief-of-staff proxy) to settle Clarify on the recommended options. No human
+chose an individual option; they are ratified only by approval of this spec.
 
 ### D1 - What the tag looks like
 

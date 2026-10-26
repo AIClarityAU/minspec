@@ -185,10 +185,9 @@ Each question names a recommended option **(rec)** and what that option costs. T
 requirements above are written under every recommendation.
 
 All 4 decisions are resolved: an agent session recorded each option this document already
-recommended, on 2026-10-27, under the founder's standing instruction of 2026-10-26 (inbox
-items in66/in67, relayed by the chief-of-staff proxy) to settle Clarify on the recommended
-options. No human chose an individual option; they are ratified only by approval of this
-spec.
+recommended, under the founder's standing instruction of 2026-10-26 (inbox items in66/in67,
+relayed by the chief-of-staff proxy) to settle Clarify on the recommended options. No human
+chose an individual option; they are ratified only by approval of this spec.
 
 - **DQ-1 - How mirrors treat DRAFT entries.**
   - **(a) (rec)** Leave them out, and print one count line (FR-2, FR-3). Cost: pending rules
