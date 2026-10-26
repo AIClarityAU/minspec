@@ -260,3 +260,60 @@ describe('--arm: bound to the judged head, under the bot, never --admin', () => 
     expect(r.gh.filter((l) => /ARGS=pr (edit|comment)/.test(l))).toEqual([]);
   }, TIMEOUT);
 });
+
+// #3120: a creator-shepherd handoff is a claim about the head it was posted against. It
+// is written when automation gives up (a ceiling timeout, the attempt cap, a fix that
+// produced nothing), never because a decision was put to the founder, and nothing ever
+// withdrew it. #2799, #2830 and #2945 were handed off on 2026-10-15..18, then remediated
+// and updated many times, and stayed refused as `handed-to-human` on every drain cycle
+// although the judge covered each at its current head. A commit pushed after the handoff
+// means automation took the PR back, so that handoff no longer speaks for the founder.
+describe('a shepherd handoff is scoped to the head it was posted against (#3120)', () => {
+  const MARK = 'handed off <!-- minspec-shepherd-handoff -->';
+  const view = (v: object) => JSON.stringify({ ...VIEW_OK, ...v });
+  const commits = (...dates: string[]) => dates.map((d) => ({ oid: 'a'.repeat(40), committedDate: d }));
+
+  it('a handoff posted before the newest commit is spent: the covered PR proceeds', () => {
+    const r = run(['2966'], {
+      view: view({
+        commits: commits('2026-10-14T00:00:00Z', '2026-10-25T10:13:30Z'),
+        comments: [{ body: MARK, createdAt: '2026-10-15T17:02:20Z' }],
+      }),
+    });
+    expect(r.status).toBe(0);
+    expect(r.verdict).toMatchObject({ proceed: true });
+  }, TIMEOUT);
+
+  it.each([
+    ['posted after the newest commit', { commits: commits('2026-10-14T00:00:00Z'), comments: [{ body: MARK, createdAt: '2026-10-15T17:02:20Z' }] }],
+    ['posted at the same second as the newest commit', { commits: commits('2026-10-15T17:02:20Z'), comments: [{ body: MARK, createdAt: '2026-10-15T17:02:20Z' }] }],
+    ['one spent and one live handoff', {
+      commits: commits('2026-10-20T00:00:00Z'),
+      comments: [{ body: MARK, createdAt: '2026-10-15T00:00:00Z' }, { body: MARK, createdAt: '2026-10-21T00:00:00Z' }],
+    }],
+    ['a handoff with no timestamp', { commits: commits('2026-10-20T00:00:00Z'), comments: [{ body: MARK }] }],
+    ['a handoff with an unparseable timestamp', { commits: commits('2026-10-20T00:00:00Z'), comments: [{ body: MARK, createdAt: 'yesterday' }] }],
+    ['no commit list', { comments: [{ body: MARK, createdAt: '2026-10-15T00:00:00Z' }] }],
+    ['an empty commit list', { commits: [], comments: [{ body: MARK, createdAt: '2026-10-15T00:00:00Z' }] }],
+    ['a commit with no date', { commits: [{ oid: 'a'.repeat(40) }], comments: [{ body: MARK, createdAt: '2026-10-15T00:00:00Z' }] }],
+  ] as const)('%s: still handed-to-human, nothing written', (_n, v) => {
+    const r = run(['2966', '--arm'], { view: view(v) });
+    expect(r.status).toBe(1);
+    expect(r.verdict).toMatchObject({ proceed: false, reason: 'handed-to-human' });
+    expect(r.judgeArgs).toBeUndefined();
+    expect(writes(r.gh)).toEqual([]);
+  }, TIMEOUT);
+
+  it('a spent handoff still leaves the closing-link claim in force', () => {
+    const r = run(['2966', '--arm'], {
+      view: view({
+        closingIssuesReferences: [],
+        commits: commits('2026-10-25T10:13:30Z'),
+        comments: [{ body: MARK, createdAt: '2026-10-15T17:02:20Z' }],
+      }),
+    });
+    expect(r.status).toBe(1);
+    expect(r.verdict).toMatchObject({ proceed: false, reason: 'closes-link-unconfirmed' });
+    expect(writes(r.gh)).toEqual([]);
+  }, TIMEOUT);
+});
