@@ -46,7 +46,10 @@ interface Row {
 const spec = (n: number) => `specs/minspec/SPEC-${n}-x/requirements.md`;
 
 /** seamExit: per-PR exit code of the stub seam (default 0 = armed). */
-function run(rows: Row[] | string, o: { listExit?: number; seamExit?: Record<number, number>; env?: Record<string, string> } = {}) {
+function run(
+  rows: Row[] | string,
+  o: { listExit?: number; listStderr?: string; failFirst?: number; seamExit?: Record<number, number>; env?: Record<string, string> } = {},
+) {
   const calls = path.join(tmp, 'calls');
   const list =
     typeof rows === 'string'
@@ -82,13 +85,18 @@ exit $code
     'set -euo pipefail',
     'REPO="AIClarityAU/minspec"',
     `DISPATCH=${JSON.stringify(seam)}`,
-    `gh() { printf 'GH %s\\n' "$*" >> ${JSON.stringify(calls)}; cat ${JSON.stringify(path.join(tmp, 'list.json'))}; return ${o.listExit ?? 0}; }`,
+    // failFirst: the first N gh calls fail (stderr + exit 1), later ones succeed.
+    `gh() { printf 'GH %s\\n' "$*" >> ${JSON.stringify(calls)}; ` +
+      `local n; n=$(grep -c '^GH ' ${JSON.stringify(calls)}); ` +
+      `if (( n <= ${o.failFirst ?? 0} )); then echo ${JSON.stringify(o.listStderr ?? 'boom')} >&2; return 1; fi; ` +
+      `if [ ${o.listExit ?? 0} != 0 ]; then echo ${JSON.stringify(o.listStderr ?? '')} >&2; fi; ` +
+      `cat ${JSON.stringify(path.join(tmp, 'list.json'))}; return ${o.listExit ?? 0}; }`,
     stageBlock(),
     'arm_delegated_spec_merges; echo "rc=$?"',
   ].join('\n');
   const r = spawnSync('bash', ['-c', script], {
     encoding: 'utf-8',
-    env: { PATH: process.env.PATH ?? '', ...(o.env ?? {}) },
+    env: { PATH: process.env.PATH ?? '', MINSPEC_DRAIN_DELEGATED_MERGE_RETRY_SLEEP: '0', ...(o.env ?? {}) },
   });
   const all = fs.existsSync(calls) ? fs.readFileSync(calls, 'utf-8').split('\n').filter(Boolean) : [];
   return {
@@ -164,6 +172,21 @@ describe('never silent, never fatal', () => {
     expect(r.seamCalls).toEqual([]);
     expect(r.stderr).toContain('could not be read');
     expect(r.stdout).toContain('rc=0');
+  });
+
+  it('a persistent list failure names the gh stderr in the WARNING (#3098)', () => {
+    const r = run('', { listExit: 1, listStderr: 'GraphQL: Resource limits exceeded' });
+    expect(r.list).toHaveLength(2);
+    expect(r.stderr).toContain('could not be read after 2 attempts');
+    expect(r.stderr).toContain('GraphQL: Resource limits exceeded');
+    expect(r.seamCalls).toEqual([]);
+  });
+
+  it('a transient list failure is retried once and the stage then runs (#3098)', () => {
+    const r = run([{ number: 10, files: [spec(10)] }], { failFirst: 1 });
+    expect(r.list).toHaveLength(2);
+    expect(r.stderr).not.toContain('could not be read');
+    expect(r.seamCalls).toEqual(['--delegated-spec-merge 10 --arm']);
   });
 
   it('an unparseable list is loud', () => {

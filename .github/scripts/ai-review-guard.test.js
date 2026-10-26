@@ -41,6 +41,9 @@ const {
   decideReviewCheck,
   isBenignRemovalError,
   sanitizeLogin,
+  isRateLimitError,
+  rateLimitWaitMs,
+  withRateLimitRetry,
 } = require('./ai-review-guard.js');
 
 // Shared timestamps for the recency tests: a pass applied AFTER the head commit
@@ -227,6 +230,178 @@ test('provenance-recency: missing/unparseable timestamps are NOT verified (canno
   });
   assert.equal(v.verified, false);
   assert.match(v.reason, /timestamp/);
+});
+
+// ── #3015 — a rate-limited read is not a provenance finding ─────────────────
+// Measured on PR 2557 (run 40139595165): the installation hit its core rate limit,
+// the label-timeline read threw, the workflow swallowed it into a warning, and the
+// gate reported "no record of who applied ai-review:pass - provenance unverifiable".
+// The pass was the reviewer bot's; a later run on the next head went green. The gate
+// must still fail closed, but must say the read failed and a re-run is the fix.
+function rateLimitError({ status = 403, remaining = '0', reset, retryAfter } = {}) {
+  const headers = { 'x-ratelimit-remaining': remaining };
+  if (reset !== undefined) headers['x-ratelimit-reset'] = String(reset);
+  if (retryAfter !== undefined) headers['retry-after'] = String(retryAfter);
+  const e = new Error('API rate limit exceeded for installation.');
+  e.status = status;
+  e.response = { status, headers };
+  return e;
+}
+
+test('isRateLimitError: primary (403, remaining 0) and secondary (429 / retry-after) limits', () => {
+  assert.equal(isRateLimitError(rateLimitError()), true);
+  assert.equal(isRateLimitError(rateLimitError({ status: 429, remaining: '12' })), true);
+  assert.equal(isRateLimitError(rateLimitError({ remaining: '40', retryAfter: 60 })), true);
+});
+
+test('isRateLimitError: a plain 403/404/500 is NOT a rate limit', () => {
+  const forbidden = new Error('Resource not accessible by integration');
+  forbidden.status = 403;
+  forbidden.response = { status: 403, headers: { 'x-ratelimit-remaining': '4000' } };
+  assert.equal(isRateLimitError(forbidden), false);
+  const notFound = new Error('Not Found');
+  notFound.status = 404;
+  assert.equal(isRateLimitError(notFound), false);
+  assert.equal(isRateLimitError(new Error('socket hang up')), false);
+  assert.equal(isRateLimitError(undefined), false);
+});
+
+test('rateLimitWaitMs: retry-after wins, then x-ratelimit-reset, else null', () => {
+  const now = 1_000_000_000_000;
+  assert.equal(rateLimitWaitMs(rateLimitError({ retryAfter: 30 }), now), 30_000);
+  assert.equal(
+    rateLimitWaitMs(rateLimitError({ reset: Math.floor(now / 1000) + 20 }), now),
+    21_000, // reset instant plus a one-second pad against clock skew
+  );
+  assert.equal(rateLimitWaitMs(rateLimitError({ reset: Math.floor(now / 1000) - 5 }), now), 1_000);
+  assert.equal(rateLimitWaitMs(rateLimitError(), now), null);
+});
+
+test('withRateLimitRetry: retries a rate-limited read and returns the eventual result', async () => {
+  const slept = [];
+  let calls = 0;
+  const out = await withRateLimitRetry(
+    async () => {
+      calls += 1;
+      if (calls < 3) throw rateLimitError({ retryAfter: 2 });
+      return 'events';
+    },
+    { sleep: async (ms) => slept.push(ms), now: () => 0 },
+  );
+  assert.equal(out, 'events');
+  assert.equal(calls, 3);
+  assert.deepEqual(slept, [2000, 2000]);
+});
+
+test('withRateLimitRetry: a non-rate-limit error is rethrown at once, never retried', async () => {
+  let calls = 0;
+  const boom = new Error('Not Found');
+  boom.status = 404;
+  await assert.rejects(
+    withRateLimitRetry(
+      async () => {
+        calls += 1;
+        throw boom;
+      },
+      { sleep: async () => assert.fail('must not sleep'), now: () => 0 },
+    ),
+    (e) => e === boom && e.rateLimited !== true,
+  );
+  assert.equal(calls, 1);
+});
+
+test('withRateLimitRetry: still fails (closed) when retries run out, marked rateLimited', async () => {
+  let calls = 0;
+  await assert.rejects(
+    withRateLimitRetry(
+      async () => {
+        calls += 1;
+        throw rateLimitError({ retryAfter: 1 });
+      },
+      { sleep: async () => {}, now: () => 0, maxAttempts: 3 },
+    ),
+    (e) => e.rateLimited === true,
+  );
+  assert.equal(calls, 3);
+});
+
+test('withRateLimitRetry: a reset beyond the wait budget is not slept on - fails at once', async () => {
+  let calls = 0;
+  await assert.rejects(
+    withRateLimitRetry(
+      async () => {
+        calls += 1;
+        throw rateLimitError({ reset: 3600 }); // an hour away
+      },
+      { sleep: async () => assert.fail('must not sleep past the budget'), now: () => 0 },
+    ),
+    (e) => e.rateLimited === true,
+  );
+  assert.equal(calls, 1);
+});
+
+test('provenance-recency (#3015): a rate-limited timeline read stays NOT verified but says so', () => {
+  const v = verifyPassProvenance({
+    labelActor: null,
+    labelAppliedAt: null,
+    headCommittedAt: HEAD_AT,
+    allowlist: BOT_ALLOWLIST,
+    timelineReadError: rateLimitError(),
+  });
+  assert.equal(v.verified, false);
+  assert.match(v.reason, /rate-limited/);
+  assert.match(v.reason, /re-run/);
+  assert.doesNotMatch(v.reason, /no record/);
+});
+
+test('provenance-recency (#3015): any other failed timeline read says the read failed, not "no record"', () => {
+  const v = verifyPassProvenance({
+    labelActor: null,
+    headCommittedAt: HEAD_AT,
+    allowlist: BOT_ALLOWLIST,
+    timelineReadError: new Error('socket hang up'),
+  });
+  assert.equal(v.verified, false);
+  assert.match(v.reason, /could not read the PR label timeline/);
+  assert.doesNotMatch(v.reason, /rate-limited/);
+});
+
+test('provenance-recency (#3015): a rate-limited head-commit read stays NOT verified but says so', () => {
+  const v = verifyPassProvenance({
+    labelActor: 'minspec-review-bot',
+    labelAppliedAt: AFTER_HEAD,
+    headCommittedAt: null,
+    allowlist: BOT_ALLOWLIST,
+    headReadError: rateLimitError(),
+  });
+  assert.equal(v.verified, false);
+  assert.match(v.reason, /rate-limited/);
+});
+
+test('provenance-recency (#3015): a read error never rescues a forged applier', () => {
+  const v = verifyPassProvenance({
+    labelActor: 'harvest316',
+    labelAppliedAt: AFTER_HEAD,
+    headCommittedAt: null,
+    allowlist: BOT_ALLOWLIST,
+    headReadError: rateLimitError(),
+  });
+  assert.equal(v.verified, false);
+  assert.match(v.reason, /not an allowlisted reviewer/);
+});
+
+test('decideStatus (#3015): the rate-limited reason reaches the gate description, gate stays red', () => {
+  const passProvenance = verifyPassProvenance({
+    labelActor: null,
+    headCommittedAt: HEAD_AT,
+    allowlist: BOT_ALLOWLIST,
+    timelineReadError: rateLimitError(),
+  });
+  const s = decideStatus({ labels: [PASS], passProvenance });
+  assert.equal(s.state, 'failure');
+  assert.match(s.description, /rate-limited/);
+  assert.match(s.description, /re-run/); // the actionable tail survives truncate()
+  assert.ok(s.description.length <= 140, `description is ${s.description.length} chars`);
 });
 
 // ── decideStatus + verifyPassProvenance end-to-end (the fail-open regressions) ─

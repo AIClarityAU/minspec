@@ -30,11 +30,13 @@
 #      lifetime end, or a container restart never turns a paused drain back on.
 #   4. A failure is visible. When a drain ends, the lines it wrote to the drain log
 #      since this script started waiting on it are printed here (the unit's journal),
-#      and the exit code says how it ended: 0 for a normal end (lifetime cap, or a SIGTERM someone
-#      else sent), 1 for
-#      the loop's "consecutive cycle errors" stop, a launch that failed, or a drain
-#      that vanished without its exit line. The unit's StartLimitBurst turns repeated
-#      failures into a failed unit instead of restarting forever.
+#      and a failure is never silent. The failures are: the loop's "consecutive cycle
+#      errors" stop, a launch that failed, and a drain that vanished without its exit
+#      line. Each is printed and then RETRIED with backoff inside the same start (#3095),
+#      not turned into exit 1: exiting would spend one of the unit's StartLimitBurst
+#      starts per failure, and a burst of transient failures after a host resume used up
+#      the limit and left the unit failed for good. A normal end (lifetime cap, or a
+#      SIGTERM someone else sent) exits 0.
 #
 # A deliberate stop is `systemctl --user stop minspec-drain`. Killing a `docker exec`
 # client does not kill the process it started in the container, so the unit's
@@ -56,6 +58,8 @@
 #   MINSPEC_DRAIN_SERVICE_LOCK   this script's own lock (default /tmp/minspec-drain-service.lock)
 #   MINSPEC_DRAIN_SERVICE_POLL   seconds between checks (default 30)
 #   MINSPEC_DRAIN_SERVICE_STOP_GRACE  seconds to wait for the drain on stop (default 90)
+#   MINSPEC_DRAIN_SERVICE_RETRY_BASE  first backoff after a failed launch/end (default 15, doubles)
+#   MINSPEC_DRAIN_SERVICE_RETRY_MAX   backoff ceiling in seconds (default 600)
 
 set -uo pipefail
 
@@ -70,6 +74,9 @@ DRAIN="${MINSPEC_DRAIN_SERVICE_DRAIN:-${SCRIPT_DIR}/../drain-inbox.sh}"
 SVC_LOCK="${MINSPEC_DRAIN_SERVICE_LOCK:-/tmp/minspec-drain-service.lock}"
 POLL="${MINSPEC_DRAIN_SERVICE_POLL:-30}"
 STOP_GRACE="${MINSPEC_DRAIN_SERVICE_STOP_GRACE:-90}"
+# Backoff between retries of a failed launch or failed drain end, inside ONE start (#3095).
+RETRY_BASE="${MINSPEC_DRAIN_SERVICE_RETRY_BASE:-15}"
+RETRY_MAX="${MINSPEC_DRAIN_SERVICE_RETRY_MAX:-600}"
 
 say() { echo "[drain-service] $*"; }
 
@@ -147,6 +154,14 @@ watch() {
   report_end "$off" "$pid"
 }
 
+# retry_wait <delay-var>: say it, sleep that long, then double the variable up to RETRY_MAX.
+retry_wait() {
+  local -n _d="$1"
+  say "retrying in ${_d}s (inside this start; no systemd restart is spent)."
+  nap "$_d"
+  _d=$(( _d * 2 > RETRY_MAX ? RETRY_MAX : _d * 2 ))
+}
+
 cmd_run() {
   if ! is_container "$PID1_COMM"; then
     say "REFUSING: pid 1 is '$(cat "$PID1_COMM" 2>/dev/null || echo unreadable)', not $CONTAINER_PID1. The drain must run inside the agent container: on the host it would push as the founder."
@@ -160,11 +175,16 @@ cmd_run() {
   echo "$$" > "$SVC_LOCK.pid"
   trap on_term TERM
 
-  local was_paused=0 pid off rc
+  # A failure retries here with backoff, in the SAME start. Exiting non-zero would spend
+  # one of the unit's StartLimitBurst starts per failure, and a run of transient failures
+  # after a host resume would mark the unit failed for good (#3095). Only a normal end
+  # (exit 0) leaves this loop.
+  local was_paused=0 pid off rc delay="$RETRY_BASE"
   while :; do
     if pid="$(drain_holder)"; then
       say "adopting the running drain (pid $pid); starting nothing."
-      watch "$pid" "$(log_size)"; exit $?
+      if watch "$pid" "$(log_size)"; then exit 0; fi
+      retry_wait delay; continue
     fi
     if paused; then
       (( was_paused )) || say "PAUSED: pause marker present; no drain started. Resume: scripts/drain-inbox.sh --resume"
@@ -181,7 +201,7 @@ cmd_run() {
     MINSPEC_SESSION_PID=$$ "$DRAIN" --continuous 9>&- || rc=$?
     if (( rc != 0 )); then
       say "FAILED: drain launch exited $rc (see the lines above)."
-      exit 1
+      retry_wait delay; continue
     fi
     # The launcher forks the loop and returns; the loop writes its pid to the lock a
     # moment later. Give it a few seconds before calling the launch a failure.
@@ -189,9 +209,10 @@ cmd_run() {
     until pid="$(drain_holder)" || (( tries >= 20 )); do sleep 0.5; tries=$((tries + 1)); done
     if [[ -z "$pid" ]]; then
       say "FAILED: the drain launch exited 0 but no live pid holds $DRAIN_LOCK."
-      exit 1
+      retry_wait delay; continue
     fi
-    watch "$pid" "$off"; exit $?
+    if watch "$pid" "$off"; then exit 0; fi
+    retry_wait delay
   done
 }
 
