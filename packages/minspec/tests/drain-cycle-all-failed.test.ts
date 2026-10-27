@@ -245,10 +245,17 @@ describe('#3176 drain dispatch: a 401 re-mints once and retries; a second stops 
   }, 60000);
 
   it.each(['1', '2'])('width %s: stops loudly when the freshly minted token 401s too', (width) => {
-    const h = makeHarness([2914, 2936, 2973], LIVE_ONLY('never'));
-    const log = runCycle(h, width, mintEnv(h, ['ghs_dead_a', 'ghs_dead_b', 'ghs_dead_c']));
+    // Six issues, every credential dead, every mint different. At width 2 the first two
+    // launches run on the original token; once one of them re-mints, every later launch runs
+    // on the fresh one, and the first of THOSE to 401 must stop the cycle (review of #3185).
+    // Whatever order the jobs finish in, at most four distinct issues are ever launched, so
+    // the fifth and sixth being dispatched is the walk down the queue this guards against.
+    const h = makeHarness([2914, 2936, 2973, 2978, 2981, 2990], LIVE_ONLY('never'));
+    const log = runCycle(h, width, mintEnv(h, ['ghs_dead_a', 'ghs_dead_b', 'ghs_dead_c', 'ghs_dead_d', 'ghs_dead_e', 'ghs_dead_f', 'ghs_dead_g', 'ghs_dead_h']));
 
     expect(log).toContain('AUTH FAILURE');
+    expect(log).not.toContain('dispatching #2981');
+    expect(log).not.toContain('dispatching #2990');
     expect(log).not.toContain('cycle done.');
     fs.rmSync(h.dir, { recursive: true, force: true });
   }, 60000);

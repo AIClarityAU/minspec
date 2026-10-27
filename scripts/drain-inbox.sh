@@ -2124,13 +2124,16 @@ run_cycle() {
     # ── Parallel path (#1208) — launch up to N, reap as they finish.
     # Each job tees to its own capture file AND to a per-issue prefixed stream, so
     # concurrent builds stay live AND readable instead of interleaving anonymously.
-    local -A pid_issue=() pid_cap=()
+    local -A pid_issue=() pid_cap=() pid_gen=()
     local -a queue=($all_ready)
     local qi=0 stop_launching=0 p rc n out
-    # #3176: issues already retried after an observed 401, whether this cycle has re-minted,
-    # and whether a second 401 (or an impossible re-mint) ended the cycle.
+    # #3176: issues already retried after an observed 401, how many times this cycle has
+    # re-minted (the credential GENERATION every launch records in pid_gen), and whether a
+    # second 401 (or an impossible re-mint) ended the cycle. The generation is what tells a
+    # 401 from a job launched on the token the re-mint replaced (stale: retry once) from a
+    # 401 from a job launched on the fresh one (the fresh token is dead too: stop).
     local -A auth_retried=()
-    local reminted=0 auth_stop=0 auth_dead=0
+    local mint_gen=0 auth_stop=0 auth_dead=0
 
     launch_next() {
       # Same per-item refresh as the serial path. This runs in the PARENT — only the
@@ -2151,7 +2154,7 @@ run_cycle() {
         exit "$(_dispatch_own_status "${PIPESTATUS[@]}")"
       ) &
       local pid=$!
-      pid_issue[$pid]="$n"; pid_cap[$pid]="$cap"
+      pid_issue[$pid]="$n"; pid_cap[$pid]="$cap"; pid_gen[$pid]="$mint_gen"
     }
 
     while (( qi < ${#queue[@]} || ${#pid_issue[@]} > 0 )); do
@@ -2177,8 +2180,9 @@ run_cycle() {
       wait -n -p p || rc=$?
       [[ -z "$p" ]] && continue
       n="${pid_issue[$p]:-}"; [[ -z "$n" ]] && continue
+      local job_gen="${pid_gen[$p]:-0}"
       out=$(cat "${pid_cap[$p]}" 2>/dev/null || true); rm -f "${pid_cap[$p]}"  # swallow-ok: the capture only feeds text signals; the dispatcher's exit status is the failure verdict, so an unreadable capture at worst skips the 401 re-mint and the all-failed gate (#2140) still fires
-      unset 'pid_issue[$p]' 'pid_cap[$p]'
+      unset 'pid_issue[$p]' 'pid_cap[$p]' 'pid_gen[$p]'
 
       # As on the serial path: past this point `rc` is a failure's status and nothing else.
       outcome="$(_dispatch_outcome "$rc")"
@@ -2186,14 +2190,28 @@ run_cycle() {
       [[ "$outcome" == "failed" ]] || rc=0
       verdict="$(classify_dispatch "$n" "$rc" "$out")"
       if (( auth_dead )); then
-        # Re-mint once per cycle (a job launched on the old token may 401 after the
-        # re-mint already happened) and retry each issue once; anything else stops
-        # launching, drains what is in flight, and fails the cycle.
+        # Re-mint once per cycle and retry each issue once. Which 401 may be retried is
+        # decided by the generation the job was LAUNCHED under, not by whether a re-mint
+        # has happened (review of #3185): a job launched before the latest re-mint ran on
+        # the replaced token, so its 401 says nothing about the fresh one and it is
+        # requeued; a job launched after it ran on the fresh token, so its 401 means that
+        # token is dead too and the cycle stops, exactly as the serial path does. The
+        # first 401 of the cycle (generation 0, nothing re-minted yet) is the one that
+        # asks for the re-mint. Anything else stops launching, drains what is in flight,
+        # and fails the cycle.
         # Never once launching has stopped (the cycle failed on a 401, or the quota gate or
         # the breaker held it): a requeued issue would never be launched and would vanish
         # from every count. It is booked as the failure it is, below.
-        if (( ! stop_launching )) && [[ -z "${auth_retried[$n]:-}" ]] && { (( reminted )) || gh_bot_reauth_read; }; then
-          reminted=1; auth_retried[$n]=1
+        local auth_requeue=0
+        if (( ! stop_launching )) && [[ -z "${auth_retried[$n]:-}" ]]; then
+          if (( job_gen < mint_gen )); then
+            auth_requeue=1
+          elif (( mint_gen == 0 )) && gh_bot_reauth_read; then
+            mint_gen=$(( mint_gen + 1 )); auth_requeue=1
+          fi
+        fi
+        if (( auth_requeue )); then
+          auth_retried[$n]=1
           echo "[drain] dispatch of #$n answered HTTP 401 — credential re-minted, queuing this issue for one retry (#3176)." >&2
           queue+=("$n")
           continue
@@ -2206,6 +2224,7 @@ run_cycle() {
           auth_stop=1; stop_launching=1
           if [[ -n "${auth_retried[$n]:-}" ]]; then announce_auth_stop "$n" "the retry on a freshly minted credential failed too"
           elif (( was_stopped )); then announce_auth_stop "$n" "launching had already stopped, so it was not retried"
+          elif (( mint_gen > 0 )); then announce_auth_stop "$n" "it was launched on the freshly minted credential, which failed too"
           else announce_auth_stop "$n" "no different credential could be minted"; fi
         fi
         continue
