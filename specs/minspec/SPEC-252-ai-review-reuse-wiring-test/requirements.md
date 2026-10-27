@@ -1,5 +1,5 @@
 ---
-id: SPEC-232
+id: SPEC-252
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-232: The ai-review.yml glue that calls selectVotersToRun is executed by a test, and the test is proven non-vacuous
+# SPEC-252: The ai-review.yml glue that calls selectVotersToRun is executed by a test, and the test is proven non-vacuous
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2165. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
