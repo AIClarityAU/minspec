@@ -181,6 +181,10 @@ compaction must use. Without one, three hand-copied checks have already drifted 
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 Each question names a recommended option **(rec)** and what that option costs. The
 requirements above are written under every recommendation.
 
@@ -194,6 +198,8 @@ requirements above are written under every recommendation.
     "must never be violated" heading it sits under. #1937 rates this the weakest option.
   - The issue's own recommendation is (a) without the count line. The count line is added
     here so the omission is not silent (INV-1). It is cheap to drop at Clarify if not wanted.
+  **Recorded selection: Option (a),** leave DRAFT entries out and print one count line, so the
+  omission is not silent (INV-1).
 - **DQ-2 - Which marker forms count as DRAFT.**
   - **(a) (rec)** Case-sensitive `DRAFT:` and `DRAFT?:`, either one optionally wrapped in
     bold (`**DRAFT:**`, `**DRAFT?:**`). Compaction strips all four (FR-8). Cost: compaction
@@ -204,6 +210,8 @@ requirements above are written under every recommendation.
     partly fixed.
   - (c) Any leading `DRAFT` token, matched case-insensitively. Cost: could hide an accepted
     rule that happens to start with "Draft". AC-4 exists to rule this out.
+  **Recorded selection: Option (a),** case-sensitive `DRAFT:` and `DRAFT?:`, either optionally in
+  bold, so both marker forms in memory-fabric#30 leave the binding list.
 - **DQ-3 - Do the `.cursorrules` Principles get the same treatment?**
   - **(a) (rec)** Yes. Principles go through the same predicate, the same count line and the
     same placeholder rule. Cost: this goes beyond the issue's invariant-only wording, and
@@ -211,12 +219,16 @@ requirements above are written under every recommendation.
   - (b) No, invariants only. Cost: `.cursorrules` keeps presenting seeded DRAFT principles
     as the project's adopted principles. The heading is softer, but the defect has the
     same shape.
+  **Recorded selection: Option (a),** yes, the `.cursorrules` Principles go through the same
+  predicate, count line and placeholder rule.
 - **DQ-4 - Numbering in CLAUDE.md once DRAFT entries are left out.**
   - **(a) (rec)** Keep the constitution's ordinals, with gaps (FR-5). Cost: a numbered list
     that skips numbers looks odd and may be "corrected" by hand inside a managed section.
   - (b) Renumber 1..N. Cost: "invariant 3" means different rules in CLAUDE.md and in the
     constitution, and prose that cites ordinals (this repo's CLAUDE.md does) quietly points
     at the wrong rule.
+  **Recorded selection: Option (a),** keep the constitution's ordinals, with gaps (FR-5), so
+  "invariant 3" names the same rule in CLAUDE.md and in the constitution.
 
 ## Why no new DR
 

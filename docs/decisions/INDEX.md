@@ -890,4 +890,12 @@ The constitution's merge-gate conservation rule (DR-070 §4) says no unit of wor
 <!-- dr-summary:DR-112 auto=fb18ca00a43a -->
 The rule being lifted: on 2026-07-28 the founder made --admin human-only: "Never use the App token to bypass branch protection or a required check. A PR that needs --admin waits for the human merge keystroke." It is restated in ~/.claude/CLAUDE.md, in DR-086 (section 2.1 and its Amendment A: "--admin remains human-only and no failing check may be bypassed"), in DR-070 section 4 ("No unit of work ever has zero human keystrokes"), and in the chief-of-staff-runner skill. GitHub enforces it today…
 <!-- /dr-summary:DR-112 -->
+
+## [DR-113 — The required ai-review check-run has a guard-free second producer, and a preflight checks the head workflow's guard calls against the base guard's exports](DR-113.md)
+
+*Status: proposed · Date: 2026-10-27*
+
+<!-- dr-summary:DR-113 auto=1a2f25486902 -->
+The step "Post honest ai-review verdict check-run" (.github/workflows/ai-review.yml) treats the check-run as best-effort, yet the check-run is the required, server-attested witness (#397). A required witness whose producer can disappear while the producer shows green is a silent gate (constitution invariant 2, DR-066).
+<!-- /dr-summary:DR-113 -->
 <!-- minspec:dr-index:end -->
