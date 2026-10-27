@@ -279,16 +279,18 @@ collision was settled by the "cheapest to fix" answer, case by case, with no rul
 
 ## Decisions needed (Clarify)
 
-4 of 5 decisions are resolved: an agent session recorded each selection under delegation
-DLG-001 (DR-108, the delegated-approval record); they are ratified only by approval of this
-spec. DQ-5 sets a convention people follow, has no recorded selection, and stays open for
-Clarify; the spec is not ready to approve until it is settled.
+DQ-1 and DQ-3 were answered by the founder (task-queue item c227, 2026-10-27, via
+AskUserQuestion: "Both (Recommended)"). DQ-2 and DQ-4 carry the (rec) option an agent session
+copied; no human chose them (each says so). Delegation DLG-001 (DR-108) made none of these
+selections. DQ-5 sets a convention people follow, has no recorded selection, and stays open
+(queue item c227q5). This section stays open, and the spec is not ready to approve, until the
+founder answers DQ-5 and confirms DQ-2 and DQ-4.
 
 ### DQ-1 - Per-product id ranges contradict the global uniqueness gate
 
 **Recorded selection: (a),** allocate globally and keep the `product` parameter only for
-attribution. Recorded by an agent session under delegation DLG-001 (DR-108, the
-delegated-approval record); ratified only by approval of this spec. SPEC-053's text then needs
+attribution. Recorded from the founder's answer to task-queue
+item c227, 2026-10-27, via AskUserQuestion ("Both (Recommended)": global ids). SPEC-053's text then needs
 an update and a fresh approval; this record does not edit SPEC-053.
 
 `nextSpecId(specsDir, product)` scopes the max to one product (#57, SPEC-053), so a new
@@ -321,8 +323,9 @@ session copied this document's (rec) option; no human chose this item.
 ### DQ-3 - Make `spec-id-collision` a required check?
 
 **Recorded selection: (a),** make `spec-id-collision` a required check once it has run green
-on open PRs for a week. Recorded by an agent session under delegation DLG-001 (DR-108, the
-delegated-approval record); ratified only by approval of this spec. The ruleset edit itself is
+on open PRs for a week. Recorded from the founder's answer to task-queue
+item c227, 2026-10-27, via AskUserQuestion ("Both (Recommended)": required collision check).
+The ruleset edit itself is
 a separate act; this record makes none.
 
 The DR twin is still advisory: a workflow cannot make itself required.

@@ -94,16 +94,18 @@ unless the sender notices and reroutes it.
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are resolved: an agent session recorded each selection under delegation
-DLG-001 (DR-108, the delegated-approval record); they are ratified only by approval of this
-spec.
+D1 was answered by the founder (task-queue item c219, 2026-10-27, via AskUserQuestion:
+"Upstream (Recommended)"). The other selections carry the (rec) option an agent session
+copied; no human chose them (each says so). Delegation DLG-001 (DR-108) made none of these
+selections. This section stays open, and the spec is not ready to approve, until the founder
+answers or confirms the rest.
 
 **D1 - Where does this land?** (gating; blocks Plan)
 
 **Recorded selection: (a),** route the fix upstream to the owner of the host messaging layer,
-and keep this spec as the contract plus acceptance tests for it. Recorded by an agent session
-under delegation DLG-001 (DR-108, the delegated-approval record); ratified only by approval of
-this spec. The upstream report itself is a separate outward-facing act; this record makes none.
+and keep this spec as the contract plus acceptance tests for it. Recorded from the
+founder's answer to task-queue item c219, 2026-10-27, via AskUserQuestion ("Upstream
+(Recommended)"). The upstream report itself is a separate outward-facing act; this record makes none.
 
 - (a) **(rec)** File/route upstream to the owner of the host messaging layer, and keep this
   spec as the contract plus acceptance tests for it. Cost: MinSpec cannot ship the fix

@@ -201,10 +201,12 @@ no new stored value. It only changes what is said about a fact SPEC-068 already 
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are resolved: an agent session recorded each selection under delegation
-DLG-001 (DR-108, the delegated-approval record); they are ratified only by approval of this
-spec. DQ-1's fold amends SPEC-068's FR-4/FR-5; this record changes nothing in SPEC-068,
-whose amendment and re-approval are separate acts.
+DQ-1 was answered by the founder (task-queue item c082, 2026-10-27, via AskUserQuestion:
+"Fold in (Recommended)"). DQ-2 and DQ-3 carry the (rec) option an agent session copied; no
+human chose them (each says so). Delegation DLG-001 (DR-108) made none of these selections.
+DQ-1's fold amends SPEC-068's FR-4/FR-5; this record changes nothing in SPEC-068, whose
+amendment and re-approval are separate acts. This section stays open, and the spec is not
+ready to approve, until the founder answers or confirms DQ-2 and DQ-3.
 
 - **DQ-1 — Fold into SPEC-068, or ship as this spec's own increment?** SPEC-068 is
   `plan: in-progress` — unbuilt — and FR-1 here is a small, natural extension of its own
@@ -221,9 +223,9 @@ whose amendment and re-approval are separate acts.
   owned" the way SPEC-079 DQ-3 flagged for a different pair of specs.
 
   **Recorded selection: fold FR-1–FR-3 into SPEC-068** as an amendment to its FR-4/FR-5,
-  with SPEC-082 standing only as the traceability anchor for #1492. Recorded by an agent
-  session under delegation DLG-001 (DR-108, the delegated-approval record); ratified only
-  by approval of this spec. SPEC-068 is already approved, so the amendment needs its
+  with SPEC-082 standing only as the traceability anchor for #1492. Recorded from
+  the founder's answer to task-queue item c082, 2026-10-27, via AskUserQuestion ("Fold in
+  (Recommended)"). SPEC-068 is already approved, so the amendment needs its
   re-approval; this record does not edit SPEC-068.
 
 - **DQ-2 — Does FR-1's message apply to every `level` refresh, or only when asked?** The

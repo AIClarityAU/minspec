@@ -191,9 +191,11 @@ this change.
 
 ## Decisions needed (Clarify)
 
-All 5 decisions are resolved: an agent session recorded each selection under delegation
-DLG-001 (DR-108, the delegated-approval record); they are ratified only by approval of this
-spec.
+DQ-3 was answered by the founder (task-queue item c217, 2026-10-27, via AskUserQuestion:
+"Yes (Recommended)"). The other selections carry the (rec) option an agent session copied; no
+human chose them (each says so). Delegation DLG-001 (DR-108) made none of these selections.
+This section stays open, and the spec is not ready to approve, until the founder answers or
+confirms the rest.
 
 **DQ-1 — `.minspec/` present but `config.json` absent.** The extension treats this as "all
 defaults" (`config.ts:210-212`).
@@ -222,10 +224,11 @@ document's (rec) option; no human chose this item.
 governed even at defaults today. That gap exists in this repo now, not only for adopters.
 
 **Recorded selection: `a`,** include `epicsDir` (default `docs/epics`) in this change, so an
-epic `status:` edit in this repo now needs a human merge. Recorded by an agent session under
-delegation DLG-001 (DR-108, the delegated-approval record); ratified only by approval of this
-spec. The evidence note below still stands: no record yet decides whether an epic status
-change is a human act.
+epic `status:` edit in this repo now needs a human merge. Recorded from the
+founder's answer to task-queue item c217, 2026-10-27, via AskUserQuestion ("Yes
+(Recommended)"). This is his informed choice despite an open evidence gap, not an agent
+resolution: the evidence note below still stands, and no record yet decides whether an epic
+status change is a human act.
 
 - `a` **(rec)** Include `epicsDir` (default `docs/epics`) in this change. *Cost:* it changes
   behaviour for this repo: an epic `status:` edit, for example `active` to `done`, now needs a

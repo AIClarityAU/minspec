@@ -287,15 +287,18 @@ which option it took is not established here. DQ-4 asks the human to settle it o
 
 ## Decisions needed (Clarify)
 
-All 5 decisions are resolved: an agent session recorded each selection under delegation
-DLG-001 (DR-108, the delegated-approval record); they are ratified only by approval of this
-spec.
+DQ-1, DQ-3 and DQ-4 were answered by the founder (task-queue item c228, 2026-10-27, via
+AskUserQuestion: "All three (Recommended)"). The other selections carry the (rec) option an
+agent session copied; no human chose them (each says so). Delegation DLG-001 (DR-108) made
+none of these selections. This section stays open, and the spec is not ready to approve,
+until the founder answers or confirms the rest.
 
 - **DQ-1 - How the adopter gets the derived list.**
 
   **Recorded selection: (D),** MinSpec ships `minspec-ci-parity.yml` as a managed template
-  whose region is rendered from FR-1. Recorded by an agent session under delegation
-  DLG-001 (DR-108, the delegated-approval record); ratified only by approval of this spec.
+  whose region is rendered from FR-1. Recorded from the founder's
+  answer to task-queue item c228, 2026-10-27, via AskUserQuestion ("All three
+  (Recommended)").
 
   - **(D) (rec) MinSpec ships `minspec-ci-parity.yml` as a managed template** whose region
     is rendered from FR-1 (the issue's recommended option, and SPEC-079's DQ-1 (D)). One
@@ -343,9 +346,9 @@ spec.
   adopters with none).
 
   **Recorded selection: (a),** scaffold the parity workflow into repos with `.minspec/` that
-  lack one, on the next refresh, like any other managed file. Recorded by an agent session
-  under delegation DLG-001 (DR-108, the delegated-approval record); ratified only by
-  approval of this spec.
+  lack one, on the next refresh, like any other managed file. Recorded from the
+  founder's answer to task-queue item c228, 2026-10-27, via AskUserQuestion ("All three
+  (Recommended)").
 
   - **(a) (rec) Scaffold it there too, on the next refresh**, like any other managed file.
     They opted in through `.minspec/`, so invariant 3 allows it. *Cost:* a new CI job appears
@@ -363,9 +366,9 @@ spec.
   no DR is needed for this spec; record that at Clarify.
 
   **Recorded selection: one DR,** covering both this spec's and SPEC-079's use of the
-  template, written before either spec's Plan completes. Recorded by an agent session under
-  delegation DLG-001 (DR-108, the delegated-approval record); ratified only by approval of
-  this spec. The DR is not drafted by this record, and SPEC-079 is not edited by it.
+  template, written before either spec's Plan completes. Recorded from the
+  founder's answer to task-queue item c228, 2026-10-27, via AskUserQuestion ("All three
+  (Recommended)"). The DR is not drafted by this record, and SPEC-079 is not edited by it.
 
 - **DQ-5 - Sequencing.** SPEC-068 (refresh direction gate) is `status: planning`, not built.
   Under (D), a refresh from an older build could write an older parity list, which is
