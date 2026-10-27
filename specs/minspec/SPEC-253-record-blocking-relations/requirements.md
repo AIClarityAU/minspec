@@ -1,5 +1,5 @@
 ---
-id: SPEC-232
+id: SPEC-253
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-232: A blocking relation is recorded at the moment it is discovered, so the issue ranker's first term has data
+# SPEC-253: A blocking relation is recorded at the moment it is discovered, so the issue ranker's first term has data
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2200. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
