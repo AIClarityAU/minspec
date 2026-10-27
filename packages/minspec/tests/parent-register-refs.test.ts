@@ -54,12 +54,43 @@ const EXCLUDE = new Set(['docs/decisions/INDEX.md']);
  * so a title containing an attributing word ("global", "parent register",
  * "mmo-platform") slips past; and the floor is DR-100 while main tops out at
  * DR-093, so the first legitimate local DR-100 turns this gate RED on correct
- * work. Raising the floor or dropping the rule is therefore also a decision
- * about the leak class — make it deliberately, not as a way to clear a red.
- * That boundary is tracked as #2148 (the DR-100 red on the parent-register
- * gate), which lays out the options and what each one costs.
+ * work. Resolved in #3140 (see PARENT_FLOOR below): a token is exempt only
+ * when a local record exists on disk AND it is under the parent-range floor.
+ * Boundary history: #2148.
  */
 const PARENT_DR = /DR-([1-9]\d{2,})/g;
+
+/**
+ * Resolution (#3140). A DR-100+ token is LOCAL — and exempt — only when BOTH
+ * hold: `docs/decisions/DR-NNN.md` exists, and NNN is below the parent-register
+ * floor. Parent-register numbers observed in the wild are DR-3xx, so the floor
+ * is 200: a leaked global number (the #41 / DR-362 class) stays flagged even if
+ * its record was minted under docs/decisions/, while real local DR-100..DR-199
+ * citations no longer turn the gate red. Raise the floor deliberately if the
+ * local register ever approaches it.
+ */
+const PARENT_FLOOR = 200;
+
+/** Tokens on `line` that are parent-range AND not a resolvable local record. */
+export function unresolvedParentRefs(line: string, localIds: ReadonlySet<number>): string[] {
+  const out: string[] = [];
+  for (const m of line.matchAll(PARENT_DR)) {
+    const n = Number(m[1]);
+    if (!(n < PARENT_FLOOR && localIds.has(n))) out.push(m[0]);
+  }
+  return out;
+}
+
+function localDrIds(): Set<number> {
+  const dir = path.join(REPO_ROOT, 'docs', 'decisions');
+  const ids = new Set<number>();
+  if (!fs.existsSync(dir)) return ids;
+  for (const f of fs.readdirSync(dir)) {
+    const m = /^DR-(\d+)\.md$/.exec(f);
+    if (m) ids.add(Number(m[1]));
+  }
+  return ids;
+}
 
 /**
  * A line is attributed if it names the parent register / global origin in a way
@@ -103,12 +134,12 @@ function bodyLines(content: string): { line: string; n: number }[] {
 
 function scan(): string[] {
   const offenders: string[] = [];
+  const local = localDrIds();
   for (const root of SCAN_ROOTS) {
     for (const file of listFiles(root)) {
       const content = fs.readFileSync(file, 'utf-8');
       for (const { line, n } of bodyLines(content)) {
-        PARENT_DR.lastIndex = 0;
-        if (PARENT_DR.test(line) && !ATTRIBUTION.test(line)) {
+        if (unresolvedParentRefs(line, local).length > 0 && !ATTRIBUTION.test(line)) {
           offenders.push(`${path.relative(REPO_ROOT, file)}:${n}: ${line.trim()}`);
         }
       }
@@ -116,6 +147,19 @@ function scan(): string[] {
   }
   return offenders;
 }
+
+describe('unresolvedParentRefs (#3140)', () => {
+  const local = new Set([100, 114, 362]);
+  it('exempts a local DR-100+ citation that has a record on disk', () => {
+    expect(unresolvedParentRefs('see DR-114 and docs/decisions/DR-114.md', local)).toEqual([]);
+  });
+  it('flags a DR-100+ id with no local record', () => {
+    expect(unresolvedParentRefs('see DR-115', local)).toEqual(['DR-115']);
+  });
+  it('still flags a leaked parent-range number even when a file exists for it', () => {
+    expect(unresolvedParentRefs('DR-362 spec gate', local)).toEqual(['DR-362']);
+  });
+});
 
 describe('parent-register reference attribution (#160, #179)', () => {
   it('every parent-range DR-3xx ref in docs/README/CLAUDE is attributed', () => {
