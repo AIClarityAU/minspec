@@ -215,7 +215,7 @@ async function pickAdr(
 }
 
 /** The DR's own frontmatter `tier:` (T1-T4), or undefined — never inferred (D10). */
-function declaredTier(filePath: string): string | undefined {
+export function declaredTier(filePath: string): string | undefined {
   try {
     const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(fs.readFileSync(filePath, 'utf-8'))?.[1] ?? '';
     return /^tier:[ \t]*(T[1-4])\b/m.exec(fm)?.[1];
