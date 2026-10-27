@@ -202,6 +202,26 @@ describe('#1758 all three machinery definitions are pinned to the canonical modu
   });
 });
 
+describe('#3178 ai-review-guard.js carries the canonical machinery pattern', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const guard = require('../../../.github/scripts/ai-review-guard.js');
+
+  it('MACHINERY_PATH_RE is the canonical pattern, character for character', () => {
+    expect(guard.MACHINERY_PATH_RE.source.replace(/\\\//g, '/')).toBe(
+      buildMachineryRegexSource().replace(/\\\//g, '/'),
+    );
+  });
+
+  it('classifies the shared path table like the canonical module (carve-outs refuse, never carry)', () => {
+    for (const p of ['.github/workflows/ai-review.yml', 'scripts/dispatch-issue.sh', '.githooks/pre-commit', 'packages/minspec/src/lib/machinery-paths.ts']) {
+      expect(guard.MACHINERY_PATH_RE.test(p), p).toBe(true);
+    }
+    for (const p of ['README.md', 'packages/minspec/src/lib/foo.ts', 'docs/decisions/DR-077.md']) {
+      expect(guard.MACHINERY_PATH_RE.test(p), p).toBe(false);
+    }
+  });
+});
+
 describe('#1758 all three machinery definitions classify one path table identically', () => {
   // Every path here is machinery by the canonical definition. This is the load-bearing
   // check: ai-review.yml's regex, dispatch-issue.sh's MACHINERY_PATH_RE, and
