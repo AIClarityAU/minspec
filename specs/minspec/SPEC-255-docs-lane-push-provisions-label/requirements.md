@@ -4,9 +4,9 @@ type: requirements
 status: specifying
 tier: T3
 product: minspec
-epic: EPIC-009  # docs-lane push ergonomics across adopter repositories
+epic: EPIC-009  # Team Readiness - docs-lane push ergonomics across adopter repositories (membership to confirm in Clarify, cf. DR-076)
 aspects: [docs-lane, consent, forge-write, blast-radius, adopter-parity]
-relates_to: [SPEC-039, SPEC-050, DR-098, DR-071, "#2257", "#2243", "#2094"]
+relates_to: [SPEC-039, SPEC-050, DR-098, DR-071, "#2257", "#2243"]
 phases:
   specify: in-progress
   clarify: pending
@@ -38,9 +38,15 @@ without editing that test file.
 - `push-docs-lane.ts` (~`:370`) calls `openPullRequest` with `labels: [DOCS_LANE_LABEL]` and no
   opt-in. Its PR is created from a temp worktree `wt` off `origin/main`, with `cwd: wt`.
 - DR-098 condition 6 states that SPEC-039's command "does not opt in; its classification is
-  pinned by SPEC-050 AC-10, and #2257 tracks it". This spec supersedes that sentence.
+  pinned by SPEC-050 AC-10, and #2257 tracks it". DR-098 scopes its label write to the
+  approval flow's `pushOnApprove` consent and says any further kind of configuration write
+  "would need its own record". A spec cannot supersede that: this change needs a **new
+  decision record** (see D-3) before Plan.
 - SPEC-050 AC-10 constrains the *tests*: SPEC-039's existing tests must pass unchanged. It
   does not forbid the command gaining a behaviour, provided those tests stay green and unedited.
+  SPEC-050 `design.md` reads AC-10 more strongly (as pinning that SPEC-039's command does not
+  opt in); that disagreement is contested and load-bearing, so Clarify must settle it
+  authoritatively (decision D-5) rather than assume this reading.
 
 ## Functional requirements
 
@@ -107,10 +113,19 @@ without editing that test file.
   stray remote branch on failure. (b) preflight-create the label *before* pushing; cost: moves
   a forge write ahead of the push and reorders SPEC-039's pinned call sequence, which risks
   breaking its existing tests.
-- **D-3 Amending DR-098 condition 6.** (a) **edit DR-098's sentence to point at SPEC-255
-  (rec)** - keeps one authoritative record; cost: edits an accepted DR (a wording amendment,
-  not a new decision). (b) leave it and rely on this spec; cost: DR-098 asserts something false.
+- **D-3 Decision record for the new consent surface.** The Tier-1 `pushDocsLane` command
+  gaining a label-creating forge write, under the SPEC-039 FR-3 dialog consent rather than the
+  `pushOnApprove` consent, is a new decision, not a wording tweak. (a) **write a new DR that
+  extends DR-098's boundary to this command and annotates DR-098 condition 6 with a pointer to
+  it (rec)** - honours DR-098's "own record" rule; cost: one more DR to author and approve
+  before Plan (id taken from the collision gate, not from disk). (b) amend DR-098 condition 6
+  in place; cost: stretches an accepted DR past the consent it was scoped to. This spec stays
+  `specifying` until the DR exists. Follow-up (tracked): author the DR under #2257.
 - **D-4 Confirmation dialog wording (FR-4).** Adding a sentence changes a string the existing
   tests may match. (a) **append a separate sentence only when the lane workflow is present
   (rec)**; cost: dialog text varies. (b) no dialog change, rely on the command title and
   settings text; cost: weaker disclosure than the approval path.
+- **D-5 Reading of SPEC-050 AC-10.** (a) **tests-only reading, ratified in the D-3 DR (rec)**
+  - behaviour may grow while the tests stay green and unedited; cost: contradicts the
+  stronger wording in SPEC-050 `design.md`, which then needs a pointer. (b) behaviour-pinning
+  reading; cost: this spec cannot proceed without amending SPEC-050 first.
