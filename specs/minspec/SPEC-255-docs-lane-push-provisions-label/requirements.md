@@ -4,9 +4,9 @@ type: requirements
 status: specifying
 tier: T3
 product: minspec
-epic: EPIC-009  # Team Readiness - docs-lane push ergonomics across adopter repositories (membership to confirm in Clarify, cf. DR-076)
+epic: EPIC-006  # Trust, Consent & Supply Chain - a new opt-in forge write; DR-081 re-homed the sibling SPEC-050 from EPIC-009 for the same reason (EPIC-009 needs >1 actor sharing the repo)
 aspects: [docs-lane, consent, forge-write, blast-radius, adopter-parity]
-relates_to: [SPEC-039, SPEC-050, DR-098, DR-071, "#2257", "#2243"]
+relates_to: [SPEC-039, SPEC-050, DR-098, DR-081, DR-071, "#2257", "#2243"]
 phases:
   specify: in-progress
   clarify: pending
