@@ -202,7 +202,7 @@ const LIVE_ONLY = (live: string) => `#!/usr/bin/env bash
 echo "Fetching issue #$1..."
 if [[ "$GH_TOKEN" != "${live}" ]]; then
   echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2
-  exit 1
+  exit 78
 fi
 echo "dispatched $1"
 exit 0
@@ -223,7 +223,7 @@ echo "Fetching issue #$1..."
 if [[ "$GH_TOKEN" != "ghs_live" ]]; then
   : > "${flag}"
   echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2
-  exit 1
+  exit 78
 fi
 echo "dispatched $1"
 exit 0
@@ -265,5 +265,64 @@ describe('#3176 drain dispatch: a 401 re-mints once and retries; a second stops 
     expect(log).not.toContain('AUTH FAILURE');
     expect(log).toContain('cycle done.');
     fs.rmSync(h0.dir, { recursive: true, force: true });
+  }, 60000);
+});
+
+// ── Review of #3185: the 401 verdict is the dispatcher's EXIT STATUS, never its output ─────────
+// The dispatcher's output carries the build agent's own prose (#2233), so a build working on a
+// 401-related issue quotes "HTTP 401: Bad credentials" without any credential having failed.
+// Reading that text stopped the drain (MAX_CONSEC_FAIL) or spent a needless re-run. The
+// dispatcher says "auth failed before the claim" with DISPATCH_RC_AUTH_FAILED (78).
+const QUOTES_401_PROSE = `#!/usr/bin/env bash
+echo "Fetching issue #$1..."
+echo "The agent wrote: the API answered HTTP 401: Bad credentials, so I fixed the retry." >&2
+exit 1
+`;
+
+describe('#3176 review: a 401 quoted in output is not an auth failure', () => {
+  it.each(['1', '2'])('width %s: output that merely contains the 401 text, with an ordinary failure status, never reads as AUTH FAILURE', (width) => {
+    const h = makeHarness([2914, 2936, 2973], QUOTES_401_PROSE);
+    const log = runCycle(h, width, mintEnv(h, ['ghs_a', 'ghs_b', 'ghs_c']));
+
+    expect(log).not.toContain('AUTH FAILURE');
+    expect(log).not.toContain('credential re-minted');
+    expect(log).toContain('dispatching #2914');
+    expect(log).toContain('dispatching #2936');
+    expect(log).toContain('dispatching #2973');
+    expect(log).toContain('all 3 dispatch(es)');
+    fs.rmSync(h.dir, { recursive: true, force: true });
+  }, 60000);
+
+  it('serial: the quota gate is asked again before the retry launch', () => {
+    const h = makeHarness([2914, 2936], ALWAYS_SUCCEED);
+    const { env } = dyingTokenEnv(h);
+    // The first launch 401s AND the meter crosses the cap in the same breath.
+    fs.writeFileSync(path.join(h.bin, 'dispatch.sh'), `#!/usr/bin/env bash
+echo "Fetching issue #$1..."
+printf '{"used_percentage":99,"resets_at":%s,"observed_at":%s}' "$(( $(date +%s) + 3600 ))" "$(date +%s)" > "${h.quota}"
+: > "${path.join(h.dir, 'revoked')}"
+echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2
+exit 78
+`);
+    const log = runCycle(h, '1', { ...env, MINSPEC_QUOTA_ADMIT_PCT: '60', MINSPEC_QUOTA_ADMIT_PCT_7D: '60' });
+
+    expect(log.match(/dispatching #2914/g)?.length).toBe(1);
+    expect(log).toContain('holding the rest of the queue');
+    expect(log).not.toContain('cycle done.');
+    fs.rmSync(h.dir, { recursive: true, force: true });
+  }, 60000);
+
+  it('parallel: a job in flight that 401s after the cycle stopped is counted as failed, not dropped', () => {
+    const h = makeHarness([2914, 2936], `#!/usr/bin/env bash
+echo "Fetching issue #$1..."
+if [[ "$1" == "2936" ]]; then sleep 2; fi
+echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2
+exit 78
+`);
+    const log = runCycle(h, '2', mintEnv(h, ['ghs_a', 'ghs_b', 'ghs_c']));
+
+    expect(log).toContain('AUTH FAILURE');
+    expect(log).toMatch(/#2936[^\n]*(counted as failed|after the cycle stopped)/);
+    fs.rmSync(h.dir, { recursive: true, force: true });
   }, 60000);
 });

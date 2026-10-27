@@ -474,6 +474,9 @@ _breaker_decide() {
 # what `wait` returns for the process this cycle launched for this issue.
 _DISPATCH_RC_DECLINED=75
 _DISPATCH_RC_STARTED=76
+# The dispatcher's own first `gh` call got a 401, before any claim (#3176). Told by status
+# alone, never by the dispatcher's output, which carries the build agent's prose (#2233).
+_DISPATCH_RC_AUTH_FAILED=78
 
 # _dispatch_own_status <dispatcher's status> [<status of each later stage>...]
 # Prints the one status to judge a dispatch by, from the PIPESTATUS of
@@ -514,6 +517,14 @@ _dispatch_outcome() {
     0)                        printf 'unanswered' ;;
     *)                        printf 'failed' ;;
   esac
+}
+
+# _dispatch_auth_failed <status>: did the dispatcher say, by its own exit status, that its
+# first `gh` call got a 401? That is a `failed` outcome like any other for every count; this
+# only marks the one the cycle can act on (#3176). The status is the dispatcher's own
+# (_dispatch_own_status), so nothing the build agent writes can produce it.
+_dispatch_auth_failed() {
+  [[ "${1-}" == "$_DISPATCH_RC_AUTH_FAILED" ]]
 }
 
 DISPATCH_CONCURRENCY="$(_validated_concurrency "${MINSPEC_DRAIN_CONCURRENCY:-1}")"
@@ -1923,15 +1934,15 @@ run_cycle() {
     printf '%s%s' "$thrash" "$quota"
   }
 
-  # dispatch_auth_failed <output>: did a dispatch die on a dead credential? (#3176)
+  # The verdict "this dispatch died on a dead credential" (#3176) is _dispatch_auth_failed,
+  # keyed on the dispatcher's exit status. It was a grep of the dispatcher's whole output,
+  # and that output carries the build agent's prose (#2233): a build working on any
+  # 401-related issue quotes the text and stopped the drain.
   # `gh_bot_warm_read` re-mints on token AGE, which is a guess: the broker keeps serving
   # one cached token machine-wide after it dies (#2114), and a host suspend moves the
   # wall clock under it. A dispatch whose own output says 401 is the OBSERVATION. The
   # 2026-10-27 cycle never acted on it and ran the whole queue, one `HTTP 401: Bad
   # credentials` per issue, spending no quota and opening no PR.
-  dispatch_auth_failed() {
-    grep -qE 'HTTP 401|Bad credentials' <<<"$1"
-  }
 
   # announce_auth_stop <issue> <why>: the loud end of a cycle that cannot authenticate
   # (constitution invariant 2). The caller returns 1, so run_loop counts it toward
@@ -2062,7 +2073,7 @@ run_cycle() {
       # The child inherits GH_TOKEN from here, so refreshing here fixes it for the child
       # too.
       gh_bot_warm_read
-      local auth_retried=0
+      local auth_retried=0 auth_dead=0
       while :; do
       echo "[drain] dispatching #$n..."
       cap=$(mktemp)
@@ -2076,13 +2087,20 @@ run_cycle() {
       # From here `drc` is a FAILURE's status and nothing else: "started" and "refused"
       # are non-zero answers, not failures, and classify_dispatch warns on any non-zero.
       outcome="$(_dispatch_outcome "$drc")"
+      auth_dead=0; _dispatch_auth_failed "$drc" && auth_dead=1
       [[ "$outcome" == "failed" ]] || drc=0
       verdict="$(classify_dispatch "$n" "$drc" "$out")"
       # A 401 is acted on, not just counted (#3176): re-mint once, in this shell, and
       # retry this issue once. Still 401, or no different credential to be had: stop.
-      if [[ "$outcome" == "failed" ]] && dispatch_auth_failed "$out"; then
+      if (( auth_dead )); then
         if (( ! auth_retried )) && gh_bot_reauth_read; then
           echo "[drain] dispatch of #$n answered HTTP 401 — credential re-minted, retrying this issue once (#3176)." >&2
+          # The gate is asked before EVERY launch, the retry included (#2573). Held: the
+          # failed attempt is still counted, and the cycle pauses like any other hold.
+          if ! admit_next_dispatch; then
+            book_dispatch "$n" "$outcome" "${verdict:0:1}"
+            return 42
+          fi
           auth_retried=1
           continue
         fi
@@ -2112,7 +2130,7 @@ run_cycle() {
     # #3176: issues already retried after an observed 401, whether this cycle has re-minted,
     # and whether a second 401 (or an impossible re-mint) ended the cycle.
     local -A auth_retried=()
-    local reminted=0 auth_stop=0
+    local reminted=0 auth_stop=0 auth_dead=0
 
     launch_next() {
       # Same per-item refresh as the serial path. This runs in the PARENT — only the
@@ -2164,22 +2182,30 @@ run_cycle() {
 
       # As on the serial path: past this point `rc` is a failure's status and nothing else.
       outcome="$(_dispatch_outcome "$rc")"
+      auth_dead=0; _dispatch_auth_failed "$rc" && auth_dead=1
       [[ "$outcome" == "failed" ]] || rc=0
       verdict="$(classify_dispatch "$n" "$rc" "$out")"
-      if [[ "$outcome" == "failed" ]] && dispatch_auth_failed "$out"; then
+      if (( auth_dead )); then
         # Re-mint once per cycle (a job launched on the old token may 401 after the
         # re-mint already happened) and retry each issue once; anything else stops
         # launching, drains what is in flight, and fails the cycle.
-        if [[ -z "${auth_retried[$n]:-}" ]] && { (( reminted )) || gh_bot_reauth_read; }; then
+        # Never once launching has stopped (the cycle failed on a 401, or the quota gate or
+        # the breaker held it): a requeued issue would never be launched and would vanish
+        # from every count. It is booked as the failure it is, below.
+        if (( ! stop_launching )) && [[ -z "${auth_retried[$n]:-}" ]] && { (( reminted )) || gh_bot_reauth_read; }; then
           reminted=1; auth_retried[$n]=1
           echo "[drain] dispatch of #$n answered HTTP 401 — credential re-minted, queuing this issue for one retry (#3176)." >&2
           queue+=("$n")
           continue
         fi
         book_dispatch "$n" "$outcome" "${verdict:0:1}"
-        if (( ! auth_stop )); then
+        if (( auth_stop )); then
+          echo "[drain] dispatch of #$n answered HTTP 401 after the cycle stopped — counted as failed, not retried (#3176)." >&2
+        else
+          local was_stopped=$stop_launching
           auth_stop=1; stop_launching=1
           if [[ -n "${auth_retried[$n]:-}" ]]; then announce_auth_stop "$n" "the retry on a freshly minted credential failed too"
+          elif (( was_stopped )); then announce_auth_stop "$n" "launching had already stopped, so it was not retried"
           else announce_auth_stop "$n" "no different credential could be minted"; fi
         fi
         continue
