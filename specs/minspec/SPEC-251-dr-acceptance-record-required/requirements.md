@@ -1,5 +1,5 @@
 ---
-id: SPEC-232
+id: SPEC-251
 type: requirements
 status: specifying
 tier: T3
@@ -15,7 +15,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-232: A DR flipped to `accepted` must carry a verified acceptance record, or the merge gate says so
+# SPEC-251: A DR flipped to `accepted` must carry a verified acceptance record, or the merge gate says so
 
 Issue: #2153 (DR acceptance has no deterministic witness, so ai-review blocks every human acceptance).
 
