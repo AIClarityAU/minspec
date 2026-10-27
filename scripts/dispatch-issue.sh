@@ -594,7 +594,7 @@ fi
 delegated_merge_human_claims() {
   local pr="$1" view="" head="" refs="" handoffs="" issue=""
   local marker="<!-- minspec-shepherd-handoff -->"
-  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments 2>/dev/null) \
+  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments,author,body 2>/dev/null) \
      || ! head=$(printf '%s' "$view" | jq -r '.headRefName' 2>/dev/null) \
      || ! refs=$(printf '%s' "$view" | jq -r '.closingIssuesReferences | if type == "array" then .[].number else error("no list") end' 2>/dev/null) \
      || ! handoffs=$(printf '%s' "$view" | jq -r --arg m "$marker" '.comments | if type == "array" then [.[] | select((.body // "") | contains($m))] | length else error("no list") end' 2>/dev/null); then
@@ -612,6 +612,16 @@ delegated_merge_human_claims() {
       return 1
     fi
   elif [[ -z "${refs//[$'\n\r\t ']/}" ]]; then
+    # No confirmed link on a non-drain branch (#3115). Two cases look identical here: a
+    # `Closes #N` trailer GitHub failed to link (#2228), and a PR that claims to close nothing
+    # (a bot Clarify-selections PR). Admit only the latter: authored by minspec-sdd[bot] AND
+    # no closing keyword in the body. An unreadable author/body fails closed.
+    local author="" body_closes=""
+    if author=$(printf '%s' "$view" | jq -r '.author.login | if type == "string" then . else error("no author") end' 2>/dev/null) \
+       && body_closes=$(printf '%s' "$view" | jq -r '.body | if type == "string" then (test("(^|[^a-z])(close[sd]?|fix(e[sd])?|resolve[sd]?)[: \\t]*([a-z0-9._-]+/[a-z0-9._-]+)?(#|https?://)"; "i")) else error("no body") end' 2>/dev/null) \
+       && [[ "$author" =~ ^(app/)?minspec-sdd(\[bot\])?$ && "$body_closes" == "false" ]]; then
+      return 0
+    fi
     printf 'closes-link-unconfirmed\tPR #%s has no confirmed closing link; merging would close no issue\n' "$pr"
     return 1
   fi

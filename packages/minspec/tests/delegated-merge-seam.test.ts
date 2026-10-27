@@ -62,6 +62,8 @@ const VIEW_OK = {
   headRefName: 'agent/issue-3000',
   closingIssuesReferences: [{ number: 3000 }],
   comments: [{ body: 'looks good' }],
+  author: { login: 'human' },
+  body: '',
 };
 
 function run(args: string[], o: Opts = {}) {
@@ -210,6 +212,11 @@ describe('human claims: a covered PR the bot must still not merge (#3050)', () =
     ['no closing link at all', { view: view({ closingIssuesReferences: [] }) }, 'closes-link-unconfirmed'],
     ['a closing link to a different issue', { view: view({ closingIssuesReferences: [{ number: 1 }] }) }, 'closes-link-unconfirmed'],
     ['a non-drain branch with no link', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [] }) }, 'closes-link-unconfirmed'],
+    ['a human-authored non-drain PR with no link', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [], author: { login: 'human' }, body: 'no keyword' }) }, 'closes-link-unconfirmed'],
+    ['another bot with no link', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [], author: { login: 'dependabot[bot]' }, body: '' }) }, 'closes-link-unconfirmed'],
+    ['minspec-sdd[bot] with an unlinked Closes trailer', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [], author: { login: 'minspec-sdd[bot]' }, body: 'x\n\nCloses #12' }) }, 'closes-link-unconfirmed'],
+    ['minspec-sdd[bot] with an unlinked fixes: trailer', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [], author: { login: 'minspec-sdd[bot]' }, body: 'Fixes: org/repo#12' }) }, 'closes-link-unconfirmed'],
+    ['minspec-sdd[bot] with no readable author', { view: JSON.stringify({ headRefName: 'cos/x', closingIssuesReferences: [], comments: [], body: '' }) }, 'closes-link-unconfirmed'],
     ['a creator-shepherd handoff comment', { view: view({ comments: [{ body: 'x <!-- minspec-shepherd-handoff -->' }] }) }, 'handed-to-human'],
     ['an unreadable PR view', { viewExit: 1 }, 'pr-claims-unreadable'],
     ['a PR view that is not JSON', { view: 'nope' }, 'pr-claims-unreadable'],
@@ -220,6 +227,12 @@ describe('human claims: a covered PR the bot must still not merge (#3050)', () =
     expect(r.verdict).toMatchObject({ proceed: false, reason });
     expect(r.judgeArgs).toBeUndefined();
     expect(writes(r.gh)).toEqual([]);
+  }, TIMEOUT);
+
+  it.each(['minspec-sdd[bot]', 'app/minspec-sdd'])('a %s PR with no link and no closing keyword proceeds (#3115)', (login) => {
+    const r = run(['2966'], { view: view({ headRefName: 'cos/clarify-selections', closingIssuesReferences: [], author: { login }, body: 'Records Clarify selections. Discloses #5 only.' }) });
+    expect(r.status).toBe(0);
+    expect(r.verdict).toMatchObject({ proceed: true });
   }, TIMEOUT);
 
   it('a non-drain branch with a confirmed link still proceeds', () => {
