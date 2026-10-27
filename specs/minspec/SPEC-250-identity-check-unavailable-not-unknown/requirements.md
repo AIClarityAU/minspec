@@ -1,5 +1,5 @@
 ---
-id: SPEC-238
+id: SPEC-250
 type: requirements
 status: specifying
 tier: T3
@@ -27,7 +27,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-238: The identity check decides reachability from what a producer handed over, not from whether it explained a failure
+# SPEC-250: The identity check decides reachability from what a producer handed over, not from whether it explained a failure
 
 ## In plain terms
 
@@ -72,10 +72,10 @@ wording". This spec adopts it, with three corrections found while reading the co
 Context): stderr can itself carry a credential (FR-2), the mute exit-1 acceptance is wider
 than its stated reason (D-1), and the banner half was already changed by #2044.
 
-**Id note.** `SPEC-238` is the highest claimed id plus one. Claimed ids were read on
+**Id note.** `SPEC-250` is the highest claimed id plus one (renumbered from `SPEC-238` after `origin/main` claimed that id for another spec; highest claimed then `SPEC-249`). Claimed ids were read on
 2026-10-27 from every local and remote-tracking branch of this worktree's repository and from
 every worktree under `/tmp/minspec-agent/` and `~/code/.worktrees/MinSpecPro/` (highest
-`SPEC-237`); `origin/main` was at `7a200191`. Open pull requests were not queried, because
+`SPEC-237` at first read); `origin/main` was at `7a200191`. Open pull requests were not queried, because
 this dispatch makes no network call. If the id collides at review time, renumber.
 
 **Tier note.** Triage recorded T3/T4. Mechanical scope is small: one function and the verdict
