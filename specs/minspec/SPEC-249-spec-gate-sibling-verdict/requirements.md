@@ -1,5 +1,5 @@
 ---
-id: SPEC-232
+id: SPEC-249
 type: requirements
 status: specifying
 tier: T3
@@ -22,7 +22,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-232: The spec-gate takes one spec id's verdict from its requirements doc, never from whichever sibling doc carries the strongest approval
+# SPEC-249: The spec-gate takes one spec id's verdict from its requirements doc, never from whichever sibling doc carries the strongest approval
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2130 (spec-gate BLOCKING set depends
 > on readdir order). Nothing is built until a human reads it, resolves
@@ -212,7 +212,7 @@ TypeScript and the gate is Python, so the definition cannot be shared by import.
   SPEC-070's own next revision and not to this spec. ➡️ Needs an issue; unfiled at the time of
   writing, because this dispatch cannot run `gh`.
 - **#2130 itself.** Once this spec is approved and built, #2130 can be closed as "mechanism
-  fixed by #958, rule decided and hole closed by SPEC-232". Before then the issue's premise is
+  fixed by #958, rule decided and hole closed by SPEC-249". Before then the issue's premise is
   stale, and the reason it stays open is D1.
 - **Convention gate for sibling `tier:`/`phases:`.** None. Two of the six multi-doc ids carry
   sibling `phases:` (SPEC-051 design.md and tasks.md, SPEC-064 design.md; measured by grep),
