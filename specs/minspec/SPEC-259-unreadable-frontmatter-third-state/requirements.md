@@ -98,8 +98,9 @@ Nothing rejects the second case, so the tree offers to accept an already-accepte
 
 - INV-1 Invariant 2 (no silent gate): an unreadable block never degrades silently to a default.
 - INV-2 Invariant 1: no network calls.
-- INV-3 SPEC-095 behaviour (CRLF and byte order mark tolerance) is unchanged; this spec only
-  changes what is shown for a block still unreadable after those fixes.
+- INV-3 SPEC-095 behaviour that has landed is unchanged; SPEC-095 is `implementing`, and its CRLF
+  and byte order mark steps (the latter via #2404, not yet on main) land in its Slice 2, so this
+  spec assumes neither. It only changes what is shown for a block that is unreadable.
 - INV-4 Existing persisted status values and `AdrStatus` strings written to files are
   unchanged; `unreadable` is a read-side state, never written to a record.
 
@@ -107,7 +108,7 @@ Nothing rejects the second case, so the tree offers to accept an already-accepte
 
 - Repairing damaged files (reporting only).
 - Spec readers (`spec.ts`); a separate surface, track separately if wanted.
-- The decision writer refusing a second block (done in SPEC-095).
+- The decision writer refusing a second block: SPEC-095 FR-6, planned in its unbuilt Slice 2 (`setAdrStatus` in `adr-manager.ts` still prepends a second block today). Not built here.
 
 ## Decisions needed (Clarify)
 
