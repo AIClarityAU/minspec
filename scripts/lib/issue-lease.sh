@@ -218,7 +218,32 @@ lease_gate_open_unshipped() {
        | grep -qF "$SHIPPED_MARKER"; then
     return 1                                   # already shipped ⇒ never re-dispatch
   fi
+  # #3161: an OPEN PR that closes this issue is work in flight, whatever its branch name
+  # or author (a job or session opens `fix/N-…`, not `agent/issue-N`). Building anyway
+  # spends a build + review panel and opens a rival PR. Keyed on the PR's own
+  # closingIssuesReferences, never on our branch name or a label. Fails closed: a gh/jq
+  # error reads as "cannot prove nothing is in flight" ⇒ refuse (visibly, on stdout).
+  local closing
+  if ! closing="$(lease_open_closing_prs "$item")"; then
+    echo "Cannot list open PRs to check whether one already closes #$item — refusing (fail closed, #3161)."
+    return 1
+  fi
+  if [[ -n "$closing" ]]; then
+    echo "Skipping #$item — open PR(s) already close it: ${closing} (#3161). Not building a rival."
+    return 1
+  fi
   return 0
+}
+
+# lease_open_closing_prs <item>: print the numbers (space-separated, "#N" form) of every
+# OPEN pull request whose closingIssuesReferences contains <item>; empty when none.
+# Non-zero on any gh/jq failure (the caller treats that as "unknown", never "none").
+lease_open_closing_prs() {
+  local item="${1:?lease_open_closing_prs needs an item}" raw
+  raw="$(gh pr list --repo "$MINSPEC_LEASE_REPO" --state open --limit 1000 \
+           --json number,closingIssuesReferences 2>/dev/null)" || return 1
+  printf '%s' "$raw" | jq -r --argjson n "$item" '
+    [ .[] | select(any(.closingIssuesReferences[]?; .number == $n)) | "#\(.number)" ] | join(" ")'
 }
 
 # ── Claim comment body + read/enumerate ──────────────────────────────────────

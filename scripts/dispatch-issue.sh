@@ -1187,7 +1187,7 @@ if [[ "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
   # D12/FR-3b sequential guard — refuse a closed/already-shipped item BEFORE any build.
   # The PR-per-head CAS window closes on merge, so at-most-one-merge across TIME rests here.
   if ! lease_gate_open_unshipped "$ISSUE"; then
-    echo "Refusing #$ISSUE — issue is closed or already shipped (FR-3b/INV-1). Never re-dispatched."
+    echo "Refusing #$ISSUE — issue is closed or already shipped (FR-3b/INV-1), or an open PR already closes it or its PR list is unreadable (#3161); the line above says which. Not built."
     exit_declined
   fi
   # Soft claim: post → re-read TO EXHAUSTION → verify winner (FR-1/FR-2). Not the
