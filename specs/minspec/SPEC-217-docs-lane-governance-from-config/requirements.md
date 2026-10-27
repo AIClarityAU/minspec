@@ -191,8 +191,21 @@ this change.
 
 ## Decisions needed (Clarify)
 
+Selections below are recorded on the option this document already marks recommended. An
+agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
+on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
+chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
+(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
+context, not verified. No human chose any single item. DQ-3 is left open (its recommendation
+is evidence-incomplete by this document's own note); this section stays open, and the spec
+is not ready to approve, until the founder answers.
+
 **DQ-1 — `.minspec/` present but `config.json` absent.** The extension treats this as "all
 defaults" (`config.ts:210-212`).
+
+**Recorded selection: `a`,** fail closed: refuse to arm and say why. An agent session copied
+this document's (rec) option; no human chose this item.
+
 - `a` **(rec)** Fail closed: refuse to arm and say why. *Cost:* a repo initialised without a
   config file (hand-built, or an older init) loses the lane until it commits one, which is one
   visible red per PR.
@@ -201,6 +214,10 @@ defaults" (`config.ts:210-212`).
   path.
 
 **DQ-2 — Union with defaults, or configured directories only.**
+
+**Recorded selection: `a`,** union with defaults (FR-3). An agent session copied this
+document's (rec) option; no human chose this item.
+
 - `a` **(rec)** Union (FR-3). *Cost:* an adopter whose `docs/decisions/` is an ordinary, non-DR
   folder gets over-refusals there. Those are fail-safe but noisy.
 - `b` Configured only. *Cost:* a repo that moved `decisionsDir` but left old DRs in
@@ -208,6 +225,12 @@ defaults" (`config.ts:210-212`).
 
 **DQ-3 — Govern `epicsDir` too.** Epics are approvables (`approvable.ts:15`) and are not
 governed even at defaults today. That gap exists in this repo now, not only for adopters.
+
+**Not recorded:** the recommendation is evidence-incomplete by this document's own note:
+whether an epic `status:` change is a human act has not been decided, and the search for one
+was partial. It also moves epic status edits in this repo from the docs lane to a human
+merge. Needs the founder's answer.
+
 - `a` **(rec)** Include `epicsDir` (default `docs/epics`) in this change. *Cost:* it changes
   behaviour for this repo: an epic `status:` edit, for example `active` to `done`, now needs a
   human merge. It also widens the scope of a defect fix. Whether an epic status change is a human
@@ -217,6 +240,10 @@ governed even at defaults today. That gap exists in this repo now, not only for 
   directories" the issue names are only two-thirds derived.
 
 **DQ-4 — Derive `allowed` from config in the same change (the issue's recommendation).**
+
+**Recorded selection: `a`,** keep `allowed` hardcoded (FR-11) and track derivation
+separately. An agent session copied this document's (rec) option; no human chose this item.
+
 - `a` **(rec)** No: keep `allowed` hardcoded (FR-11) and track it separately. A mismatch there
   fails **closed**: a spec under a non-default `specsDir` is refused from the lane, loudly.
   Deriving it turns a config value into a knob that widens the **auto-merge** corpus. For
@@ -232,6 +259,11 @@ governed even at defaults today. That gap exists in this repo now, not only for 
 **DQ-5 — Directories set only in VS Code settings.** `minspec.specsDir` and
 `minspec.decisionsDir` override the file inside the editor (`applyVSCodeOverrides`), and CI can
 never see them. For such an adopter the extension and the lane disagree about where DRs live.
+
+**Recorded selection: `a`,** document that `.minspec/config.json` is the only source CI
+honours, with a follow-up for the extension warning. An agent session copied this document's
+(rec) option; no human chose this item.
+
 - `a` **(rec)** In this spec, document that `.minspec/config.json` is the only source CI honours.
   File a follow-up so the extension warns when a workspace setting differs from the file.
   *Cost:* until that follow-up ships, an editor-settings-only adopter is still exposed. The gap is
