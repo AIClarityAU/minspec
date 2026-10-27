@@ -1,5 +1,5 @@
 ---
-id: SPEC-232
+id: SPEC-248
 type: requirements
 status: specifying
 tier: T3
@@ -21,7 +21,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-232: Deleting a spec file does not release the owned set its approval signed
+# SPEC-248: Deleting a spec file does not release the owned set its approval signed
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2129. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
@@ -278,7 +278,7 @@ producer ships in the extension, so adopters will hold snapshot-carrying records
 ## Follow-ups (tracked)
 
 - SPEC-070 FR-6.2 and Out of Scope point at #2129, which this spec answers; when this spec
-  is approved, SPEC-070's Out of Scope bullet can cite SPEC-232. Done at Plan by editing
+  is approved, SPEC-070's Out of Scope bullet can cite SPEC-248. Done at Plan by editing
   SPEC-070 (an unapproved-spec edit; SPEC-070 is `planning`).
 - Adopter parity: decided at D4; if (a), Plan files the issue before implementation starts.
 - DR-088 amendment: only if D3 (b) is chosen; otherwise None.
