@@ -1,5 +1,5 @@
 ---
-id: SPEC-232
+id: SPEC-256
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-232: A DR INDEX row never carries an invented auto fingerprint, and a headless path produces real ones
+# SPEC-256: A DR INDEX row never carries an invented auto fingerprint, and a headless path produces real ones
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2274. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
