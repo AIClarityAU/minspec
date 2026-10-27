@@ -5,8 +5,9 @@ import * as path from 'path';
 /**
  * T0 — bare parent-register reference gate (issues #160, #179).
  *
- * This repo keeps its OWN local decision register (DR-001..DR-0NN, currently
- * topping out below 100). Any `DR-3xx` token therefore points into the PARENT /
+ * This repo keeps its OWN local decision register (DR-001..DR-NNN). A DR-100+
+ * token resolves locally per #3140 (see PARENT_FLOOR below); a leaked file with
+ * no prose citation is SPEC-252 FR-5's job. Any unresolved `DR-3xx` token points into the PARENT /
  * global `mmo-platform` register (DR-355 agent-escalation, DR-360 parking-lot,
  * DR-359 contract-driven-development, DR-362 spec-gate enforcement, ...). Cited
  * bare, such a token is indistinguishable in form from a local ref and reads as
