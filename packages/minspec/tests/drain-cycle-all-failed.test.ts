@@ -82,7 +82,7 @@ exit 0
 // `process.env`, so nothing this harness doesn't set (MINSPEC_DRAIN_QUEUE_LIMIT in
 // particular) can change how many dispatches a cycle actually runs (#2583).
 /** Run one real `--once` cycle at the given width and wait for the disowned loop. */
-function runCycle(h: Harness, width = '1'): string {
+function runCycle(h: Harness, width = '1', extraEnv: Record<string, string> = {}): string {
   const env: NodeJS.ProcessEnv = {
     ...drainBaseEnv(),
     PATH: `${h.bin}:${process.env.PATH}`,
@@ -95,6 +95,7 @@ function runCycle(h: Harness, width = '1'): string {
     MINSPEC_DRAIN_LOG: h.log,
     MINSPEC_DRAIN_LOCK: path.join(h.dir, 'lock'),
     MINSPEC_QUOTA_FILE: h.quota,
+    ...extraEnv,
   };
   execFileSync('bash', ['-c', `
     pid=$(bash "${DRAIN}" --once 2>&1 | grep -oP 'PID \\K[0-9]+')
@@ -103,9 +104,11 @@ function runCycle(h: Harness, width = '1'): string {
   return fs.readFileSync(h.log, 'utf-8');
 }
 
+// A failure that is NOT an authentication failure: #3176 made a 401 stop the cycle at
+// once, so the #2140 all-failed roll-up is exercised with a different cause.
 const ALWAYS_FAIL_401 = `#!/usr/bin/env bash
 echo "Fetching issue #$1..."
-echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2
+echo "HTTP 500: upstream exploded (https://api.github.com/graphql)" >&2
 exit 1
 `;
 const ALWAYS_SUCCEED = `#!/usr/bin/env bash
@@ -140,7 +143,7 @@ describe('#2140 drain cycle summary: N-of-N dispatch failures must not read as "
   it('CONTROL: a PARTIALLY failed cycle (some succeed) still reports "cycle done." — only ALL-failed is a cycle failure', () => {
     const h = makeHarness([2131, 2132, 2133], `#!/usr/bin/env bash
 if [[ "$1" == "2132" ]]; then
-  echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2
+  echo "HTTP 500: upstream exploded (https://api.github.com/graphql)" >&2
   exit 1
 fi
 echo "dispatched $1"
@@ -173,5 +176,94 @@ describe('#2140 drain cycle summary: the same roll-up applies to the parallel di
     expect(log).toContain('cycle done.');
     expect(log).not.toContain('CYCLE FAILED');
     fs.rmSync(h.dir, { recursive: true, force: true });
+  }, 60000);
+});
+
+// ── #3176: an OBSERVED 401 re-mints once and retries; a second one stops the cycle ──────────
+// 2026-10-27: a whole cycle (#2914 .. #2978 and more, 166 `Bad credentials` lines) answered
+// 401 per issue and ended `cycle done.`. Root cause: the parent shell re-minted only on token
+// AGE (gh_bot_warm_read); a dispatch whose own output said 401 was counted and walked past,
+// so a dead token the broker kept serving (#2114) was presented to every remaining issue.
+function mintEnv(h: Harness, tokens: string[]): Record<string, string> {
+  // Each call to the minter hands out the next token; the last one repeats.
+  const counter = path.join(h.dir, 'mint-count');
+  const script = path.join(h.bin, 'mint.sh');
+  fs.writeFileSync(script, `#!/usr/bin/env bash
+c=$(cat "${counter}" 2>/dev/null || echo 0)
+toks=(${tokens.map((t) => `"${t}"`).join(' ')})
+i=$c; (( i >= ${tokens.length} )) && i=$(( ${tokens.length} - 1 ))
+echo $(( c + 1 )) > "${counter}"
+printf '%s' "\${toks[$i]}"
+`);
+  fs.chmodSync(script, 0o755);
+  return { MINSPEC_GH_APP_TOKEN_SCRIPT: script };
+}
+const LIVE_ONLY = (live: string) => `#!/usr/bin/env bash
+echo "Fetching issue #$1..."
+if [[ "$GH_TOKEN" != "${live}" ]]; then
+  echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2
+  exit 1
+fi
+echo "dispatched $1"
+exit 0
+`;
+
+// A broker whose token dies the first time a dispatch is refused: the minter hands out
+// `ghs_dead` until the dispatcher stub drops the flag, then `ghs_live`. Keyed on the flag, not
+// on a call count, because how many reads mint before the first dispatch is not the subject.
+function dyingTokenEnv(h: Harness): { env: Record<string, string>; dispatch: string } {
+  const flag = path.join(h.dir, 'revoked');
+  const script = path.join(h.bin, 'mint-flag.sh');
+  fs.writeFileSync(script, `#!/usr/bin/env bash
+if [[ -e "${flag}" ]]; then printf 'ghs_live'; else printf 'ghs_dead'; fi
+`);
+  fs.chmodSync(script, 0o755);
+  const dispatch = `#!/usr/bin/env bash
+echo "Fetching issue #$1..."
+if [[ "$GH_TOKEN" != "ghs_live" ]]; then
+  : > "${flag}"
+  echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2
+  exit 1
+fi
+echo "dispatched $1"
+exit 0
+`;
+  return { env: { MINSPEC_GH_APP_TOKEN_SCRIPT: script }, dispatch };
+}
+
+describe('#3176 drain dispatch: a 401 re-mints once and retries; a second stops the cycle', () => {
+  it('stops after the FIRST issue when no different credential can be minted (no walk down the queue)', () => {
+    const h = makeHarness([2914, 2936, 2973], LIVE_ONLY('never'));
+    const log = runCycle(h, '1');
+
+    expect(log).toContain('AUTH FAILURE');
+    expect(log).toContain('#3176');
+    expect(log).not.toContain('dispatching #2936');
+    expect(log).not.toContain('dispatching #2973');
+    expect(log).not.toContain('cycle done.');
+    fs.rmSync(h.dir, { recursive: true, force: true });
+  }, 60000);
+
+  it.each(['1', '2'])('width %s: stops loudly when the freshly minted token 401s too', (width) => {
+    const h = makeHarness([2914, 2936, 2973], LIVE_ONLY('never'));
+    const log = runCycle(h, width, mintEnv(h, ['ghs_dead_a', 'ghs_dead_b', 'ghs_dead_c']));
+
+    expect(log).toContain('AUTH FAILURE');
+    expect(log).not.toContain('cycle done.');
+    fs.rmSync(h.dir, { recursive: true, force: true });
+  }, 60000);
+
+  it.each(['1', '2'])('width %s: CONTROL — a dead token that the re-mint replaces recovers and finishes the cycle', (width) => {
+    const h0 = makeHarness([2914, 2936], ALWAYS_SUCCEED);
+    const { env, dispatch } = dyingTokenEnv(h0);
+    fs.writeFileSync(path.join(h0.bin, 'dispatch.sh'), dispatch);
+    const log = runCycle(h0, width, env);
+
+    expect(log).toContain('credential re-minted');
+    expect(log).toContain('dispatched 2914');
+    expect(log).toContain('dispatched 2936');
+    expect(log).not.toContain('AUTH FAILURE');
+    expect(log).toContain('cycle done.');
+    fs.rmSync(h0.dir, { recursive: true, force: true });
   }, 60000);
 });
