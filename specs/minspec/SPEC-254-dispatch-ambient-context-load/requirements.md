@@ -1,5 +1,5 @@
 ---
-id: SPEC-232
+id: SPEC-254
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-232: Drain dispatches do not load project CLAUDE.md and auto-memory ambiently, and a first-call size check makes a regression visible
+# SPEC-254: Drain dispatches do not load project CLAUDE.md and auto-memory ambiently, and a first-call size check makes a regression visible
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2225. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
