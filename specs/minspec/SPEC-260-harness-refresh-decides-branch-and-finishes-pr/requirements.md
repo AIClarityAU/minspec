@@ -1,5 +1,5 @@
 ---
-id: SPEC-259
+id: SPEC-260
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-259: Refresh Harness Files decides branch-or-direct itself, finishes the job, and leaves the checkout on the default branch
+# SPEC-260: Refresh Harness Files decides branch-or-direct itself, finishes the job, and leaves the checkout on the default branch
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2559. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
