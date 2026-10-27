@@ -1,5 +1,5 @@
 ---
-id: SPEC-232
+id: SPEC-257
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-232: The auto-merge gate reports "armed" only from an observed PR state, and a shepherd stand-down says which of its two causes fired
+# SPEC-257: The auto-merge gate reports "armed" only from an observed PR state, and a shepherd stand-down says which of its two causes fired
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2298 (https://github.com/AIClarityAU/minspec/issues/2298).
 > Nothing is built until a human reads it, resolves
