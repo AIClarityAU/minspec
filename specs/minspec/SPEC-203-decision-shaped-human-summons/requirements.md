@@ -291,7 +291,14 @@ gets back into the pipeline.
 
 ## Decisions needed (Clarify)
 
+All 5 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 ### D-1 - How does a founder's answer get back into the pipeline?
+
+**Recorded selection: Option (a),** labels and scripts only; each summons names the existing label or
+script that answers it, so no new comment-triggered writer is needed.
 
 The issue offers two shapes. Both satisfy FR-5.
 
@@ -315,6 +322,9 @@ finds himself answering in prose often.
 
 ### D-2 - Where is "In plain terms" enforced?
 
+**Recorded selection: Option (a),** inside `ready-to-merge` for bot-authored PRs; it is already a
+required check, so the rule gates merge with no ruleset change.
+
 - **(a) Inside `ready-to-merge`, for bot-authored PRs. (rec)** `ready-to-merge` is already a
   required check, so the rule gates merge without a ruleset change. **Cost:** a missing
   section blocks an otherwise green PR until the body is edited, and `ready-to-merge` grows
@@ -329,6 +339,9 @@ finds himself answering in prose often.
 
 ### D-3 - Which panel findings reach the summons, and do unsummoned PRs keep losing them?
 
+**Recorded selection: Option (a),** every severity, but only into a summons; the wider leak is a
+separate issue.
+
 - **(a) Every severity, but only into a summons; the wider leak is a separate issue. (rec)**
   Matches the issue's acceptance line. **Cost:** a PR that merges with no summons still drops
   its minor findings, so the leak is narrowed, not closed.
@@ -338,12 +351,18 @@ finds himself answering in prose often.
 
 ### D-4 - Does the renderer also cover triage's `needs-review` / `needs-info`?
 
+**Recorded selection: Option (a),** no, triage's `needs-review` / `needs-info` are a second slice;
+they already carry a rationale.
+
 - **(a) No, second slice. (rec)** They already carry a rationale. **Cost:** two summons
   shapes coexist for a while.
 - **(b) Yes, now.** One shape everywhere. **Cost:** touches the triage path, which has its own
   verdict-record contract (DR-091), and roughly doubles the test surface.
 
 ### D-5 - Ship the convention to adopters?
+
+**Recorded selection: Option (a),** this repository only; invariant 3 forbids changing behaviour
+where nobody opted in.
 
 - **(a) No, this repository only. (rec)** The summons sites are this repository's own
   pipeline scripts, and invariant 3 forbids changing behaviour where nobody opted in.
