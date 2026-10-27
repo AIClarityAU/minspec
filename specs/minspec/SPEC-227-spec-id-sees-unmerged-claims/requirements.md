@@ -279,19 +279,32 @@ collision was settled by the "cheapest to fix" answer, case by case, with no rul
 
 ## Decisions needed (Clarify)
 
-DQ-1 and DQ-3 were answered by the founder (task-queue item c227, 2026-10-27, via
-AskUserQuestion: "Both (Recommended)"). DQ-2 and DQ-4 carry the (rec) option an agent session
-copied; no human chose them (each says so). Delegation DLG-001 (DR-108) made none of these
-selections. DQ-5 sets a convention people follow, has no recorded selection, and stays open
-(queue item c227q5). This section stays open, and the spec is not ready to approve, until the
-founder answers DQ-5 and confirms DQ-2 and DQ-4.
+DQ-1 and DQ-3 have selections recorded from the answer to task-queue item c227 (2026-10-27:
+"Both (Recommended)"), an answer the queue attributes to the founder. A queue answer is not
+consent and is not verified here: DR-108 (delegated approval) section 4 holds that a queue
+item cannot carry consent, because any session can write the queue. Those selections
+therefore bind nothing on their own. They bind only if the founder approves this spec with
+them in its text; that approval, not this record, is the consent act, and it may overturn
+them. DQ-2 and DQ-4 carry the (rec) option an agent session copied; no human chose them
+(each says so). Delegation DLG-001 (DR-108) made none of these selections. DQ-5 sets a
+convention people follow, has no recorded selection, and stays open (queue item c227q5).
+This section stays open, and the spec is not ready to approve, until the founder answers
+DQ-5 and confirms DQ-2 and DQ-4.
 
 ### DQ-1 - Per-product id ranges contradict the global uniqueness gate
 
 **Recorded selection: (a),** allocate globally and keep the `product` parameter only for
-attribution. Recorded from the founder's answer to task-queue
-item c227, 2026-10-27, via AskUserQuestion ("Both (Recommended)": global ids). SPEC-053's text then needs
-an update and a fresh approval; this record does not edit SPEC-053.
+attribution. Source: the answer to task-queue item c227, 2026-10-27 ("Both
+(Recommended)": global ids). A queue answer is not consent (DR-108 section 4), so this
+selection is unverified and binds only if the founder approves this spec's text with it in
+place. SPEC-053's text then needs an update and a fresh approval; this record does not edit
+SPEC-053.
+
+**A DR is required before implementation.** Option (a) ends the per-product id ranges
+adopters may rely on and forces SPEC-053's re-approval, which cannot be undone in a day once
+adopters allocate under it (the DR-359 filter). Its rationale goes in one decision record,
+written before this spec's Plan completes and so before any implementation; SPEC-053's
+amendment cites the same DR. The DR is not drafted by this record.
 
 `nextSpecId(specsDir, product)` scopes the max to one product (#57, SPEC-053), so a new
 product starts at SPEC-001. Rule 18 checks uniqueness **across all products**
@@ -323,10 +336,10 @@ session copied this document's (rec) option; no human chose this item.
 ### DQ-3 - Make `spec-id-collision` a required check?
 
 **Recorded selection: (a),** make `spec-id-collision` a required check once it has run green
-on open PRs for a week. Recorded from the founder's answer to task-queue
-item c227, 2026-10-27, via AskUserQuestion ("Both (Recommended)": required collision check).
-The ruleset edit itself is
-a separate act; this record makes none.
+on open PRs for a week. Source: the answer to task-queue item c227, 2026-10-27 ("Both
+(Recommended)": required collision check). A queue answer is not consent (DR-108 section
+4), so this selection is unverified and binds only if the founder approves this spec's text
+with it in place. The ruleset edit itself is a separate act; this record makes none.
 
 The DR twin is still advisory: a workflow cannot make itself required.
 

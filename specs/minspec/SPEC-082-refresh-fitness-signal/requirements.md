@@ -201,12 +201,17 @@ no new stored value. It only changes what is said about a fact SPEC-068 already 
 
 ## Decisions needed (Clarify)
 
-DQ-1 was answered by the founder (task-queue item c082, 2026-10-27, via AskUserQuestion:
-"Fold in (Recommended)"). DQ-2 and DQ-3 carry the (rec) option an agent session copied; no
-human chose them (each says so). Delegation DLG-001 (DR-108) made none of these selections.
-DQ-1's fold amends SPEC-068's FR-4/FR-5; this record changes nothing in SPEC-068, whose
-amendment and re-approval are separate acts. This section stays open, and the spec is not
-ready to approve, until the founder answers or confirms DQ-2 and DQ-3.
+DQ-1 has a selection recorded from the answer to task-queue item c082 (2026-10-27: "Fold in
+(Recommended)"), an answer the queue attributes to the founder. A queue answer is not
+consent and is not verified here: DR-108 (delegated approval) section 4 holds that a queue
+item cannot carry consent, because any session can write the queue. That selection therefore
+binds nothing on its own. It binds only if the founder approves this spec with it in its
+text; that approval, not this record, is the consent act, and it may overturn it. DQ-2 and
+DQ-3 carry the (rec) option an agent session copied; no human chose them (each says so).
+Delegation DLG-001 (DR-108) made none of these selections. DQ-1's fold amends SPEC-068's
+FR-4/FR-5; this record changes nothing in SPEC-068, whose amendment and re-approval are
+separate acts. This section stays open, and the spec is not ready to approve, until the
+founder answers or confirms DQ-2 and DQ-3.
 
 - **DQ-1 — Fold into SPEC-068, or ship as this spec's own increment?** SPEC-068 is
   `plan: in-progress` — unbuilt — and FR-1 here is a small, natural extension of its own
@@ -223,9 +228,10 @@ ready to approve, until the founder answers or confirms DQ-2 and DQ-3.
   owned" the way SPEC-079 DQ-3 flagged for a different pair of specs.
 
   **Recorded selection: fold FR-1–FR-3 into SPEC-068** as an amendment to its FR-4/FR-5,
-  with SPEC-082 standing only as the traceability anchor for #1492. Recorded from
-  the founder's answer to task-queue item c082, 2026-10-27, via AskUserQuestion ("Fold in
-  (Recommended)"). SPEC-068 is already approved, so the amendment needs its
+  with SPEC-082 standing only as the traceability anchor for #1492. Source: the answer to
+  task-queue item c082, 2026-10-27 ("Fold in (Recommended)"). A queue answer is not consent
+  (DR-108 section 4), so this selection is unverified and binds only if the founder approves
+  this spec's text with it in place. SPEC-068 is already approved, so the amendment needs its
   re-approval; this record does not edit SPEC-068.
 
 - **DQ-2 — Does FR-1's message apply to every `level` refresh, or only when asked?** The
