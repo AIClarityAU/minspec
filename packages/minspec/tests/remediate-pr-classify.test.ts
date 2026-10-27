@@ -455,6 +455,36 @@ describe('remediate-pr.sh --derive-failing: ready-to-merge gate is not a code-fi
     ])).toBe('no');
   });
 
+  it('a red ai-review/pass status context (context, no name) is not code-fixable → no (#3174 review)', () => {
+    expect(derive([{ context: 'ai-review/pass', state: 'FAILURE' }])).toBe('no');
+    expect(derive([{ context: 'ai-review/pass', state: 'ERROR' }])).toBe('no');
+    expect(derive([{ context: 'ai-review', state: 'FAILURE' }])).toBe('no');
+  });
+
+  it('a real red status context still counts beside a red ai-review/pass (#3174 review)', () => {
+    expect(derive([
+      { context: 'ai-review/pass', state: 'FAILURE' },
+      { context: 'lint', state: 'FAILURE' },
+    ])).toBe('yes');
+  });
+
+  it('a red ai-review/pass context yields no rerun run id (#3174 review)', () => {
+    const ids = execFileSync('bash', [SCRIPT, '--derive-failed-runs'], {
+      encoding: 'utf-8',
+      input: JSON.stringify({ statusCheckRollup: [
+        { context: 'ai-review/pass', state: 'FAILURE', targetUrl: 'https://github.com/o/r/actions/runs/111' },
+        { context: 'lint', state: 'FAILURE', targetUrl: 'https://github.com/o/r/actions/runs/222' },
+      ] }),
+    }).trim();
+    expect(ids).toBe('222');
+  });
+
+  it('FAILED_NAMES shares the same gate exclusion as derive_failing_non_review (#3174 review)', () => {
+    const src = fs.readFileSync(SCRIPT, 'utf-8');
+    const block = src.slice(src.indexOf('FAILED_NAMES=$(jq'));
+    expect(block.slice(0, block.indexOf('CONTEXT=$('))).toContain('select(self_cert_gate | not)');
+  });
+
   it('ai-review red stays excluded; in-flight check is not a failure', () => {
     expect(derive([
       { name: 'ai-review', conclusion: 'FAILURE' },
