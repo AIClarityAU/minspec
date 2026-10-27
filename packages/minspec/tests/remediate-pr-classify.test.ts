@@ -432,6 +432,29 @@ describe('remediate-pr.sh --derive-failing: ready-to-merge gate is not a code-fi
     ])).toBe('yes');
   });
 
+  // #3174 — a commit StatusContext carries `state`, never `conclusion`; reading conclusion
+  // alone read a red status context as passing, so a BEHIND PR stranded as failing_checks=no.
+  it('a status context failing via `state` only (no conclusion) → yes (#3174)', () => {
+    expect(derive([
+      { name: 'test', workflowName: 'ci', conclusion: 'SUCCESS' },
+      { context: 'MinSpec SDD validation', state: 'FAILURE' },
+    ])).toBe('yes');
+  });
+
+  it('classified end to end: BEHIND PR with a state-only red context is remediated, not parked (#3174)', () => {
+    const failing = derive([{ context: 'lint', state: 'ERROR' }]);
+    const action = execFileSync('bash', [SCRIPT, '--classify', 'agent/issue-2274', 'MERGEABLE', 'BEHIND', '', failing, 'no'], { encoding: 'utf-8' }).trim();
+    expect(failing).toBe('yes');
+    expect(action).not.toBe('skip-awaiting-merge-turn');
+  });
+
+  it('a pending/success status context is not a failure (#3174)', () => {
+    expect(derive([
+      { context: 'a', state: 'PENDING' },
+      { context: 'b', state: 'SUCCESS' },
+    ])).toBe('no');
+  });
+
   it('ai-review red stays excluded; in-flight check is not a failure', () => {
     expect(derive([
       { name: 'ai-review', conclusion: 'FAILURE' },
