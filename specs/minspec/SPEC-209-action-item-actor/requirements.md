@@ -215,7 +215,14 @@ that backstop.
 
 ## Decisions needed (Clarify)
 
+All 6 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 ### D1 - What the tag looks like
+
+**Recorded selection: Option (a),** `[human]` / `[agent]` immediately after ➡️: a fixed position in
+plain ASCII that one regex reads and that still reads naturally.
 
 - **a** `[human]` / `[agent]` immediately after ➡️ **(rec)** - fixed position, plain ASCII,
   one regex, still reads naturally. Cost: two extra words on every line the founder reads.
@@ -226,6 +233,9 @@ that backstop.
 
 ### D2 - Where the parser lives
 
+**Recorded selection: Option (a),** `packages/shared` (`@aiclarity/shared`), which is Tier 0, already
+holds pure parsers and is usable from both scripts and the extension.
+
 - **a** `packages/shared` (`@aiclarity/shared`) **(rec)** - Tier 0, no vscode, already
   holds pure parsers (`project-prefix.ts`), usable from scripts and the extension. Cost: it
   ships inside the extension bundle even if only dev-time scripts use it.
@@ -233,6 +243,9 @@ that backstop.
   backstop, if it lands in the extension, would need a second copy.
 
 ### D3 - Who gets the convention text
+
+**Recorded selection: Option (a),** this repo only, as a project-specific CLAUDE.md section beside
+"Merge asks in THIS repo", following the merge-funnel precedent.
 
 - **a** This repo only, as a project-specific CLAUDE.md section beside "Merge asks in THIS
   repo" **(rec)** - the problem needs peer sessions, which solo adopters do not run, and it
@@ -242,6 +255,9 @@ that backstop.
   adopter's ➡️ lines gain a tag for a consumer most of them will never have.
 
 ### D4 - Which act-site refusals, if any, this spec builds
+
+**Recorded selection: Option (a),** no act-site refusal here; one issue per unwitnessed act class,
+so each refusal gets its own design.
 
 The issue's own conclusion is that the safety boundary belongs where the act happens. Of
 the four acts in #1857, `--admin` merge already has one and the other three do not.
@@ -257,6 +273,9 @@ the four acts in #1857, `--admin` merge already has one and the other three do n
 
 ### D5 - How a receiving session knows the sender is not the human (FR-11)
 
+**Recorded selection: Option (a),** treat any instruction whose text says it comes from another
+session as non-human, and state that FR-11 is model-trusted; it is buildable now.
+
 - **a** Treat any instruction whose text says it comes from another session as non-human,
   and state that FR-11 is model-trusted **(rec)** - buildable now. Cost: a sender that does
   not say so is treated as the human.
@@ -265,6 +284,9 @@ the four acts in #1857, `--admin` merge already has one and the other three do n
   exists (I have not verified either way); FR-11 waits on that research.
 
 ### D6 - Two values or three
+
+**Recorded selection: Option (a),** two values, human-only and agent-ok, matching the issue and
+FR-2's default.
 
 - **a** Two: human-only and agent-ok **(rec)** - matches the issue and FR-2's default.
   Cost: "the human decides, then an agent executes" and "only the human can physically do
