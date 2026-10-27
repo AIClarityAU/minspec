@@ -1,5 +1,5 @@
 ---
-id: SPEC-232
+id: SPEC-255
 type: requirements
 status: specifying
 tier: T3
@@ -15,7 +15,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-232: "MinSpec: Push Docs Lane" lands in a repository that has no `docs-lane` label
+# SPEC-255: "MinSpec: Push Docs Lane" lands in a repository that has no `docs-lane` label
 
 Issue: #2257 (sibling of #2243, which fixed the approval path). Rests on DR-098 (approval flow may create the missing lane label).
 
@@ -107,7 +107,7 @@ without editing that test file.
   stray remote branch on failure. (b) preflight-create the label *before* pushing; cost: moves
   a forge write ahead of the push and reorders SPEC-039's pinned call sequence, which risks
   breaking its existing tests.
-- **D-3 Amending DR-098 condition 6.** (a) **edit DR-098's sentence to point at SPEC-232
+- **D-3 Amending DR-098 condition 6.** (a) **edit DR-098's sentence to point at SPEC-255
   (rec)** - keeps one authoritative record; cost: edits an accepted DR (a wording amendment,
   not a new decision). (b) leave it and rely on this spec; cost: DR-098 asserts something false.
 - **D-4 Confirmation dialog wording (FR-4).** Adding a sentence changes a string the existing
