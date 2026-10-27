@@ -94,19 +94,16 @@ unless the sender notices and reroutes it.
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended. An
-agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
-on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
-chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
-(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
-context, not verified. No human chose any single item. D1 is left open (its recommendation
-is an act outside this repo); this section stays open, and the spec is not ready to approve,
-until the founder answers.
+All 3 decisions are resolved: an agent session recorded each selection under delegation
+DLG-001 (DR-108, the delegated-approval record); they are ratified only by approval of this
+spec.
 
 **D1 - Where does this land?** (gating; blocks Plan)
 
-**Not recorded:** the recommended option routes the fix to the owner of the host messaging
-layer, outside this repo, which is an outward-facing act. Needs the founder's answer.
+**Recorded selection: (a),** route the fix upstream to the owner of the host messaging layer,
+and keep this spec as the contract plus acceptance tests for it. Recorded by an agent session
+under delegation DLG-001 (DR-108, the delegated-approval record); ratified only by approval of
+this spec. The upstream report itself is a separate outward-facing act; this record makes none.
 
 - (a) **(rec)** File/route upstream to the owner of the host messaging layer, and keep this
   spec as the contract plus acceptance tests for it. Cost: MinSpec cannot ship the fix

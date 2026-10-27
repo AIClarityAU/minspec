@@ -201,14 +201,10 @@ no new stored value. It only changes what is said about a fact SPEC-068 already 
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended. An
-agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
-on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
-chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
-(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
-context, not verified. No human chose any single item. DQ-1 is left open (its recommendation
-amends an already-approved spec); this section stays open, and the spec is not ready to
-approve, until the founder answers.
+All 3 decisions are resolved: an agent session recorded each selection under delegation
+DLG-001 (DR-108, the delegated-approval record); they are ratified only by approval of this
+spec. DQ-1's fold amends SPEC-068's FR-4/FR-5; this record changes nothing in SPEC-068,
+whose amendment and re-approval are separate acts.
 
 - **DQ-1 — Fold into SPEC-068, or ship as this spec's own increment?** SPEC-068 is
   `plan: in-progress` — unbuilt — and FR-1 here is a small, natural extension of its own
@@ -224,9 +220,11 @@ approve, until the founder answers.
   SPEC-082 standalone) is fully independent but duplicates "where is the `level` message
   owned" the way SPEC-079 DQ-3 flagged for a different pair of specs.
 
-  **Not recorded:** the recommended fold amends SPEC-068's FR-4/FR-5, and SPEC-068 is
-  already approved (`status: planning`, approval record committed), so taking it forces a
-  re-approval of that spec. Needs the founder's answer.
+  **Recorded selection: fold FR-1–FR-3 into SPEC-068** as an amendment to its FR-4/FR-5,
+  with SPEC-082 standing only as the traceability anchor for #1492. Recorded by an agent
+  session under delegation DLG-001 (DR-108, the delegated-approval record); ratified only
+  by approval of this spec. SPEC-068 is already approved, so the amendment needs its
+  re-approval; this record does not edit SPEC-068.
 
 - **DQ-2 — Does FR-1's message apply to every `level` refresh, or only when asked?** The
   common case for `level` is a healthy repo that is genuinely current — printing "this

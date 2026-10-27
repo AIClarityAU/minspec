@@ -191,14 +191,9 @@ this change.
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended. An
-agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
-on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
-chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
-(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
-context, not verified. No human chose any single item. DQ-3 is left open (its recommendation
-is evidence-incomplete by this document's own note); this section stays open, and the spec
-is not ready to approve, until the founder answers.
+All 5 decisions are resolved: an agent session recorded each selection under delegation
+DLG-001 (DR-108, the delegated-approval record); they are ratified only by approval of this
+spec.
 
 **DQ-1 — `.minspec/` present but `config.json` absent.** The extension treats this as "all
 defaults" (`config.ts:210-212`).
@@ -226,10 +221,11 @@ document's (rec) option; no human chose this item.
 **DQ-3 — Govern `epicsDir` too.** Epics are approvables (`approvable.ts:15`) and are not
 governed even at defaults today. That gap exists in this repo now, not only for adopters.
 
-**Not recorded:** the recommendation is evidence-incomplete by this document's own note:
-whether an epic `status:` change is a human act has not been decided, and the search for one
-was partial. It also moves epic status edits in this repo from the docs lane to a human
-merge. Needs the founder's answer.
+**Recorded selection: `a`,** include `epicsDir` (default `docs/epics`) in this change, so an
+epic `status:` edit in this repo now needs a human merge. Recorded by an agent session under
+delegation DLG-001 (DR-108, the delegated-approval record); ratified only by approval of this
+spec. The evidence note below still stands: no record yet decides whether an epic status
+change is a human act.
 
 - `a` **(rec)** Include `epicsDir` (default `docs/epics`) in this change. *Cost:* it changes
   behaviour for this repo: an epic `status:` edit, for example `active` to `done`, now needs a
