@@ -66,7 +66,9 @@ write gate.
   existing key. Whether the written file keeps the mark is D2.
 - **FR-5 — Other JSON readers.** Each reader of on-disk JSON state applies FR-1: approval sidecar
   records (`approval-store.ts` `readRecord`), `.claude/settings.json` (`claude-settings.ts`), the
-  harness manifest (`merge-refresh.ts`), and any other found by the Plan inventory (see D3).
+  harness manifest (`merge-refresh.ts`), the root `vitest.config.ts` (it reads
+  `.minspec/config.json` for the coverage minimum, so a leading mark can break the CI coverage gate
+  too), and any other found by the Plan inventory (see D3).
   These call sites were read from code, not run.
 - **FR-6 — Failure is distinguishable.** `loadConfig` keeps returning defaults on a genuinely
   malformed file (the #2001 hardening issue owns making that loud), but the code path must let a
@@ -116,6 +118,6 @@ write gate.
   produced it and a rewrite should change only the `coverage` key. Cost: the file stays
   non-portable for tools that choke on a mark. (b) Drop it on write. Cost: an unrequested byte
   change to the user's file.
-- **D3 — Breadth.** (a) **(rec)** Every JSON reader of on-disk state in this one spec (about a
-  dozen sites). Cost: larger diff to review. (b) Config only now, others as follow-ups. Cost:
+- **D3 — Breadth.** (a) **(rec)** Every JSON reader of on-disk state in this one spec (an
+  uncounted estimate of about a dozen sites; the Plan inventory replaces it with a count). Cost: larger diff to review. (b) Config only now, others as follow-ups. Cost:
   approval and hook-registration readers keep the silent failure; each follow-up needs its own issue.
