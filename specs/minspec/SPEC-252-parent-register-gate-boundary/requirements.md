@@ -1,5 +1,5 @@
 ---
-id: SPEC-250
+id: SPEC-252
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-250: The parent-register gate stops reading local decision ids of one hundred and above as parent refs, and a separate structural check keeps catching leaked parent-register numbers
+# SPEC-252: The parent-register gate stops reading local decision ids of one hundred and above as parent refs, and a separate structural check keeps catching leaked parent-register numbers
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2148. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
