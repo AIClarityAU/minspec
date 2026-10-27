@@ -109,8 +109,17 @@ new consent surface (invariant 1).
 
 ## Decisions needed (Clarify)
 
+All 2 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 **D1. Where does the fix live?** The reader (`cos.py`) is machine-local and unversioned, so
 a spec here cannot change it directly.
+
+**Recorded selection: Option (a),** land a versioned reader inside this repo that reuses
+`canonical.py:spec_hash`, with the fixtures of AC-1..6 as its tests, and have `cos.py`
+delegate to it.
+
 - (a) **(rec)** Land a versioned reader inside this repo (e.g. under `scripts/`) that reuses
   `canonical.py:spec_hash`, with the fixtures of AC-1..6 as its tests, and have `cos.py`
   delegate to it. Cost: a new maintained surface, and `cos.py` still needs a one-time manual
@@ -122,6 +131,9 @@ a spec here cannot change it directly.
 `UNKNOWN`. Cost: any consumer parsing the literal `UNKNOWN` breaks (loudly, which is
 fail-closed). (b) Keep `UNKNOWN` as an umbrella with a sub-reason. Cost: a consumer that
 matches only the umbrella still cannot tell the two apart, which is the defect.
+
+**Recorded selection: Option (a),** rename to `UNREADABLE` / `UNRESOLVED` and drop
+`UNKNOWN`.
 
 ## Follow-ups (tracked)
 

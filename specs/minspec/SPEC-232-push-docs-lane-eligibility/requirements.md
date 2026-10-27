@@ -116,7 +116,15 @@ so a new or old producer can bypass it unnoticed.
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 **D1 — What does the command do when the label is withheld?**
+
+**Recorded selection: Option (a),** open the PR without the label, as the approval flow does,
+with the reason in the toast and PR body.
+
 - **(a) Open the PR without the label (rec).** Same as the approval flow: human merges with one
   keystroke; the reason is in the toast and PR body. Cost: the user asked for "push via lane" and
   gets a PR that is not on the lane; a mixed status-change plus docs push needs a manual merge
@@ -127,6 +135,10 @@ so a new or old producer can bypass it unnoticed.
   new multi-PR flow, partial-failure handling, and it breaks SPEC-039's one-command-one-PR contract.
 
 **D2 — How are the producers kept in sync?**
+
+**Recorded selection: Option (a),** call `laneRefusal` at the call site, plus a
+source-text/parity pin test.
+
 - **(a) Call `laneRefusal` at the call site, plus a source-text/parity pin test (rec).** Smallest
   change; reuses the existing seam and `governance-lane-eligibility.test.ts` containment. Cost: the
   pin test is a textual guard, which passes vacuously if the call is renamed (a known weakness).
@@ -137,3 +149,6 @@ so a new or old producer can bypass it unnoticed.
 **D3 — Should the lane's refusal become neutral instead?** (#2078's option b.) Recommend **no**:
 #2078 already shipped option a for two producers, and a neutral refusal would weaken a gate whose
 point is that ratification is a human act. Cost of "no": the third producer needs this fix too.
+
+**Recorded selection: Option (no),** the lane's refusal does not become neutral, because that
+would weaken a gate whose point is that ratification is a human act.

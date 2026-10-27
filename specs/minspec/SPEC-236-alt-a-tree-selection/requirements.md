@@ -153,7 +153,16 @@ handler accepts. Adding a view to the `when` clause without wiring it fails this
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 **D1. How the handler learns that a tree is focused.**
+
+**Recorded selection: Option (a),** per-view keybinding entries carrying `args` (FR-1),
+verifying the focus/selection split first and adding the tree-path confirmation only if
+it is real.
+
 - **(a) (rec)** Per-view keybinding entries carrying `args` (FR-1). The editor evaluates
   `focusedView` at the keypress, so the answer is exact and needs no stored state. Cost: three
   extra keybinding entries to keep aligned with the views (FR-7 tests that), and the selected
@@ -176,6 +185,10 @@ naming the artifact before dispatching (one extra keypress, tree path only).
   real. Cost: Plan carries an editor experiment before the design is final.
 
 **D2. What happens after the FR-5 message.**
+
+**Recorded selection: Option (a),** stop after the FR-5 message, without continuing to the
+recently-viewed picker.
+
 - **(a) (rec)** Stop there. The user was in the tree, so the recently-viewed picker answers a
   question they did not ask. Cost: one more keypress (click the row) to get the approval.
 - (b) Continue to the recently-viewed picker (step 3), as today. Cost: keeps the confusing
@@ -183,6 +196,10 @@ naming the artifact before dispatching (one extra keypress, tree path only).
 
 **D3. Epic group rows.** Epic group nodes in the Specs and Backlog trees carry `.epic`, so
 `classifyNode` routes them to `minspec.acceptEpic`.
+
+**Recorded selection: Option (a),** keep routing epic group rows to `minspec.acceptEpic`,
+matching the row's context-menu Approve/Accept.
+
 - **(a) (rec)** Keep that: it matches what the row's context-menu Approve/Accept already does.
   Cost: Alt+A on a group header accepts the epic in one keystroke, which a user collapsing
   groups may not expect.

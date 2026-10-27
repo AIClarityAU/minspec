@@ -177,6 +177,10 @@ it. FR-0 requires the answer before Plan.
 
 ## Decisions needed (Clarify)
 
+All 6 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 - **D1: Revert, or record only?**
   `a` **revert unexplained removals and record them (rec)**. An unexplained release of the
   gate does not stand, which is what #2113 asks for. Cost: a new write path on an event
@@ -184,6 +188,7 @@ it. FR-0 requires the answer before Plan.
   limits that risk without removing it.
   `b` record only. There is no flapping, but on a PR the merge lane has already acted on
   the removal by the time anyone reads the record.
+  **Recorded selection: Option (a),** revert unexplained removals and record them.
 - **D2: What counts as a reason?**
   `a` **a comment by the same actor that contains the exact label name, posted at most 30
   minutes before the removal (rec)**. It is deterministic and it is what a careful human
@@ -193,26 +198,32 @@ it. FR-0 requires the answer before Plan.
   and humans will forget the syntax.
   `c` any comment by anyone in the window. Cost: weak, because an unrelated comment
   launders the removal.
+  **Recorded selection: Option (a),** a comment by the same actor that contains the exact
+  label name, posted at most 30 minutes before the removal.
 - **D3: Scope.**
   `a` **both issues and pull requests (rec)**. On PRs a `hold:*` label is a merge gate (see
   diagnosis), so leaving PRs out would leave the sharper half open. Cost: PR label events
   are frequent, so this means more workflow runs.
   `b` issues only, as #2113 is literally framed.
+  **Recorded selection: Option (a),** both issues and pull requests.
 - **D4: Exempt Bot-type actors?**
   `a` **no exemption (rec)**. The removal on #1750 was by a bot, and FR-5 lets in-repo bots
   explain themselves cheaply. Cost: an external bot that strips labels would be reverted
   once, then left alone and flagged.
   `b` exempt `minspec-sdd[bot]`. This recreates the exact hole on #1750.
+  **Recorded selection: Option (a),** no exemption for Bot-type actors.
 - **D5: The opposite failure, a hold that outlives its decision** (#1750 still carries
   `hold:human` after the founder answered it).
   `a` **out of scope here, to be filed as its own issue (rec)**. Detecting "the human
   answered" is a separate decision family, sitting next to #1857 and SPEC-209. Cost: the
   stale label on #1750 stays wrong until that issue lands or someone fixes it by hand.
   `b` fold it in. This doubles the spec.
+  **Recorded selection: Option (a),** out of scope here, to be filed as its own issue.
 - **D6: Ship to adopters?**
   `a` **this repo only (rec)**. The defect was measured here, and shipping it would need a
   DR plus the `.minspec/` check. Cost: adopters keep the same blind spot.
   `b` scaffold as a template.
+  **Recorded selection: Option (a),** this repo only.
 
 ## Alternatives rejected (DR-086 §4)
 

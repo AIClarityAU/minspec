@@ -100,14 +100,24 @@ In: the `MinSpec: Validate` result surface, and a test pinning it. Out:
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 - **D1 — Should the same check also run for the Validate-all / tree decoration / CI path?**
   Options: (A) command only **(rec)** — smallest, fixes the reported surface; cost: other
   surfaces (status-bar tick, `npm run validate`) can still say "fine" for a spec approval would
   refuse (CI is deliberately state-based, so it cannot know the advance). (B) also the
   tree-view badge — closer to "at authoring time", but a wider blast radius and per-refresh cost.
+  **Recorded selection: Option (A),** command only, the smallest change, which fixes the
+  reported surface.
 - **D2 — Should the validator itself assert `implements:` at authoring time** (e.g. a
   warning-level `ownership.implements.undeclared` for a T3/T4 spec at `plan: pending`) instead
   of, or in addition to, FR-1? Rec: **no, not now** — it changes `npm run validate` results for
   the ~16 un-backfilled specs and would collide with the #1543 backfill; cost: the requirement
   stays visible only to those who run `MinSpec: Validate` or approve.
+  **Recorded selection: Option (no, not now),** the validator does not assert `implements:`
+  at authoring time, so `npm run validate` results do not change for the un-backfilled specs.
 - **D3 — Guidance prose.** Leave `slash-commands.ts` guidance as is (rec; the gate now enforces it) or tighten it to point at Validate. Cost of leaving: none beyond staleness risk.
+  **Recorded selection: Option (leave),** leave the `slash-commands.ts` guidance as is,
+  since the gate now enforces it.
