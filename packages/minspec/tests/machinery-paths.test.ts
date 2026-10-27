@@ -39,6 +39,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createRequire } from 'module';
 import { AI_REVIEW_WORKFLOW } from '../src/lib/ci-review-templates';
 import { isBoundaryPath } from '../../../scripts/auto-merge-gate';
 import {
@@ -203,8 +204,7 @@ describe('#1758 all three machinery definitions are pinned to the canonical modu
 });
 
 describe('#3178 ai-review-guard.js carries the canonical machinery pattern', () => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const guard = require('../../../.github/scripts/ai-review-guard.js');
+  const guard = createRequire(__filename)('../../../.github/scripts/ai-review-guard.js');
 
   it('MACHINERY_PATH_RE is the canonical pattern, character for character', () => {
     expect(guard.MACHINERY_PATH_RE.source.replace(/\\\//g, '/')).toBe(
