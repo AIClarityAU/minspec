@@ -237,13 +237,28 @@ lease_gate_open_unshipped() {
 
 # lease_open_closing_prs <item>: print the numbers (space-separated, "#N" form) of every
 # OPEN pull request whose closingIssuesReferences contains <item>; empty when none.
-# Non-zero on any gh/jq failure (the caller treats that as "unknown", never "none").
+# Non-zero on any gh/jq failure (the caller treats that as "unknown", never "none"), and
+# when the list hits the --limit cap (a truncated list cannot prove "none in flight").
+#
+# TRUSTED PR authors only. This repo is PUBLIC and `Closes #N` in any fork PR's body fills
+# closingIssuesReferences, so an unfiltered read lets any internet user park a throwaway PR
+# and deny dispatch of #N for as long as it stays open — the same zero-permission denial
+# the shipped-marker read above filters against. Trusted = authorAssociation
+# OWNER/MEMBER/COLLABORATOR, or this pipeline's own App (is_bot, slug minspec-sdd: an App
+# slug is unique, and a person cannot register a bot account).
 lease_open_closing_prs() {
-  local item="${1:?lease_open_closing_prs needs an item}" raw
-  raw="$(gh pr list --repo "$MINSPEC_LEASE_REPO" --state open --limit 1000 \
-           --json number,closingIssuesReferences 2>/dev/null)" || return 1
-  printf '%s' "$raw" | jq -r --argjson n "$item" '
-    [ .[] | select(any(.closingIssuesReferences[]?; .number == $n)) | "#\(.number)" ] | join(" ")'
+  local item="${1:?lease_open_closing_prs needs an item}" raw limit=1000
+  raw="$(gh pr list --repo "$MINSPEC_LEASE_REPO" --state open --limit "$limit" \
+           --json number,closingIssuesReferences,authorAssociation,author 2>/dev/null)" || return 1
+  printf '%s' "$raw" | jq -r --argjson n "$item" --argjson lim "$limit" '
+    if length >= $lim then error("open PR list hit the cap") else . end
+    | [ .[]
+        | select((.authorAssociation // "") as $a
+                 | $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR"
+                   or ((.author.is_bot // false) == true
+                       and ((.author.login // "") | . == "app/minspec-sdd" or . == "minspec-sdd" or . == "minspec-sdd[bot]")))
+        | select(any(.closingIssuesReferences[]?; .number == $n))
+        | "#\(.number)" ] | join(" ")'
 }
 
 # ── Claim comment body + read/enumerate ──────────────────────────────────────

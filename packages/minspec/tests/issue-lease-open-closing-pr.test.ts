@@ -39,13 +39,31 @@ function gate(opts: { prs: string; prFails?: boolean; issue?: number }) {
 }
 
 describe('lease_gate_open_unshipped: open closing PR (#3161)', () => {
+  const closes = (n: number, who: object) => ({ number: n, closingIssuesReferences: [{ number: 3115 }], ...who });
   it('refuses when a non-agent/ branch PR closes the issue, and names it', () => {
-    const r = gate({ prs: JSON.stringify([{ number: 3116, closingIssuesReferences: [{ number: 3115 }] }]) });
+    const r = gate({ prs: JSON.stringify([closes(3116, { authorAssociation: 'OWNER', author: { login: 'x' } })]) });
     expect(r.status).toBe(1);
     expect(r.out).toContain('#3116');
   });
+  it('refuses when the pipeline App opened the closing PR', () => {
+    const r = gate({ prs: JSON.stringify([closes(3116, { authorAssociation: 'CONTRIBUTOR', author: { login: 'app/minspec-sdd', is_bot: true } })]) });
+    expect(r.status).toBe(1);
+  });
+  it('ignores a closing PR from an untrusted author (no permanent-denial vector)', () => {
+    for (const who of [
+      { authorAssociation: 'NONE', author: { login: 'rando' } },
+      { authorAssociation: 'FIRST_TIME_CONTRIBUTOR', author: { login: 'minspec-sdd', is_bot: false } },
+      { author: { login: 'rando' } },
+    ]) {
+      expect(gate({ prs: JSON.stringify([closes(77, who)]) }).status).toBe(0);
+    }
+  });
+  it('fails closed when the PR list hits the cap', () => {
+    const prs = Array.from({ length: 1000 }, (_, i) => ({ number: i + 1, closingIssuesReferences: [], authorAssociation: 'NONE' }));
+    expect(gate({ prs: JSON.stringify(prs) }).status).toBe(1);
+  });
   it('allows when open PRs close other issues only', () => {
-    const r = gate({ prs: JSON.stringify([{ number: 9, closingIssuesReferences: [{ number: 1 }] }, { number: 10, closingIssuesReferences: [] }]) });
+    const r = gate({ prs: JSON.stringify([{ number: 9, authorAssociation: 'OWNER', closingIssuesReferences: [{ number: 1 }] }, { number: 10, closingIssuesReferences: [] }]) });
     expect(r.status).toBe(0);
   });
   it('allows when there are no open PRs', () => {
