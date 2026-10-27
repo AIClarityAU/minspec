@@ -206,11 +206,17 @@ describe('fail closed: nothing is armed', () => {
 
 describe('human claims: a covered PR the bot must still not merge (#3050)', () => {
   const view = (v: object) => JSON.stringify({ ...VIEW_OK, ...v });
+  const HANDOFF = (createdAt: string) => ({ body: 'x <!-- minspec-shepherd-handoff -->', createdAt });
+  const COMMIT = (committedDate: string) => ({ committedDate });
   it.each([
     ['no closing link at all', { view: view({ closingIssuesReferences: [] }) }, 'closes-link-unconfirmed'],
     ['a closing link to a different issue', { view: view({ closingIssuesReferences: [{ number: 1 }] }) }, 'closes-link-unconfirmed'],
     ['a non-drain branch with no link', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [] }) }, 'closes-link-unconfirmed'],
     ['a creator-shepherd handoff comment', { view: view({ comments: [{ body: 'x <!-- minspec-shepherd-handoff -->' }] }) }, 'handed-to-human'],
+    ['a handoff posted after the newest commit', { view: view({ comments: [HANDOFF('2026-10-20T00:00:00Z')], commits: [COMMIT('2026-10-19T00:00:00Z')] }) }, 'handed-to-human'],
+    ['a handoff with an unreadable timestamp', { view: view({ comments: [{ body: HANDOFF('x').body, createdAt: 'garbage' }], commits: [COMMIT('2026-10-19T00:00:00Z')] }) }, 'handed-to-human'],
+    ['a handoff with an unreadable commit list', { view: view({ comments: [HANDOFF('2026-10-15T00:00:00Z')], commits: 'nope' }) }, 'handed-to-human'],
+    ['a handoff with a commit missing its date', { view: view({ comments: [HANDOFF('2026-10-15T00:00:00Z')], commits: [{}] }) }, 'handed-to-human'],
     ['an unreadable PR view', { viewExit: 1 }, 'pr-claims-unreadable'],
     ['a PR view that is not JSON', { view: 'nope' }, 'pr-claims-unreadable'],
     ['a PR view without a comments list', { view: JSON.stringify({ headRefName: 'agent/issue-3000', closingIssuesReferences: [{ number: 3000 }] }) }, 'pr-claims-unreadable'],
@@ -220,6 +226,17 @@ describe('human claims: a covered PR the bot must still not merge (#3050)', () =
     expect(r.verdict).toMatchObject({ proceed: false, reason });
     expect(r.judgeArgs).toBeUndefined();
     expect(writes(r.gh)).toEqual([]);
+  }, TIMEOUT);
+
+  it('a handoff older than the newest commit is withdrawn by the later push (#3120)', () => {
+    const r = run(['2966'], {
+      view: view({
+        comments: [HANDOFF('2026-10-15T00:00:00Z')],
+        commits: [COMMIT('2026-10-10T00:00:00Z'), COMMIT('2026-10-20T00:00:00Z')],
+      }),
+    });
+    expect(r.status).toBe(0);
+    expect(r.verdict).toMatchObject({ proceed: true });
   }, TIMEOUT);
 
   it('a non-drain branch with a confirmed link still proceeds', () => {

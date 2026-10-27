@@ -588,16 +588,30 @@ fi
 #      drain branch names no issue, so it needs at least one confirmed link.
 #   2. a creator-shepherd handoff. `shepherd_hand_off` stamps SHEPHERD_HANDOFF_MARKER on a
 #      comment when the creating session gives the PR to the founder; a bot merge would
-#      take that decision from him.
+#      take that decision from him. Only a handoff posted at or after the PR's newest commit
+#      counts (#3120); a later push means automation took the PR back.
 # Prints the denial reason and detail (tab-separated) and returns 1 on a claim OR on any
 # unreadable input; returns 0 only when both are positively clear.
 delegated_merge_human_claims() {
   local pr="$1" view="" head="" refs="" handoffs="" issue=""
   local marker="<!-- minspec-shepherd-handoff -->"
-  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments 2>/dev/null) \
+  # A handoff counts only if posted at or after the PR's newest commit (#3120): a later push
+  # means automation took the PR back. An unreadable commit list or timestamp keeps it live.
+  local handoff_jq='
+    (if (.commits | type) == "array" and (.commits | length) > 0
+        and ([.commits[] | (.committedDate | type) == "string"] | all)
+     then ([.commits[].committedDate | try fromdateiso8601 catch null] | if any(. == null) then null else max end)
+     else null end) as $newest
+    | .comments | if type == "array" then
+        [.[] | select((.body // "") | contains($m))
+             | select(((.createdAt | type) != "string") or $newest == null
+                      or (((.createdAt | try fromdateiso8601 catch null) as $at
+                           | $at == null or $at >= $newest)))] | length
+      else error("no list") end'
+  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments,commits 2>/dev/null) \
      || ! head=$(printf '%s' "$view" | jq -r '.headRefName' 2>/dev/null) \
      || ! refs=$(printf '%s' "$view" | jq -r '.closingIssuesReferences | if type == "array" then .[].number else error("no list") end' 2>/dev/null) \
-     || ! handoffs=$(printf '%s' "$view" | jq -r --arg m "$marker" '.comments | if type == "array" then [.[] | select((.body // "") | contains($m))] | length else error("no list") end' 2>/dev/null); then
+     || ! handoffs=$(printf '%s' "$view" | jq -r --arg m "$marker" "$handoff_jq" 2>/dev/null); then
     printf 'pr-claims-unreadable\tcould not read PR #%s closing links and comments; failing closed\n' "$pr"
     return 1
   fi
