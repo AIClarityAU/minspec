@@ -11,8 +11,9 @@
  *   2. At most one drain: a live lock holder is adopted, never joined by a second, and a
  *      second supervisor exits 75.
  *   3. Pause survives restart: with the marker present a fresh supervisor starts nothing.
- *   4. A failure is visible: the drain's own last lines reach the journal and the exit
- *      code is non-zero.
+ *   4. A failure is visible: the drain's own last lines reach the journal, and the failure
+ *      is retried with backoff inside the same start (#3095) rather than exiting
+ *      non-zero; a normal end or SIGTERM exits 0.
  *
  * drain-service.sh reads pid 1's name from a path no environment variable can move. The
  * tests source the script and set that shell variable to a fixture, which is the only
@@ -39,6 +40,9 @@ echo "$*" >> "$STUB_CALLS"
 case "$1" in
   --paused) [[ -e "$STUB_PAUSE" ]] && exit 0; exit 1 ;;
   --continuous)
+    # A failed launch forks no loop: an orphan would hold the lock and be adopted
+    # by the supervisor's next pass, racing the retry assertions.
+    [[ "\${STUB_RC:-0}" != 0 ]] && exit "$STUB_RC"
     (
       echo "$BASHPID" > "$MINSPEC_DRAIN_LOCK"
       trap 'echo "[drain] stopping on SIGTERM"; rm -f "$MINSPEC_DRAIN_LOCK"; exit 143' TERM
@@ -113,6 +117,8 @@ beforeEach(() => {
     MINSPEC_DRAIN_SERVICE_LOCK: file('svc.lock'),
     MINSPEC_DRAIN_SERVICE_POLL: '1',
     MINSPEC_DRAIN_SERVICE_STOP_GRACE: '5',
+    MINSPEC_DRAIN_SERVICE_RETRY_BASE: '1',
+    MINSPEC_DRAIN_SERVICE_RETRY_MAX: '1',
     STUB_CALLS: file('calls'),
     STUB_PAUSE: file('pause'),
   };
@@ -238,10 +244,11 @@ describe('invariant 2: at most one drain', () => {
     await until(() => sv.out().includes('adopting'));
     expect(calls().filter((c) => c.startsWith('--continuous'))).toEqual([]);
     holder.kill('SIGKILL');
-    const code = await sv.done;
-    // The adopted drain wrote no exit line, so its end is reported as a failure.
-    expect(code).toBe(1);
-    expect(calls().filter((c) => c.startsWith('--continuous'))).toEqual([]);
+    // The adopted drain wrote no exit line, so its end is a failure: retried in this start.
+    await until(() => sv.out().includes('retrying in'));
+    // After the retry the supervisor starts its own drain, which ends normally.
+    expect(await sv.done).toBe(0);
+    expect(calls().filter((c) => c.startsWith('--continuous')).length).toBe(1);
   });
 
   it('a second supervisor exits 75', async () => {
@@ -276,19 +283,26 @@ describe('invariant 4: a failure is visible', () => {
     expect(r.stdout).toContain('[drain] loop exited.');
   });
 
-  it('consecutive cycle errors exit 1 with the drain line in the journal', () => {
+  it('consecutive cycle errors are reported, then retried inside the same start (#3095)', async () => {
     env.STUB_END = '[drain] 3 consecutive cycle errors — stopping loop cleanly';
-    const r = runSync('docker-init');
-    expect(r.status).toBe(1);
-    expect(r.stdout).toContain('consecutive cycle errors');
-    expect(r.stdout).toContain('FAILED');
+    const sv = runBackground('docker-init');
+    await until(() => calls().filter((c) => c.startsWith('--continuous')).length >= 2, 15_000);
+    expect(sv.out()).toContain('consecutive cycle errors');
+    expect(sv.out()).toContain('FAILED');
+    expect(sv.proc.exitCode).toBeNull();
+    sv.proc.kill('SIGTERM');
+    expect(await sv.done).toBe(0);
   });
 
-  it('a failed launch exits 1', () => {
+  it('N failed launches inside one start do not exit the supervisor (#3095)', async () => {
     env.STUB_RC = '1';
-    const r = runSync('docker-init');
-    expect(r.status).toBe(1);
-    expect(r.stdout).toContain('drain launch exited 1');
+    const sv = runBackground('docker-init');
+    await until(() => calls().filter((c) => c.startsWith('--continuous')).length >= 3, 15_000);
+    expect(sv.out()).toContain('drain launch exited 1');
+    expect(sv.out()).toContain('retrying in');
+    expect(sv.proc.exitCode).toBeNull();
+    sv.proc.kill('SIGTERM');
+    expect(await sv.done).toBe(0);
   });
 });
 

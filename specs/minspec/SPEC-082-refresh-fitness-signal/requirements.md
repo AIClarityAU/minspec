@@ -201,6 +201,15 @@ no new stored value. It only changes what is said about a fact SPEC-068 already 
 
 ## Decisions needed (Clarify)
 
+Selections below are recorded on the option this document already marks recommended. An
+agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
+on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
+chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
+(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
+context, not verified. No human chose any single item. DQ-1 is left open (its recommendation
+amends an already-approved spec); this section stays open, and the spec is not ready to
+approve, until the founder answers.
+
 - **DQ-1 — Fold into SPEC-068, or ship as this spec's own increment?** SPEC-068 is
   `plan: in-progress` — unbuilt — and FR-1 here is a small, natural extension of its own
   FR-4/FR-5 (the four-verdict report). Building it as a second spec against the same
@@ -215,6 +224,10 @@ no new stored value. It only changes what is said about a fact SPEC-068 already 
   SPEC-082 standalone) is fully independent but duplicates "where is the `level` message
   owned" the way SPEC-079 DQ-3 flagged for a different pair of specs.
 
+  **Not recorded:** the recommended fold amends SPEC-068's FR-4/FR-5, and SPEC-068 is
+  already approved (`status: planning`, approval record committed), so taking it forces a
+  re-approval of that spec. Needs the founder's answer.
+
 - **DQ-2 — Does FR-1's message apply to every `level` refresh, or only when asked?** The
   common case for `level` is a healthy repo that is genuinely current — printing "this
   build is not ahead" on every such run risks reading as alarming noise rather than
@@ -227,6 +240,11 @@ no new stored value. It only changes what is said about a fact SPEC-068 already 
   spec is for (mid-incident, reading a failing downstream gate) has one more step between
   them and the answer unless the base message is inviting enough to prompt it.
 
+  **Recorded selection: always print the short epoch/build-identity line,** keeping the
+  stronger "may not resolve an external check" framing behind a `--verbose` or equivalent
+  diagnostic flag. An agent session copied this document's (rec) option; no human chose this
+  item.
+
 - **DQ-3 — Does this spec need its own DR?** No new irreversible choice is made here — the
   epoch comparison, the provenance record, and the fail-closed direction are all DR-092's
   decision; this spec only changes report text for one already-decided verdict.
@@ -234,6 +252,10 @@ no new stored value. It only changes what is said about a fact SPEC-068 already 
   convention for the same situation) — unless DQ-1 resolves to *not* folding and instead
   widens FR-2's remedy language into something that reaches the network, at which point
   that widening would need its own DR under DR-050's consent framing.
+
+  **Recorded selection: no DR required,** recorded explicitly; this holds unless DQ-1
+  resolves to not folding and FR-2's remedy then reaches the network. An agent session
+  copied this document's (rec) option; no human chose this item.
 
 ## Out of Scope
 
