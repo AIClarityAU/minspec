@@ -352,8 +352,14 @@ blindness. Its CI gate exists; its offline allocator does not see branches eithe
 
 ### DQ-5 - Which claimant renumbers when two specs already share an id? (#2185)
 
-**Not recorded:** this sets a convention people follow, not only gate behaviour, and it
-arrived after the 2026-10-26 instruction. Needs the founder's answer.
+**Recorded selection: (b),** cheapest to fix wins: whichever claimant is cheaper to
+renumber renumbers. Source: the answer to task-queue item c227q5, 2026-10-28 ("Cheapest
+fix"), an answer the queue attributes to the founder. It is NOT this document's (rec)
+option, which was (a). The founder accepted the stated cost: a judgement is needed each
+time and the gate cannot apply it. A queue answer is not consent (DR-108 section 4), so this
+selection is unverified and binds only if the founder approves this spec's text with it in
+place. FR-10 therefore needs rewriting in Clarify before Plan, as the closing paragraph of
+this decision says; this record does not edit FR-10.
 
 FR-10 fixes the gate's answer (lower PR number keeps the id). The open question is whether
 that is also the rule for a clash found any other way - by hand, by the FR-8 command, or
