@@ -1,5 +1,5 @@
 ---
-id: SPEC-269
+id: SPEC-295
 type: requirements
 status: specifying
 tier: T3
@@ -20,7 +20,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-269: An approval pull request is opened by an identity the target repo lets the founder approve
+# SPEC-295: An approval pull request is opened by an identity the target repo lets the founder approve
 
 > **This is a SPECIFICATION ONLY.** Written for issue
 > [#2995](https://github.com/AIClarityAU/minspec/issues/2995). Nothing is built until a human
