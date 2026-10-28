@@ -1,14 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-130-checkbox-state-hash-exit/requirements.md",
   "specHash": "cd36fbb654852fb01f9ac0ec84b900fef059367579173fcce73000126ca03734",
-  "approvedAt": "2026-10-23T07:09:32.671Z",
-  "approvedBy": "minspec-sdd[bot]",
+  "approvedAt": "2026-10-24T04:12:42.860Z",
+  "approvedBy": "github@harvest316.com",
   "tier": "T4",
   "migrated": false,
-  "baselineBlob": "",
-  "actor": "minspec-sdd[bot]",
-  "basis": "delegation:DLG-001",
-  "act": "spec-approval",
-  "author": "session:cos/spec130-clarify-1022",
-  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3004#issuecomment-6329336041"
+  "baselineBlob": "4e996e520977ab9196ecf5b23c8231627ee3d0e5"
 }
