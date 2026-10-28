@@ -27,9 +27,11 @@ phases:
 > boundary of its own for code an agent runs). Nothing is built until a human reads it,
 > resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
 >
-> **On this spec's number.** SPEC-263 is the highest id on disk at this base plus one. Open
-> pull requests were not visible to the agent that wrote this (no network), so the spec-id
-> collision gate's report on the PR is the authority; renumber if it says the id is taken.
+> **On this spec's number.** This spec was first written as SPEC-263, then renumbered to SPEC-285
+> because that id was already taken on main or by another open pull request. An id above the
+> highest on disk is expected while other specs are in flight. Open pull requests are not
+> visible from a base checkout, so the spec-id collision gate's report on the PR is the
+> authority; renumber if it says this id is taken.
 
 ## In plain terms
 
