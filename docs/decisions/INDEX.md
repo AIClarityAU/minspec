@@ -906,4 +906,12 @@ The step "Post honest ai-review verdict check-run" (.github/workflows/ai-review.
 <!-- dr-summary:DR-114 auto=5fb445350927 -->
 scripts/drain-inbox.sh defaults to concurrency 1 and carries a caveat (around lines 407-411): two queued issues touching the same file still produce competing pull requests, because each agent branches from origin/main and cannot see an unmerged sibling, so "keep the default at 1 until same-file serialisation exists, and de-duplicate the queue first". That caveat was written for the session-start drain.
 <!-- /dr-summary:DR-114 -->
+
+## [DR-117 — The ZCode container boundary - git through GitHub is the only bridge between ZCode's container and the host (BND-1 to BND-6), and measurement 12 checks the running container matches](DR-117.md)
+
+*Status: proposed · Date: 2026-10-28*
+
+<!-- dr-summary:DR-117 auto=f3bf57334586 -->
+ZCode (Z.ai's editor) runs apart from the host so that the host's editor and agents are never "infected" by reading what ZCode wrote; SPEC-136 set six boundary rules for that and said they outlive the spec and need a decision record. This is that record.
+<!-- /dr-summary:DR-117 -->
 <!-- minspec:dr-index:end -->
