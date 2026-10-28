@@ -73,7 +73,7 @@ All line refs are inside the `VALIDATE_PY` string in
 | # | Defect | Mechanism (function, ~line) | Effect |
 |---|---|---|---|
 | 1 | `type:` not comment-stripped | `ownership_violations` (~2093) strips `tier`/`plan` but lowercases raw `type` | `type: requirements  # primary` is not in `("", "requirements")`, rule returns `[]` |
-| 2 | `tier: "T3"  # note` | `strip_inline_comment` (1963) tests surrounding quotes before stripping the comment | reads `"T3"  # note`, not in `TIERS`, falls back to T2, rule disarmed |
+| 2 | `tier: "T3"  # note` | `strip_inline_comment` (1963) tests surrounding quotes before stripping the comment | the quote test fails (last char is `e`), so the comment is stripped but the quotes stay: returns `"T3"`, not in `TIERS`, falls back to T2, rule disarmed |
 | 3 | `..\..\x.py` | `owned_path` (2052) returns None when no `/` before backslash normalisation | not escaping, not owned; passes the always-FAIL escape rule |
 | 4 | column-0 `- item` | `frontmatter_list` item regex (~2036) requires `[ \t]+-` | `affects:` list reads empty; escaping path passes |
 | 5 | one-space `phases:` child | `parse_frontmatter_yaml` (1972) nests only `\s{2,}` lines | plan reads pending, rule disarmed |
