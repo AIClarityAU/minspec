@@ -1,5 +1,5 @@
 ---
-id: SPEC-262
+id: SPEC-271
 type: requirements
 status: specifying
 tier: T3
@@ -18,7 +18,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-262: A quota cap that is SET for a window the reading does not report holds the drain
+# SPEC-271: A quota cap that is SET for a window the reading does not report holds the drain
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2586. Nothing is built until a
 > human resolves [Decisions needed (Clarify)](#decisions-needed-clarify) and approves it.
