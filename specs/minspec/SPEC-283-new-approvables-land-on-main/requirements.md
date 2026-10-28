@@ -1,5 +1,5 @@
 ---
-id: SPEC-263
+id: SPEC-283
 type: requirements
 status: specifying
 tier: T3
@@ -20,7 +20,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-263: A new approvable lands on `main` unapproved, so the founder sees it in his checkout
+# SPEC-283: A new approvable lands on `main` unapproved, so the founder sees it in his checkout
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2852. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
