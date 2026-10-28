@@ -46,7 +46,8 @@ case "$1" in
     [[ "\${STUB_RC:-0}" != 0 ]] && exit "$STUB_RC"
     (
       echo "$BASHPID" > "$MINSPEC_DRAIN_LOCK"
-      trap 'echo "[drain] stopping on SIGTERM"; rm -f "$MINSPEC_DRAIN_LOCK"; exit 143' TERM
+      if [[ -n "\${STUB_IGNORE_TERM:-}" ]]; then trap '' TERM
+      else trap 'echo "[drain] stopping on SIGTERM"; rm -f "$MINSPEC_DRAIN_LOCK"; exit 143' TERM; fi
       sleep "\${STUB_LIFE:-1}" & wait $!
       echo "\${STUB_END:-[drain] loop exited.}"
       rm -f "$MINSPEC_DRAIN_LOCK"
@@ -270,6 +271,17 @@ describe('invariant 2: at most one drain', () => {
     expect(calls().filter((c) => c.startsWith('--continuous')).length).toBe(1);
   });
 
+  it('logs the adopted drain start time and flags a stale concurrency (#3195)', async () => {
+    const holder = spawn('sleep', ['30'], { env: { ...env, MINSPEC_DRAIN_CONCURRENCY: '1' } });
+    children.push(holder);
+    fs.writeFileSync(file('drain.lock'), String(holder.pid));
+    const sv = runBackground('docker-init');
+    await until(() => sv.out().includes('STALE'));
+    expect(sv.out()).toContain('concurrency=1');
+    expect(sv.out()).toContain('configured for 8');
+    sv.proc.kill('SIGKILL');
+  });
+
   it('a second supervisor exits 75', async () => {
     fs.writeFileSync(file('pause'), '');
     const first = runBackground('docker-init');
@@ -338,5 +350,19 @@ describe('deliberate stop', () => {
     await until(() => !alive(drainPid));
     expect(fs.existsSync(file('drain.lock'))).toBe(false);
     expect(fs.readFileSync(file('drain.log'), 'utf-8')).toContain('stopping on SIGTERM');
+  });
+
+  it('stop fails when the drain ignores TERM past the grace period (#3195)', async () => {
+    env.STUB_LIFE = '60';
+    env.STUB_IGNORE_TERM = '1';
+    const sv = runBackground('docker-init');
+    await until(() => fs.existsSync(file('drain.lock')) && sv.out().includes('starting the drain'));
+    const drainPid = Number(fs.readFileSync(file('drain.lock'), 'utf-8'));
+    const stop = spawnSync('bash', [SVC, 'stop'], { env, encoding: 'utf-8', timeout: 30_000 });
+    expect(stop.status).toBe(1);
+    expect(stop.stdout).toContain('still alive');
+    expect(await sv.done).toBe(1);
+    expect(sv.out()).toContain('still running after 5s');
+    expect(alive(drainPid)).toBe(true);
   });
 });
