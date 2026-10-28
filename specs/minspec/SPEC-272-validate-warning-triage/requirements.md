@@ -1,5 +1,5 @@
 ---
-id: SPEC-262
+id: SPEC-272
 type: requirements
 status: specifying
 tier: T3
@@ -20,7 +20,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-262: Triage the four new `npm run validate` warnings, per spec
+# SPEC-272: Triage the four new `npm run validate` warnings, per spec
 
 Issue: #2621 (four specs gain new non-blocking validate warnings after the implement-evidence and status-line gates landed).
 
