@@ -1,5 +1,5 @@
 ---
-id: SPEC-267
+id: SPEC-289
 type: requirements
 status: specifying
 tier: T3
@@ -21,7 +21,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-267: Data-only pull requests are detected automatically and reviewed on a cheap lane
+# SPEC-289: Data-only pull requests are detected automatically and reviewed on a cheap lane
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2973 (founder queue item in13). Nothing
 > is built until a human reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify),
