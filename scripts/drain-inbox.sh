@@ -841,6 +841,13 @@ session_anchor_note() {
 # tree that actually has a runnable tsx (primary checkout, then the primary worktree);
 # (4) otherwise WARN visibly. A missing tsx keeps every tsx gate failing CLOSED; this
 # function never fakes a runner.
+#
+# `--ignore-scripts` skips the root `prepare`, the only step that builds @aiclarity/shared
+# into the gitignored packages/shared/out (its package "main"). So after the install we
+# build it explicitly: render-review-signals imports it, and dispatch-issue.sh hides that
+# import's stderr, so an unbuilt package drops the review-signals block from every PR
+# summary in silence. tsc is a local devDependency, so the build needs no network. A failed
+# build WARNs, leaves the stamp unwritten (the next cycle retries) and never touches tsx.
 provision_run_dir_modules() {
   local run="$DRAIN_RUN_DIR" nm="${DRAIN_RUN_DIR}/node_modules"
   local stamp="${nm}/.minspec-run-dir-lock" lock_sum="" ws
@@ -850,6 +857,7 @@ provision_run_dir_modules() {
     lock_sum="$(sha256sum "${run}/package-lock.json" | cut -d' ' -f1)" || lock_sum=""
   fi
   if [[ -n "$lock_sum" && ! -L "$nm" && -x "${nm}/.bin/tsx" \
+        && -f "${run}/packages/shared/out/index.js" \
         && "$(cat "$stamp" 2>/dev/null)" == "$lock_sum" ]]; then
     return 0
   fi
@@ -865,8 +873,14 @@ provision_run_dir_modules() {
   if [[ -n "$lock_sum" ]] \
      && npm_err="$(cd "$run" && npm ci --offline --ignore-scripts --no-audit --no-fund 2>&1 >/dev/null)" \
      && [[ -x "${nm}/.bin/tsx" ]]; then
-    printf '%s\n' "$lock_sum" > "$stamp"
     echo "[drain] run dir node_modules installed offline from the npm cache (own tree, not linked)."
+    local build_err=""
+    if build_err="$(cd "$run" && npm run build --workspace=@aiclarity/shared 2>&1 >/dev/null)" \
+       && [[ -f "${run}/packages/shared/out/index.js" ]]; then
+      printf '%s\n' "$lock_sum" > "$stamp"
+    else
+      echo "[drain] WARNING: @aiclarity/shared build failed in the run dir: $(printf '%s\n' "${build_err:-no packages/shared/out/index.js after build}" | tail -n 1) - review-signals will be missing from PR summaries until it builds; retrying next cycle." >&2
+    fi
     return 0
   fi
   echo "[drain] WARNING: offline npm ci failed in the run dir: $(printf '%s\n' "${npm_err:-no package-lock.json, or no tsx after install}" | tail -n 1)" >&2

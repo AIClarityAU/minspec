@@ -38,6 +38,13 @@ function git(cwd: string, ...args: string[]): string {
 // offline cache miss) or installs an executable .bin/tsx. Every call is logged.
 const FAKE_NPM = `#!/usr/bin/env bash
 echo "$*" >> "$FAKE_NPM_LOG"
+if [[ "$1" == "run" ]]; then
+  # \`npm run build --workspace=@aiclarity/shared\`: emits the package entry point (main: out/index.js).
+  [[ "\${FAKE_NPM_BUILD_FAIL:-0}" == "1" ]] && { echo "tsc error TS2307" >&2; exit 1; }
+  mkdir -p packages/shared/out
+  echo "module.exports = {};" > packages/shared/out/index.js
+  exit 0
+fi
 [[ "$1" == "ci" ]] || exit 0
 if [[ -d node_modules ]]; then
   for e in node_modules/* node_modules/.[!.]*; do [[ -e "$e" || -L "$e" ]] && rm -rf "$e"; done
@@ -114,7 +121,6 @@ describe('drain run dir owns its node_modules (judge-unrunnable, 2026-10-28)', (
       expect(isLink(nm)).toBe(false);
       expect(isExec(path.join(nm, '.bin', 'tsx'))).toBe(true);
       const calls = npmCalls(f);
-      expect(calls.length).toBe(1);
       expect(calls[0]).toMatch(/^ci\b/);
       expect(calls[0]).toContain('--offline'); // never a network fetch
       expect(fs.existsSync(path.join(f.primary, 'node_modules', 'keep-me'))).toBe(true);
@@ -165,6 +171,37 @@ describe('drain run dir owns its node_modules (judge-unrunnable, 2026-10-28)', (
       expect(isExec(path.join(f.runDir, 'node_modules', '.bin', 'tsx'))).toBe(false);
       expect(res.stderr).toMatch(/WARNING: no runnable tsx/);
       expect(res.stderr).toMatch(/delegated-merge judge/);
+    } finally { cleanup(f); }
+  });
+
+  // --ignore-scripts skips the root `prepare` (the only thing that builds
+  // @aiclarity/shared into the gitignored packages/shared/out), so the run dir's
+  // render-review-signals `import('@aiclarity/shared')` had no entry point (#3224 review).
+  it('builds @aiclarity/shared after the install so the run dir has its package entry point', () => {
+    const f = makeFixture(true);
+    try {
+      const res = refresh(f);
+      expect(res.status).toBe(0);
+      expect(fs.existsSync(path.join(f.runDir, 'packages', 'shared', 'out', 'index.js'))).toBe(true);
+      const calls = npmCalls(f);
+      expect(calls.findIndex((c) => c.startsWith('ci'))).toBeLessThan(calls.findIndex((c) => c.startsWith('run build')));
+      expect(calls.some((c) => c.includes('--workspace=@aiclarity/shared'))).toBe(true);
+    } finally { cleanup(f); }
+  });
+
+  it('reports a failed shared build loudly, keeps tsx, and retries the install next cycle', () => {
+    const f = makeFixture(true);
+    try {
+      const res = refresh(f, { FAKE_NPM_BUILD_FAIL: '1' });
+      expect(res.status).toBe(0);
+      expect(res.stderr).toMatch(/WARNING: .*@aiclarity\/shared build failed/);
+      expect(fs.existsSync(path.join(f.runDir, 'packages', 'shared', 'out', 'index.js'))).toBe(false);
+      // A tree with no built shared is not "done": the next cycle runs the install again.
+      refresh(f, { FAKE_NPM_BUILD_FAIL: '1' });
+      expect(npmCalls(f).filter((c) => c.startsWith('ci')).length).toBe(2);
+      // ...and recovers once the build works.
+      expect(refresh(f).status).toBe(0);
+      expect(fs.existsSync(path.join(f.runDir, 'packages', 'shared', 'out', 'index.js'))).toBe(true);
     } finally { cleanup(f); }
   });
 });
