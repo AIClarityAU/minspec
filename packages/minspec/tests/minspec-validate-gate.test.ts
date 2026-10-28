@@ -95,6 +95,26 @@ describe('#811 — MinSpec SDD validation is a fail-closed required check (DR-06
     expect(WORKFLOW).toMatch(/DR-066/);
   });
 
+  it('runs the headless core (SPEC-136 FR-15) when its bundle exists, before the Python branch', () => {
+    const core = WORKFLOW.indexOf('[ -f .minspec/bin/minspec-core.cjs ]');
+    const py = WORKFLOW.indexOf('[ -f .minspec/hooks/validate.py ]');
+    expect(core).toBeGreaterThan(-1);
+    expect(WORKFLOW).toContain('node .minspec/bin/minspec-core.cjs validate');
+    expect(py).toBeGreaterThan(core);
+    // The never-published npx branch is gone; the no-validator message names the core.
+    expect(WORKFLOW).not.toContain('npx --no-install');
+    expect(WORKFLOW).not.toContain('@aiclarity/minspec-validator');
+    expect(WORKFLOW).toMatch(/Looked for[^\n]*minspec-core\.cjs/);
+  });
+
+  it('keeps the no-validator arm last and fail-closed (negative control for the core branch)', () => {
+    const elseIdx = WORKFLOW.lastIndexOf('\n          else\n');
+    expect(elseIdx).toBeGreaterThan(WORKFLOW.indexOf('node .minspec/bin/minspec-core.cjs validate'));
+    const tail = WORKFLOW.slice(elseIdx);
+    expect(tail).toMatch(/exit 1/);
+    expect(tail).not.toMatch(/exit 0/);
+  });
+
   it('keeps the required-check context name stable (branch protection depends on it)', () => {
     // `MinSpec SDD validation` is the job `name:` branch protection requires
     // (ruleset-advisor DEFAULT_REQUIRED_CHECK_CONTEXTS). Renaming it would strand
