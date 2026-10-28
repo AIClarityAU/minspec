@@ -1,5 +1,5 @@
 ---
-id: SPEC-263
+id: SPEC-276
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-263: The pre-commit shell tier never passes silently when a project has moved its specs or decisions folder
+# SPEC-276: The pre-commit shell tier never passes silently when a project has moved its specs or decisions folder
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2678 (the shell tier matches `specs/` and `docs/decisions/` literally). Nothing is built until a human approves it. Part of #2675 (the RCDD on values baked into managed files). The spec id was taken as highest-on-disk plus one; open pull requests are invisible from this checkout, so run the id collision gate before approving.
 
