@@ -893,7 +893,7 @@ The rule being lifted: on 2026-07-28 the founder made --admin human-only: "Never
 
 ## [DR-113 — The required ai-review check-run has a guard-free second producer, and a preflight checks the head workflow's guard calls against the base guard's exports](DR-113.md)
 
-*Status: proposed · Date: 2026-10-27*
+*Status: accepted · Date: 2026-10-27*
 
 <!-- dr-summary:DR-113 auto=1a2f25486902 -->
 The step "Post honest ai-review verdict check-run" (.github/workflows/ai-review.yml) treats the check-run as best-effort, yet the check-run is the required, server-attested witness (#397). A required witness whose producer can disappear while the producer shows green is a silent gate (constitution invariant 2, DR-066).
