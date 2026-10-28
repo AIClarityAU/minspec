@@ -7,7 +7,7 @@ product: minspec
 epic: EPIC-002  # Signpost Integrity - a finished dispatch must never be reported done when its work was never published
 aspects: [dispatch, no-silent-gate, spec-id, drain]
 depends_on: []
-relates_to: ["#2794", "#735", "#847", "#1418", "#1226", "#1120", "#1305"]
+relates_to: ["#2794", "#735", "#847", "#1418", "#1226", "#1120", "#1305", "SPEC-073"]
 implements: none
 implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan, after Decisions D1-D3.
@@ -23,7 +23,7 @@ phases:
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2794. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
-> If another open PR already holds `SPEC-263`, renumber to the max across base and every open
+> If another open PR already holds `SPEC-279`, renumber to the max across base and every open
 > PR plus one (the same rule DR ids follow) and update `id:` and the directory name together.
 
 ## In plain terms
@@ -76,6 +76,13 @@ Checked in this repo at `804a899d`:
   (`/rules/branches/...`, not classic protection). The result names exactly one of: pre-existing
   remote branch, host ruleset, App permission gap, transient server error, other. If the worktrees
   are gone, that is recorded and the cause stays "unknown" rather than guessed.
+- **Scope boundary with SPEC-073.** SPEC-073 (dispatch-completion-requires-commit, status
+  planning) owns the guard for the zero-commit path of `agent-done` labelling in
+  `scripts/dispatch-issue.sh` (siblings #1674/#1652/#1656). This spec owns only the
+  push-failed path (FR-2..FR-5) and spec-id allocation (FR-6, FR-7). At Plan, both specs must
+  share one completion-labelling guard rather than add two: whichever reaches Plan first lands
+  the shared guard, and the other reuses it. Decision D1's state must match SPEC-073's FR-4
+  signpost so the two paths do not diverge.
 - **FR-2 A failed publish is a visible failure, not a completion.** When the parent's push of an
   agent branch fails, the dispatcher MUST NOT add `agent-done` or remove `agent-ready`/
   `agent-running` as though the work shipped. It leaves the issue in a state that is re-visible
@@ -121,8 +128,8 @@ Checked in this repo at `804a899d`:
   removed.
 - **AC-5 (FR-5)** The stub succeeding on the second attempt yields a normal completion; a stub
   printing a named refusal triggers no retry; no call uses `--force`.
-- **AC-6 (FR-6)** Given base specs up to 262 and open PR directories `SPEC-263-a` and
-  `SPEC-264-b`, the allocator returns `SPEC-265`. Two simultaneous callers that read the same
+- **AC-6 (FR-6)** Given base specs up to 278 and open PR directories `SPEC-279-a` and
+  `SPEC-280-b`, the allocator returns `SPEC-281`. Two simultaneous callers that read the same
   state are shown to need the CI check as the backstop (documented, not claimed to be solved).
 - **AC-7 (FR-7)** With the PR list unreadable the output contains the "not checked against open
   PRs" notice and the local-max id.
