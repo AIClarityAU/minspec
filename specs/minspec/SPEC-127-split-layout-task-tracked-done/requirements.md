@@ -242,9 +242,11 @@ scope-expansion ("extend to X" is a new work item, not a detection), it is named
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are resolved: an agent session recorded each option this document already
-recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
-chose them; they are ratified only by approval of this spec.
+All 3 decisions are answered by a pre-recorded selection, not approved: an agent session
+recorded each option this document already recommended. No human chose them. Nothing here is
+ratified, and this note does not claim a DLG-001 (DR-108) delegated approval: no independent
+verdict or repeat-fix figure is cited. The frontmatter stays `status: specifying` and
+`clarify: pending` until the normal spec-approval gate records approval.
 
 - **D1 — Where does the task-completion signal attach to `deriveStatus`?**
 
