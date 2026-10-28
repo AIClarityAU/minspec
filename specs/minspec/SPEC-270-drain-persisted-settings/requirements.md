@@ -1,5 +1,5 @@
 ---
-id: SPEC-262
+id: SPEC-270
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-262: The drain's settings are persisted on disk, read by the drain itself, and shown in force
+# SPEC-270: The drain's settings are persisted on disk, read by the drain itself, and shown in force
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2605. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
