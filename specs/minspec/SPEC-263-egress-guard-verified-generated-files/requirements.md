@@ -190,7 +190,7 @@ Recorded here because this repo runs in act mode (DR-086 §4) and nobody sees th
   would become a new attack surface for obfuscated encodings. Byte-equality against the trusted
   generator is simpler and stricter.
 - **A new DR.** Not written. This is a guard change that can be reverted in under a day, so it does
-  not pass the DR-359 filter. DR-008 stays the governing decision.
+  not pass the parent register's under-a-day ADR filter. DR-008 stays the governing decision.
 
 ## Decisions needed (Clarify)
 
