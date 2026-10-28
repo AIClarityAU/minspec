@@ -132,6 +132,25 @@ function writeStubs(dir: string, agentOut: string): string {
   fs.mkdirSync(bin, { recursive: true });
   fs.writeFileSync(path.join(dir, 'agent-out.txt'), agentOut);
 
+  // `npm`. remediate-pr.sh gives its worktree its own node_modules before an agent starts
+  // (#3238), and a fixture has no npm cache: `npm ci` here leaves the two things that
+  // install is checked for, and does nothing else.
+  fs.writeFileSync(
+    path.join(bin, 'npm'),
+    `#!/usr/bin/env bash
+if [[ "\${1:-}" == "ci" ]]; then
+  mkdir -p node_modules/.bin node_modules/handlebars
+  printf '#!/bin/sh\\n' > node_modules/.bin/tsx; chmod +x node_modules/.bin/tsx
+  echo 'module.exports={}' > node_modules/handlebars/index.js
+  exit 0
+fi
+# Anything else is the real npm: a test may plant the worktree's own checks for it to run.
+PATH="\${PATH//'${bin}:'/}"
+exec npm "$@"
+`,
+    { mode: 0o755 },
+  );
+
   // `claude`. Shell builtins only, and its directory is written into it rather than read
   // from the environment: an environment the launcher has cut down to an allowlist has
   // neither a helper variable nor, necessarily, a PATH to find `env` with.

@@ -15,6 +15,7 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 
 const LIB = path.resolve(__dirname, '../../../scripts/lib/provision-worktree-modules.sh');
+const LAUNCH_ENV = path.resolve(__dirname, '../../../scripts/lib/agent-context.sh');
 const SCRIPT = path.resolve(__dirname, '../../../scripts/remediate-pr.sh');
 
 function fixture(npmBody: string) {
@@ -30,7 +31,7 @@ function fixture(npmBody: string) {
 function run(f: { dir: string; bin: string; wt: string }) {
   return spawnSync('bash', ['-c', `source "${LIB}" && provision_worktree_modules "${f.wt}"`], {
     encoding: 'utf-8',
-    env: { ...process.env, PATH: `${f.bin}:${process.env.PATH}` },
+    env: { ...process.env, PATH: `${f.bin}:${process.env.PATH}`, AGENT_LAUNCH_ENV: LAUNCH_ENV },
   });
 }
 
@@ -45,6 +46,8 @@ describe('provision_worktree_modules (#3238)', () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/node_modules/);
     expect(fs.readFileSync(path.join(f.dir, 'calls'), 'utf-8')).toMatch(/ci .*--offline/);
+    // The tree is an untrusted PR branch: none of its lifecycle scripts may run here.
+    expect(fs.readFileSync(path.join(f.dir, 'calls'), 'utf-8')).toMatch(/--ignore-scripts/);
   });
 
   it('a successful offline install gives a real, non-symlink node_modules', () => {
@@ -52,6 +55,16 @@ describe('provision_worktree_modules (#3238)', () => {
     const r = run(f);
     expect(r.status).toBe(0);
     expect(fs.lstatSync(path.join(f.wt, 'node_modules')).isSymbolicLink()).toBe(false);
+  });
+
+  it('with no scrubbed-environment launcher it installs nothing and fails closed', () => {
+    const f = fixture(INSTALL_OK);
+    const r = spawnSync('bash', ['-c', `source "${LIB}" && unset AGENT_LAUNCH_ENV && provision_worktree_modules "${f.wt}"`], {
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: `${f.bin}:${process.env.PATH}` },
+    });
+    expect(r.status).not.toBe(0);
+    expect(fs.existsSync(path.join(f.dir, 'calls'))).toBe(false);
   });
 
   it('an install that exits 0 but leaves no usable toolchain still fails closed', () => {
