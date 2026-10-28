@@ -1,5 +1,5 @@
 ---
-id: SPEC-269
+id: SPEC-294
 type: requirements
 status: specifying
 tier: T3
@@ -20,7 +20,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-269: A durable, searchable log of what each agent did
+# SPEC-294: A durable, searchable log of what each agent did
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2986. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
