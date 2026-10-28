@@ -218,6 +218,6 @@ missing a gate; a capability is missing.
 
 - D6(a) deferred paths (reviewer stage, triage, delegated merge): file an issue at Plan if D6
   resolves to (a); none filed now because the choice is open.
-- D7(a) rotation: `backlog: agent-action log rotation (SPEC-269 D7)` at Plan if chosen.
+- D7(a) rotation: `backlog: agent-action log rotation (SPEC-294 D7)` at Plan if chosen.
 - SPEC-263 (bot identity by account, in flight) supplies `identity.account_id`; until it
   lands the field may be absent and `kind` is classified as today.
