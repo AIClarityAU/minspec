@@ -37,6 +37,11 @@ ROLES_DIR="${SCRIPT_DIR}/roles"
 #   DISPATCH_RC_DECLINED   refused before the claim. Nothing was started.
 #   DISPATCH_RC_STARTED    the claim was won, and the run ended the way it used to end on
 #                          0: built, escalated or crashed.
+#   DISPATCH_RC_AUTH_FAILED  this script's OWN first `gh` call (the issue read, before the
+#                          claim) was answered HTTP 401. Nothing was started. The caller
+#                          may re-mint its credential and ask again (#3176). Said by status
+#                          only: the caller never reads this script's output for it, because
+#                          the build agent's prose travels on that output (#2233).
 #   0                      NO ANSWER. An exit neither function below was called for. The
 #                          caller must read it as neither of the two.
 #   anything else          a failure, as before.
@@ -68,6 +73,7 @@ ROLES_DIR="${SCRIPT_DIR}/roles"
 # numbers, and exit_declined cannot once the claim is won.
 DISPATCH_RC_DECLINED=75
 DISPATCH_RC_STARTED=76
+DISPATCH_RC_AUTH_FAILED=78
 
 DISPATCH_STATUS_ASKED=0
 case "${MINSPEC_DISPATCH_OUTCOME_STATUS:-}" in
@@ -113,6 +119,14 @@ exit_started() {
   exit "$DISPATCH_RC_STARTED"
 }
 
+# exit_auth_failed: leave, before the claim, because this script's own `gh` read got a 401.
+# To a caller that did not ask it is the plain failure it always was (exit 1).
+exit_auth_failed() {
+  (( DISPATCH_STATUS_ASKED && ! DISPATCH_CLAIMED )) || exit 1
+  DISPATCH_EXIT_AS="$DISPATCH_RC_AUTH_FAILED"
+  exit "$DISPATCH_RC_AUTH_FAILED"
+}
+
 # _dispatch_on_exit: the ONE exit trap of this script. It has two jobs.
 #
 # It gives the claim back (D6/D10). That used to be a trap of its own, set where the
@@ -140,7 +154,7 @@ _dispatch_on_exit() {
     lease_stop_renew_ticker; lease_release_all >/dev/null 2>&1 || true
   fi
   if (( DISPATCH_STATUS_ASKED )) \
-    && [[ "$rc" == "$DISPATCH_RC_DECLINED" || "$rc" == "$DISPATCH_RC_STARTED" ]] \
+    && [[ "$rc" == "$DISPATCH_RC_DECLINED" || "$rc" == "$DISPATCH_RC_STARTED" || "$rc" == "$DISPATCH_RC_AUTH_FAILED" ]] \
     && [[ "$rc" != "$DISPATCH_EXIT_AS" ]]; then
     echo "WARNING: #$ISSUE was ending on status $rc, which this script keeps for its own 'started' and 'refused' answers and did not choose here. Reported as a plain failure instead (#2641)." >&2
     exit 1
@@ -875,7 +889,19 @@ echo "Fetching issue #$ISSUE..."
 # ONE read, used throughout: the title and body in this document are what the readiness
 # gate fingerprints, what the author gate further down requires the judged text to equal,
 # and what the prompt is built from. Nothing below reads the issue's text again.
-ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,labels,state,comments)
+#
+# A 401 here is the one failure the caller can act on (#3176), and it is told by exit
+# status (exit_auth_failed). gh's own stderr is read for it, which is safe: no agent has
+# run yet. stderr is passed on unchanged.
+ISSUE_ERR_FILE=$(mktemp)
+ISSUE_FETCH_RC=0
+ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,labels,state,comments 2>"$ISSUE_ERR_FILE") || ISSUE_FETCH_RC=$?
+cat "$ISSUE_ERR_FILE" >&2
+if (( ISSUE_FETCH_RC )); then
+  if grep -qE 'HTTP 401|Bad credentials' "$ISSUE_ERR_FILE"; then rm -f "$ISSUE_ERR_FILE"; exit_auth_failed; fi
+  rm -f "$ISSUE_ERR_FILE"; exit "$ISSUE_FETCH_RC"
+fi
+rm -f "$ISSUE_ERR_FILE"
 ISSUE_BODY=$(echo "$ISSUE_JSON" | jq -r '"# " + .title + "\n\n" + .body')
 ISSUE_TITLE=$(echo "$ISSUE_JSON" | jq -r '.title')
 ISSUE_LABELS=$(echo "$ISSUE_JSON" | jq -r '.labels[].name')
@@ -2082,6 +2108,10 @@ shepherd_own_pr() {
       | if length > 0 then "yes" else "no" end' <<<"$pr_json")
     automerge_armed=no
     [[ "$(jq -r '.autoMergeRequest // "null"' <<<"$pr_json")" != "null" ]] && automerge_armed=yes
+    # #3179: native auto-merge withheld for a human (needs-human-review) ⇒ only a human
+    # merge can land this PR, so polling running checks holds the dispatch slot for nothing.
+    local human_held=no
+    [[ ",$labels_csv," == *",needs-human-review,"* ]] && human_held=yes
 
     local action holds attempts decision
     local classify_rc=0 classify_errfile classify_err
@@ -2121,9 +2151,9 @@ shepherd_own_pr() {
     decision=$(bash "${SCRIPT_DIR}/lib/shepherd-pr.sh" --decide \
                  "$action" "$merged" "$holds" "${attempts:-0}" \
                  "$SHEPHERD_MAX_ATTEMPTS" "$elapsed" "$SHEPHERD_MAX_SECS" \
-                 "$checks_pending" "$automerge_armed" 2>/dev/null || echo "stop-not-automation")
+                 "$checks_pending" "$automerge_armed" "$human_held" 2>/dev/null || echo "stop-not-automation")
 
-    echo "  shepherd PR #$pr_num: action=$action merged=$merged holds=$holds attempts=${attempts:-0} elapsed=${elapsed}s pending=$checks_pending automerge=$automerge_armed → $decision"
+    echo "  shepherd PR #$pr_num: action=$action merged=$merged holds=$holds attempts=${attempts:-0} elapsed=${elapsed}s pending=$checks_pending automerge=$automerge_armed human_held=$human_held → $decision"
 
     case "$decision" in
       stop-merged)
@@ -2144,6 +2174,11 @@ shepherd_own_pr() {
         # gate above has already applied whatever hold signal is correct. Saying
         # "handed off" here would be a false signpost on a green PR.
         echo "  PR #$pr_num is green with no automated gate left — awaiting a human. Not polling further."
+        return 0 ;;
+      stop-human-held)
+        # #3179: human-held, auto-merge not armed, checks still running. Only a human
+        # merge can land it; a later red check is remediated by the drain's PR sweep.
+        echo "  PR #$pr_num is human-held (needs-human-review, auto-merge not armed) — not polling running checks; a red check is left to the drain sweep."
         return 0 ;;
       stop-unhandled-state)
         # #1803/#1813: classify_pr saw a mergeStateStatus it has never seen — a
