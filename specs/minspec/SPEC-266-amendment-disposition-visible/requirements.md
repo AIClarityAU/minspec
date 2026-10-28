@@ -1,5 +1,5 @@
 ---
-id: SPEC-262
+id: SPEC-266
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-262: An amendment's disposition is enumerable standing state, so a pending one is listed and a stale one is noticed
+# SPEC-266: An amendment's disposition is enumerable standing state, so a pending one is listed and a stale one is noticed
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2613. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
