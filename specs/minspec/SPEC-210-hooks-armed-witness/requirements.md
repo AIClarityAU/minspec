@@ -8,9 +8,13 @@ epic: EPIC-009  # Team Readiness - guardrails a shared repo must carry; the scaf
 aspects: [git-hooks, core-hooksPath, secret-scanning, no-silent-gate, second-witness, harness, blast-radius, headless-clone]
 depends_on: [DR-037, DR-066]
 relates_to: ["#1863", "#1186", "#1620", "#1850", "#2671", "#1277", "#1809", SPEC-033]  # #1277 and #1809 have specs on unmerged branches only, so they are cited by issue
+# Ownership (SPEC-038): the one new module is the FR-1 predicate every witness calls. The
+# session-start hook (FR-2) ships as a template string, so it lands in existing files.
+implements: [packages/minspec/src/lib/hooks-armed.ts, packages/minspec/tests/hooks-armed.test.ts]  # all NEW
+affects: [packages/minspec/src/lib/hook-templates.ts, packages/minspec/src/lib/claude-settings.ts, packages/minspec/src/lib/scaffold.ts, packages/minspec/src/extension.ts, packages/minspec/src/lib/ruleset-advisor.ts, packages/minspec/src/lib/template-registry.ts]  # modifies-not-owns: FR-2 template + registration, FR-4 ensureHooksPath, FR-5 activation, FR-6 advisor, FR-7 guidance text
 phases:
   specify: done
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
