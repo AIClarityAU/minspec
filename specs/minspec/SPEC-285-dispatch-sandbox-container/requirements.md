@@ -1,5 +1,5 @@
 ---
-id: SPEC-263
+id: SPEC-285
 type: requirements
 status: specifying
 tier: T4
@@ -20,7 +20,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-263: Drain-dispatched agents run in a second container that holds no GitHub token and no host credential
+# SPEC-285: Drain-dispatched agents run in a second container that holds no GitHub token and no host credential
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2913 (build: run drain-dispatched
 > agents in a second container), which records the founder's 2026-10-18 answer on #2691 (a
