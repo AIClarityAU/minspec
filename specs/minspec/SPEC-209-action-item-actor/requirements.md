@@ -14,7 +14,9 @@ relates_to: [SPEC-044, SPEC-027, SPEC-054, DR-072, DR-076, DR-003, "#1857", "#12
 # the FR-7 command-line entry. D3 puts the convention text (FR-8, FR-9) in this repo's CLAUDE.md.
 # Declared before approval mints a hash: adding a path afterwards voids it.
 implements: [packages/shared/src/action-items.ts, packages/shared/tests/action-items.test.ts, scripts/action-items.ts]  # all NEW
-affects: [packages/shared/src/index.ts, CLAUDE.md]  # modifies-not-owns: the barrel export, and the "Human action items" section (D3)
+# Files this spec MODIFIES (not owns): packages/shared/src/index.ts, CLAUDE.md - the barrel export, and the "Human action items" section (D3).
+# Listed here and not under affects:, because the spec-gate freezes every affects: file of an
+# unapproved spec past Clarify for all sessions (#3234).
 phases:
   specify: done
   clarify: done
