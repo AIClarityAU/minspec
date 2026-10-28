@@ -1,5 +1,5 @@
 ---
-id: SPEC-264
+id: SPEC-275
 type: requirements
 status: specifying
 tier: T3
@@ -25,7 +25,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-264: The managed-file set has an owning spec that states its contract, and a change to that contract cannot ship without one
+# SPEC-275: The managed-file set has an owning spec that states its contract, and a change to that contract cannot ship without one
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2680 (part of #2675, the RCDD on values
 > baked into managed files). Nothing is built until a human reads it, resolves
