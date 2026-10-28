@@ -1,0 +1,87 @@
+# release-core — attach the headless core bundle to a GitHub release (SPEC-136 FR-14, task 16)
+#
+# The core must be obtainable inside the VM from GitHub alone (BND-1: no folder shared
+# with the host). On a `core-v<version>` tag this builds the single-file bundle with
+# `buildCore` (packages/core/build.mjs — the same bundler call the tests use) and attaches
+# `minspec-core-<version>.cjs` plus `minspec-core-<version>.cjs.sha256` to the release.
+#
+# The tag prefix `core-v` keeps this off the extension's own version tags (INV-3).
+# No DR-103 release workflow exists yet, so this is its own file; fold it in as a job
+# there if that lands.
+#
+# Fails closed (INV-2): no `|| true`, no `continue-on-error`. The tag must equal
+# `core-v<packages/core/package.json version>`, the bundle must exist and be non-empty,
+# and the checksum is verified before upload. The only credential is the workflow's own
+# GITHUB_TOKEN; nothing is stored.
+#
+# Dry run: Actions > release-core > Run workflow builds the bundle and its sha256 and verifies
+# them; it never touches a release.
+name: release-core
+
+on:
+  push:
+    tags:
+      - 'core-v*'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build the bundle and its sha256
+        id: build
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./packages/core/package.json').version")"
+          if [ -z "$version" ]; then echo "::error::empty core version"; exit 1; fi
+          if [ "$REF_TYPE" = "tag" ] && [ "$REF_NAME" != "core-v${version}" ]; then
+            echo "::error::tag ${REF_NAME} does not match packages/core/package.json version ${version} (expected core-v${version})"
+            exit 1
+          fi
+          mkdir -p dist-core
+          out="dist-core/minspec-core-${version}.cjs"
+          OUT="$out" node --input-type=module -e "
+            import { buildCore } from './packages/core/build.mjs';
+            await buildCore({ outfile: process.env.OUT });
+          "
+          test -s "$out"
+          (cd dist-core && sha256sum "minspec-core-${version}.cjs" > "minspec-core-${version}.cjs.sha256")
+          (cd dist-core && sha256sum --check "minspec-core-${version}.cjs.sha256")
+          test -s "dist-core/minspec-core-${version}.cjs.sha256"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Attach to the GitHub release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "minspec-core ${VERSION}" --notes "Headless core bundle (SPEC-136 FR-14)."
+          fi
+          gh release upload "$TAG" \
+            "dist-core/minspec-core-${VERSION}.cjs" \
+            "dist-core/minspec-core-${VERSION}.cjs.sha256" \
+            --clobber
