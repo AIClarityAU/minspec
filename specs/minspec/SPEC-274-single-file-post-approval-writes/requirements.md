@@ -8,13 +8,17 @@ epic: EPIC-002  # Signpost Integrity - an approval voided by recording progress 
 aspects: [approval, hash, flat-layout, single-file-spec, implement-phase, shipped-guidance, spec-gate, tier-0]
 depends_on: [SPEC-130]
 relates_to: [SPEC-130, DR-102, DR-034, DR-012, DR-069, SPEC-022, SPEC-262, "#2711", "#224", "#225"]
-implements: none
-implements_reason: >-
-  Specify phase only. Which files this spec owns is decided at Plan, after Decisions D1-D3
-  are answered; every candidate file is listed under Context.
+# Ownership (SPEC-038) follows the recorded Clarify answers: D1 A and D2 A move guidance text
+# only, D3 A adds no approval-time notice, so the only new code is the FR-3/FR-4 cause helper
+# and the witnesses. Files this spec MODIFIES (slash-commands.ts, commands/example.ts, the
+# generated .claude/commands/minspec-{plan,tasks,implement,checklist}.md, the stale message in
+# views/spec-tree-provider.ts, scripts/hooks/spec-gate.py and test_spec_gate.py) are listed here
+# and not under affects:, because the spec-gate freezes every affects: file of an unapproved
+# spec past Clarify for all sessions (#3234). Declared before approval mints a hash.
+implements: [packages/minspec/src/lib/stale-cause.ts, packages/minspec/tests/stale-cause.test.ts, packages/minspec/tests/single-file-post-approval.test.ts]  # all NEW
 phases:
-  specify: in-progress
-  clarify: pending
+  specify: done
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -154,6 +158,17 @@ outside the approved file, and make the gate name the cause when such a spec doe
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
+- **D1 - Recorded selection: Option A,** an Implement-phase note goes in the commit message and
+  pull request body; the implement command and example spec stop asking for an in-file note.
+- **D2 - Recorded selection: Option A,** guidance says to write Plan and Tasks before approving a
+  single-file spec; changing them after approval is a re-approval by design.
+- **D3 - Recorded selection: Option A,** no up-front notice at approval; FR-3's stale message is
+  enough.
+
 ### D1 - Where does an Implement-phase note go when the spec is an approved single file?
 
 - **Option A - the commit message and pull request body (rec).** The implement command and
@@ -198,9 +213,10 @@ outside the approved file, and make the gate name the cause when such a spec doe
 
 ## Why no decision record
 
-No choice here is made yet: D1-D3 are open. The irreversible part of #2711, the hash change,
-is already recorded in DR-102. If D1 or D2 lands on an option that moves files or adds a
-sidecar type (D1 B/C, D2 B), the Plan phase writes a decision record for it.
+D1-D3 are recorded on Option A (see Clarify above), and none of those options moves a file or
+adds a sidecar type, so nothing here needs a decision record. The irreversible part of #2711,
+the hash change, is already recorded in DR-102. Had D1 or D2 landed on an option that moves
+files or adds a sidecar type (D1 B/C, D2 B), the Plan phase would have written one.
 
 ## Follow-ups (tracked)
 
