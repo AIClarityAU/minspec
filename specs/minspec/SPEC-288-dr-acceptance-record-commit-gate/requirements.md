@@ -1,5 +1,5 @@
 ---
-id: SPEC-263
+id: SPEC-288
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-263: A DR acceptance commit cannot exist without its approval record
+# SPEC-288: A DR acceptance commit cannot exist without its approval record
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2936. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
