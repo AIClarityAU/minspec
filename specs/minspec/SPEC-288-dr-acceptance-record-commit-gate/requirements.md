@@ -7,7 +7,7 @@ product: minspec
 epic: EPIC-002  # approval integrity - an acceptance must not exist without its witness
 aspects: [approval, decision-record, commit-hook, no-silent-gate, offline]
 depends_on: []
-relates_to: [SPEC-022, SPEC-045, "#2936", "#2153", "#718", "#2935", "#1066", "#2810"]
+relates_to: [SPEC-022, SPEC-045, SPEC-251, "#2936", "#2153", "#718", "#2935", "#1066", "#2810"]
 implements: none
 implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan, after Decisions D1-D3 are answered.
@@ -71,7 +71,7 @@ quietly (constitution invariant 2, no silent gate).
   (invariant 3).
 - **FR-6 Bypass is named and scoped.** One env var (name decided at Plan, following `ADR_BORN_GATE_OFF`) disables only this block and
   never falls through as a whole-hook `exit 0` (#1043).
-- **FR-7 Recovery refuses a missing path.** `recoverApproval` (`approval-recover.ts`) MUST throw/return a
+- **FR-7 Recovery refuses a missing path.** `recoverProtectedBranchApproval` (`approval-recover.ts`) MUST throw/return a
   visible failure, naming the path, when any `absPaths` entry does not exist, rather than filtering it out.
   Nothing is committed or pushed in that case.
 - **FR-8 Regression test first.** In a temp git repo: commit a DR flip `proposed` to `accepted` with no record - the
@@ -84,7 +84,7 @@ quietly (constitution invariant 2, no silent gate).
 2. AC for FR-2: flip with a record whose hash differs from the staged DR exits non-zero; with a matching record exits 0.
 3. AC for FR-3: corrupt-JSON record exits non-zero.
 4. AC for FR-5: editing an `accepted` DR body, or adding a `proposed` DR, is not blocked by this check.
-5. AC for FR-7: `recoverApproval` given one existing and one nonexistent path rejects and runs no git write.
+5. AC for FR-7: `recoverProtectedBranchApproval` given one existing and one nonexistent path rejects and runs no git write.
 6. The test fails on base (no check) and passes on head.
 
 ## Invariants this must not break
@@ -96,6 +96,12 @@ quietly (constitution invariant 2, no silent gate).
 
 ## Non-goals
 
+- **Boundary with SPEC-251** (same incident family, #2153). SPEC-251 is the merge-time/CI witness: it checks
+  the flip against base and head after push and surfaces a check plus an ai-review fact. SPEC-288 is the
+  commit-time, pre-push gate in the local hook, plus the recovery fix (FR-7). Both need the same predicate
+  (proposed-to-accepted flip requires a record whose `specHash` matches). They are complementary witnesses
+  (invariant 2, independent second witness), not rivals, but Plan MUST share one flip/hash predicate between them
+  rather than keep two copies that drift; Clarify confirms the split or merges the specs.
 - Not a witness that a human accepted (#2153, #718) - this only requires the record exist and match; `approvedBy` is not verified here.
 - Not the one-keystroke accept route (#2935).
 - Not fixing build-skew dismissal itself (see D3).
