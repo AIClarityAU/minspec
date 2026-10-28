@@ -1,5 +1,5 @@
 ---
-id: SPEC-263
+id: SPEC-282
 type: requirements
 status: specifying
 tier: T3
@@ -20,7 +20,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-263: The egress guard verifies generated template files instead of entropy-scanning their base64
+# SPEC-282: The egress guard verifies generated template files instead of entropy-scanning their base64
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2815 (egress guard blocks every drain build
 > that regenerates `ci-review-templates.ts`). Nothing is built until a human reads it, resolves
