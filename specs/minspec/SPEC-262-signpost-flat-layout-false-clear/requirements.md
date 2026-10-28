@@ -140,6 +140,17 @@ voip's frontmatter alone would repeat the #2370 pattern (fix the instance, leave
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
+- **D1 - Recorded selection: Option (a),** "clear" means nothing open in the human queue AND no
+  non-terminal spec with open work; agent-only work shows "nothing for you; agent work remains".
+- **D2 - Recorded selection: Option (a),** a plan-phase task ranks in the `pending` class, below
+  approvals, above corruption-free idle.
+- **D3 - Recorded selection: Option (a),** a done spec with a stale approval never blocks "clear";
+  #2519 owns the approval repair.
+
 **D1 - What may "clear" claim?**
 - (a) **(rec)** "Clear" means nothing open in the human queue AND no non-terminal spec with
   open work; when only agent-side work remains, show "nothing for you; agent work remains:

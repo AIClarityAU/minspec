@@ -203,6 +203,15 @@ is proposed.
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
+- **DQ-A - Recorded selection: Option 1,** comment only: no `needs-human-review`, the shepherd stops.
+- **DQ-B - Recorded selection: Option 1,** land after SPEC-074's slice that exposes the matcher seam.
+- **DQ-C - Recorded selection: Option 1,** approve now and make the Plan's first step the AC-1
+  base-red run, which is defined as a refutation test.
+
 ### DQ-A — what a quota-stopped fix attempt leaves behind on the PR
 
 The issue lists three candidates and does not choose.

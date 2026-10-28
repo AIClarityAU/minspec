@@ -108,6 +108,17 @@ SPEC-076 id fault (#2185), which is the opposite error (a second id minted where
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
+- **D1 - Recorded selection: Option (a),** the issue's existing spec is one whose frontmatter
+  `relates_to` lists `#N`.
+- **D2 - Recorded selection: Option (a),** the issue keeps `hold:specify` and the comment names the
+  spec and offers the two paths (new spec id, or the FR-6 override).
+- **D3 - Recorded selection: Option (a),** refuse when the open-PR query cannot run, naming the
+  missing witness.
+
 - **D1 How is "the issue's existing spec" found?**
   - (a) **(rec)** A spec whose frontmatter `relates_to` lists `#N`. Cheap, deterministic.
     Cost: a spec that cites the issue only in its body is missed, so the gate passes it.

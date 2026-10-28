@@ -103,6 +103,22 @@ without editing that test file.
 
 ## Decisions needed (Clarify)
 
+All 5 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
+- **D-1 - Recorded selection: Option (a),** check the temp worktree off `origin/main`, the tree the
+  pull request targets.
+- **D-2 - Recorded selection: Option (a),** leave the pushed branch and name it in the failure; no
+  new destructive git action.
+- **D-3 - Recorded selection: Option (a),** write a new DR that extends DR-098's boundary to this
+  command and annotates DR-098 condition 6 with a pointer to it (id from the collision gate).
+  The spec stays `specifying` until that DR exists; tracked under #2257.
+- **D-4 - Recorded selection: Option (a),** append a separate sentence to the confirmation dialog only
+  when the lane workflow is present.
+- **D-5 - Recorded selection: Option (a),** the tests-only reading of SPEC-050 AC-10, ratified in the
+  D-3 DR.
+
 - **D-1 Which tree is checked for the workflow?** (a) **the temp worktree off `origin/main`
   (rec)** - it is the tree the PR targets, so "the lane is installed on the base" is what
   matters; cost: a user who has added the workflow locally but not yet merged it gets no label

@@ -207,6 +207,18 @@ workflows) are the ones invariant 2 cares about most.
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
+- **D1 - Recorded selection: Option `b`,** the existing per-region entry in machine-local
+  `.minspec/template-baseline.json`; held entries are no longer re-stamped (FR-5).
+- **D2 - Recorded selection: Option `d`,** one aggregated notice listing all held files on every
+  refresh a human runs.
+- **D3 - Recorded selection: Option `f`,** this spec stops the loss; a sanctioned home for a project
+  rule config cannot express stays separate work, tracked by #1698 (harness refresh deletes a
+  project's commit gate, no sanctioned extension point), which this spec does not close.
+
 Agent recommendations below are proposals; no human has chosen any of them. Approving this
 spec with a recommendation in place accepts it.
 

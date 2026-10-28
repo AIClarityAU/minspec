@@ -127,6 +127,18 @@ recorded where the next launcher cannot see it.
 
 ## Decisions needed (Clarify)
 
+All 5 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
+- **D1 - Recorded selection: Option (a),** env beats file; FR6 shows the source of each value.
+- **D2 - Recorded selection: Option (a),** re-read the settings file every cycle.
+- **D3 - Recorded selection: Option (a),** a validated, atomic `--set key=value` writer.
+- **D4 - Recorded selection: Option (a),** `KEY=value` lines in `.minspec/drain-settings`,
+  gitignored like `auto-drain`.
+- **D5 - Recorded selection: no default flip,** keep the in-script defaults and rely on FR6
+  visibility.
+
 - **D1 - Precedence of env vs file.** (a) env beats file (rec): keeps tests and one-off runs
   working; cost: a stray exported env var in a launcher can silently override a founder decision,
   which is the very failure here, so FR6 must show the source. (b) file beats env: decision always

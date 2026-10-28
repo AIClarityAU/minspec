@@ -220,6 +220,16 @@ start treating either as corrupt.
 
 ## Decisions needed (Clarify)
 
+All 2 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
+- **D1 - Recorded selection: Option (a),** a namespace token in the presence record; foreign-namespace
+  records are judged by fresh `lastSeen` alone, same-namespace records keep the pid probe (FR-5).
+  The DR-065 amendment is written at Plan, born `proposed`, and must be accepted before build.
+- **D2 - Recorded selection: Option (a),** token = Linux pid-namespace id joined with the kernel boot
+  id; a missing token, or a reader that cannot compute one, falls back to fresh `lastSeen` alone.
+
 **D1 - How may liveness be judged across a namespace boundary?** (Changes DR-065 §1's
 "heartbeat within 120 s AND PID alive"; whichever of (a)/(b) is chosen, a DR-065 amendment,
 born `proposed`, is written at Plan and must be accepted before build.)
