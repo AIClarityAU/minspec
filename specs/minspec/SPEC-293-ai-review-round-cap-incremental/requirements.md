@@ -29,10 +29,10 @@ research job in18 (Anthropic's Claude Code code-review post: round-limiting plus
 convergence changes cut PRs needing five or more rounds from 8.9% to 1.5%; several changes
 shipped together, so no single one is credited).
 
-**On the number.** `main` at this worktree's base (`118548be`) holds up to SPEC-266; the
-local remote-tracking refs show 267 already claimed on an unmerged branch. This spec
-takes 268. The refs were read offline and may be stale - a collision found at publish time
-renumbers this spec, not the other one.
+**On the number.** This spec was drafted as SPEC-268 against a worktree base (`118548be`)
+that held up to SPEC-266. The collision gate then found 268 taken on `main` or by another
+open pull request and renumbered it to SPEC-293, the next free id across the base branch
+and every open pull request. A later collision renumbers this spec, not the other one.
 
 ## One-Sentence Scope
 
