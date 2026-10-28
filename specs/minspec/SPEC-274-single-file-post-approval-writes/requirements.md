@@ -8,17 +8,13 @@ epic: EPIC-002  # Signpost Integrity - an approval voided by recording progress 
 aspects: [approval, hash, flat-layout, single-file-spec, implement-phase, shipped-guidance, spec-gate, tier-0]
 depends_on: [SPEC-130]
 relates_to: [SPEC-130, DR-102, DR-034, DR-012, DR-069, SPEC-022, SPEC-262, "#2711", "#224", "#225"]
-# Ownership (SPEC-038) follows the recorded Clarify answers: D1 A and D2 A move guidance text
-# only, D3 A adds no approval-time notice, so the only new code is the FR-3/FR-4 cause helper
-# and the witnesses. Files this spec MODIFIES (slash-commands.ts, commands/example.ts, the
-# generated .claude/commands/minspec-{plan,tasks,implement,checklist}.md, the stale message in
-# views/spec-tree-provider.ts, scripts/hooks/spec-gate.py and test_spec_gate.py) are listed here
-# and not under affects:, because the spec-gate freezes every affects: file of an unapproved
-# spec past Clarify for all sessions (#3234). Declared before approval mints a hash.
-implements: [packages/minspec/src/lib/stale-cause.ts, packages/minspec/tests/stale-cause.test.ts, packages/minspec/tests/single-file-post-approval.test.ts]  # all NEW
+implements: none
+implements_reason: >-
+  Clarify answers are recorded (D1-D3, all Option A). Which files this spec owns is still
+  decided at Plan; every candidate file is listed under Context.
 phases:
-  specify: done
-  clarify: done
+  specify: in-progress
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending
@@ -158,9 +154,10 @@ outside the approved file, and make the gate name the cause when such a spec doe
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are resolved: an agent session recorded each option this document already
-recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
-chose them; they are ratified only by approval of this spec.
+All 3 decisions are recorded: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001 covers spec approval and engineering-DR acceptance only). They are ratified only
+when a human or a covered delegation approves this spec.
 
 - **D1 - Recorded selection: Option A,** an Implement-phase note goes in the commit message and
   pull request body; the implement command and example spec stop asking for an in-file note.
