@@ -1,5 +1,5 @@
 ---
-id: SPEC-263
+id: SPEC-281
 type: requirements
 status: specifying
 tier: T3
@@ -20,7 +20,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-263: One stated rule for when the Clarify phase is required
+# SPEC-281: One stated rule for when the Clarify phase is required
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2709. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
