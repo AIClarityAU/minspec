@@ -1,5 +1,5 @@
 ---
-id: SPEC-264
+id: SPEC-274
 type: requirements
 status: specifying
 tier: T3
@@ -20,7 +20,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-264: Recording progress in an approved single-file spec does not void its approval
+# SPEC-274: Recording progress in an approved single-file spec does not void its approval
 
 > **SPECIFICATION ONLY.** Written for issue
 > [#2711](https://github.com/AIClarityAU/minspec/issues/2711) (ticking a task checkbox
@@ -213,6 +213,5 @@ sidecar type (D1 B/C, D2 B), the Plan phase writes a decision record for it.
   [DR-102](../../../docs/decisions/DR-102.md).
 - **Builds on:** DR-034 / SPEC-022 (approval and the canonical form), DR-012 (the spec gate),
   DR-069 (status derived from approval and phases).
-- **Id note:** `SPEC-264` is one above the highest id on any local or remote-tracking ref
-  this checkout sees (263, on three agent branches, not on `main`). Open pull requests were not readable
-  offline; renumber if it collides.
+- **Id note:** `SPEC-274` is one above the highest id on `main` (273) after `SPEC-264` was taken by the
+  presence-liveness spec (#3198). Open pull requests were not readable offline; renumber if it collides.
