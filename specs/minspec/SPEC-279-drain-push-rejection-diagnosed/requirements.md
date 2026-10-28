@@ -1,5 +1,5 @@
 ---
-id: SPEC-263
+id: SPEC-279
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-263: A rejected drain push is diagnosed, never reported as done, and a new spec never reuses a taken id
+# SPEC-279: A rejected drain push is diagnosed, never reported as done, and a new spec never reuses a taken id
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2794. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
