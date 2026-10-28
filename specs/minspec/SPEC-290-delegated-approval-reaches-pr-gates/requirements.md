@@ -1,5 +1,5 @@
 ---
-id: SPEC-267
+id: SPEC-290
 type: requirements
 status: specifying
 tier: T3
@@ -21,7 +21,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-267: A delegated approval record is judged by the same validator at both approval-PR gates
+# SPEC-290: A delegated approval record is judged by the same validator at both approval-PR gates
 
 > **This is a SPECIFICATION ONLY.** Written for issue
 > [#2978](https://github.com/AIClarityAU/minspec/issues/2978) (follow-up from #2854 delegated
