@@ -1786,6 +1786,8 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     parseRoundRecord,
     latestHeadRound,
     decideVerdictCarry,
+    inputTouchesMachinery,
+    MACHINERY_PATH_RE,
     renderCarriedComment,
     planVerdictCarry,
     carriedLabelFault,
@@ -1838,6 +1840,7 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
       panelKey: KEY_A,
       listing: whole(checkRuns === undefined ? [round()] : checkRuns),
       allowlist: ALLOW,
+      touchesMachinery: false,
       ...rest,
     });
   };
@@ -1936,6 +1939,7 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
       panelKey: KEY_A,
       checkRuns: [round()],
       allowlist: ALLOW,
+      touchesMachinery: false,
     });
     assert.equal(old.carry, false);
     assert.match(old.reason, /could not be read/);
@@ -2433,6 +2437,37 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     assert.equal(p.panelKey, reviewPanelKey({ lsTree: TREE(), coverage: '' }));
     assert.match(p.comment, /carried forward/i);
     assert.ok(p.comment.includes(P));
+  });
+
+  const diffFor = (...paths) =>
+    paths.map((f) => `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1 +1 @@\n-a\n+b\n`).join('');
+
+  test('#3178 planVerdictCarry: a machinery-touching change is never carried (fresh voters)', () => {
+    for (const f of ['.github/workflows/x.yml', 'scripts/a.sh', '.githooks/pre-commit', 'packages/minspec/src/lib/machinery-paths.ts']) {
+      const inputText = diffFor('docs/a.md', f);
+      const hash = reviewInputFingerprint(inputText);
+      const src = round({ output: { title: 't', summary: record({ inputHash: hash, panelKey: reviewPanelKey({ lsTree: TREE(), coverage: '' }) }) } });
+      const p = planVerdictCarry(rawPlan({ inputText, checkRunsJson: JSON.stringify({ total_count: 1, check_runs: [src] }) }));
+      assert.equal(p.carry, false, f);
+      assert.equal(p.comment, '');
+      assert.match(p.reason, /machinery/);
+    }
+  });
+
+  test('#3178 planVerdictCarry: a non-machinery change still carries', () => {
+    const inputText = diffFor('docs/a.md', 'packages/minspec/src/lib/other.ts');
+    const hash = reviewInputFingerprint(inputText);
+    const src = round({ output: { title: 't', summary: record({ inputHash: hash, panelKey: reviewPanelKey({ lsTree: TREE(), coverage: '' }) }) } });
+    const p = planVerdictCarry(rawPlan({ inputText, checkRunsJson: JSON.stringify({ total_count: 1, check_runs: [src] }) }));
+    assert.equal(p.carry, true, p.reason);
+  });
+
+  test('#3178 inputTouchesMachinery: an unreadable file list fails toward machinery', () => {
+    assert.equal(inputTouchesMachinery(''), true);
+    assert.equal(inputTouchesMachinery('no headers here'), true);
+    assert.equal(inputTouchesMachinery('diff --git "a/we ird" "b/we ird"\n'), true);
+    assert.equal(inputTouchesMachinery('diff --git a/old.md b/scripts/new.sh\n'), true);
+    assert.equal(inputTouchesMachinery(diffFor('src/a.ts')), false);
   });
 
   test('#1688 planVerdictCarry: a refusal still returns the hashes, an empty label and NO comment', () => {

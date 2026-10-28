@@ -40,6 +40,7 @@ echo "$*" >> "$STUB_CALLS"
 case "$1" in
   --paused) [[ -e "$STUB_PAUSE" ]] && exit 0; exit 1 ;;
   --continuous)
+    echo "\${MINSPEC_DRAIN_CONCURRENCY-unset}" >> "$STUB_CONC"
     # A failed launch forks no loop: an orphan would hold the lock and be adopted
     # by the supervisor's next pass, racing the retry assertions.
     [[ "\${STUB_RC:-0}" != 0 ]] && exit "$STUB_RC"
@@ -120,6 +121,7 @@ beforeEach(() => {
     MINSPEC_DRAIN_SERVICE_RETRY_BASE: '1',
     MINSPEC_DRAIN_SERVICE_RETRY_MAX: '1',
     STUB_CALLS: file('calls'),
+    STUB_CONC: file('conc'),
     STUB_PAUSE: file('pause'),
   };
 });
@@ -221,6 +223,23 @@ describe('invariant 1: the drain never runs on the host', () => {
     // only what -e names, and the only -e is HOME.
     expect(execStart.match(/ -e (\S+)/g)).toEqual([' -e HOME=%h']);
     expect(unit).not.toMatch(/^Environment=.*MINSPEC/m);
+  });
+});
+
+describe('drain concurrency', () => {
+  const conc = () => fs.readFileSync(file('conc'), 'utf-8').trim().split('\n');
+
+  it('launches the drain at concurrency 8 when the service environment names none', async () => {
+    const sv = runBackground('docker-init');
+    expect(await sv.done).toBe(0);
+    expect(conc()).toEqual(['8']);
+  });
+
+  it('passes an explicit MINSPEC_DRAIN_CONCURRENCY through unchanged', async () => {
+    env.MINSPEC_DRAIN_CONCURRENCY = '5';
+    const sv = runBackground('docker-init');
+    expect(await sv.done).toBe(0);
+    expect(conc()).toEqual(['5']);
   });
 });
 
