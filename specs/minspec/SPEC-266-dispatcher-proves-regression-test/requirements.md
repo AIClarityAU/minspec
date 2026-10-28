@@ -43,7 +43,7 @@ Read from code at this base (`bd2d754f`), not inferred:
 - `scripts/dispatch-issue.sh:2514-2519`: `regressionTest`, `regressionProvenBaseRed`,
   `regressionProvenHeadGreen` are taken from the agent's file; `== true` coerces anything else
   to false. A missing/unparseable file defaults both to false (`:2523-2524`).
-- `scripts/dispatch-issue.sh:2545` merges `$prose + {changedFiles, gate}`: derived keys win, but
+- `scripts/dispatch-issue.sh:2532` merges `$prose + {changedFiles, gate}`: derived keys win, but
   the two proof flags are in `$prose`, so they are self-reported.
 - `scripts/dispatch-issue.sh:1441-1453` (agent prompt) and `scripts/roles/dev.md:62-64` tell the
   agent to set the flags "ONLY if" it ran the test. Nothing verifies that.
