@@ -15,8 +15,8 @@ relates_to: [SPEC-044, SPEC-062, SPEC-074, SPEC-078, "#2853", "#1208", "#2514", 
 implements: [packages/minspec/tests/drain-concurrency-width.test.ts]
 affects: [scripts/drain-inbox.sh, scripts/remediate-pr.sh, packages/minspec/tests/drain-concurrency.test.ts]
 phases:
-  specify: in-progress
-  clarify: pending
+  specify: done
+  clarify: done   # D1-D3 answered 2026-10-25 (see Decisions needed (Clarify)); spec still unapproved
   plan: pending
   tasks: pending
   implement: pending
@@ -116,7 +116,7 @@ is the model.
 
 **FR-7. Reader.** `scripts/drain-inbox.sh --concurrency` prints, in one line, the width the
 drain would use right now and why, for example
-`width 4 of max 8 | binding 7d headroom 51.2pp | host ok (mem 13.1G, load 3.9/12) | <quota_cap_line>`.
+`width 6 of max 6 | binding 7d headroom 51.2pp | host ok (mem 13.1G, load 3.9/12) | <quota_cap_line>`.
 It spends nothing (`QUOTA_BOOTSTRAP_ADMITS=0`, as `quota_cap_line`), exits 0 when `W >= 1`
 and 42 when `W` is 0. Anything outside the script that asks "how much may run?" reads this
 line instead of holding its own figure.
