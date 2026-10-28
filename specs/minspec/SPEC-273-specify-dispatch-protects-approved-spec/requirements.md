@@ -1,5 +1,5 @@
 ---
-id: SPEC-262
+id: SPEC-273
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-262: A specify-only dispatch never rewrites a spec that is approved or awaiting approval
+# SPEC-273: A specify-only dispatch never rewrites a spec that is approved or awaiting approval
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2618. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
