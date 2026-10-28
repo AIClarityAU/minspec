@@ -1,5 +1,5 @@
 ---
-id: SPEC-254
+id: SPEC-280
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-254: A leading byte order mark does not revert config, and an unreadable config is never overwritten
+# SPEC-280: A leading byte order mark does not revert config, and an unreadable config is never overwritten
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2474 (windows: a UTF-8 byte order mark in
 > `.minspec/config.json` reverts every setting to its default, and the coverage prompt then
