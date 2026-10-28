@@ -1,4 +1,4 @@
-// SPEC-136 FR-1, FR-13, INV-5: the core bundle imports no editor module and runs with
+// SPEC-136 FR-1, FR-13: the core bundle imports no editor module and runs with
 // nothing around it. Control: an entry that reaches diagnostics.ts (which imports vscode)
 // must be reported by the same scan, so the scan is proven able to go red.
 import { execFileSync } from 'node:child_process';
@@ -31,7 +31,7 @@ afterAll(() => {
   rmSync(work, { recursive: true, force: true });
 });
 
-describe('core bundle is editor-free (FR-1, FR-13, INV-5)', () => {
+describe('core bundle is editor-free (FR-1, FR-13)', () => {
   it('no input of the bundle imports vscode', async () => {
     const { metafile } = await buildCore({
       outfile: join(work, 'real', 'minspec-core.cjs'),
