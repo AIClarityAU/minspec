@@ -13,9 +13,9 @@ relates_to: [DR-066, DR-086, DR-100, SPEC-060, SPEC-085, "#2581", "#2718", "#257
 # error log and its redaction, the issue-link builder, the diagnostics panel, and the four
 # tests that pin capture, redaction, the panel's no-network rule and the wiring.
 implements: [packages/minspec/src/lib/error-log.ts, packages/minspec/src/lib/error-redact.ts, packages/minspec/src/lib/issue-link.ts, packages/minspec/src/views/diagnostics-panel.ts, packages/minspec/tests/error-log.test.ts, packages/minspec/tests/error-redact.test.ts, packages/minspec/tests/diagnostics-panel.test.ts, packages/minspec/tests/error-capture-wiring.test.ts]
-# Modified, not owned. extension.ts gains the wrapper at its 44 registrations and the new
+# Modified, not owned. extension.ts gains the wrapper at its 45 registrations and the new
 # command; package.json the command, its keybinding and one dependency; the README its
-# diagnostics section. The next 18 files call showErrorMessage today and change only to
+# diagnostics section. The next 18 files, plus views/getting-started-webview.ts (named here, not in affects:, so it is not frozen before approval; ownership is finalized then), call showErrorMessage today and change only to
 # route that call through the error log (FR-3). The last four hold console.error/warn
 # failure reports that FR-4 routes through the log (commit-on-approve.ts holds 19 of 28).
 affects: [packages/minspec/src/extension.ts, packages/minspec/package.json, packages/minspec/README.md, packages/minspec/src/commands/adr.ts, packages/minspec/src/commands/approve-active.ts, packages/minspec/src/commands/approve.ts, packages/minspec/src/commands/backfill-epics.ts, packages/minspec/src/commands/backlog.ts, packages/minspec/src/commands/classify.ts, packages/minspec/src/commands/constitution.ts, packages/minspec/src/commands/epic.ts, packages/minspec/src/commands/example.ts, packages/minspec/src/commands/init.ts, packages/minspec/src/commands/migrate.ts, packages/minspec/src/commands/park.ts, packages/minspec/src/commands/session.ts, packages/minspec/src/commands/validate.ts, packages/minspec/src/lib/resolve-folder.ts, packages/minspec/src/views/codelens-provider.ts, packages/minspec/src/views/epic-dnd-controller.ts, packages/minspec/src/views/spec-panel.ts, packages/minspec/src/commands/commit-on-approve.ts, packages/minspec/src/commands/push-docs-lane.ts, packages/minspec/src/lib/ownership-advance-guard.ts, packages/minspec/src/lib/ownership-ratchet.ts]
@@ -77,8 +77,8 @@ action by the extension.
 
 ### Errors are shown and then lost
 
-- **No error is recorded anywhere.** `showErrorMessage` is called on 58 lines in 19 files
-  under `packages/minspec/src`, listed in `affects:` above (count from
+- **No error is recorded anywhere.** `showErrorMessage` is called on 59 lines in 20 files
+  under `packages/minspec/src`, 19 of them listed in `affects:` above and the 20th, `packages/minspec/src/views/getting-started-webview.ts:481`, named here (count from
   `grep -rn showErrorMessage packages/minspec/src`). The toast is the only record. Most
   calls pass a fixed string. A few pass `err.message`: `packages/minspec/src/extension.ts:1025`,
   `packages/minspec/src/commands/classify.ts:24`, `packages/minspec/src/commands/approve.ts:266-267`. None pass `err.stack`.
@@ -90,10 +90,10 @@ action by the extension.
   console, which a user does not see. 19 of them are in `packages/minspec/src/commands/commit-on-approve.ts`,
   for example the catch blocks at `:441-443`, `:495-497` and `:1015-1016`. Those catches log
   `err.message` only.
-- **A command that throws is not recorded by MinSpec.** All 44 commands are registered
+- **A command that throws is not recorded by MinSpec.** All 45 commands are registered
   directly in one `context.subscriptions.push(...)` block in `activate()`
-  (`packages/minspec/src/extension.ts:370` onward; `registerCommand(` occurs 44 times in that file and in no
-  other source file, and `package.json` contributes 44 commands). No handler is wrapped. A
+  (`packages/minspec/src/extension.ts:370` onward; `registerCommand(` occurs 45 times in that file and in no
+  other source file, and `package.json` contributes 45 commands). No handler is wrapped. A
   rejected handler reaches VS Code, which shows its own generic failure notification and
   writes the trace to the extension host log. I believe that is VS Code's behaviour; it is
   unverified here and Plan confirms it.
@@ -161,7 +161,7 @@ in one scan and one tap, with nothing retyped.
   A non-`Error` value (a thrown string, `undefined`, an object) MUST still be recorded,
   with its `String()` form as the message and no stack.
 
-- **FR-2 - Every command is captured.** Each of the 44 command registrations MUST go
+- **FR-2 - Every command is captured.** Each of the 45 command registrations MUST go
   through one wrapper in `error-log.ts` that records a thrown or rejected error with the
   command id as its source and then rethrows it unchanged, so VS Code's own handling and
   every existing caller's behaviour are untouched. For a synchronous handler it records
@@ -340,7 +340,7 @@ in one scan and one tap, with nothing retyped.
 
 - [ ] A command that throws is listed on the Diagnostics page with its command id, message
       and stack, and VS Code still shows its own failure notification. (FR-1, FR-2)
-- [ ] An error toast from any of the 19 files is listed on the Diagnostics page and has a
+- [ ] An error toast from any of the 20 files is listed on the Diagnostics page and has a
       Diagnostics button that opens it. (FR-3, FR-8)
 - [ ] An error forced in `activate()` after the first statements is listed with source
       `activation`, and Show Diagnostics opens from the palette afterwards. (FR-5)
