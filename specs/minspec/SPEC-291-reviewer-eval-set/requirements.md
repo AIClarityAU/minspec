@@ -1,5 +1,5 @@
 ---
-id: SPEC-267
+id: SPEC-291
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-267: A reviewer eval set built from reverts and repeat-fixes, scored on every reviewer-prompt change
+# SPEC-291: A reviewer eval set built from reverts and repeat-fixes, scored on every reviewer-prompt change
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2983. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
