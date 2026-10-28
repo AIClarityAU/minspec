@@ -1,5 +1,5 @@
 ---
-id: SPEC-263
+id: SPEC-278
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-263: Shipped agent instructions name the folders the project configured
+# SPEC-278: Shipped agent instructions name the folders the project configured
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2682 (part of #2675, the RCDD on values baked into managed files). Nothing is built until a human reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
 
