@@ -1,5 +1,5 @@
 ---
-id: SPEC-266
+id: SPEC-267
 type: requirements
 status: specifying
 tier: T3
@@ -23,7 +23,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-266: The shipped ownership check never reads a valid spec as "nothing to check"
+# SPEC-267: The shipped ownership check never reads a valid spec as "nothing to check"
 
 **Status:** specifying
 
