@@ -1,5 +1,5 @@
 ---
-id: SPEC-263
+id: SPEC-287
 type: requirements
 status: specifying
 tier: T3
@@ -21,7 +21,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-263: Every trust check on the pipeline's bot keys on account type or id, never on the bare login
+# SPEC-287: Every trust check on the pipeline's bot keys on account type or id, never on the bare login
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2870 (GraphQL reports the bot as bare
 > `minspec-sdd`). Nothing is built until a human reads it, resolves
