@@ -1,5 +1,5 @@
 ---
-id: SPEC-266
+id: SPEC-286
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-266: The dispatcher proves the regression test red-then-green itself
+# SPEC-286: The dispatcher proves the regression test red-then-green itself
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2893. Nothing is built until a human
 > reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
