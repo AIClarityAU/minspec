@@ -12,8 +12,8 @@ relates_to: ["#2091", "#2633", "#2380", SPEC-219, SPEC-026]
 phases:
   specify: done
   clarify: done
-  plan: done
-  tasks: done
+  plan: in-progress
+  tasks: pending
   implement: pending
 ---
 
