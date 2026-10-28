@@ -142,7 +142,7 @@ export interface DrainFixture {
   /** The same for the remediation of that pull request. */
   remediateSays?: Record<number, string>;
   /**
-   * Issues whose dispatch FAILS: the stub prints an authentication error and exits 1
+   * Issues whose dispatch FAILS: the stub prints a non-auth error (a 401 now stops the cycle, #3176) and exits 1
    * without building anything. Such an issue is in `offered()` and not in `dispatched()`.
    */
   issueFails?: number[];
@@ -341,7 +341,7 @@ asked="\${MINSPEC_DISPATCH_OUTCOME_STATUS:-}"
 for v in $(compgen -v MINSPEC_DISPATCH_); do unset "$v"; done
 if [[ -f "${dir}/fails-issue.$1" ]]; then
   echo "Fetching issue #$1..."
-  echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2
+  echo "HTTP 500: upstream exploded (https://api.github.com/graphql)" >&2
   exit 1
 fi
 if [[ -f "${dir}/quiet-refusal.$1" ]]; then
