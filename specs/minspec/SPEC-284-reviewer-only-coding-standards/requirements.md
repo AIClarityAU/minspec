@@ -1,5 +1,5 @@
 ---
-id: SPEC-263
+id: SPEC-284
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-263: Coding standards live in a reviewer-only file; mechanical rules become checks
+# SPEC-284: Coding standards live in a reviewer-only file; mechanical rules become checks
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2891 (reviewer-only coding standards file,
 > mechanical rules as lints). Nothing is built until a human reads it, resolves
