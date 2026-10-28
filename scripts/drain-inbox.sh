@@ -841,6 +841,91 @@ session_anchor_note() {
   return 0
 }
 
+# provision_run_dir_modules: give the run dir its OWN node_modules, installed offline
+# from the npm cache, instead of a symlink to the primary checkout's tree.
+#
+# Why not the symlink (#3048 linked the primary's tree): that tree is shared with every
+# worktree that links it, and `npm ci` (npm 10, lib/commands/ci.js) reads the entries
+# of node_modules THROUGH a symlink and deletes each one. On 2026-10-28 an agent
+# worktree linked the primary's tree and ran `npm ci`; the primary's node_modules was
+# emptied, the run dir's link then pointed at an empty tree, and the old `-d` check
+# passed it every cycle in silence, so the delegated-merge judge held every merge as
+# judge-unrunnable. Owning the tree takes the drain's gates out of that blast radius.
+#
+# Order: (1) the tree is ours, has a runnable tsx and matches package-lock.json - done;
+# (2) unlink any shared tree FIRST (npm ci over a link would empty its target), then
+# `npm ci --offline --ignore-scripts` - never a network fetch; (3) if that fails, link a
+# tree that actually has a runnable tsx (primary checkout, then the primary worktree);
+# (4) otherwise WARN visibly. A missing tsx keeps every tsx gate failing CLOSED; this
+# function never fakes a runner.
+#
+# `--ignore-scripts` skips the root `prepare`, the only step that builds @aiclarity/shared
+# into the gitignored packages/shared/out (its package "main"). So after the install we
+# build it explicitly: render-review-signals imports it, and dispatch-issue.sh hides that
+# import's stderr, so an unbuilt package drops the review-signals block from every PR
+# summary in silence. tsc is a local devDependency, so the build needs no network. A failed
+# build WARNs, leaves the stamp unwritten (the next cycle retries) and never touches tsx.
+provision_run_dir_modules() {
+  local run="$DRAIN_RUN_DIR" nm="${DRAIN_RUN_DIR}/node_modules"
+  local stamp="${nm}/.minspec-run-dir-lock" lock_sum="" ws
+  # No lockfile (or an unreadable one) leaves lock_sum empty, which skips the install
+  # below and goes straight to the tsx-gated fallback.
+  if [[ -r "${run}/package-lock.json" ]]; then
+    lock_sum="$(sha256sum "${run}/package-lock.json" | cut -d' ' -f1)" || lock_sum=""
+  fi
+  if [[ -n "$lock_sum" && ! -L "$nm" && -x "${nm}/.bin/tsx" \
+        && -f "${run}/packages/shared/out/index.js" \
+        && "$(cat "$stamp" 2>/dev/null)" == "$lock_sum" ]]; then
+    return 0
+  fi
+
+  # Remove links ONLY (rm -f on a symlink never touches its target). A real directory
+  # left here is our own earlier install, which npm ci replaces.
+  [[ -L "$nm" ]] && rm -f "$nm"
+  for ws in "${run}"/packages/*/node_modules; do
+    [[ -L "$ws" ]] && rm -f "$ws"
+  done
+
+  local npm_err=""
+  if [[ -n "$lock_sum" ]] \
+     && npm_err="$(cd "$run" && npm ci --offline --ignore-scripts --no-audit --no-fund 2>&1 >/dev/null)" \
+     && [[ -x "${nm}/.bin/tsx" ]]; then
+    echo "[drain] run dir node_modules installed offline from the npm cache (own tree, not linked)."
+    local build_err=""
+    if build_err="$(cd "$run" && npm run build --workspace=@aiclarity/shared 2>&1 >/dev/null)" \
+       && [[ -f "${run}/packages/shared/out/index.js" ]]; then
+      printf '%s\n' "$lock_sum" > "$stamp"
+    else
+      echo "[drain] WARNING: @aiclarity/shared build failed in the run dir: $(printf '%s\n' "${build_err:-no packages/shared/out/index.js after build}" | tail -n 1) - review-signals will be missing from PR summaries until it builds; retrying next cycle." >&2
+    fi
+    return 0
+  fi
+  echo "[drain] WARNING: offline npm ci failed in the run dir: $(printf '%s\n' "${npm_err:-no package-lock.json, or no tsx after install}" | tail -n 1)" >&2
+
+  # Fallback: link a tree that HAS a runnable tsx. Gate on tsx, not on `-d`: an emptied
+  # node_modules directory still passes `-d` (the 2026-10-28 incident).
+  local src="" first_wt="" cand
+  first_wt="$(git -C "$PRIMARY_ROOT" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
+  for cand in "$PRIMARY_ROOT" "$first_wt"; do
+    [[ -n "$cand" && -x "${cand}/node_modules/.bin/tsx" ]] && { src="$cand"; break; }
+  done
+  if [[ -z "$src" ]]; then
+    echo "[drain] WARNING: no runnable tsx for the run dir (own install failed; ${PRIMARY_ROOT}/node_modules and ${first_wt:-the primary worktree}/node_modules have no .bin/tsx) - the delegated-merge judge, auto-merge gate and ranker fail closed until \`npm ci\` succeeds in ${run}." >&2
+    return 0
+  fi
+  # A partial own install is a real directory; `ln -sfn` onto a directory would nest
+  # the link inside it, so remove it first (rm -rf does not follow links inside it).
+  [[ -d "$nm" && ! -L "$nm" ]] && rm -rf "$nm"
+  ln -sfn "${src}/node_modules" "$nm" 2>/dev/null || true
+  if [[ -d "${src}/packages/minspec/node_modules" ]]; then
+    [[ -d "${run}/packages/minspec/node_modules" && ! -L "${run}/packages/minspec/node_modules" ]] \
+      && rm -rf "${run}/packages/minspec/node_modules"
+    ln -sfn "${src}/packages/minspec/node_modules" "${run}/packages/minspec/node_modules" 2>/dev/null || true
+  fi
+  echo "[drain] NOTE: linked node_modules from ${src} (has tsx); the run dir retries its own offline install next cycle." >&2
+  return 0
+}
+
 # ensure_fresh_run_dir (#773): guarantee the pipeline scripts we run this cycle are
 # CURRENT, by maintaining a dedicated worktree hard-synced to origin/main and
 # repointing TRIAGE/DISPATCH/REMEDIATE at ITS copies. This replaces the old
@@ -908,34 +993,9 @@ ensure_fresh_run_dir() {
   git -C "$DRAIN_RUN_DIR" reset --hard origin/main -q 2>/dev/null \
     || echo "[drain] WARNING: could not resync run-dir to origin/main." >&2
 
-  # node/tsx helpers (render-review-signals.mjs, auto-merge-gate.ts) need the
-  # workspace's hoisted modules; symlink the primary's so children resolve without a
-  # per-cycle install. HONEST CAVEAT (#773 review, minor): this uses the primary's
-  # COMPILED deps — including @aiclarity/shared's gitignored `out/` — which can lag
-  # origin/main's source. Those helpers are best-effort and degrade if it mismatches
-  # (the render block is skipped, not corrupted), so the staleness is accepted, not fatal.
-  # Module source (#3048): PRIMARY_ROOT is the toplevel of SCRIPT_DIR, so a drain launched
-  # from a fresh worktree gets that worktree, which has no node_modules. Fall back to the
-  # git common dir's primary worktree (first `git worktree list --porcelain` entry), and
-  # warn loudly when nothing can be linked - the tsx helpers (ranker, auto-merge gate,
-  # render-review-signals) would otherwise fail 127 and degrade the drain silently.
-  local mod_root="$PRIMARY_ROOT"
-  if [[ ! -d "${mod_root}/node_modules" ]]; then
-    local first_wt
-    first_wt="$(git -C "$PRIMARY_ROOT" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
-    if [[ -n "$first_wt" && -d "${first_wt}/node_modules" ]]; then
-      echo "[drain] NOTE: ${PRIMARY_ROOT} has no node_modules; linking from primary worktree ${first_wt} (#3048)." >&2
-      mod_root="$first_wt"
-    else
-      echo "[drain] WARNING: no node_modules found in ${PRIMARY_ROOT} or the primary worktree - tsx helpers (ranker, auto-merge gate, render-review-signals) will fail 127 (#3048)." >&2
-    fi
-  fi
-  if [[ -d "${mod_root}/node_modules" ]]; then
-    ln -sfn "${mod_root}/node_modules" "${DRAIN_RUN_DIR}/node_modules" 2>/dev/null || true
-  fi
-  if [[ -d "${mod_root}/packages/minspec/node_modules" ]]; then
-    ln -sfn "${mod_root}/packages/minspec/node_modules" "${DRAIN_RUN_DIR}/packages/minspec/node_modules" 2>/dev/null || true
-  fi
+  # node/tsx helpers (delegated-merge judge, auto-merge gate, ranker,
+  # render-review-signals) need the workspace's modules - see provision_run_dir_modules.
+  provision_run_dir_modules
 
   # VERIFY the run dir is ACTUALLY at origin/main before trusting it (#773 review,
   # MAJOR). Only then repoint children + tell them freshness is validated. If the reset
