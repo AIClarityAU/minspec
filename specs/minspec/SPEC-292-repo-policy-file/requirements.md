@@ -1,5 +1,5 @@
 ---
-id: SPEC-267
+id: SPEC-292
 type: requirements
 status: specifying
 tier: T3
@@ -19,7 +19,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-267: One repo-level policy file that every agent prompt and every AI review loads, and that points rather than copies
+# SPEC-292: One repo-level policy file that every agent prompt and every AI review loads, and that points rather than copies
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2985 (queue item cl1, from the
 > 2026-10-20 competitive-landscape research). Nothing is built until a human reads it,
