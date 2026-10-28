@@ -190,6 +190,28 @@ exit 0
     { mode: 0o755 },
   );
 
+  // `npm`. `ci` stands in for the offline install remediate-pr.sh provisions a worktree
+  // with (#3238): it builds a real node_modules with the two things the launcher checks
+  // for, unless npm-fail exists in the stubs' directory, which makes it fail. It logs
+  // its arguments to npm-ci.log. Anything else goes to the real npm.
+  fs.writeFileSync(
+    path.join(bin, 'npm'),
+    `#!/usr/bin/env bash
+dir='${dir}'
+if [[ "\${1:-}" == "ci" ]]; then
+  echo "$*" >> "$dir/npm-ci.log"
+  [[ -e "$dir/npm-fail" ]] && exit 1
+  mkdir -p node_modules/.bin node_modules/handlebars
+  printf '#!/bin/sh\\nexit 0\\n' > node_modules/.bin/tsx
+  chmod +x node_modules/.bin/tsx
+  echo 'module.exports = {};' > node_modules/handlebars/index.js
+  exit 0
+fi
+PATH="\${PATH#'${bin}':}" exec npm "$@"
+`,
+    { mode: 0o755 },
+  );
+
   // `gh`. Answers an identity probe the way GitHub answers an installation token (403, no
   // user), honours --jq, serves one list per label, and keeps the comments posted on each
   // issue so they can be listed back. Anything it was not taught is empty and succeeds.

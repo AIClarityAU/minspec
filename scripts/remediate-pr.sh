@@ -964,6 +964,30 @@ if [[ "$ACTION" == "rebase-only" ]]; then
   exit 0
 fi
 
+# ── Toolchain: the agent gets its OWN node_modules, or no agent runs (#3238) ───
+# node_modules is gitignored, so the worktree has none and `npm ci` is denied network in
+# the sandbox: an agent started now can only escalate on the fail-closed validate gate.
+# Say so visibly (invariant 2, no silent gate) instead of spending a run (+ DR-355 retry).
+#
+# Never a symlink to a shared tree: the agent may run `npm ci`, and npm 10 `ci` deletes
+# entries THROUGH a link. Both commands run through the allowlist ($AGENT_LAUNCH_ENV, no
+# token in the environment) because they execute the pull request's own code (its
+# .npmrc, whatever `handlebars` its lockfile resolves to). --ignore-scripts: no install
+# script runs. The check is a file of THIS tree: real directory, tsx executable,
+# handlebars resolves.
+TOOLCHAIN_OK=0
+if ( cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" npm ci --offline --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 ); then
+  if ( cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" node "${SCRIPT_DIR}/lib/worktree-toolchain-check.cjs" >/dev/null 2>&1 ); then
+    TOOLCHAIN_OK=1
+  fi
+fi
+if (( TOOLCHAIN_OK == 0 )); then
+  echo "  remediation-unrunnable: no node_modules — not launching an agent that can only escalate." >&2
+  post_marked_comment "$CRASH_MARKER" 'remediation-unrunnable: no node_modules. Auto-remediation could not provision a runnable toolchain (`npm ci --offline` from the local cache failed, or `tsx`/`handlebars` are missing) in its worktree, so no agent was launched. Left for a human.'
+  cleanup
+  exit 0
+fi
+
 # ── Agent remediation (review findings OR failing checks) ──────────────────────
 # Assemble the UNTRUSTED remediation context per class.
 CONTEXT=""
