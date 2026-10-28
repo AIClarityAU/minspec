@@ -2108,6 +2108,10 @@ shepherd_own_pr() {
       | if length > 0 then "yes" else "no" end' <<<"$pr_json")
     automerge_armed=no
     [[ "$(jq -r '.autoMergeRequest // "null"' <<<"$pr_json")" != "null" ]] && automerge_armed=yes
+    # #3179: native auto-merge withheld for a human (needs-human-review) ⇒ only a human
+    # merge can land this PR, so polling running checks holds the dispatch slot for nothing.
+    local human_held=no
+    [[ ",$labels_csv," == *",needs-human-review,"* ]] && human_held=yes
 
     local action holds attempts decision
     local classify_rc=0 classify_errfile classify_err
@@ -2147,9 +2151,9 @@ shepherd_own_pr() {
     decision=$(bash "${SCRIPT_DIR}/lib/shepherd-pr.sh" --decide \
                  "$action" "$merged" "$holds" "${attempts:-0}" \
                  "$SHEPHERD_MAX_ATTEMPTS" "$elapsed" "$SHEPHERD_MAX_SECS" \
-                 "$checks_pending" "$automerge_armed" 2>/dev/null || echo "stop-not-automation")
+                 "$checks_pending" "$automerge_armed" "$human_held" 2>/dev/null || echo "stop-not-automation")
 
-    echo "  shepherd PR #$pr_num: action=$action merged=$merged holds=$holds attempts=${attempts:-0} elapsed=${elapsed}s pending=$checks_pending automerge=$automerge_armed → $decision"
+    echo "  shepherd PR #$pr_num: action=$action merged=$merged holds=$holds attempts=${attempts:-0} elapsed=${elapsed}s pending=$checks_pending automerge=$automerge_armed human_held=$human_held → $decision"
 
     case "$decision" in
       stop-merged)
@@ -2170,6 +2174,11 @@ shepherd_own_pr() {
         # gate above has already applied whatever hold signal is correct. Saying
         # "handed off" here would be a false signpost on a green PR.
         echo "  PR #$pr_num is green with no automated gate left — awaiting a human. Not polling further."
+        return 0 ;;
+      stop-human-held)
+        # #3179: human-held, auto-merge not armed, checks still running. Only a human
+        # merge can land it; a later red check is remediated by the drain's PR sweep.
+        echo "  PR #$pr_num is human-held (needs-human-review, auto-merge not armed) — not polling running checks; a red check is left to the drain sweep."
         return 0 ;;
       stop-unhandled-state)
         # #1803/#1813: classify_pr saw a mergeStateStatus it has never seen — a
