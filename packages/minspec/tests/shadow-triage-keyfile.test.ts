@@ -94,6 +94,13 @@ describe('key resolution: env first, then the 600 file', () => {
     expect(libOut('shadow_key_source', env)).toBe('env');
   });
 
+  it('the env key wins even over an unsafe-mode file (the file is never consulted)', () => {
+    const { dir, file } = keyFile(FILE_SENTINEL, 0o644);
+    const env = baseEnv(dir, file, { MINSPEC_ZAI_API_KEY: ENV_SENTINEL });
+    expect(libCheck(`[[ "$(shadow_key)" == "${ENV_SENTINEL}" ]]`, env)).toBe(0);
+    expect(libOut('shadow_key_source', env)).toBe('env');
+  });
+
   it.each([
     [0o644, 'unsafe-mode:644'],
     [0o640, 'unsafe-mode:640'],
@@ -170,6 +177,44 @@ describe('the drain names the key SOURCE at start, never the value', () => {
   it('none → says the instrument is inert and why', () => {
     const { dir, file } = keyFile(null);
     expect(note(baseEnv(dir, file))).toContain(`key file ${file}: missing`);
+  });
+});
+
+describe('end to end: an unusable key file means NO request is issued', () => {
+  it.each([
+    ['missing', null, 0o600],
+    ['unsafe-mode:644', FILE_SENTINEL, 0o644],
+  ])('state %s → record exits 0 and the stub curl is never invoked', (_state: string, content: string | null, mode: number) => {
+    const { dir, file } = keyFile(content, mode);
+    const binDir = path.join(dir, 'bin');
+    fs.mkdirSync(binDir);
+    const calls = path.join(dir, 'curl-called');
+    fs.writeFileSync(path.join(binDir, 'curl'), `#!/usr/bin/env bash\ntouch "${calls}"\nprintf '200'\n`, { mode: 0o755 });
+    fs.writeFileSync(
+      path.join(binDir, 'gh'),
+      `#!/usr/bin/env bash
+[[ "\${1:-}" == "repo" && "\${2:-}" == "view" ]] && echo '{"visibility":"PUBLIC","isPrivate":false}'
+exit 0
+`,
+      { mode: 0o755 },
+    );
+    const prompt = path.join(dir, 'prompt.txt');
+    const live = path.join(dir, 'live.txt');
+    fs.writeFileSync(prompt, 'classify this issue');
+    fs.writeFileSync(live, 'label=needs-review\nrole=architect\nhold=human\ntier=T3\nhuman_only=yes\n');
+    const env = baseEnv(dir, file, {
+      PATH: `${binDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+      MINSPEC_SHADOW_TRIAGE_LOG: path.join(dir, 'shadow.jsonl'),
+    });
+    const r = spawnSync(
+      'bash',
+      [SHADOW, 'record', '--issue', '7', '--repo', 'AIClarityAU/minspec', '--prompt-file', prompt, '--live-fields', live],
+      { encoding: 'utf-8', env, cwd: dir },
+    );
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('no z.ai key configured');
+    expect(fs.existsSync(calls)).toBe(false);
+    expect(`${r.stdout}${r.stderr}`).not.toContain(FILE_SENTINEL);
   });
 });
 
