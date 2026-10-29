@@ -3,8 +3,9 @@ id: SPEC-054
 type: tasks
 # tier lives on requirements.md, the single tier-carrying approvable. A tier on a sibling
 # document is read by spec-gate.py as a second, unapproved spec. (SPEC-054 is T3.)
-# status and phases mirror requirements.md. This file has no approval record of its own:
-# only requirements.md is signed, so these two fields describe and never seal.
+# status and phases here carry the current phase state. requirements.md stays frozen at its
+# approved hash (approval sidecar under .minspec/approvals/), so its own phases lag. This file
+# has no approval record of its own: these two fields describe and never seal.
 status: planning
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain

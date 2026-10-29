@@ -3,8 +3,9 @@ id: SPEC-054
 type: design
 # tier lives on requirements.md, the single tier-carrying approvable. A tier on a sibling
 # document is read by spec-gate.py as a second, unapproved spec. (SPEC-054 is T3.)
-# status and phases mirror requirements.md. This file has no approval record of its own:
-# only requirements.md is signed, so these two fields describe and never seal.
+# status and phases here carry the current phase state. requirements.md stays frozen at its
+# approved hash (approval sidecar under .minspec/approvals/), so its own phases lag. This file
+# has no approval record of its own: these two fields describe and never seal.
 status: planning
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain
@@ -47,8 +48,8 @@ this ships (DQ-5).
    three-property definition of "load-bearing" is the reason it is landable (118 `|| true`
    under `scripts/`, `swallowed-gate-signal.ts:24-27`); grafting a second, unrelated predicate
    onto it makes both harder to reason about and shares no logic beyond a line splitter.
-2. **The App cannot push workflow files.** The installation has no `workflows` scope (host
-   DR-079), so any commit touching `.github/workflows/**` is pushed by the founder. #1859 met
+2. **The App cannot push workflow files.** The installation has no `workflows` scope (DR-103,
+   `docs/decisions/DR-103.md:287-289`), so any commit touching `.github/workflows/**` is pushed by the founder. #1859 met
    the same wall and enforced its lint through a T0 vitest test instead of a named CI step
    (`check-swallowed-gate-signal.ts:31-38`). This plan cannot avoid workflow edits entirely:
    FR-6 requires the FR-1 step in `ci.yml`'s `lint` job, a new FR-3 job, and FR-2 annotations
@@ -75,7 +76,7 @@ this ships (DQ-5).
    is parsed with the `typescript` compiler API, already a root dev dependency
    (`package.json:41`).
 6. **The FR-4 follow-up issue was never filed.** The spec says to record its number on the FR-4
-   tombstone, but requirements.md is hash-locked, so the number goes in this file's Follow-ups
+   tombstone, but requirements.md is hash-locked (approval sidecar `.minspec/approvals/specs/minspec/SPEC-054-gate-signal-linter/requirements.md.json`), so the number goes in this file's Follow-ups
    instead (task 7.1), not into requirements.md.
 
 ## Reconciliation with main (`281774d9`)
