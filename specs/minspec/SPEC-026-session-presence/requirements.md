@@ -363,9 +363,10 @@ scope).
    so lexical order == chronological; on **equal** `startedAt` (same millisecond), the
    **lexicographically-lower `sessionId` holds** — a deterministic total order both engines
    compute identically, so exactly one session is ever the holder and two same-second
-   sessions can never both commit. (If self has no resolvable `startedAt` — `MY_SESSION`
-   unresolved, or self's presence record absent, unreadable, or missing the field — treat
-   self as later → the conservative side blocks, never both.)
+   sessions can never both commit. (If `MY_SESSION` **is resolved** but self's presence
+   record is absent, unreadable, or missing the `startedAt` field, treat self as later →
+   the conservative side blocks, never both. An **unresolved** `MY_SESSION` is not covered
+   here: it is governed by item 2 and fails open to ALLOW, never self-block.)
 2. **Self-fallback.** If `MY_SESSION` is unresolved (trailer absent — bare-terminal human,
    or trailer hook bypassed), the backstop MUST NOT let a session's own presence record
    block its own commit. It additionally excludes any record whose `pid` is the committing
