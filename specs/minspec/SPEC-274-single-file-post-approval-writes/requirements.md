@@ -13,8 +13,8 @@ implements_reason: >-
   Clarify answers are recorded (D1-D3, all Option A). Which files this spec owns is still
   decided at Plan; every candidate file is listed under Context.
 phases:
-  specify: in-progress
-  clarify: pending
+  specify: done
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
