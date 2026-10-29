@@ -54,8 +54,8 @@ Tier T1. One concern, one source file, one test file.
 
 Tier T2. One concern (the rule), one source file, one test file. Depends on task 1.
 
-- [ ] **2.1** `scripts/validate-frontmatter.ts` - add the rule after Rule 22, numbered with
-  the next free rule number, as design.md *The corpus rule* specifies: every `.md` under the
+- [ ] **2.1** `scripts/validate-frontmatter.ts` - append the rule after the last existing rule
+  block (rules there are not in numeric order), numbered with the next free rule number, as design.md *The corpus rule* specifies: every `.md` under the
   specs dir with a frontmatter `id`, `specDeriveInputs` then `validateSpec`, keep only
   `status.mirror-drift`, `warn()` each as `status-mirror <path>: <message>`, never `fail()`.
   Then the one `console.log` summary line, printed even at zero. Failure handling exactly as
@@ -136,3 +136,5 @@ task 2 having merged. The commit is a `fix(#1807):` commit, so its body carries 
   both now read `stale` and derive `specifying` with matching literals, and that the
   post-merge delegated-approval lane (DLG-001, DR-108) is expected to re-record them as the
   bot, landing at `planning`. No step asks the founder.
+  State also that this reverses `requirements.md` CQ-2's "the correction is free" claim
+  (design.md, re-measurement point 4) and cite #3337, which tracks amending that locked text.

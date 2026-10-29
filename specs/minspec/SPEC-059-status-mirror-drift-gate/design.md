@@ -29,8 +29,8 @@ commit this plan was written on. New code is cited by symbol, because its line n
 
 Three pull requests, in order. First, one exported helper in `artifact-graph.ts` returns the
 `{ approvalState, explicitTerminal }` pair the signpost already computes for a spec file,
-and `buildArtifactGraph` is switched to call it, so there is exactly one place that turns a
-file into derive inputs. Second, `scripts/validate-frontmatter.ts` gains one rule that, for
+and `buildArtifactGraph` is switched to call it, so the signpost and the new gate share one
+helper that turns a file into derive inputs. Second, `scripts/validate-frontmatter.ts` gains one rule that, for
 every `.md` with an `id:` under the specs dir, calls the existing `validateSpec` with those
 inputs and reports each `status.mirror-drift` violation as a WARN, then prints a drift count.
 Landing the rule before any data fix is what proves AC-3: its first run on the unchanged
@@ -68,6 +68,15 @@ the spec:
    two founder approvals. The *Correcting SPEC-014 and SPEC-018* section below says what
    that costs and why it is still the right path.
 
+   **This reverses a settled Clarify conclusion, and the plan records it as a reversal.**
+   The approved, hash-locked `requirements.md` CQ-2 states "The correction is free ... FR-1
+   therefore costs no re-approval." That sentence is now known to be false. This plan does
+   not edit the locked file; it supersedes the claim here, in writing, and tracks the
+   correction of the locked text as #3337 (amend CQ-2 through the approval lane). Until that
+   lands, a reader of `requirements.md` must treat CQ-2's "free" claim as superseded by this
+   section. FR-1's required outcome (accurate `phases:` and a literal equal to the derived
+   status) is unchanged; only its cost claim changes.
+
 ## Architecture
 
 ```
@@ -103,7 +112,9 @@ Why here and not elsewhere: `spec-validator.ts` is filesystem-free by design and
 `approval.ts` type-only to avoid a runtime cycle, so the helper cannot live there.
 `artifact-graph.ts` is already in `affects:`, already value-imports both functions, and is
 the signpost FR-2 names as the reference behaviour. `commands/validate.ts` makes the same two
-calls but is not in `affects:`; switching it is optional cleanup outside this spec, and AC-4
+calls inline and is not in `affects:`, so after this plan three call sites feed derive
+inputs: two through the helper (the signpost and the new rule) and `validateSpecCommand`
+inline. Switching it is optional cleanup outside this spec, and AC-4
 is proved behaviourally (below) rather than by every caller sharing one import.
 
 Rejected: a new `lib/` module for the helper. It would be a new owned source file, which
@@ -111,8 +122,9 @@ the approved `implements: none` rules out.
 
 ## The corpus rule (FR-2, FR-3, FR-4, FR-5, INV-3, INV-4)
 
-Placed after Rule 22 in `scripts/validate-frontmatter.ts`, numbered with the next free
-number (25 at `a3a4a3e8`; take whatever is free when it lands), with a header comment in the
+Appended after the last existing rule block in `scripts/validate-frontmatter.ts` (rule
+blocks there are not in numeric order: Rules 23 and 24 already exist), numbered with the next
+free number (25 at `a3a4a3e8`; take whatever is free when it lands), with a header comment in the
 style of Rules 13 and 15 naming SPEC-059, #1807 and the "same function as the interactive
 gate" discipline.
 
@@ -282,4 +294,7 @@ path; no task hand-edits SPEC-059's approved `requirements.md`.
 
 - Corpus backfill of the remaining drift: #1513.
 - The gap this spec closes: #1807 (the rule's pull request references it).
+- Amend the false CQ-2 "free" claim in the locked `requirements.md`: #3337.
+- Reconcile with #2799's shard rule when the second of the two lands: tracked here, no
+  separate item until #2799 is approved.
 - None other.
