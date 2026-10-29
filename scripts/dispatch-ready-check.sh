@@ -809,7 +809,9 @@ fi
 # state cannot be read the answer is "unknown", which is a refusal, never a pass.
 # Checked last so a stale verdict or countermanding label keeps its own reason.
 if [[ -n "$BLOCKER_ISSUE" ]]; then
-  b_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # Physical path (-P): a caller may reach this script through a symlinked scripts/ dir
+  # (the test fixtures do), and node_modules belongs to the real repo, not the link.
+  b_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
   b_repo="${BLOCKER_REPO:-${REPO-}}"
   if [[ -z "$b_repo" ]]; then
     refuse blocker-unknown "no repository named (BLOCKER_REPO), so whether the issue's declared blockers are open cannot be read - refusing rather than assuming none (#3326)"
