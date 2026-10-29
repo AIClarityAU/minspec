@@ -917,7 +917,7 @@ SPEC-136 (headless core, status: planning, T4) packages the checks MinSpec alrea
 
 ## [DR-117 — The ZCode container boundary - git through GitHub is the only bridge between ZCode's container and the host (BND-1 to BND-6), and measurement 12 checks the running container matches](DR-117.md)
 
-*Status: proposed · Date: 2026-10-28*
+*Status: accepted · Date: 2026-10-28*
 
 <!-- dr-summary:DR-117 auto=f3bf57334586 -->
 ZCode (Z.ai's editor) runs apart from the host so that the host's editor and agents are never "infected" by reading what ZCode wrote; SPEC-136 set six boundary rules for that and said they outlive the spec and need a decision record. This is that record.
