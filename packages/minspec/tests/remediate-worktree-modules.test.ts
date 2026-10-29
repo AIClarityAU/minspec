@@ -25,7 +25,27 @@ function fixture(npmBody: string) {
   fs.mkdirSync(bin);
   fs.mkdirSync(wt);
   fs.writeFileSync(path.join(bin, 'npm'), `#!/usr/bin/env bash\necho "npm $*" >> "${dir}/calls"\n${npmBody}\n`, { mode: 0o755 });
+  writeLock(wt, REGISTRY_LOCK);
   return { dir, bin, wt };
+}
+
+// The shape of this repo's own lockfile: registry tarballs plus workspace links.
+const REGISTRY_LOCK = {
+  name: 't', lockfileVersion: 3, requires: true,
+  packages: {
+    '': { name: 't', workspaces: ['packages/shared'] },
+    'node_modules/handlebars': { version: '4.7.8', resolved: 'https://registry.npmjs.org/handlebars/-/handlebars-4.7.8.tgz' },
+    'node_modules/@aiclarity/shared': { resolved: 'packages/shared', link: true },
+    'packages/shared': { name: '@aiclarity/shared' },
+  },
+};
+
+function writeLock(wt: string, lock: unknown) {
+  fs.writeFileSync(path.join(wt, 'package-lock.json'), typeof lock === 'string' ? lock : JSON.stringify(lock));
+}
+
+function lockWith(name: string, entry: Record<string, unknown>) {
+  return { ...REGISTRY_LOCK, packages: { ...REGISTRY_LOCK.packages, [`node_modules/${name}`]: entry } };
 }
 
 function run(f: { dir: string; bin: string; wt: string }) {
@@ -80,6 +100,74 @@ describe('provision_worktree_modules (#3238)', () => {
     const r = run(f);
     expect(r.status).not.toBe(0);
     expect(fs.existsSync(path.join(f.dir, 'calls'))).toBe(false);
+  });
+});
+
+// npm reads a .npmrc committed in the tree and fetches any `resolved` URL the lockfile
+// names. --offline and --ignore-scripts stop neither: measured with npm 10.9.9, a tree's
+// `.npmrc` line `git=<path>` plus a git dependency made `npm ci --offline --ignore-scripts`
+// execute <path> (`<path> --no-replace-objects ls-remote https://...`). So the tree's npm
+// configuration and its non-registry sources are refused before npm is started.
+describe('provision_worktree_modules refuses tree-controlled npm configuration (security)', () => {
+  const refusedWithoutNpm = (f: { dir: string }, r: ReturnType<typeof run>, why: RegExp) => {
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(why);
+    expect(fs.existsSync(path.join(f.dir, 'calls'))).toBe(false);
+  };
+
+  it('refuses a worktree that carries its own .npmrc', () => {
+    const f = fixture(INSTALL_OK);
+    fs.writeFileSync(path.join(f.wt, '.npmrc'), 'git=./evil.sh\n');
+    refusedWithoutNpm(f, run(f), /\.npmrc/);
+  });
+
+  it('refuses a .npmrc that is a dangling symlink', () => {
+    const f = fixture(INSTALL_OK);
+    fs.symlinkSync(path.join(f.dir, 'nowhere'), path.join(f.wt, '.npmrc'));
+    refusedWithoutNpm(f, run(f), /\.npmrc/);
+  });
+
+  it.each([
+    ['git+ssh://git@example.invalid/x.git#0123456789abcdef0123456789abcdef01234567'],
+    ['git+https://github.com/x/y.git#0123456789abcdef0123456789abcdef01234567'],
+    ['https://example.invalid/evil-1.0.0.tgz'],
+    ['http://registry.npmjs.org/evil/-/evil-1.0.0.tgz'],
+    ['https://registry.npmjs.org.example.invalid/evil/-/evil-1.0.0.tgz'],
+    ['file:../evil.tgz'],
+  ])('refuses a lockfile entry resolved from %s', (resolved) => {
+    const f = fixture(INSTALL_OK);
+    writeLock(f.wt, lockWith('evil', { version: '1.0.0', resolved }));
+    refusedWithoutNpm(f, run(f), /resolved|registry/);
+  });
+
+  it('refuses a dependency with no resolved source (npm would fall back to the package.json spec)', () => {
+    const f = fixture(INSTALL_OK);
+    writeLock(f.wt, lockWith('evil', { version: '1.0.0' }));
+    refusedWithoutNpm(f, run(f), /resolved|registry/);
+  });
+
+  it.each([['/etc'], ['../outside'], ['packages/../../outside']])('refuses a workspace link that leaves the tree (%s)', (resolved) => {
+    const f = fixture(INSTALL_OK);
+    writeLock(f.wt, lockWith('evil', { resolved, link: true }));
+    refusedWithoutNpm(f, run(f), /resolved|registry/);
+  });
+
+  it.each([
+    ['missing', null],
+    ['unparseable', '{not json'],
+    ['a version-1 lockfile with no packages map', { name: 't', lockfileVersion: 1, dependencies: {} }],
+  ])('fails closed when the lockfile is %s', (_label, lock) => {
+    const f = fixture(INSTALL_OK);
+    if (lock === null) fs.rmSync(path.join(f.wt, 'package-lock.json'));
+    else writeLock(f.wt, lock);
+    refusedWithoutNpm(f, run(f), /package-lock\.json/);
+  });
+
+  it('installs a registry-only lockfile with workspace links, and tells npm never to run git', () => {
+    const f = fixture(INSTALL_OK);
+    const r = run(f);
+    expect(r.status).toBe(0);
+    expect(fs.readFileSync(path.join(f.dir, 'calls'), 'utf-8')).toMatch(/--git=false/);
   });
 });
 
