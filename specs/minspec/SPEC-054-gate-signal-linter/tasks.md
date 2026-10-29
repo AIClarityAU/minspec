@@ -55,7 +55,11 @@ push (no `workflows` scope): the founder pushes and merges it. Group 6 is founde
   every `failClosed` has a non-empty reason and an `evidence` path that exists; freshness: each
   witness's `workflow` file exists and contains its `job` as a job key (and its `step` name when
   set); `GATE_LABEL_PATTERNS` matches `ai-review:pass`, `ai-review:carried`, `ready-to-merge`,
-  `awaiting-approval`, `blocked-by`, and not `agent-ready`.
+  `awaiting-approval`, `blocked-by`, `hold:tier` (the `hold:*` family), and not `agent-ready` or
+  `needs-human-review`; and a derived-from case: every label constant or `*_RE` that
+  `decideStatus` in `.github/scripts/ai-review-guard.js` reads (`PASS`, `CHANGES`, `HOLD_RE`) matches
+  some member of the set, so the case fails when a required-check condition reads a label the set
+  lacks (planted in a fixture copy: a new `FOO_RE` read by `decideStatus` fails it).
   *Done when:* green. A planted rename of a job id in a fixture copy fails the freshness case.
 
 ## 2 - FR-1/FR-2 scanner, pure parts (offline)
@@ -71,7 +75,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   `--remove-label agent-ready` does not; `--add-label "$LABEL"` does.
   *Done when:* green.
 - [ ] **2.2** (FR-1 unobserved/unsurfaced, FR-6 corollary, DQ-7, AC-1, AC-2) the shell
-  exit-status model of design.md: `errexit` per unit, continuation joining, and the
+  exit-status model of design.md: `errexit` and `pipefail` per unit, continuation joining, and the
   classification table, with the surfacing-forms constant.
   Test (`describe('FR-1 shell model')`): AC-1, `gh api .../statuses/... || true` is
   unobserved; AC-2 both directions, `if ! W >/dev/null 2>&1; then echo "::warning ..."; fi`
@@ -82,6 +86,10 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   `x=$(gh api ...)` under `-e` is ok; `W || { echo "::error ..."; exit 1; }` is ok; a
   `>> "$GITHUB_STEP_SUMMARY"` branch is ok; a write split by `\` continuations reports its
   first line.
+  `pipefail` and `&&` shapes: `gh api .../statuses/... | jq .` in a default-shell unit (`-e`, no
+  `pipefail`) is unobserved, and ok under `set -o pipefail` or `shell: bash`; `gh pr edit
+  --add-label ready-to-merge && echo done` (write non-final in an `&&` list) is unobserved, while
+  `echo go && gh pr edit --add-label ready-to-merge` (write last) is ok.
   *Done when:* green.
 - [ ] **2.3** (FR-1 inputs, P1) workflow extraction: line-based `run:` and `actions/github-script`
   `script:` blocks with source line mapping, each step's `shell:` applied to the unit's initial
@@ -177,8 +185,9 @@ One pull request for the whole group. An agent prepares the branch; the founder 
   `.github/workflows/**` and `.github/scripts/**`, fix or annotate with a reason, then re-run the
   template generator (scripts/gen-ci-templates.mjs) so
   `packages/minspec/src/lib/ci-review-templates.ts` matches. Known today in `.github/workflows/ai-review.yml`: the swallowed `--remove-label` /
-  `--add-label` writes of the pending-label step and the verdict and fail-closed steps, and
-  the `needs-human-review` writes. Other workflow files are edited only where the scanner
+  `--add-label` writes of the pending-label step and the verdict and fail-closed steps (the
+  `needs-human-review` writes are not gate-relevant under design.md's predicate: no
+  required-check condition reads that label, so they are not known findings). Other workflow files are edited only where the scanner
   names a finding in them.
   *Done when:* the scanner exits 0 on the whole tree, the generator's `--check` mode passes, and the managed-region parity tests pass.
 - [ ] **5.2** (FR-6, AC-7, INV-1) `.github/workflows/ci.yml` - in the `lint` job, a step

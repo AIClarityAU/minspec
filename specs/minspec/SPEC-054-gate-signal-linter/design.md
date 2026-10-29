@@ -144,7 +144,7 @@ export interface GateEntry {
 }
 
 export const GATE_MANIFEST: readonly GateEntry[];
-export const GATE_LABEL_PATTERNS: readonly RegExp[]; // ai-review:*, ready-to-merge, awaiting-approval, blocked-by
+export const GATE_LABEL_PATTERNS: readonly RegExp[]; // ai-review:*, ready-to-merge, awaiting-approval, blocked-by, hold:*
 ```
 
 Entries at ship: the six required contexts recorded at `docs/decisions/DR-047.md:47` (`lint`,
@@ -200,7 +200,18 @@ path exits 0 without having read the tree, the same rule #1859's checker states
 - **Label:** `gh pr edit` / `gh issue edit` with `--add-label` or `--remove-label`;
   `issues.addLabels(`, `issues.removeLabel(`, `issues.setLabels(`.
 
-A label write is **gate-relevant** when any label it names matches `GATE_LABEL_PATTERNS`.
+A label write is **gate-relevant** when any label it names matches `GATE_LABEL_PATTERNS`. That
+list honours FR-1 in full, including its last clause "or any label named in a required-check
+condition": besides the four ai-review/dependency patterns it carries `hold:*`, because
+`decideStatus` (`.github/scripts/ai-review-guard.js:1826-1827`, `HOLD_RE = /^hold:/` at :1809)
+turns the required `ready-to-merge` check red on any `hold:*` label. `needs-human-review` is
+deliberately **not** in the set: no required-check condition reads it (the guard calls it
+advisory at `ai-review-guard.js:2079`; `grep -rn needs-human-review .github` shows writes and
+comments only). **Derived-from check, so a new gate label cannot silently fall out:** the manifest
+test reads the label tests in `ai-review-guard.js` (every exported `*_RE` label regex and every
+label constant `decideStatus` reads, e.g. `PASS`, `CHANGES`, `HOLD_RE`) and fails when a
+label those conditions read matches no member of `GATE_LABEL_PATTERNS`. A new label read by a
+required-check condition therefore fails that test until it is added to the set.
 **Decision on the fork DQ-7 left open: the narrower predicate.** Creating a label *object*
 (`gh label create`, `issues.createLabel`) is not a gate-signal write and is never matched.
 *Why:* it writes no state on any pull request, issue or commit, so a reader of the gate never
@@ -229,7 +240,7 @@ Each shell text unit (a `run:` block, or a `.sh` file) starts with an `errexit` 
   semantics; the spec's model names the `shell:` override as the way `-e` is removed, and this
   adds the only other one, which can only produce more findings, never fewer.
 
-A gate-signal write is then classified:
+A gate-signal write is then classified (the model tracks `pipefail` per unit the same way as `errexit`; I chose to cover the `&&`-list and pipeline shapes rather than record them as known false negatives, because each is one extra row and a flag):
 
 | Shape | Verdict |
 |---|---|
@@ -239,6 +250,8 @@ A gate-signal write is then classified:
 | inside `local`/`export`/`declare`/`readonly` assignment, or a substitution embedded in another command (`echo "$(gh ...)"`) | **unobserved** (the outer command's status masks it) |
 | plain `x=$(gh ...)` with `errexit` on | observed: **ok** |
 | `if ! W; then B; fi`, `if W; then ...; else B; fi`, `W \|\| B`, `W \|\| { B; }` | look at failure branch `B` |
+| `W && x` where `W` is a **non-final** member of an `&&` list | **unobserved**: `-e` does not fire on a failure in a non-final `&&` member. `x && W` (write last) is the bare case and follows `errexit` |
+| pipeline `W \| cmd` with `pipefail` off | **unobserved**: the pipeline status is the last member's, so the write's failure is lost. Default `run:` shells (`bash -e {0}`) have no `pipefail`; it is on only when the unit turned it on (`set -o pipefail`, `set -euo pipefail`) or the step's `shell:` is `bash` (which adds `-o pipefail`). With `pipefail` on, a write in any member is observed |
 
 The failure branch `B` is **surfaced** when it contains one of the surfacing forms, or fails the
 step (`exit` with a non-zero literal, `return` non-zero, `false`). Surfacing forms (R5's
