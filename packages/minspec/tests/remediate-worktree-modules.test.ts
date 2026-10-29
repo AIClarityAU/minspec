@@ -121,6 +121,12 @@ describe('provision_worktree_modules refuses tree-controlled npm configuration (
     refusedWithoutNpm(f, run(f), /\.npmrc/);
   });
 
+  it('refuses a worktree that carries npm-shrinkwrap.json, which npm ci prefers over the vetted lockfile', () => {
+    const f = fixture(INSTALL_OK);
+    fs.writeFileSync(path.join(f.wt, 'npm-shrinkwrap.json'), JSON.stringify(lockWith('evil', { version: '1.0.0', resolved: 'git+https://x/y.git' })));
+    refusedWithoutNpm(f, run(f), /npm-shrinkwrap\.json/);
+  });
+
   it('refuses a .npmrc that is a dangling symlink', () => {
     const f = fixture(INSTALL_OK);
     fs.symlinkSync(path.join(f.dir, 'nowhere'), path.join(f.wt, '.npmrc'));

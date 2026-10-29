@@ -1161,7 +1161,10 @@ export function runRemediate(opts: RemediateOptions = {}): RemediateRun {
   git('-C', seed, 'checkout', '-q', '-b', branch);
   fs.mkdirSync(path.join(seed, 'scripts', 'lib'), { recursive: true });
   fs.writeFileSync(path.join(seed, 'scripts', 'lib', 'agent-context.sh'), PASS_THROUGH_HELPER, { mode: 0o755 });
-  git('-C', seed, 'add', 'scripts/lib/agent-context.sh');
+  // remediate-pr.sh refuses `npm ci` without a vetted lockfile, so the branch carries the
+  // smallest valid one: no packages beyond the root, nothing for npm to fetch.
+  fs.writeFileSync(path.join(seed, 'package-lock.json'), '{"lockfileVersion":3,"packages":{"":{}}}\n');
+  git('-C', seed, 'add', 'scripts/lib/agent-context.sh', 'package-lock.json');
   git('-C', seed, 'commit', '-q', '-m', 'fixture: the branch under remediation');
   opts.prepare?.({ dir, repo, origin, seed, branch, worktree, git });
   git('-C', seed, 'push', '-q', 'origin', branch);

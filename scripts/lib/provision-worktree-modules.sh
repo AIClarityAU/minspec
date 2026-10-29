@@ -29,6 +29,12 @@ provision_worktree_modules() {
     echo "  ${wt} carries its own .npmrc; refusing to let the tree configure npm." >&2
     return 1
   fi
+  # `npm ci` reads npm-shrinkwrap.json in preference to package-lock.json, so a shrinkwrap
+  # would bypass the lockfile vetting below: refuse it the way .npmrc is refused.
+  if [[ -e "${wt}/npm-shrinkwrap.json" || -L "${wt}/npm-shrinkwrap.json" ]]; then
+    echo "  ${wt} carries npm-shrinkwrap.json, which npm would use instead of the vetted package-lock.json; refusing to install." >&2
+    return 1
+  fi
   local bad
   # jq exits non-zero on a missing or unparseable lockfile, and `error` on one without a
   # v2+ packages map: either way nothing is printed and the install is refused.
