@@ -110,7 +110,8 @@ Shared rules for every task:
 
 ## 4 - The contention backstop and arbitration (FR-8, FR-12, FR-13, FR-16; machinery)
 
-- [ ] **4.1** `packages/minspec/src/lib/template-registry.ts` - add `minspec_cedit_gate` to
+- [ ] **4.1** **BLOCKED until the FR-13.1 amendment (#3332) is accepted** - do not start before then.
+  `packages/minspec/src/lib/template-registry.ts` - add `minspec_cedit_gate` to
   `PRE_COMMIT_HOOK` and call it as `minspec_cedit_gate || exit 1` after the existing stages,
   per design.md *The pre-commit stanzas in outline*: kill-switch `MINSPEC_CEDIT_OFF`; the
   absent-or-empty sessions no-op with the FR-8 carve-out stated in a comment above it; self

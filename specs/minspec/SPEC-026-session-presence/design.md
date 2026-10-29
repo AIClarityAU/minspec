@@ -120,7 +120,9 @@ values for self. This plan follows line 118, because it is the only reading unde
 sides of the comparison are the same kind of value. It does not follow the literal wording of
 line 350, so D-P2 is **not** inside what requirements.md allows. requirements.md is hash-locked
 and is left untouched; the amendment is tracked in #3332 (amend FR-13.1 to the presence-record
-`startedAt`). Until it lands, a builder of task 4.1 follows this note.
+`startedAt`). Task 4.1 is **blocked until #3332 is accepted**: no builder implements the arbitration
+against the hash-locked line 350 wording, and this note is not a licence to. Once the
+amendment is accepted, 4.1 follows the amended FR-13.1.
 
 **Chosen:** self's `startedAt` is read from **self's own presence record**,
 `.minspec/sessions/<MY_SESSION>.session.json`. Both sides then compare the same two values
@@ -168,8 +170,8 @@ Together, on a remote-backed repo with a protected default branch, the primary c
 commits no approvable at all, and approvables go worktree branch to pull request. That is
 not a deadlock: the worktree exemption is the path, and it is how approvables move in
 practice today. On a repo without a protected default branch, approvables commit on the
-default branch on the primary, as DR-051 §4b intends. FR-15.2 itself is built exactly as
-specified.
+default branch on the primary, as DR-051 §4b intends. FR-15.2 itself is implemented by this plan exactly as
+specified (task 5 builds it; it is not built today).
 
 What the plan does decide is the **wording**: FR-15.2's rejection message must not tell the
 user to "commit on main" when Stage 0 would then refuse that. The stanza reuses Stage 0's own
