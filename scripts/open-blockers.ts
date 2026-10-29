@@ -20,25 +20,34 @@ import { execFileSync } from 'node:child_process';
 import { parseDeclaredBlockers } from './lib/issue-rank';
 
 export interface BlockerDeps {
-  /** State of a same-repo issue: 'OPEN' | 'CLOSED'. Throws on any failure or other answer. */
+  /** State of a same-repo issue OR pull request: 'OPEN' | 'CLOSED' (| 'MERGED'). Throws on any failure. */
   issueState(repo: string, n: number): string;
   /** Same-repo numbers in the issue's native blockedBy relation, with their states. Throws on failure. */
   nativeBlockers(repo: string, n: number): { number: number; state: string }[];
 }
 
+const WAY_OUT = (n: number): string =>
+  `to clear it, edit the issue body to remove or correct the 'Blocked by #${n}' line`;
+
 export function openBlockers(issue: number, repo: string, body: string, deps: BlockerDeps): number[] {
   const open = new Set<number>();
   const declared = parseDeclaredBlockers(body).filter((n) => n !== issue);
   for (const n of declared) {
-    const state = deps.issueState(repo, n).trim().toUpperCase();
+    let state: string;
+    try {
+      state = deps.issueState(repo, n).trim().toUpperCase();
+    } catch (e) {
+      // Still fail closed, but name the blocker: a deleted/transferred one never reads again.
+      throw new Error(`blocker #${n} state unreadable (${e instanceof Error ? e.message : String(e)}); ${WAY_OUT(n)}`);
+    }
     if (state === 'OPEN') open.add(n);
-    else if (state !== 'CLOSED') throw new Error(`#${n}: unreadable state '${state}'`);
+    else if (state !== 'CLOSED' && state !== 'MERGED') throw new Error(`blocker #${n}: unreadable state '${state}'; ${WAY_OUT(n)}`);
   }
   for (const { number, state } of deps.nativeBlockers(repo, issue)) {
     if (number === issue) continue;
     const s = state.trim().toUpperCase();
     if (s === 'OPEN') open.add(number);
-    else if (s !== 'CLOSED') throw new Error(`#${number}: unreadable state '${s}'`);
+    else if (s !== 'CLOSED' && s !== 'MERGED') throw new Error(`blocker #${number}: unreadable state '${s}'`);
   }
   return [...open].sort((a, b) => a - b);
 }
@@ -53,7 +62,9 @@ const NATIVE_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
 
 export const ghDeps: BlockerDeps = {
   issueState(repo, n) {
-    return execFileSync('gh', ['issue', 'view', String(n), '--repo', repo, '--json', 'state', '--jq', '.state'], {
+    // The REST issues endpoint answers open|closed for issues AND pull requests; `gh issue
+    // view` fails on a PR, which would hold its dependents forever, even once it merges.
+    return execFileSync('gh', ['api', `repos/${repo}/issues/${n}`, '--jq', '.state'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'inherit'],
     });

@@ -34,8 +34,10 @@ function render(body: string): string {
 }
 
 interface World {
-  /** state per issue number; absent = `gh issue view` fails */
+  /** state per issue number; absent = the state read fails */
   states: Record<number, string>;
+  /** numbers that are pull requests: `gh issue view` fails on them, as the real one does */
+  prs?: number[];
   /** raw stdout of the graphql call; null = it fails */
   graphql: string | null;
 }
@@ -59,29 +61,28 @@ function gate(body: string, world: World, issue = '10', cwd?: string): { ok: boo
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-blockers-'));
   fs.mkdirSync(path.join(dir, 'bin'));
   for (const [n, s] of Object.entries(world.states)) fs.writeFileSync(path.join(dir, `state.${n}`), s);
+  for (const n of world.prs ?? []) fs.writeFileSync(path.join(dir, `pr.${n}`), '');
   if (world.graphql !== null) fs.writeFileSync(path.join(dir, 'graphql'), world.graphql);
   fs.writeFileSync(
     path.join(dir, 'bin', 'gh'),
     `#!/usr/bin/env bash
 if [[ "$1" == "issue" && "$2" == "view" ]]; then
+  [[ -f "${dir}/pr.$3" ]] && { echo "GraphQL: Could not resolve to an issue (a pull request)" >&2; exit 1; }
   [[ -f "${dir}/state.$3" ]] && { cat "${dir}/state.$3"; exit 0; }
   echo "HTTP 502" >&2; exit 1
+fi
+if [[ "$1" == "api" && "$2" == repos/${REPO}/issues/* ]]; then
+  n="\${2##*/}"
+  [[ -f "${dir}/state.$n" ]] || { echo "HTTP 502" >&2; exit 1; }
+  # the REST issues endpoint answers open|closed for issues AND pull requests (merged = closed)
+  case "$(cat "${dir}/state.$n")" in OPEN) echo open;; CLOSED|MERGED) echo closed;; *) cat "${dir}/state.$n";; esac
+  exit 0
 fi
 if [[ "$1" == "api" && "$2" == "graphql" ]]; then
   [[ -f "${dir}/graphql" ]] && { cat "${dir}/graphql"; exit 0; }
   echo "HTTP 502" >&2; exit 1
 fi
 exit 1
-`,
-    { mode: 0o755 },
-  );
-  // `npx --no-install tsx` finds tsx from the CALLER's cwd only (a host may also have a
-  // global one, which would mask the fault). Model the strict case: no local tsx, no run.
-  fs.writeFileSync(
-    path.join(dir, 'bin', 'npx'),
-    `#!/usr/bin/env bash
-[[ -x ./node_modules/.bin/tsx ]] || { echo "npx: tsx not found in ./node_modules" >&2; exit 1; }
-exec ./node_modules/.bin/tsx "\${@:3}"
 `,
     { mode: 0o755 },
   );
@@ -135,6 +136,29 @@ describe('dispatch-ready-check.sh - open declared blockers (#3326)', () => {
     const r = gate('# T\n\nBlocked by #7\n', { states: {}, graphql: NO_NATIVE });
     expect(r.ok).toBe(false);
     expect(r.out).toContain('not-ready [blocker-unknown]');
+  });
+
+  it('blocker is a pull request, MERGED -> admitted (a merged PR clears)', () => {
+    const r = gate('# T\n\nBlocked by #7\n', { states: { 7: 'MERGED' }, prs: [7], graphql: NO_NATIVE });
+    expect(r).toEqual({ ok: true, out: 'ready' });
+  });
+
+  it('blocker is a pull request, closed unmerged -> admitted', () => {
+    const r = gate('# T\n\nBlocked by #7\n', { states: { 7: 'CLOSED' }, prs: [7], graphql: NO_NATIVE });
+    expect(r).toEqual({ ok: true, out: 'ready' });
+  });
+
+  it('blocker is a pull request, still OPEN -> refused [blocked]', () => {
+    const r = gate('# T\n\nBlocked by #7\n', { states: { 7: 'OPEN' }, prs: [7], graphql: NO_NATIVE });
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('not-ready [blocked]');
+    expect(r.out).toContain('#7');
+  });
+
+  it('unreadable blocker -> the reason names the blocker and the way out', () => {
+    const r = gate('# T\n\nBlocked by #7\n', { states: {}, graphql: NO_NATIVE });
+    expect(r.out).toContain('#7');
+    expect(r.out).toContain('edit the issue body');
   });
 
   it('native blockedBy open -> refused even with no body declaration', () => {

@@ -102,7 +102,7 @@
 # label-as-authority hole this file exists to close.
 #
 # Usage:
-#   dispatch-ready-check.sh <state> <labels-csv> <verdict-source-file> <body-file>
+#   dispatch-ready-check.sh <state> <labels-csv> <verdict-source-file> <body-file> [issue-number]
 #     <state>               the issue's CURRENT state from `gh issue view --json state`
 #                           (OPEN | CLOSED, case-insensitive).
 #     <labels-csv>          the issue's CURRENT labels, comma-separated (label NAMES).
@@ -115,6 +115,8 @@
 #                           inside a later comment cannot.
 #     <body-file>           a file holding the issue body AS COMPOSED FOR TRIAGE
 #                           ("# " + title + "\n\n" + body), used to recompute bodyHash.
+#     [issue-number]        optional. When given, the issue's declared blockers are read
+#                           and an open one refuses it [blocked] (#3326).
 #
 #   dispatch-ready-check.sh --render-record <decision> <role> <tier> <human_only> <hold> [verdictAt]
 #     Issue body on stdin. Prints the comment-embeddable verdict record. This is the
@@ -829,7 +831,7 @@ if [[ -n "$BLOCKER_ISSUE" ]]; then
   b_msg="$(head -c 300 "$b_err" | tr '\n' ' ')"
   rm -f "$b_err"
   if (( b_rc != 0 )); then
-    refuse blocker-unknown "the state of the issue's declared blockers could not be read (${b_msg:-exit ${b_rc}}) - refusing rather than assuming none are open (#3326)"
+    refuse blocker-unknown "the state of the issue's declared blockers could not be read (${b_msg:-exit ${b_rc}}) - refusing rather than assuming none are open; a blocker that was deleted or transferred never reads again, so edit the issue body to remove or correct its 'Blocked by' line (#3326)"
   fi
   if [[ -n "$b_open" ]]; then
     b_list="$(printf '%s\n' "$b_open" | sed 's/^/#/' | paste -sd, - | sed 's/,/, /g')"

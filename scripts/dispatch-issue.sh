@@ -1024,6 +1024,7 @@ if [[ "$READY_OK" -ne 1 ]]; then
       # repeats for every issue, so a quiet skip would stall the queue unseen. Loud, but
       # no label or comment: it may be a transient gh error the next cycle clears.
       echo "WARNING: #$ISSUE refused because its blockers could not be read - ${READY_REASON}" >&2
+      echo "  (a blocker that no longer exists never reads again: edit the issue body to remove or correct its 'Blocked by #N' line to clear this)" >&2
       echo "  (agent-ready left in place; if this repeats across issues the blocker reader is broken - #3326)"
       ;;
     *)
