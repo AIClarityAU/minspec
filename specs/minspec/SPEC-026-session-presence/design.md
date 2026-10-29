@@ -83,8 +83,9 @@ founder's merge, never `--admin` (`machinery-review-required`).
 
 ## Decisions this plan makes
 
-Each is an engineering choice inside what requirements.md allows. None answers a question
-the spec left to the founder. Alternatives rejected are recorded with each (DR-086 §4).
+Each is an engineering choice inside what requirements.md allows, **except D-P2**, which
+departs from FR-13.1's wording (requirements.md:350) and awaits an FR-13.1 amendment (#3332).
+None answers a question the spec left to the founder. Alternatives rejected are recorded with each (DR-086 §4).
 
 ### D-P1 - Self-identity in pre-commit (closes OQ-5)
 
@@ -112,12 +113,21 @@ sessions in the same tree read the **same** self values. Comparing self's scope 
 peer's presence time is asymmetric: A and B can each decide they hold, or each decide they do
 not, which breaks INV-9.
 
+**requirements.md contradicts itself here.** Line 118 (FR-2, the `startedAt` field) calls the
+presence field "the FR-13 arbitration key". Line 350 (FR-13.1) says to "compare `startedAt` of
+self (from `.minspec/session.json`) with the contending peer's". Those name two different
+values for self. This plan follows line 118, because it is the only reading under which both
+sides of the comparison are the same kind of value. It does not follow the literal wording of
+line 350, so D-P2 is **not** inside what requirements.md allows. requirements.md is hash-locked
+and is left untouched; the amendment is tracked in #3332 (amend FR-13.1 to the presence-record
+`startedAt`). Until it lands, a builder of task 4.1 follows this note.
+
 **Chosen:** self's `startedAt` is read from **self's own presence record**,
-`.minspec/sessions/<MY_SESSION>.session.json`, the field FR-2 names as "the FR-13
-arbitration key". Both sides then compare the same two values and the order is total.
-`.minspec/session.json` stays the source of `MY_SESSION` (FR-13.1's parenthetical), not of
-the timestamp. If self has no readable presence record, self is treated as later (FR-13.1:
-the conservative side blocks).
+`.minspec/sessions/<MY_SESSION>.session.json`. Both sides then compare the same two values
+and the order is total. `MY_SESSION` itself comes from the chain in D-P1
+(`$MINSPEC_SESSION_ID`, then `sessionId` in `.minspec/session.json`), not from FR-13.1; the
+shared `session.json` supplies the id only, never the timestamp. If self has no readable
+presence record, self is treated as later (FR-13.1: the conservative side blocks).
 
 ### D-P3 - Staged set: no diff filter, no rename folding
 

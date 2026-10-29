@@ -114,7 +114,8 @@ Shared rules for every task:
   `PRE_COMMIT_HOOK` and call it as `minspec_cedit_gate || exit 1` after the existing stages,
   per design.md *The pre-commit stanzas in outline*: kill-switch `MINSPEC_CEDIT_OFF`; the
   absent-or-empty sessions no-op with the FR-8 carve-out stated in a comment above it; self
-  `startedAt` from self's own presence record (D-P2); the total-order arbitration (FR-13.1);
+  `startedAt` from self's own presence record (D-P2 - departs from FR-13.1's literal wording at
+  requirements.md:350, see the D-P2 note and #3332); the total-order arbitration (FR-13.1);
   the null-self fallback that allows with a warning (FR-13.2); a rejection message naming the
   peer by scope, branch, pid, `lastSeen` and `startedAt`, with the FR-12 resolution text, the
   FR-16 copy-paste prompt inline, and the bypass; one `info:` line per record whose time it
