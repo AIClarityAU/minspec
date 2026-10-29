@@ -26,4 +26,11 @@ describe('findOpenClarify (#3059)', () => {
   it('a numbered list under an all-resolved section is not open', () => {
     expect(findOpenClarify('## Decisions needed (Clarify) - all resolved\n\n1. **Where.** Hook.\n').open).toBe(false);
   });
+  it('flags letter-labelled decisions (SPEC-258 shape, #3230)', () => {
+    const t = '## Decisions needed (Clarify)\n\n### DQ-A — Which bucket?\n\n### DQ-B — Where?\n\n- **D-C — x**\n\n## Risks\n';
+    expect(findOpenClarify(t)).toEqual({ open: true, items: ['DQ-A', 'DQ-B', 'D-C'] });
+  });
+  it('does not treat QA or Q&A prose as a letter label', () => {
+    expect(findOpenClarify('## Decisions needed (Clarify)\n\nQA pass and Q&A notes.\n').open).toBe(false);
+  });
 });
