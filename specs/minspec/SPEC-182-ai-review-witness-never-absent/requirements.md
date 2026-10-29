@@ -133,10 +133,10 @@ from the head, with no version handshake (#1834), which makes the failure reacha
 
 ## Decisions needed (Clarify)
 
-4 of 6 decisions are resolved: an agent session recorded each option this document already
-recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
-chose them; they are ratified only by approval of this spec. D5 and D6 name no
-recommended option, so they stay open for Clarify.
+5 of 6 decisions are resolved: an agent session recorded each selection (D1-D4 the option
+this document already recommended, D6 the option to write a DR), under delegation DLG-001
+(DR-108, the delegated-approval record). No human chose them; they are ratified only by
+approval of this spec. D5 names no recommended option, so it stays open for Clarify.
 
 - **D1 - Preflight placement.** (a) Separate early step that fails the job before the
   review runs **(rec)**: fastest, clearest signal; costs a CI step and a failed job that

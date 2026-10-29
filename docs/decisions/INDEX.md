@@ -893,9 +893,33 @@ The rule being lifted: on 2026-07-28 the founder made --admin human-only: "Never
 
 ## [DR-113 — The required ai-review check-run has a guard-free second producer, and a preflight checks the head workflow's guard calls against the base guard's exports](DR-113.md)
 
-*Status: proposed · Date: 2026-10-27*
+*Status: accepted · Date: 2026-10-27*
 
 <!-- dr-summary:DR-113 auto=1a2f25486902 -->
 The step "Post honest ai-review verdict check-run" (.github/workflows/ai-review.yml) treats the check-run as best-effort, yet the check-run is the required, server-attested witness (#397). A required witness whose producer can disappear while the producer shows green is a silent gate (constitution invariant 2, DR-066).
 <!-- /dr-summary:DR-113 -->
+
+## [DR-114 — The host drain service runs the drain at concurrency 8 by default; drain-inbox.sh keeps its own default of 1](DR-114.md)
+
+*Status: proposed · Date: 2026-10-27*
+
+<!-- dr-summary:DR-114 auto=5fb445350927 -->
+scripts/drain-inbox.sh defaults to concurrency 1 and carries a caveat (around lines 407-411): two queued issues touching the same file still produce competing pull requests, because each agent branches from origin/main and cannot see an unmerged sibling, so "keep the default at 1 until same-file serialisation exists, and de-duplicate the queue first". That caveat was written for the session-start drain.
+<!-- /dr-summary:DR-114 -->
+
+## [DR-116 — MinSpec has a machine-facing command line (the headless core's), for hooks, workflows and agents only - no MinSpec text tells a person to type it, and its result schema minspec-core/0 is unstable](DR-116.md)
+
+*Status: proposed · Date: 2026-10-28*
+
+<!-- dr-summary:DR-116 auto=95db563f243b -->
+SPEC-136 (headless core, status: planning, T4) packages the checks MinSpec already has into one editor-free program with two ways in: a command line (FR-9) and a stdio tool server (FR-10), both generated from one table of operations (FR-11). The founder allowed the command line on 2026-10-13, for hooks, workflows and agents only (FR-12); this record writes that answer down before any code depends on it.
+<!-- /dr-summary:DR-116 -->
+
+## [DR-117 — The ZCode container boundary - git through GitHub is the only bridge between ZCode's container and the host (BND-1 to BND-6), and measurement 12 checks the running container matches](DR-117.md)
+
+*Status: proposed · Date: 2026-10-28*
+
+<!-- dr-summary:DR-117 auto=f3bf57334586 -->
+ZCode (Z.ai's editor) runs apart from the host so that the host's editor and agents are never "infected" by reading what ZCode wrote; SPEC-136 set six boundary rules for that and said they outlive the spec and need a decision record. This is that record.
+<!-- /dr-summary:DR-117 -->
 <!-- minspec:dr-index:end -->
