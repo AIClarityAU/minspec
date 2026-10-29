@@ -2,8 +2,14 @@
 #
 # The core must be obtainable inside the VM from GitHub alone (BND-1: no folder shared
 # with the host). On a `core-v<version>` tag this builds the single-file bundle with
-# `buildCore` (packages/core/build.mjs — the same bundler call the tests use) and attaches
-# `minspec-core-<version>.cjs` plus `minspec-core-<version>.cjs.sha256` to the release.
+# `buildCore` (packages/core/build.mjs, as specified in SPEC-136 design.md - the same
+# bundler call the tests are to use) and attaches `minspec-core-<version>.cjs` plus
+# `minspec-core-<version>.cjs.sha256` to the release.
+#
+# Not yet runnable: packages/core/ (package.json, build.mjs, buildCore) is created by
+# SPEC-136 tasks 3-15 and does not exist when this file lands. Until it does, a `core-v*`
+# tag or a manual run fails closed at the version read. This file is dormant, not verified;
+# the task 16.1 dry run is to be done once packages/core/ lands.
 #
 # The tag prefix `core-v` keeps this off the extension's own version tags (INV-3).
 # No DR-103 release workflow exists yet, so this is its own file; fold it in as a job
@@ -15,7 +21,8 @@
 # GITHUB_TOKEN; nothing is stored.
 #
 # Dry run: Actions > release-core > Run workflow builds the bundle and its sha256 and verifies
-# them; it never touches a release.
+# them; it attaches nothing to a release (the attach step runs only on a tag push). It
+# uploads no artifact either, so the built files are not inspectable from a manual run.
 name: release-core
 
 on:
@@ -71,7 +78,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Attach to the GitHub release
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
