@@ -356,6 +356,11 @@ item.
   displace a specific unmet Phase-1 item, rather than holding the line the constitution's
   own checklist draws.
 
+**Founder answer (2026-10-29, founder, via AskUserQuestion, queue item c098):** "Plan may
+start now, ahead of Phase 1". This is not the recommended option: the founder chose to
+sequence this item ahead of the Phase 1 exit checklist, accepting the cost that build
+capacity goes to Phase 2 polish before core is done.
+
 ## Why no new DR
 
 Every recommended option above is additive and fully revertable inside a day: new files,
