@@ -226,8 +226,12 @@ adds no extra cost. Rejected: writing `plan: pending` to dodge the gate. `design
 so that block would lie, and FR-1 asks for "accurate `phases:` frontmatter".
 
 **The body parenthetical.** `setBodyStatusToken` rewrites only the leading word, which would
-leave "**Status:** Specifying (SDD Implement phase)" in all four files. The task replaces the
-parenthetical with "(not built; corrected by SPEC-059)" by hand. This is prose, not the
+leave "**Status:** Specifying (SDD Implement phase)" in the three files that carry a body
+`**Status:**` line: SPEC-014 `requirements.md`, SPEC-018 `requirements.md` and SPEC-018
+`design.md` (re-measured by grep at accb89a1). SPEC-018 `tasks.md` has no body Status line
+(its body opens with the title, then `**Requirements:**`), so `setBodyStatusToken` is a
+no-op on it and there is nothing to replace there. The task replaces the parenthetical in
+the three files with "(not built; corrected by SPEC-059)" by hand. This is prose, not the
 status value, and the approval is already void.
 
 **What voiding the two approvals costs, and why it is still right.** After the correction
@@ -272,7 +276,8 @@ the summary line from `npm run validate` on its own branch.
 | `scripts/validate-frontmatter.ts` | the status-mirror rule and its summary line | 2 |
 | `specs/minspec/SPEC-014-review-webview/requirements.md` | `phases:`, `status:`, body token and parenthetical | 3 |
 | `specs/minspec/SPEC-018-spec-custom-editor/requirements.md` | same, plus `implements: none` and `implements_reason:` | 3 |
-| `specs/minspec/SPEC-018-spec-custom-editor/design.md`, `tasks.md` | `phases:`, `status:`, body token and parenthetical | 3 |
+| `specs/minspec/SPEC-018-spec-custom-editor/design.md` | `phases:`, `status:`, body token and parenthetical | 3 |
+| `specs/minspec/SPEC-018-spec-custom-editor/tasks.md` | `phases:`, `status:` only (no body Status line exists) | 3 |
 | three new test files above | tests | 1, 2, 3 |
 
 `spec-validator.ts` is in `affects:` but needs no change: `status.mirror-drift` and its

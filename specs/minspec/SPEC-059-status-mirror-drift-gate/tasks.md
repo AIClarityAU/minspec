@@ -94,7 +94,9 @@ Tier T2. One concern (the rule), one source file, one test file. Depends on task
 ## 3 - Correct SPEC-014 and SPEC-018 through the lifecycle writers (FR-1, INV-1; AC-1, AC-2)
 
 Tier T2. One concern (the two named instances), four spec files, one test file. Depends on
-task 2 having merged. The commit is a `fix(#1807):` commit, so its body carries a
+task 2 having merged, and on #3337 (amend CQ-2 through the approval lane) having landed:
+this task voids the two approvals, so it does not start until the locked CQ-2 "the
+correction is free" claim has been amended. The commit is a `fix(#1807):` commit, so its body carries a
 `Root cause:` line (the `.githooks/commit-msg` RCDD gate): the literal was hand-set by
 `85d0173` on an "approved means implementing" model, and no commit/CI surface ran
 `status.mirror-drift` to reject it.
@@ -118,9 +120,12 @@ task 2 having merged. The commit is a `fix(#1807):` commit, so its body carries 
   `requirements.md`; if it reports an open decision, write `clarify: in-progress` for that
   spec. Paste the exact snippet into the commit body (AC-2). Never type a `status:` value
   by hand.
-- [ ] **3.3** Same four files - replace the body parenthetical "(SDD Implement phase)" after
-  the `**Status:**` word with "(not built; corrected by SPEC-059)". Prose only; the status
-  word itself stays as the writer left it.
+- [ ] **3.3** The three files that carry a body `**Status:**` line (SPEC-014
+  `requirements.md`, SPEC-018 `requirements.md`, SPEC-018 `design.md`) - replace the body
+  parenthetical "(SDD Implement phase)" after the `**Status:**` word with "(not built;
+  corrected by SPEC-059)". Prose only; the status word itself stays as the writer left it.
+  SPEC-018 `tasks.md` has no body Status line, so `setBodyStatusToken` is a no-op there and
+  it gets no edit in this step.
 - [ ] **3.4** `packages/minspec/tests/spec-059-status-corrections.test.ts` (new) - for each of
   the four files on the real corpus: a `phases:` block is present in the raw frontmatter, and
   the literal `status:` equals `deriveStatus(parsed phases, getApprovalStatus(repoRoot,
