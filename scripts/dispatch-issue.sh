@@ -1007,14 +1007,14 @@ fi
 
 READY_REASON=""
 READY_OK=1
-READY_REASON=$("${SCRIPT_DIR}/dispatch-ready-check.sh" \
-  "$ISSUE_STATE" "$ISSUE_LABELS_CSV" "$VERDICT_SRC" "$BODY_FILE") || READY_OK=0
+READY_REASON=$(BLOCKER_REPO="$REPO" "${SCRIPT_DIR}/dispatch-ready-check.sh" \
+  "$ISSUE_STATE" "$ISSUE_LABELS_CSV" "$VERDICT_SRC" "$BODY_FILE" "$ISSUE") || READY_OK=0
 rm -f "$VERDICT_SRC" "$BODY_FILE"
 
 if [[ "$READY_OK" -ne 1 ]]; then
   echo "Skipping #$ISSUE — not dispatchable at dispatch time: ${READY_REASON}"
   case "$READY_REASON" in
-    *'[closed]'*|*'[no-label]'*|*'[countermanded]'*)
+    *'[closed]'*|*'[no-label]'*|*'[countermanded]'*|*'[blocked]'*|*'[blocker-unknown]'*)
       # #406 staleness classes: self-evident from the issue's own state/labels, so
       # a quiet skip is honest — no new label, no comment.
       echo "  (was agent-ready when the drain enumerated it; re-validated stale here — #406)"

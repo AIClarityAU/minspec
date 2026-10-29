@@ -623,6 +623,7 @@ STATE="${1:?usage: dispatch-ready-check.sh <state> <labels-csv> <verdict-source-
 LABELS_CSV="${2-}"      # optional: an issue may have zero labels
 VERDICT_SRC="${3-}"     # REQUIRED: absence is itself a refusal (fail closed)
 BODY_FILE="${4-}"       # REQUIRED: needed to recompute bodyHash
+BLOCKER_ISSUE="${5-}"   # OPTIONAL (#3326): issue number; when given, open declared blockers are a HOLD
 
 # Normalise state; gh emits OPEN | CLOSED.
 state_uc="$(printf '%s' "$STATE" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]')"
@@ -791,6 +792,39 @@ if [[ "$IS_HUMAN_APPROVAL" -eq 1 ]]; then
   r_sup="$(printf '%s' "$(record_field supersedes)" | tr '[:upper:]' '[:lower:]')"
   if ! printf '%s\n' "$APPROVABLE_HOLDS" | tr ' ' '\n' | grep -Fxq -- "$r_sup"; then
     refuse bad-supersedes "human-approval record claims to lift hold '${r_sup:-<missing>}', which no approval may lift (approvable: ${APPROVABLE_HOLDS}) — human_only, info and unknown holds are absolute (DR-072 §3)."
+  fi
+fi
+
+# ── #3326: an open declared blocker is a HOLD, not a build ───────────────────
+# ROOT CAUSE: the ranker (scripts/lib/issue-rank.ts) knew the `Blocked by #N` /
+# `Depends on #N` / native blockedBy edges but called them informational, and this
+# gate - the one pre-dispatch refusal point - never asked. SPEC-136's build tasks were
+# all filed `agent-ready` at once and the drain dispatched dependents beside their
+# prerequisites; eleven agents escalated "blocked on unmerged dependencies".
+#
+# The refusal leaves `agent-ready` in place and (via exit_declined, #2641) costs no
+# dispatch slot, so the issue dispatches on the first cycle after its last blocker
+# closes - no release step. The parser is issue-rank.ts's (scripts/open-blockers.ts
+# imports it); there is no second copy. Fail closed (invariant 2): if a blocker's
+# state cannot be read the answer is "unknown", which is a refusal, never a pass.
+# Checked last so a stale verdict or countermanding label keeps its own reason.
+if [[ -n "$BLOCKER_ISSUE" ]]; then
+  b_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  b_repo="${BLOCKER_REPO:-${REPO-}}"
+  if [[ -z "$b_repo" ]]; then
+    refuse blocker-unknown "no repository named (BLOCKER_REPO), so whether the issue's declared blockers are open cannot be read - refusing rather than assuming none (#3326)"
+  fi
+  b_err="$(mktemp)"
+  b_rc=0
+  b_open="$(npx --no-install tsx "${b_dir}/open-blockers.ts" "$BLOCKER_ISSUE" "$b_repo" < "$BODY_FILE" 2>"$b_err")" || b_rc=$?
+  b_msg="$(head -c 300 "$b_err" | tr '\n' ' ')"
+  rm -f "$b_err"
+  if (( b_rc != 0 )); then
+    refuse blocker-unknown "the state of the issue's declared blockers could not be read (${b_msg:-exit ${b_rc}}) - refusing rather than assuming none are open (#3326)"
+  fi
+  if [[ -n "$b_open" ]]; then
+    b_list="$(printf '%s\n' "$b_open" | sed 's/^/#/' | paste -sd, - | sed 's/,/, /g')"
+    refuse blocked "declared blocker(s) still open: ${b_list} - held until they close; agent-ready stays in place and the issue dispatches on the first cycle after (#3326)"
   fi
 fi
 

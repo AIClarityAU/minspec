@@ -246,6 +246,10 @@ if [[ "$noun $verb" == "api graphql" ]]; then
   case "$query" in
     *"nodes(ids:"*) third="nodes"; answer="$dir/comment-nodes.json" ;;
     *"pullRequest("*) third="pullRequest:$number"; answer="$dir/pr-comments.json" ;;
+    # The readiness gate's blocker read (#3326): not the author gate's provenance read, so
+    # it is answered "no native blockers" and kept out of gh-calls.log, which pins the
+    # author gate's reads exactly.
+    *"blockedBy("*) echo '{"data":{"repository":{"issue":{"blockedBy":{"totalCount":0,"nodes":[]}}}}}'; exit 0 ;;
     *"issue("*) third="issue:$number"; answer="$dir/provenance.$number.json" ;;
     *) third="unrecognised" ;;
   esac
