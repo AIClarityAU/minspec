@@ -1014,10 +1014,17 @@ rm -f "$VERDICT_SRC" "$BODY_FILE"
 if [[ "$READY_OK" -ne 1 ]]; then
   echo "Skipping #$ISSUE — not dispatchable at dispatch time: ${READY_REASON}"
   case "$READY_REASON" in
-    *'[closed]'*|*'[no-label]'*|*'[countermanded]'*|*'[blocked]'*|*'[blocker-unknown]'*)
+    *'[closed]'*|*'[no-label]'*|*'[countermanded]'*|*'[blocked]'*)
       # #406 staleness classes: self-evident from the issue's own state/labels, so
       # a quiet skip is honest — no new label, no comment.
       echo "  (was agent-ready when the drain enumerated it; re-validated stale here — #406)"
+      ;;
+    *'[blocker-unknown]'*)
+      # #3326: a blocker read FAILURE is a fault, not a property of the issue - and it
+      # repeats for every issue, so a quiet skip would stall the queue unseen. Loud, but
+      # no label or comment: it may be a transient gh error the next cycle clears.
+      echo "WARNING: #$ISSUE refused because its blockers could not be read - ${READY_REASON}" >&2
+      echo "  (agent-ready left in place; if this repeats across issues the blocker reader is broken - #3326)"
       ;;
     *)
       # #983 verdict classes (and anything unrecognised — fail toward VISIBLE):

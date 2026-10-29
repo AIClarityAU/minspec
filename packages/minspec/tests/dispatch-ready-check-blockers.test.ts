@@ -55,7 +55,7 @@ function native(nodes: { number: number; state: string; repo?: string }[]): stri
   });
 }
 
-function gate(body: string, world: World, issue = '10'): { ok: boolean; out: string } {
+function gate(body: string, world: World, issue = '10', cwd?: string): { ok: boolean; out: string } {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-blockers-'));
   fs.mkdirSync(path.join(dir, 'bin'));
   for (const [n, s] of Object.entries(world.states)) fs.writeFileSync(path.join(dir, `state.${n}`), s);
@@ -75,6 +75,16 @@ exit 1
 `,
     { mode: 0o755 },
   );
+  // `npx --no-install tsx` finds tsx from the CALLER's cwd only (a host may also have a
+  // global one, which would mask the fault). Model the strict case: no local tsx, no run.
+  fs.writeFileSync(
+    path.join(dir, 'bin', 'npx'),
+    `#!/usr/bin/env bash
+[[ -x ./node_modules/.bin/tsx ]] || { echo "npx: tsx not found in ./node_modules" >&2; exit 1; }
+exec ./node_modules/.bin/tsx "\${@:3}"
+`,
+    { mode: 0o755 },
+  );
   const verdict = path.join(dir, 'verdict');
   const bodyFile = path.join(dir, 'body');
   fs.writeFileSync(verdict, render(body));
@@ -82,6 +92,7 @@ exit 1
   try {
     const out = execFileSync('bash', [GATE, 'OPEN', 'agent-ready,role:dev', verdict, bodyFile, issue], {
       encoding: 'utf-8',
+      cwd,
       env: { ...process.env, PATH: `${path.join(dir, 'bin')}:${process.env.PATH}`, BLOCKER_REPO: REPO },
     });
     return { ok: true, out: out.trim() };
@@ -98,6 +109,14 @@ describe('dispatch-ready-check.sh - open declared blockers (#3326)', () => {
     expect(r.ok).toBe(false);
     expect(r.out).toContain('not-ready [blocked]');
     expect(r.out).toContain('#7');
+  });
+
+  it('runs the blocker check from outside the repo (tsx resolved from the script, not cwd)', () => {
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-blockers-cwd-'));
+    const r = gate('# T\n\nBlocked by #7\n', { states: { 7: 'OPEN' }, graphql: NO_NATIVE }, '10', elsewhere);
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('not-ready [blocked]');
+    expect(r.out).not.toContain('[blocker-unknown]');
   });
 
   it('B closed -> admitted', () => {

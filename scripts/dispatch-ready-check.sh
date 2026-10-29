@@ -814,9 +814,16 @@ if [[ -n "$BLOCKER_ISSUE" ]]; then
   if [[ -z "$b_repo" ]]; then
     refuse blocker-unknown "no repository named (BLOCKER_REPO), so whether the issue's declared blockers are open cannot be read - refusing rather than assuming none (#3326)"
   fi
+  # The pinned runner, resolved from THIS script's location - never `npx tsx`, which
+  # looks in the caller's cwd and, run from outside the repo, would refuse every issue
+  # (same pattern as dispatch-issue.sh / drain-inbox.sh).
+  b_tsx="${b_dir}/../node_modules/.bin/tsx"
+  if [[ ! -x "$b_tsx" ]]; then
+    refuse blocker-unknown "no pinned tsx runner at ${b_tsx}, so the issue's declared blockers cannot be read - refusing rather than assuming none are open (#3326)"
+  fi
   b_err="$(mktemp)"
   b_rc=0
-  b_open="$(npx --no-install tsx "${b_dir}/open-blockers.ts" "$BLOCKER_ISSUE" "$b_repo" < "$BODY_FILE" 2>"$b_err")" || b_rc=$?
+  b_open="$("$b_tsx" "${b_dir}/open-blockers.ts" "$BLOCKER_ISSUE" "$b_repo" < "$BODY_FILE" 2>"$b_err")" || b_rc=$?
   b_msg="$(head -c 300 "$b_err" | tr '\n' ' ')"
   rm -f "$b_err"
   if (( b_rc != 0 )); then
