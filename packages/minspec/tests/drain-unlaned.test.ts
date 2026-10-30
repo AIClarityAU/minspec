@@ -21,7 +21,7 @@ describe('drain-inbox.sh --unlaned', () => {
 
   it.each([
     'inbox', 'agent-ready', 'agent-ready-specify', 'agent-running', 'agent-escalated',
-    'hold:founder', 'needs-review', 'needs-human-review', 'blocked-by:#5', 'parked',
+    'hold:founder', 'needs-review', 'needs-human-review', 'needs-info', 'blocked-by:#5', 'parked',
   ])('label %s is a lane', (label) => {
     expect(unlaned([{ number: 7, labels: ['role:dev', label] }])).toEqual([]);
   });

@@ -1271,13 +1271,13 @@ reconcile_done_issues() {
 # sits in a lane; triage validated what it was given and never that it was given all.
 #
 # A lane label is any label an actor reads: inbox, agent-* (ready, ready-specify, running,
-# done, escalated, ...), hold:*, needs-review, needs-human-review, blocked-by*, parked.
+# done, escalated, ...), hold:*, needs-review, needs-human-review, needs-info, blocked-by*, parked.
 # unlaned_numbers is the pure decision (stdin: `gh issue list --json number,labels`,
 # stdout: one number per issue with no lane label). It needs jq; without it the caller
 # reports loudly instead of guessing.
 unlaned_numbers() {
   jq -r '.[] | select(([.labels[].name | select(
-      . == "inbox" or . == "needs-review" or . == "needs-human-review" or . == "parked"
+      . == "inbox" or . == "needs-review" or . == "needs-human-review" or . == "needs-info" or . == "parked"
       or startswith("agent-") or startswith("hold:") or startswith("blocked-by")
     )] | length) == 0) | .number'
 }
@@ -1294,6 +1294,11 @@ reconcile_unlaned_issues() {
   if ! json=$(gh issue list --repo "$REPO" --state open --limit 5000 --json number,labels 2>/dev/null); then
     echo "[drain] lane check: could not list open issues — NOT evidence that every issue has a lane (#3355)."
     return 0
+  fi
+  local listed
+  listed=$(printf '%s' "$json" | jq 'length' 2>/dev/null || echo 0)
+  if [[ "$listed" -ge 5000 ]]; then
+    echo "[drain] lane check: open-issue list hit the 5000 limit — issues beyond it were NOT checked (#3355)."
   fi
   if ! nums=$(printf '%s' "$json" | unlaned_numbers); then
     echo "[drain] lane check: could not parse the issue list — NOT evidence that every issue has a lane (#3355)."
