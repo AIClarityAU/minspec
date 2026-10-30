@@ -102,3 +102,67 @@ describe('#2939 B6: the switch already off is not overridden or re-asked', () =>
     expect(d.heldAsked()).toBe(0);
   });
 });
+
+/**
+ * T3 (#3344) - the held count misses drafts that already merged.
+ *
+ * THE BUG. Delegated spec merge (#2981, Step 0c) lands a held spec draft on main at
+ * `status: specifying`, which takes it OUT of the held count above. Each such merge
+ * reopened spec-writing while the drafts it landed still waited on Clarify and sign-off,
+ * so unapproved specs on main went from 30 to 77 between 2026-10-27 and 2026-10-29 with
+ * the held cap holding throughout. The brake measured where a draft waits before merge,
+ * never where it waits after.
+ *
+ *   P1  at or above MINSPEC_DRAIN_SPECIFY_MAX_PENDING (default 40) unapproved specs on the
+ *       tree the drain runs from, spec-writing pauses even with nothing held; builds run.
+ *   P2  below it, spec-writing runs; only the frontmatter `status:` counts.
+ *   P3  a tree with no specs/ folder is a count nobody read: spec-writing pauses, loudly.
+ *   P4  a cap that is not a whole number is read as 0, the setting that spends nothing.
+ */
+describe('#3344 P1: unapproved specs on main at the cap pause spec-writing', () => {
+  it.each([
+    { name: 'exactly the default cap of 40', pending: 40, env: {} as Record<string, string>, cap: 40 },
+    { name: 'the 77 on main on 2026-10-29', pending: 77, env: {} as Record<string, string>, cap: 40 },
+    { name: 'a cap of 3 with 3 pending', pending: 3, env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' }, cap: 3 },
+  ])('$name: only the build is dispatched, and the cycle says why once', async ({ pending, env, cap }) => {
+    const d = await runOnce({ ready: [42], specify: [77, 78], heldPrs: 0, pendingSpecs: pending, reading: ROOM, env });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(`${pending} spec(s) on main waiting for Clarify or sign-off`);
+    expect(lines[0]).toContain(`cap ${cap}`);
+    expect(lines[0]).toContain('2 agent-ready-specify issue(s) left');
+  });
+});
+
+describe('#3344 P2: below the pending cap, spec-writing runs', () => {
+  it.each([
+    { name: '39 pending, default cap', pending: 39, env: {} as Record<string, string> },
+    { name: '2 pending, cap of 3 (body mention and approved specs not counted)', pending: 2, env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' } },
+  ])('$name: both queues are dispatched', async ({ pending, env }) => {
+    const d = await runOnce({ ready: [42], specify: [77], heldPrs: 0, pendingSpecs: pending, reading: ROOM, env });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+});
+
+describe('#3344 P3: no specs folder is not a count of zero', () => {
+  it('spec-writing pauses and the line says the count could not be read', async () => {
+    const d = await runOnce({ ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 'missing', reading: ROOM });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('unapproved specs on main could not be counted');
+  });
+});
+
+describe('#3344 P4: a pending cap that is not a whole number spends nothing', () => {
+  it.each(['forty', '-1', '2.5'])('MINSPEC_DRAIN_SPECIFY_MAX_PENDING=%j pauses spec-writing and names the value', async (value) => {
+    const d = await runOnce({ ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 0, reading: ROOM, env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: value } });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('MINSPEC_DRAIN_SPECIFY_MAX_PENDING');
+    expect(lines[0]).toContain('is not a whole number');
+  });
+});
