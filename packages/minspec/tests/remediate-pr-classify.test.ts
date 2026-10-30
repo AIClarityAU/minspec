@@ -432,6 +432,59 @@ describe('remediate-pr.sh --derive-failing: ready-to-merge gate is not a code-fi
     ])).toBe('yes');
   });
 
+  // #3174 — a commit StatusContext carries `state`, never `conclusion`; reading conclusion
+  // alone read a red status context as passing, so a BEHIND PR stranded as failing_checks=no.
+  it('a status context failing via `state` only (no conclusion) → yes (#3174)', () => {
+    expect(derive([
+      { name: 'test', workflowName: 'ci', conclusion: 'SUCCESS' },
+      { context: 'MinSpec SDD validation', state: 'FAILURE' },
+    ])).toBe('yes');
+  });
+
+  it('classified end to end: BEHIND PR with a state-only red context is remediated, not parked (#3174)', () => {
+    const failing = derive([{ context: 'lint', state: 'ERROR' }]);
+    const action = execFileSync('bash', [SCRIPT, '--classify', 'agent/issue-2274', 'MERGEABLE', 'BEHIND', '', failing, 'no'], { encoding: 'utf-8' }).trim();
+    expect(failing).toBe('yes');
+    expect(action).not.toBe('skip-awaiting-merge-turn');
+  });
+
+  it('a pending/success status context is not a failure (#3174)', () => {
+    expect(derive([
+      { context: 'a', state: 'PENDING' },
+      { context: 'b', state: 'SUCCESS' },
+    ])).toBe('no');
+  });
+
+  it('a red ai-review/pass status context (context, no name) is not code-fixable → no (#3174 review)', () => {
+    expect(derive([{ context: 'ai-review/pass', state: 'FAILURE' }])).toBe('no');
+    expect(derive([{ context: 'ai-review/pass', state: 'ERROR' }])).toBe('no');
+    expect(derive([{ context: 'ai-review', state: 'FAILURE' }])).toBe('no');
+  });
+
+  it('a real red status context still counts beside a red ai-review/pass (#3174 review)', () => {
+    expect(derive([
+      { context: 'ai-review/pass', state: 'FAILURE' },
+      { context: 'lint', state: 'FAILURE' },
+    ])).toBe('yes');
+  });
+
+  it('a red ai-review/pass context yields no rerun run id (#3174 review)', () => {
+    const ids = execFileSync('bash', [SCRIPT, '--derive-failed-runs'], {
+      encoding: 'utf-8',
+      input: JSON.stringify({ statusCheckRollup: [
+        { context: 'ai-review/pass', state: 'FAILURE', targetUrl: 'https://github.com/o/r/actions/runs/111' },
+        { context: 'lint', state: 'FAILURE', targetUrl: 'https://github.com/o/r/actions/runs/222' },
+      ] }),
+    }).trim();
+    expect(ids).toBe('222');
+  });
+
+  it('FAILED_NAMES shares the same gate exclusion as derive_failing_non_review (#3174 review)', () => {
+    const src = fs.readFileSync(SCRIPT, 'utf-8');
+    const block = src.slice(src.indexOf('FAILED_NAMES=$(jq'));
+    expect(block.slice(0, block.indexOf('CONTEXT=$('))).toContain('select(self_cert_gate | not)');
+  });
+
   it('ai-review red stays excluded; in-flight check is not a failure', () => {
     expect(derive([
       { name: 'ai-review', conclusion: 'FAILURE' },
@@ -533,5 +586,59 @@ describe('remediate-pr.sh --classify: sweep defers ai-review:pass BEHIND PRs (#3
   });
   it('the creator-shepherd contract (no 8th arg) still rebases a pass+BEHIND PR', () => {
     expect(classify('agent/issue-1', 'MERGEABLE', 'BEHIND', 'ai-review:pass', 'no', 'no')).toBe('rebase-only');
+  });
+});
+
+describe('remediate-pr.sh: delegated-approval branches (dlg-approve/*) — mechanical actions only (#3036)', () => {
+  const dlg = 'dlg-approve/SPEC-130';
+
+  it('a red check on a dlg-approve PR is rerun, never agent-remediated', () => {
+    expect(classify(dlg, 'MERGEABLE', 'UNSTABLE', '', 'yes', 'no')).toBe('dlg-rerun');
+  });
+  it('a red ai-review, or an ai-review:changes label, is a re-review rerun, never an agent', () => {
+    expect(classify(dlg, 'MERGEABLE', 'BLOCKED', '', 'no', 'yes')).toBe('dlg-rerun');
+    expect(classify(dlg, 'MERGEABLE', 'BLOCKED', 'ai-review:changes', 'no', 'no')).toBe('dlg-rerun');
+  });
+  it('BEHIND is a mechanical branch update; conflicts stay human; clean is left alone', () => {
+    expect(classify(dlg, 'MERGEABLE', 'BEHIND', '', 'no', 'no')).toBe('rebase-only');
+    expect(classify(dlg, 'CONFLICTING', 'DIRTY', '', 'yes', 'no')).toBe('skip-conflict');
+    expect(classify(dlg, 'MERGEABLE', 'CLEAN', 'ai-review:pass', 'no', 'no')).toBe('skip-clean');
+  });
+  it('a live claim still wins (orphan-fallback only)', () => {
+    expect(classify(dlg, 'MERGEABLE', 'UNSTABLE', '', 'yes', 'no', 'yes')).toBe('skip-live-owned');
+  });
+  it('lookalike prefixes stay out of scope', () => {
+    expect(classify('dlg-approver/x', 'MERGEABLE', 'UNSTABLE', '', 'yes', 'no')).toBe('skip-not-automation');
+    expect(classify('dlg-approve-x', 'MERGEABLE', 'UNSTABLE', '', 'yes', 'no')).toBe('skip-not-automation');
+  });
+  it('non-dlg branches never get dlg-rerun', () => {
+    expect(classify('fix/1-x', 'MERGEABLE', 'UNSTABLE', '', 'yes', 'no')).toBe('agent-remediate-checks');
+  });
+
+  const allowed = (branch: string, action: string): string =>
+    execFileSync('bash', [SCRIPT, '--content-push-allowed', branch, action], { encoding: 'utf-8' }).trim();
+  it('refuses any agent content push on dlg-approve/*, allows mechanical actions', () => {
+    expect(allowed(dlg, 'agent-remediate-checks')).toBe('no');
+    expect(allowed(dlg, 'agent-remediate-review')).toBe('no');
+    expect(allowed(dlg, 'rebase-only')).toBe('yes');
+    expect(allowed(dlg, 'dlg-rerun')).toBe('yes');
+    expect(allowed('fix/1-x', 'agent-remediate-checks')).toBe('yes');
+  });
+
+  it('--derive-failed-runs keeps a red ai-review run only with-review; never ready-to-merge', () => {
+    const roll = JSON.stringify({
+      statusCheckRollup: [
+        // Production's shape (read on #3382): the App posts `ai-review` with its homepage as the
+        // URL; the run id is on the `runner` job of the review workflow.
+        { name: 'ai-review', workflowName: '', conclusion: 'FAILURE', detailsUrl: 'https://minspec.dev/', startedAt: '2026-01-01T00:00:00Z' },
+        { name: 'runner', workflowName: 'ai-review-runner', conclusion: 'SUCCESS', detailsUrl: 'https://x/actions/runs/111/job/1', startedAt: '2026-01-01T00:00:00Z' },
+        { name: 'test', conclusion: 'FAILURE', detailsUrl: 'https://x/actions/runs/222/job/2', startedAt: '2026-01-01T00:00:00Z' },
+        { name: 'gate', workflowName: 'ready-to-merge', conclusion: 'FAILURE', detailsUrl: 'https://x/actions/runs/333/job/3', startedAt: '2026-01-01T00:00:00Z' },
+      ],
+    });
+    const run = (extra: string[]) =>
+      execFileSync('bash', [SCRIPT, '--derive-failed-runs', ...extra], { encoding: 'utf-8', input: roll }).trim().split('\n');
+    expect(run([])).toEqual(['222']);
+    expect(run(['with-review'])).toEqual(['111', '222']);
   });
 });

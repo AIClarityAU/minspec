@@ -46,8 +46,12 @@ interface Row {
 const spec = (n: number) => `specs/minspec/SPEC-${n}-x/requirements.md`;
 
 /** seamExit: per-PR exit code of the stub seam (default 0 = armed). */
-function run(rows: Row[] | string, o: { listExit?: number; seamExit?: Record<number, number>; env?: Record<string, string> } = {}) {
+function run(
+  rows: Row[] | string,
+  o: { listExit?: number; listStderr?: string; failFirst?: number; seamExit?: Record<number, number>; env?: Record<string, string> } = {},
+) {
   const calls = path.join(tmp, 'calls');
+  fs.rmSync(calls, { force: true }); // one run's calls; the cursor file is what carries over
   const list =
     typeof rows === 'string'
       ? rows
@@ -82,13 +86,24 @@ exit $code
     'set -euo pipefail',
     'REPO="AIClarityAU/minspec"',
     `DISPATCH=${JSON.stringify(seam)}`,
-    `gh() { printf 'GH %s\\n' "$*" >> ${JSON.stringify(calls)}; cat ${JSON.stringify(path.join(tmp, 'list.json'))}; return ${o.listExit ?? 0}; }`,
+    // failFirst: the first N gh calls fail (stderr + exit 1), later ones succeed.
+    `gh() { printf 'GH %s\\n' "$*" >> ${JSON.stringify(calls)}; ` +
+      `local n; n=$(grep -c '^GH ' ${JSON.stringify(calls)}); ` +
+      `if (( n <= ${o.failFirst ?? 0} )); then echo ${JSON.stringify(o.listStderr ?? 'boom')} >&2; return 1; fi; ` +
+      `if [ ${o.listExit ?? 0} != 0 ]; then echo ${JSON.stringify(o.listStderr ?? '')} >&2; fi; ` +
+      `cat ${JSON.stringify(path.join(tmp, 'list.json'))}; return ${o.listExit ?? 0}; }`,
     stageBlock(),
     'arm_delegated_spec_merges; echo "rc=$?"',
   ].join('\n');
   const r = spawnSync('bash', ['-c', script], {
     encoding: 'utf-8',
-    env: { PATH: process.env.PATH ?? '', ...(o.env ?? {}) },
+    env: {
+      PATH: process.env.PATH ?? '',
+      MINSPEC_DRAIN_DELEGATED_MERGE_RETRY_SLEEP: '0',
+      // Never the live drain's cursor under /tmp: each test gets its own.
+      MINSPEC_DRAIN_DELEGATED_MERGE_CURSOR: path.join(tmp, 'cursor'),
+      ...(o.env ?? {}),
+    },
   });
   const all = fs.existsSync(calls) ? fs.readFileSync(calls, 'utf-8').split('\n').filter(Boolean) : [];
   return {
@@ -103,6 +118,10 @@ describe('Step 0c hands held spec-only PRs to the seam, and nothing else', () =>
     const r = run([]);
     expect(r.list[0]).toContain('pr list --repo AIClarityAU/minspec --state open --label needs-human-review --limit 500');
     expect(r.list[0]).toContain('number,isDraft,autoMergeRequest,files');
+    // #3123: a spec PR opened outside the drain is held as awaiting-approval, not
+    // needs-human-review; `--label` ANDs, so each hold signal is its own read.
+    expect(r.list[1]).toContain('pr list --repo AIClarityAU/minspec --state open --label awaiting-approval --limit 500');
+    expect(r.list).toHaveLength(2);
     expect(r.stdout).toContain('no held spec-only PRs');
     expect(r.stdout).toContain('rc=0');
   });
@@ -120,6 +139,12 @@ describe('Step 0c hands held spec-only PRs to the seam, and nothing else', () =>
     ]);
     expect(r.seamCalls).toEqual(['--delegated-spec-merge 10 --arm', '--delegated-spec-merge 30 --arm']);
     expect(r.stdout).toContain('2 armed of 2 judged');
+  });
+
+  it('a PR carrying both hold labels is judged once (#3123)', () => {
+    const r = run([{ number: 10, files: [spec(10)] }]);
+    expect(r.list).toHaveLength(2);
+    expect(r.seamCalls).toEqual(['--delegated-spec-merge 10 --arm']);
   });
 
   it('a denial is reported with its reason and is not a failure', () => {
@@ -144,6 +169,37 @@ describe('Step 0c hands held spec-only PRs to the seam, and nothing else', () =>
   });
 });
 
+describe('the cap rotates, so held PRs cannot starve the ones behind them', () => {
+  // 2026-10-30: seven PRs held on every cycle (handed-to-human, hold:human, plan
+  // artifact, ai-review:changes) sat oldest in the list. Judged oldest-first under a
+  // cap of 10, they took 7 slots each cycle and twelve cycles in a row ended
+  // "0 armed of 10 judged", while 36 newer spec PRs were never judged at all.
+  const rows = [1, 2, 3, 4, 5].map((n) => ({ number: n, files: [spec(n)] }));
+  const env = { MINSPEC_DRAIN_DELEGATED_MERGE_MAX: '2' };
+  const judged = (r: { seamCalls: string[] }) => r.seamCalls.map((c) => Number(c.split(' ')[1]));
+
+  it('the next cycle starts after the last PR judged, and wraps', () => {
+    const held = { 1: 1, 2: 1, 3: 1, 4: 1, 5: 1 };
+    expect(judged(run(rows, { env, seamExit: held }))).toEqual([1, 2]);
+    expect(judged(run(rows, { env, seamExit: held }))).toEqual([3, 4]);
+    expect(judged(run(rows, { env, seamExit: held }))).toEqual([5, 1]);
+  });
+
+  it('a cursor PR that has since left the list still resumes after its number', () => {
+    fs.writeFileSync(path.join(tmp, 'cursor'), '3\n');
+    expect(judged(run(rows.filter((r) => r.number !== 3), { env }))).toEqual([4, 5]);
+  });
+
+  it('an unreadable cursor starts from the oldest, and an unwritable one is not fatal', () => {
+    fs.writeFileSync(path.join(tmp, 'cursor'), 'garbage');
+    expect(judged(run(rows, { env }))).toEqual([1, 2]);
+    const r = run(rows, { env: { ...env, MINSPEC_DRAIN_DELEGATED_MERGE_CURSOR: path.join(tmp, 'no', 'such', 'dir', 'c') } });
+    expect(judged(r)).toEqual([1, 2]);
+    expect(r.stderr).toContain('could not record');
+    expect(r.stdout).toContain('rc=0');
+  });
+});
+
 describe('never silent, never fatal', () => {
   it('the switch turns it off, and says so', () => {
     const r = run([{ number: 10, files: [spec(10)] }], { env: { MINSPEC_DRAIN_DELEGATED_MERGE: '0' } });
@@ -164,6 +220,21 @@ describe('never silent, never fatal', () => {
     expect(r.seamCalls).toEqual([]);
     expect(r.stderr).toContain('could not be read');
     expect(r.stdout).toContain('rc=0');
+  });
+
+  it('a persistent list failure names the gh stderr in the WARNING (#3098)', () => {
+    const r = run('', { listExit: 1, listStderr: 'GraphQL: Resource limits exceeded' });
+    expect(r.list).toHaveLength(2);
+    expect(r.stderr).toContain('could not be read after 2 attempts');
+    expect(r.stderr).toContain('GraphQL: Resource limits exceeded');
+    expect(r.seamCalls).toEqual([]);
+  });
+
+  it('a transient list failure is retried once and the stage then runs (#3098)', () => {
+    const r = run([{ number: 10, files: [spec(10)] }], { failFirst: 1 });
+    expect(r.list).toHaveLength(3);
+    expect(r.stderr).not.toContain('could not be read');
+    expect(r.seamCalls).toEqual(['--delegated-spec-merge 10 --arm']);
   });
 
   it('an unparseable list is loud', () => {
