@@ -909,7 +909,7 @@ scripts/drain-inbox.sh defaults to concurrency 1 and carries a caveat (around li
 
 ## [DR-116 — MinSpec has a machine-facing command line (the headless core's), for hooks, workflows and agents only - no MinSpec text tells a person to type it, and its result schema minspec-core/0 is unstable](DR-116.md)
 
-*Status: proposed · Date: 2026-10-28*
+*Status: accepted · Date: 2026-10-28*
 
 <!-- dr-summary:DR-116 auto=95db563f243b -->
 SPEC-136 (headless core, status: planning, T4) packages the checks MinSpec already has into one editor-free program with two ways in: a command line (FR-9) and a stdio tool server (FR-10), both generated from one table of operations (FR-11). The founder allowed the command line on 2026-10-13, for hooks, workflows and agents only (FR-12); this record writes that answer down before any code depends on it.
