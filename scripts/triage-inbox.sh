@@ -318,7 +318,7 @@ CONTENT
   # (`backfill-hold-labels.sh` already guards this way; this is the same check.)
   local h CURRENT_LABELS
   CURRENT_LABELS=$(echo "$ISSUE_JSON" | jq -r '[.labels[].name] | join(",")')
-  for h in human tier specify info unknown; do
+  for h in human tier specify info built-spec unknown; do
     [[ "hold:${h}" == "$HOLD_LABEL" ]] && continue
     [[ ",${CURRENT_LABELS}," == *",hold:${h},"* ]] || continue
     SUPERSEDED="${SUPERSEDED},hold:${h}"
