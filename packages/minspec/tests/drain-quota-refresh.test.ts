@@ -34,7 +34,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
 
 // Module scope: nothing in this file may depend on drain or quota knobs in the surrounding
@@ -57,27 +57,21 @@ afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
 /** Run the gate with a stubbed producer. Never invokes the real one. */
 function run(env: Record<string, string> = {}): { code: number; out: string; err: string } {
-  try {
-    const out = execFileSync('bash', [DRAIN, '--quota-gate'], {
-      encoding: 'utf-8',
-      env: {
-        ...drainBaseEnv(),
-        MINSPEC_QUOTA_FILE: quotaFile,
-        // Disable the bootstrap carve-out so these tests read the pure arms, exactly
-        // as drain-quota-deadline.test.ts does.
-        MINSPEC_QUOTA_BOOTSTRAP_ADMITS: '0',
-        MINSPEC_QUOTA_REFRESH: '1',
-        ...env,
-      },
-    });
-    return { code: 0, out: out.trim(), err: '' };
-  } catch (e: any) {
-    return {
-      code: e.status ?? 1,
-      out: ((e.stdout ?? '') as string).trim(),
-      err: ((e.stderr ?? '') as string).trim(),
-    };
-  }
+  // spawnSync, not execFileSync: stderr must be visible on exit 0 too, or a test of the
+  // success path ("no failure line") cannot fail.
+  const r = spawnSync('bash', [DRAIN, '--quota-gate'], {
+    encoding: 'utf-8',
+    env: {
+      ...drainBaseEnv(),
+      MINSPEC_QUOTA_FILE: quotaFile,
+      // Disable the bootstrap carve-out so these tests read the pure arms, exactly
+      // as drain-quota-deadline.test.ts does.
+      MINSPEC_QUOTA_BOOTSTRAP_ADMITS: '0',
+      MINSPEC_QUOTA_REFRESH: '1',
+      ...env,
+    },
+  });
+  return { code: r.status ?? 1, out: (r.stdout ?? '').trim(), err: (r.stderr ?? '').trim() };
 }
 
 function write(q: Partial<{ used_percentage: number; resets_at: number; observed_at: number }>) {
@@ -323,6 +317,22 @@ describe('#2699 — the refresh is judged by a fresher reading, not by the produ
     const r = run({ MINSPEC_QUOTA_REFRESH_CMD: producerWritesFresh() });
     expect(r.code).toBe(0);
     expect(r.err).not.toMatch(/quota refresh failed/);
+  });
+
+  it('(c) a reading that moved but is still past the staleness limit → reported as failed, and still defers', () => {
+    stale();
+    const p = path.join(tmpDir, 'older.sh');
+    fs.writeFileSync(
+      p,
+      `#!/usr/bin/env bash\nprintf '{"used_percentage":1,"resets_at":%s,"observed_at":%s}' ` +
+        `"$(( $(date +%s) + 3600 ))" "$(( $(date +%s) - 4000 ))" > "${quotaFile}"\n`,
+    );
+    fs.chmodSync(p, 0o755);
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: `bash ${p}` });
+    expect(r.code).toBe(42);
+    expect(r.out).toMatch(/^defer:stale/);
+    expect(r.err).toMatch(/quota refresh failed.*still older than the staleness limit/);
+    expect(r.out).not.toMatch(/refresh failed/);
   });
 
   it('(d) the producer leaves the reading absent afterwards → reported as failed, never success', () => {
