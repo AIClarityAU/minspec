@@ -35,6 +35,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// Module scope, never a hook: vitest resolves timeouts before beforeAll runs (#1399).
+useShellTimeout();
 
 const ROOT = path.resolve(__dirname, '../../..');
 const DISPATCH = path.join(ROOT, 'scripts', 'dispatch-issue.sh');
