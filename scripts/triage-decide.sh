@@ -147,7 +147,8 @@ emit() {
     printf 'label=%s\nrole=%s\nhold=%s\ntier=%s\nhuman_only=%s\n' \
       "$1" "$2" "$3" "$TIER_OUT" "$HUMAN_OUT"
     # Only when an exception fired, so every pre-DR-118 output stays byte-identical
-    # for the readers that compare whole field sets (shadow-triage.sh).
+    # for readers of the field set (shadow-triage.sh compares only the five named
+    # fields label, role, hold, tier and human_only, so it never sees this line).
     if [[ "$EXCEPTION_OUT" != "none" ]]; then
       printf 'exception=%s\n' "$EXCEPTION_OUT"
     fi

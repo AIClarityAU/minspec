@@ -16,7 +16,8 @@ afterAll(() => {
 // T0 invariant test for the deterministic triage gate (scripts/triage-decide.sh).
 //
 // The gate BACKS the LLM triage agent's judgment: a `human_only` or T3/T4 verdict
-// must NEVER become `agent-ready`, no matter what the (untrusted-input-reading)
+// must NEVER become `agent-ready` (save the ONE DR-118 exception, exact
+// `--label pipeline-blocker`, pinned in its own block), no matter what the (untrusted-input-reading)
 // agent emits. It must also fail CLOSED on any garbled / missing verdict.
 // Root cause it guards: triage-inbox.sh was inert in headless mode and, once fixed,
 // must not let a prompt-injected "agent-ready" reach an auto-build path.
@@ -318,7 +319,8 @@ describe('triage-decide.sh --label pipeline-blocker — the single spec-first ex
 
   it('--fields reports the exception that fired, and prints no exception line otherwise', () => {
     // Absent, not `exception=none`: every pre-DR-118 field set stays byte-identical,
-    // which shadow-triage.sh relies on when it compares whole field sets.
+    // (shadow-triage.sh `shadow_agreement` compares only label, role, hold, tier and
+    // human_only, so it is unaffected either way.)
     expect(fields(verdict({ tier: 'T3' })).exception).toBeUndefined();
     const f: Record<string, string> = {};
     for (const line of decide(verdict({ tier: 'T3' }), '--fields', '--label', 'pipeline-blocker').split('\n')) {
