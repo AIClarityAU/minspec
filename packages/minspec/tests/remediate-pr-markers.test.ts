@@ -52,11 +52,16 @@ function markersInSource(): string[] {
 
 type Comment = { author?: { login?: string }; body?: string };
 
+// The marker contract is independent of the Caveman trial; its launch notice goes to
+// stderr, so pin the trial off in every child instead of inheriting the ambient setting.
+const CHILD_ENV = { ...process.env, MINSPEC_CAVEMAN_MODE: 'off' };
+
 function countMarkers(marker: string, comments: Comment[] | string, authors?: string): string {
   const args = [SCRIPT, '--count-markers', marker];
   if (authors !== undefined) args.push(authors);
   return execFileSync('bash', args, {
     encoding: 'utf-8',
+    env: CHILD_ENV,
     input: typeof comments === 'string' ? comments : JSON.stringify({ comments }),
   }).trim();
 }
@@ -65,7 +70,7 @@ function countMarkers(marker: string, comments: Comment[] | string, authors?: st
 // first argument, so "exit code 1" alone cannot tell a gate REJECTING its input from a
 // build that never had the gate. Tests below assert the distinguishing message.
 function run(args: string[], input?: string): { code: number; stdout: string; stderr: string } {
-  const r = spawnSync('bash', [SCRIPT, ...args], { encoding: 'utf-8', input: input ?? '' });
+  const r = spawnSync('bash', [SCRIPT, ...args], { encoding: 'utf-8', env: CHILD_ENV, input: input ?? '' });
   return { code: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
@@ -432,7 +437,7 @@ describe('remediate-pr.sh: a failed `gh api user` never becomes the author allow
     fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env bash\n${ghScript}\n`, { mode: 0o755 });
     const r = spawnSync('bash', [SCRIPT, '--resolve-self-login'], {
       encoding: 'utf-8',
-      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+      env: { ...CHILD_ENV, PATH: `${dir}:${process.env.PATH}` },
     });
     return r.stdout.trim();
   }
