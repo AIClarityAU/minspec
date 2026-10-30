@@ -28,11 +28,12 @@ phases:
 Materializes **[#1252](https://github.com/AIClarityAU/minspec/issues/1252)** - *"validate
 file:line citations in specs/DRs - four artifacts cite rotted line numbers."*
 
-**Id note.** The highest spec directory on this checkout is `SPEC-211`; `SPEC-201` was chosen
-without deriving it from a measured maximum and sits below existing work. Open pull requests are
-invisible from this checkout, and no spec-id collision script exists (only
-`scripts/check-dr-id-collision.ts`, DR-only), so the id is unchecked against in-flight work. If it
-collides or a lower id is preferred, renumber at the approval gate.
+**Id note.** At `origin/main` on 2026-10-30 the highest spec directory is `SPEC-293`, no spec
+directory or frontmatter `id:` named `SPEC-201` exists there, and no other open pull request
+touches a `SPEC-201` path, so the id is a back-fill below existing work and does not collide.
+`scripts/lib/spec-id-collision.ts` exists (wired into `scripts/validate-frontmatter.ts`) and
+checks spec ids; the highest number moves with every merge, so re-check at the approval gate
+rather than trust this note.
 
 ## One-Sentence Scope
 
@@ -43,9 +44,9 @@ at all - warn-first, instead of only checking that the path exists.
 
 ## Context
 
-### What exists today (observed, not inferred)
+### What exists today (observed at `origin/main`, 2026-10-30; line numbers rot, re-measure before relying on them)
 
-- `scripts/validate-frontmatter.ts:496-527` (Rule 9, non-fatal, #161) runs
+- `scripts/validate-frontmatter.ts:514-546` (Rule 9, non-fatal, #161) runs
   `checkReferences` over every spec and DR and **warns** per violation.
 - `packages/minspec/src/lib/reference-checker.ts:181-189` resolves a `file` reference with
   `registry.fileExists(path)` and nothing else. The line number is carried on the `Reference`
@@ -64,10 +65,13 @@ at all - warn-first, instead of only checking that the path exists.
 
 | Artifact | Rot | Which proposed check catches it |
 |---|---|---|
-| SPEC-029 | every `approval.ts` citation drifted (file now 562 lines; `getApprovalStatus` at :488, cited 228-235) | FR-3 (symbol outside range) |
-| SPEC-033 | seven `template-registry.ts` citations stale (`MANAGED_REGION_TEMPLATES` at :1437, cited :937) | FR-3 |
-| SPEC-024 `design.md:74`, `tasks.md:32` | cite `withProverAuthority`, renamed `withVerifiedAuthority` | FR-4 (symbol exists nowhere) |
-| SPEC-024 `requirements.md:14` | cites `review-signals.ts` as "the gate"; it is the #180 renderer | **None** - the path and prose are both well-formed; a mis-attribution of *role* is not mechanically decidable. Out of scope (see below); fixed by hand. |
+| SPEC-029 | its `approval.ts` citations (e.g. `approval.ts:228-235`) still stale: at `origin/main` the file is 611 lines and `getApprovalStatus` is defined at :499 | FR-3 (symbol outside range) |
+| SPEC-033 | its `template-registry.ts` citations (e.g. `:937`) still stale: `MANAGED_REGION_TEMPLATES` is defined at :2774 | FR-3 |
+| SPEC-024 `design.md`, `tasks.md` | cited `withProverAuthority`, renamed `withVerifiedAuthority`; already corrected on `main` (the old name now appears only in a rename note in `tasks.md`) | FR-4 would have caught it (symbol exists nowhere) |
+| SPEC-024 `requirements.md` | cited `review-signals.ts` as "the gate"; it is the #180 renderer; already corrected on `main` with a dated note | **None** - the path and prose are both well-formed; a mis-attribution of *role* is not mechanically decidable. Out of scope (see below); fixed by hand. |
+
+The first two rows are the audit-time instances still uncorrected on `main`; the SPEC-024 rows
+were fixed by hand after the audit and remain here as the shapes the checks target.
 
 Stating the fourth row plainly matters: the validator cannot catch every rotted citation, and
 the spec does not claim it will.
@@ -122,7 +126,7 @@ dead-path and dead-symbol move together. No new resolution logic.
 
 **FR-7 - Warn-first ratchet.** Severity is a config dial, `citationRot: 'warn' | 'error'`,
 absent => `warn`, mirroring `ownershipDeclaration` / `implementEvidence`
-(`packages/minspec/src/lib/config.ts:46-69`). FR-3 is `warn` under both settings. The flip to
+(`packages/minspec/src/lib/config.ts:60-69`). FR-3 is `warn` under both settings. The flip to
 `error` is a separate, later change gated on the corpus being clean (FR-9); this spec ships the
 dial at `warn`.
 
@@ -139,7 +143,7 @@ should exist at all.
 many citations were extracted, how many were *checkable* (path resolved and, for FR-3, a
 symbol paired), and how many were skipped and why. A pass that cannot run (unreadable corpus,
 unparsable file) says so as a warning that it validated nothing, and never reports green by
-catching and ignoring - the bare `catch {}` in Rule 9 (`validate-frontmatter.ts:525-527`) is
+catching and ignoring - the bare `catch {}` in Rule 9 (`validate-frontmatter.ts:543-545`) is
 exactly the shape this must **not** copy. A zero-extracted-citations result on a corpus known
 to contain citations is itself reported.
 
@@ -164,8 +168,9 @@ the in-extension spec validator later wants it, it imports the same function. No
 ## Acceptance Criteria
 
 - **AC-1** Given a spec line ``…`getApprovalStatus` (`packages/minspec/src/lib/approval.ts:228-235`)…``
-  where lines 228-235 do not contain `getApprovalStatus` but line 488 does, the pass emits a
-  warning naming the citation, the symbol, and `:488`.
+  where lines 228-235 do not contain `getApprovalStatus` but a later line of the file does,
+  the pass emits a warning naming the citation, the symbol, and that later line (a fixture
+  file, so the expected line number is fixed by the fixture, not by the live `approval.ts`).
 - **AC-2** Given the same file cited at two different lines in one artifact, **both**
   citations are checked (FR-1 no path de-dup). A fixture with a valid first citation and a
   rotted second one reports exactly one finding.
