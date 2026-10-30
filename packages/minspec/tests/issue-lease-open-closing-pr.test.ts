@@ -88,6 +88,25 @@ describe('lease_gate_open_unshipped: open closing PR (#3161)', () => {
   it('fails closed when a PR closing list is itself truncated', () => {
     expect(gate({ pages: [page([{ number: 1, authorAssociation: 'OWNER', refsTruncated: true }])] }).status).toBe(1);
   });
+  it('ignores a truncated closing list on an UNTRUSTED PR (no zero-permission denial of dispatch)', () => {
+    for (const who of [{ authorAssociation: 'NONE' }, { authorAssociation: 'FIRST_TIME_CONTRIBUTOR', author: { __typename: 'User', login: 'rando', databaseId: 5 } }]) {
+      expect(gate({ pages: [page([{ number: 1, refsTruncated: true, ...who }])] }).status).toBe(0);
+    }
+  });
+  it('still finds a trusted closing PR beside an untrusted PR with a truncated list', () => {
+    const r = gate({ pages: [page([{ number: 1, refsTruncated: true }, { number: 3116, authorAssociation: 'OWNER', refs: [3115] }])] });
+    expect(r.status).toBe(1);
+    expect(r.out).toContain('#3116');
+  });
+  it('fails closed on a truncated closing list from the pipeline App (listed account)', () => {
+    expect(gate({ pages: [page([{ number: 1, authorAssociation: 'CONTRIBUTOR', author: APP, refsTruncated: true }])] }).status).toBe(1);
+  });
+  it('is not limited by argv size: a page over 128 KiB still reads', () => {
+    const fat = Array.from({ length: 700 }, (_, i) => ({ number: 1000 + i, refs: Array.from({ length: 100 }, (_, j) => 50000 + j) }));
+    const r = gate({ pages: [page([...fat, { number: 3116, authorAssociation: 'OWNER', refs: [3115] }])] });
+    expect(r.status).toBe(1);
+    expect(r.out).toContain('#3116');
+  });
   it('fails closed on a GraphQL errors payload', () => {
     expect(gate({ pages: [JSON.stringify({ errors: [{ message: 'boom' }], data: null })] }).status).toBe(1);
   });

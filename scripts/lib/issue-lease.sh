@@ -255,7 +255,7 @@ lease_gate_open_unshipped() {
 # a login: dispatch-author-gate.sh explains why a login is a spelling anyone can register).
 lease_open_closing_prs() {
   local item="${1:?lease_open_closing_prs needs an item}" owner name listed defs
-  local cursor="" page more pages=0 max_pages=10 acc="[]" q
+  local cursor="" page more pages=0 max_pages=10 acc="" hits q
   owner="${MINSPEC_LEASE_REPO%%/*}"; name="${MINSPEC_LEASE_REPO#*/}"
   listed="$(_dispatch_trusted_identities_json 2>/dev/null)" && [[ -n "$listed" ]] || return 1
   defs="$(_dispatch_gate_jq_defs)"
@@ -268,24 +268,32 @@ lease_open_closing_prs() {
     else
       page="$(_dispatch_graphql_read -f query="$q" -f owner="$owner" -f name="$name" 2>/dev/null)" || return 1
     fi
-    # Absent/odd shape, GraphQL errors, or a PR whose closing list is itself truncated: unknown.
-    printf '%s' "$page" | jq -e '(.errors // [] | length) == 0
-        and (.data.repository.pullRequests.nodes | type) == "array"
-        and all(.data.repository.pullRequests.nodes[]; (.closingIssuesReferences.pageInfo.hasNextPage) == false)' >/dev/null 2>&1 || return 1
-    acc="$(jq -cn --argjson a "$acc" --argjson p "$page" '$a + $p.data.repository.pullRequests.nodes')" || return 1
+    # Absent/odd shape or GraphQL errors: unknown. Then, over TRUSTED authors only, a PR whose
+    # closing list is itself truncated is unknown too; an untrusted PR's truncated list is
+    # ignored, else one fork PR naming >100 issues would deny dispatch of every issue. The page
+    # goes in on stdin and only the matching PR numbers are kept, so neither a big page nor a
+    # long accumulator rides on argv (one argument is capped at 128 KiB). jq's `error` exits
+    # non-zero, which is this function's fail-closed path.
+    hits="$(printf '%s' "$page" | jq -r --argjson n "$item" --argjson listed "$listed" --arg repo "$MINSPEC_LEASE_REPO" "$defs"'
+      if (.errors // [] | length) != 0 or (.data.repository.pullRequests.nodes | type) != "array"
+      then error("unreadable page") else . end
+      | [ .data.repository.pullRequests.nodes[]
+          | select((.authorAssociation // "") as $a
+                   | $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR"
+                     or (.author | listed)) ]
+      | if all(.[]; .closingIssuesReferences.pageInfo.hasNextPage == false) | not
+        then error("truncated closing list on a trusted PR") else . end
+      | .[]
+      | select(any(.closingIssuesReferences.nodes[]?; .number == $n and .repository.nameWithOwner == $repo))
+      | "#\(.number)"' 2>/dev/null)" || return 1
+    [[ -z "$hits" ]] || acc="${acc:+$acc }${hits//$'\n'/ }"
     more="$(printf '%s' "$page" | jq -r '.data.repository.pullRequests.pageInfo.hasNextPage')" || return 1
     [[ "$more" == "false" ]] && break
     [[ "$more" == "true" ]] || return 1
     cursor="$(printf '%s' "$page" | jq -r '.data.repository.pullRequests.pageInfo.endCursor // empty')" || return 1
     [[ -n "$cursor" ]] || return 1
   done
-  printf '%s' "$acc" | jq -r --argjson n "$item" --argjson listed "$listed" --arg repo "$MINSPEC_LEASE_REPO" "$defs"'
-    [ .[]
-      | select((.authorAssociation // "") as $a
-               | $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR"
-                 or (.author | listed))
-      | select(any(.closingIssuesReferences.nodes[]?; .number == $n and .repository.nameWithOwner == $repo))
-      | "#\(.number)" ] | join(" ")'
+  printf '%s' "$acc"
 }
 
 # ── Claim comment body + read/enumerate ──────────────────────────────────────
