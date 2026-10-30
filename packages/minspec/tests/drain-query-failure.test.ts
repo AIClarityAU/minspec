@@ -128,6 +128,7 @@ function stubGh(mode: 'fail' | 'empty' | 'full'): string {
       : mode === 'empty'
         ? 'exit 0\n'
         : 'case "$*" in\n' +
+          '  *"--label needs-human-review"*) echo 0 ;; # #2939 held-PR count: none held\n' +
           '  *"--label agent-ready-specify"*) printf "%s\\n" 77 ;;\n' +
           '  *"--label agent-ready"*)         printf "%s\\n" 42 ;;\n' +
           '  *"--label inbox"*)               : ;;\n' +
@@ -149,6 +150,9 @@ function runBlock(mode: 'fail' | 'empty' | 'full'): { out: string; status: numbe
     'gh_bot_warm_read() { :; }',
     'gh_bot_reauth_read() { return 1; }',
     'TRIAGE=/bin/true',
+    // The #3344 pile count reads specs/ beside the scripts REMEDIATE names; an empty one
+    // here, so spec-writing is decided by what each test is about, not this repo's corpus.
+    `REMEDIATE=${JSON.stringify(path.join(tmp, 'scripts', 'remediate-pr.sh'))}; mkdir -p ${JSON.stringify(path.join(tmp, 'specs'))} ${JSON.stringify(path.join(tmp, 'scripts'))}`,
     'run_cycle() {',
     queueBlock(),
     '  echo "[drain] REACHED-DISPATCH ${all_ready//$\'\\n\'/,}"',
@@ -427,6 +431,7 @@ function stubGhAuthenticating(live: string): { bin: string; calls: () => number 
       '  exit 1\n' +
       'fi\n' +
       'case "$*" in\n' +
+      '  *"--label needs-human-review"*) echo 0 ;; # #2939 held-PR count: none held\n' +
       '  *"--label agent-ready-specify"*) printf "%s\\n" 77 ;;\n' +
       '  *"--label agent-ready"*)         printf "%s\\n" 42 ;;\n' +
       '  *"--label inbox"*)               : ;;\n' +
@@ -461,6 +466,9 @@ function runWithCredential(minter: string, live: string): {
     'REPO="AIClarityAU/minspec"',
     'reconcile_labels() { :; }',
     'TRIAGE=/bin/true',
+    // The #3344 pile count reads specs/ beside the scripts REMEDIATE names; an empty one
+    // here, so spec-writing is decided by what each test is about, not this repo's corpus.
+    `REMEDIATE=${JSON.stringify(path.join(tmp, 'scripts', 'remediate-pr.sh'))}; mkdir -p ${JSON.stringify(path.join(tmp, 'specs'))} ${JSON.stringify(path.join(tmp, 'scripts'))}`,
     'run_cycle() {',
     queueBlock(),
     '  echo "[drain] REACHED-DISPATCH ${all_ready//$\'\\n\'/,}"',
@@ -498,8 +506,9 @@ describe('drain queue read: an expired credential recovers, a dead broker still 
     expect(status).toBe(0);
 
     // ONE retry, not a loop: the failed inbox query, its retry, then the two ready
-    // queries on the fresh token. A retry-per-query would be 6.
-    expect(ghCalls).toBe(4);
+    // queries, the held-PR count (#2939) and the open-PR claims read (#3241) on the fresh
+    // token. A retry-per-query would be 9.
+    expect(ghCalls).toBe(6);
   });
 
   it('CONTROL: a broker serving the same dead token still HOLDS loudly (#2114, #1855)', () => {
@@ -527,6 +536,7 @@ describe('drain queue read: an expired credential recovers, a dead broker still 
     expect(out).toContain('REACHED-DISPATCH 42,77');
     expect(out).not.toContain('retrying once');
     expect(status).toBe(0);
-    expect(ghCalls).toBe(3);
+    // inbox, the two ready queues, the held-PR count (#2939) and the open-PR claims read (#3241).
+    expect(ghCalls).toBe(5);
   });
 });

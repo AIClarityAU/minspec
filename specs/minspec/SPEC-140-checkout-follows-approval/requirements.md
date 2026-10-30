@@ -6,16 +6,19 @@ tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - concurrent multi-session coordination; the epic DR-065 (shared-checkout moves) belongs to
 aspects: [approval, git-sync, shared-checkout, presence, consent, offline, fast-forward, no-silent-gate, blast-radius]
-depends_on: [DR-065, SPEC-026, SPEC-050]  # DR-065 Amendment B (this spec's gate) must be accepted before build; SPEC-026 the presence records the gate reads; SPEC-050 owns the approval push whose success starts a follow
-relates_to: [SPEC-022, SPEC-135, SPEC-060, SPEC-095, DR-051, DR-004, DR-086, "#1167", "#1163", "#1354", "#2021", "#2626", "#2628", "#2843", "#512", "#168"]
+depends_on: [DR-065, SPEC-026, SPEC-050]  # DR-065 Amendment B (this spec's gate) must be accepted before build; FR-19 to FR-21 also need the DR-065 amendment issue 2992 asks for; SPEC-026 the presence records the gate reads; SPEC-050 owns the approval push whose success starts a follow
+relates_to: [SPEC-022, SPEC-135, SPEC-060, SPEC-095, DR-051, DR-004, DR-086, "#1167", "#1163", "#1354", "#2021", "#2626", "#2628", "#2843", "#512", "#168", "#2974", "#2990", "#2992"]
 # Ownership declared in Specify, before approval mints a hash (SPEC-038). The two NEW
 # files are owned here: the follow pass (gate, staging, fast-forward, index restore) and
 # its tests on real git fixtures. Modified, not owned: commit-on-approve.ts (SPEC-050's
 # seam) gains one call that records what an approval push wrote; presence.ts (SPEC-026)
 # gains a reader that excludes this window's own record; package.json gains the setting
-# and the palette command.
-implements: [packages/minspec/src/lib/approval-follow.ts, packages/minspec/tests/approval-follow.test.ts]
-affects: [packages/minspec/src/commands/commit-on-approve.ts, packages/minspec/src/lib/presence.ts, packages/minspec/package.json]
+# and the palette command. Amendment 2026-10-21 (issue 2974, pre-merge window): the one
+# pending-approval record and its reader are owned here (approval-inflight.ts); the
+# settle step lands in SPEC-050's recovery module, and the approval store, decision list
+# and spec catalog gain the overlay read, all modified, not owned.
+implements: [packages/minspec/src/lib/approval-follow.ts, packages/minspec/tests/approval-follow.test.ts, packages/minspec/src/lib/approval-inflight.ts, packages/minspec/tests/approval-inflight.test.ts]
+affects: [packages/minspec/src/commands/commit-on-approve.ts, packages/minspec/src/lib/presence.ts, packages/minspec/package.json, packages/minspec/src/lib/approval-recover.ts, packages/minspec/src/lib/approval-store.ts, packages/minspec/src/lib/approval.ts, packages/minspec/src/lib/adr-manager.ts, packages/minspec/src/lib/spec-catalog.ts]
 phases:
   specify: done
   clarify: done
@@ -39,6 +42,13 @@ fast-forwards. No file is deleted or rewritten, so the spec shows approved the w
 and the copies end up clean. You say yes once (a setting, asked the first time) and it never
 asks again.
 
+Before that, as soon as the approval's pull request is open, the extension also takes back
+the copies it left in your checkout, but only those whose bytes are exactly what it pushed.
+A small record inside the `.git` folder keeps the item reading approved (or accepted) in
+the editor until your checkout carries the approval itself. So your checkout is clean
+while the pull request waits, not just after it merges. (Amended 2026-10-21, issue 2974:
+primary left dirty after an approval.)
+
 It refuses, names the file, and changes nothing if any other live session claims the
 checkout, if you have local commits, or if any leftover differs from main by even one byte.
 If it cannot read the session records clearly, it does not move.
@@ -55,8 +65,9 @@ recovery copies the written files into a throwaway worktree and pushes from ther
 copies. The comment that says a later `git pull --rebase` drops them "by patch-id"
 (`packages/minspec/src/lib/approve-push.ts:20-26`) describes the older commit-on-main path;
 under recovery no local commit exists, so nothing drops them. The same seam serves Approve
-Spec, Accept ADR and epic approval (`commands/approve.ts`, `commands/adr.ts`,
-`commands/epic.ts` all route through `commit-on-approve.ts`).
+Spec, Accept ADR and Accept Epic (`commands/approve.ts`, `commands/adr.ts`,
+`commands/epic.ts` all route through `commit-on-approve.ts`). Accept Epic writes no
+approval sidecar, so it is out of this spec's scope (see Limitations).
 
 **Why nothing clears them.** The drain's G2 (content-clean) skips any dirty checkout, and
 its G3 (presence) skips any occupied one (DR-065 section 2). Your editor writes a live
@@ -77,8 +88,18 @@ hand-run clean-up command.
 - *Fix the source* (issue body option 2, the 2026-08-05 comment, and the 2026-10-01
   "producer-side" fix: return the working tree to `HEAD` for exactly the paths written).
   This is the option the founder declined as `revert` in queue item d1167: the spec would
-  read unapproved in the editor until a manual pull, which is the 2026-10-09 confusion. Not
-  taken. Issue 1163 (Accept ADR lands its own output) stays open on its own terms.
+  read unapproved in the editor until a manual pull, which is the 2026-10-09 confusion.
+  **Taken after all, by the 2026-10-21 amendment, because that reason no longer holds.**
+  The decline was about what the editor shows, not about the files: restoring them made
+  the approval disappear from view. The amendment keeps the approval in view without the
+  files (drafted in PR 2990, in-flight approval record, open and held until this
+  amendment is approved): before restoring anything the extension writes the pending-approval
+  record (FR-4), and the approval panel, the decision list and the spec list read that
+  record (FR-20) until the checkout's `HEAD` carries the approval. So the item reads
+  approved while the checkout is clean. What is restored is also narrower than the
+  declined form: only a path whose working bytes equal the blob just pushed, only once the
+  pull request is open, and never the index or `HEAD` (FR-19). Issue 1163 (Accept ADR lands
+  its own output) stays open on its own terms.
 - *The sync path clears residue already on origin* (issue body option 1, the 2026-10-01
   "sync-side" fix, and the 2026-08-30 DR-065 amendment). Taken in a narrower form: the
   actor is the editor, not the drain, because the drain cannot pass G3 while the window is
@@ -86,9 +107,11 @@ hand-run clean-up command.
   (self-installing build) FR-21 and FR-22 already specify
   (`specs/minspec/SPEC-135-self-installing-build/requirements.md:376-394`). The 2026-08-30
   discard amendment is withdrawn in the same change as this spec.
-- *The 2026-10-01 note that bytes may be "on main, or the approval branch".* This spec
-  acts only once they are on the default branch. Before the approval's pull request merges
-  the leftovers stay, and the checkout cannot be pulled; see Limitations.
+- *The 2026-10-01 note that bytes may be "on main, or the approval branch".* Taken by
+  the 2026-10-21 amendment: once the approval's pull request is open, FR-19 retires every
+  leftover proven equal to the approval branch's blob; once main carries the approval, the
+  follow pass (FR-5 to FR-14) moves the checkout. Leftovers FR-19 cannot prove stay until
+  the merge; see Limitations.
 - *Surface, do not act* (issue body option 3). Kept as the refusal path: every refusal names
   the file and the reason.
 
@@ -113,9 +136,16 @@ the index and FR-8 checks every path before staging any.
   pinned by its object id for the rest of the pass.
 - **A leftover**: any path `git status --porcelain --untracked-files=all` reports: modified,
   staged, deleted, or untracked and not ignored.
-- **A pending approval**: the record FR-4 keeps for one successful approval push: the
-  checkout's root, the paths with their object ids and modes, the base branch, the branch
-  pushed to, and the time.
+- **A pending approval**: the one record FR-4 keeps for one successful approval push. It
+  serves both the pre-merge overlay (FR-20) and the follow pass (FR-6); there is no second
+  record for the same state.
+- **The approval landed**: the checkout's `HEAD` holds the approval's sidecar with the
+  same `specHash` the record carries. `specHash` is the hash field of the approval
+  sidecar that Approve Spec (`lib/approval.ts:597`) and Accept ADR (`commands/adr.ts:289`)
+  write under the same name, so this test and FR-6's trigger read the same field for both.
+  Accept Epic (`commands/epic.ts:17-52`) writes no sidecar and no `specHash`; it flips the
+  epic's status and commits the epic file and its index, so "the approval landed" is not
+  defined for it and epics are out of scope (Limitations).
 
 ## Requirements
 
@@ -141,14 +171,24 @@ the index and FR-8 checks every path before staging any.
   editor window, at the next successful approval push through that path. It is never shown
   on a timer.
 - **FR-4 - Record what the push wrote.** After every successful approval push through
-  the protected-branch recovery arm of `commit-on-approve.ts` (Approve Spec, Accept ADR,
-  epic approval), the extension records a pending approval: the checkout's root, each
-  written path with its object id and mode, the base branch the recovery pushed against,
-  the branch it was pushed to, and the time. A push from the `committed` arm leaves no
-  copies, so it records nothing (OQ-3). The record is kept in the editor's own workspace storage, never in the
-  working tree, so recording it can never create a leftover. It is recorded whatever the
+  the protected-branch recovery arm of `commit-on-approve.ts` (Approve Spec, Accept ADR),
+  the extension records a pending approval: each written path with its
+  object id and mode, the approval commit, the base branch the recovery pushed against,
+  the branch it was pushed to, the sidecar's path and contents (its `specHash` among
+  them, the hash FR-6 and FR-21 compare), and the time; plus, when
+  FR-19 restores the approved document, the hash of the restored bytes and the pushed
+  document's frontmatter. A push from the `committed` arm leaves no copies, so it records
+  nothing (OQ-3). The record is one file per approved document in the checkout's own git
+  directory (`git rev-parse --git-dir`, per worktree, not the shared common directory),
+  named `minspec-inflight-<encoded document path>.json`. Being inside the git directory it
+  is never a working-tree path, so recording it can never create a leftover, and being per
+  worktree it names its checkout without storing a root. It is recorded whatever the
   setting says, so an answer of `on` given later still follows approvals made earlier in
-  that workspace.
+  that checkout. This record replaces the one first drafted here in the editor's workspace
+  storage; the approval store, the decision list and the spec catalog read it without the
+  editor API, which workspace storage would not allow (FR-20). Its field list above is the
+  requirement; the plan pins it as one typed contract that the writer and all three
+  readers import, so the format has a single definition.
 
 ### B. When a pass runs
 
@@ -158,10 +198,11 @@ the index and FR-8 checks every path before staging any.
   setting not `on`, it makes no network call (constitution invariant 1). A fetch never moves
   `HEAD` and never touches the working tree or the index. It uses the user's own git and
   credentials; it never pushes.
-- **FR-6 - The trigger.** A pass proceeds to the gate only when, for every path in at least
-  one pending approval, the target holds exactly the recorded object id and mode. A pending
-  approval whose every path is already held by `HEAD` (the user pulled by hand) is cleared
-  without a move.
+- **FR-6 - The trigger.** A pass proceeds to the gate only when the target holds at
+  least one pending approval's sidecar with the recorded `specHash`. The gate (C7) then
+  checks every leftover byte for byte, so a path the target holds differently, such as a
+  regenerated decision index, refuses there and is named. A pending approval that has
+  already landed (the user pulled by hand) is cleared without a move (FR-21).
 - **FR-7 - On demand.** A palette command, *MinSpec: Follow Main Now*, runs the same pass
   immediately with the same gate. It is reachable from the keyboard; if a keybinding is
   assigned it is shown with the command. Under `ask` it shows FR-2's question first; under
@@ -205,7 +246,7 @@ the index and FR-8 checks every path before staging any.
   leave the working tree as found, and report per FR-13 with git's own message.
 - **FR-12 - After the move.** After a completed fast-forward the pass checks that `HEAD`
   equals the target and that no leftover it staged is still reported by `git status`. It
-  clears every pending approval the target now holds. Because no working-tree byte changes,
+  clears every pending approval that has now landed (FR-21). Because no working-tree byte changes,
   an approved spec's hash matches throughout and its derived status reads approved before,
   during and after the move.
 
@@ -220,9 +261,10 @@ the index and FR-8 checks every path before staging any.
   the new commit and how many leftovers ended clean, and writes the same line to the output
   channel.
 - **FR-15 - A pending approval that cannot land is visible.** A pending approval older than
-  seven days whose bytes main still does not hold is reported once (it may have been closed
-  unmerged or changed in review), with *MinSpec: Follow Main Now* and the setting named. It
-  is kept, not cleared, so nothing is dropped silently.
+  seven days that main still does not carry, or one FR-21 finds dead, is reported once (it
+  may have been closed unmerged or changed in review), with *MinSpec: Follow Main Now* and
+  the setting named. It is kept, not cleared, so nothing is dropped silently; with its
+  branch deleted it may be the only remaining copy of the approval.
 
 ### F. Boundaries
 
@@ -233,10 +275,58 @@ the index and FR-8 checks every path before staging any.
   drain.
 - **FR-18 - Only this window's checkout.** A pass acts only on the checkout this window's
   presence record names. It never moves another worktree or another repository. A pending
-  approval whose recorded root is a different folder, including another folder open in the
-  same window, is never followed by this window; it is reported once, naming the folder,
-  through the same output channel and once-per-distinct-set notification FR-13 uses for a
-  refusal (OQ-4).
+  approval belongs to the checkout whose git directory holds its file (FR-4), so the
+  record needs no stored root: the pass reads only the presence-named checkout's own git
+  directory. In a window with several folders open, a pending approval found in the git
+  directory of another open folder is never followed by this window; it is reported once,
+  naming the folder, through the same output channel and once-per-distinct-set
+  notification FR-13 uses for a refusal (OQ-4). A worktree not open in the window is never
+  read, so its records are neither followed nor reported. The overlay (FR-20) is per folder
+  in the same way: each open folder's readers see only the records in that folder's git
+  directory.
+
+### G. Before the merge (amendment 2026-10-21, issue 2974)
+
+FR-19 rewrites working-tree files in the shared checkout, which DR-065 Amendment B does not
+authorise (`docs/decisions/DR-065.md:251`, `:289-290`) and which the withdrawn 2026-08-30
+amendment shows needs its own sanction under DR-065 section 5 (scope of the exception).
+FR-19 to FR-21 are therefore not built until a DR-065 amendment sanctioning exactly
+FR-19's retire step and bounds is accepted (issue 2992). FR-1 to FR-18 keep Amendment B as
+their gate.
+
+- **FR-19 - Retire proven copies once the pull request is open.** After FR-4's record is
+  written and the approval's pull request is open (created or adopted), the extension
+  restores each transported path in the checkout's working tree from the index, or
+  removes a sidecar that is new to the branch, only when all of these hold for that path,
+  checked immediately before it is touched: its working bytes (`git hash-object`) equal
+  the blob in the approval commit; its index entry equals `HEAD`'s; and, for the approved
+  document, it is on `HEAD` and differs from `HEAD` only in lifecycle (frontmatter
+  `status:` and `phases:`, and the body's status word, compared in the approval hash's
+  canonical form). The sidecar goes first: if it cannot be proven or retired, nothing is
+  touched and the approval stays in the working tree, so it is never recorded nowhere; the
+  record is kept, so the follow pass still moves the checkout once main carries the
+  approval, and FR-21 alone clears it. An untracked document is never removed. The step never changes the index or `HEAD`, makes
+  no network call, and runs whatever FR-1's setting says, because it only takes back the
+  extension's own output and only where the remote already holds the same bytes. Every
+  path it keeps is named with its reason, in the approval's completion message and the
+  output channel. With no pull request open, nothing is retired: the dirty files are the
+  visible prompt to open one.
+- **FR-20 - The record keeps the item reading as approved.** While a pending approval is
+  live, the approval panel, the decision list and the spec list read its sidecar in place
+  of the restored working-tree one, so the item reads approved or accepted exactly as it
+  did before FR-19 ran. The lifecycle part (`status`, `phases`) is overlaid only while the
+  document's bytes still hash to the recorded restored hash; an edit by the founder ends
+  the overlay for that document, so it never covers real work. A pending approval is
+  live while the remote-tracking ref of its branch exists, or `origin/<base>` already
+  carries its sidecar; reading this is local and offline. Any git error reads as not live,
+  which shows what the checkout's own files say.
+- **FR-21 - When the record ends.** A pending approval is cleared (its file deleted) when
+  the approval has landed; this is the only clear. It is dead, but kept, when its branch's
+  remote-tracking ref is gone and `origin/<base>` does not carry its sidecar (a pull
+  request closed unmerged, seen after a pruning fetch); a dead record is ignored by FR-20,
+  so the item reads as main says, and is reported per FR-15. FR-5's fetch, when it runs,
+  also updates the remote-tracking refs of every pending approval's branch, removing those
+  deleted on origin, so a closed pull request is seen without a manual fetch.
 
 ## Acceptance criteria
 
@@ -274,6 +364,21 @@ All on real git fixtures (a bare origin and a clone), not stubbed git.
 - **AC-13** A source-level test asserts the pass never invokes `stash`, `reset`, `rebase`,
   `checkout`, `restore`, `clean`, `rm` (other than `--cached` in FR-11's restore),
   `commit` or `push`; it is paired with a mutation that adds one and makes it fail.
+- **AC-14** After a recovery push with its pull request open: every transported path
+  whose bytes equal the pushed blob is gone from `git status`, the index and `HEAD` are
+  unchanged, and the approved item reads approved in the approval store, the decision
+  list and the spec catalog.
+- **AC-15** The same with one path edited after the push, or with a staged change: that
+  path is kept and named, its bytes unchanged; with the sidecar unprovable, nothing is
+  touched and the record still exists, cleared only once the approval lands (AC-17).
+- **AC-16** One record only: after a recovery push, exactly one pending-approval file
+  exists for the document, in the per-worktree git directory, and the follow pass (FR-6)
+  and the overlay (FR-20) both read that file; a sibling worktree of the same repository
+  sees no overlay. In a window with a second folder open, a record in that folder's git
+  directory is reported once, naming the folder, and never followed.
+- **AC-17** Clear and dead: once `HEAD` carries the sidecar with the same `specHash`, the
+  record is deleted; with the branch's remote-tracking ref removed and the base not
+  carrying the sidecar, the item reads unapproved and the record file still exists.
 
 ## Limitations, stated plainly
 
@@ -285,14 +390,25 @@ All on real git fixtures (a bare origin and a clone), not stubbed git.
   refuses a fast-forward over a change that races in. What is not prevented: an agent that
   is only reading sees files change under it, exactly as if the user ran `git pull`.
   Tracked as issue 2843 (terminal agent sessions write no presence record).
-- **Before the merge, nothing changes.** Until the approval's pull request merges, the
-  leftovers stay and the checkout cannot be pulled. This spec shortens the stuck window to
-  "until merge"; it does not remove it.
+- **Before the merge, only proven copies go.** FR-19 retires what it can prove once the
+  pull request is open. A document edited beyond lifecycle, an untracked document, or a
+  path with staged changes stays until the merge, and the follow pass handles it then.
+- **A closed pull request is seen only after a pruning fetch.** With the setting `off` or
+  `ask`, nothing fetches, so a record whose pull request was closed unmerged keeps the item
+  reading approved until the user's own fetch prunes the branch's remote-tracking ref.
+  The overlay can then overstate the approval, the opposite of the 2026-10-09 error, for
+  as long as no fetch happens.
 - **A regenerated index can block a follow.** Accept ADR writes the whole regenerated
   `docs/decisions/INDEX.md` (issue 2021). If another decision merges before this one, main's
   index differs from the leftover by more than this approval, C7 fails, and the refusal
-  names `INDEX.md`. The one clean-up command stays the fallback for that case; issue 2021 is
-  the producer-side fix.
+  names `INDEX.md`. When FR-19 has already retired the leftover index (its bytes matched
+  the pushed blob), there is no leftover and this case does not arise. The one clean-up
+  command stays the fallback otherwise; issue 2021 is the producer-side fix.
+- **Accept Epic is not covered.** It writes no approval sidecar, so there is no
+  `specHash` for FR-4 to record or for the landed test to compare, and a leftover epic file
+  from a protected-branch accept is not followed. Covering it needs the producer to write a
+  sidecar (new behaviour in `commands/epic.ts`) or a different landed test; neither is
+  specified here. Tracked as issue 2993 (Accept Epic writes no approval sidecar).
 - **Two approvals in flight.** Leftovers from an approval that has not merged differ from
   main, so a merged approval's follow waits until both have landed.
 - **The move brings in all of main, code included.** The stale-build warning (SPEC-060) can
@@ -317,6 +433,20 @@ recorded here because nobody saw them live (DR-086 section 4).
 5. **Fetch on focus and every five minutes, only while pending (FR-5).** Matches SPEC-135
    FR-19's cadence. Rejected: fetching only on demand, which leaves the founder's checkout
    stale until someone remembers.
+6. **One record, in the per-worktree git directory (FR-4, amendment 2026-10-21).** The
+   readers that must see it (approval store, decision list, spec catalog) are plain
+   library code with no editor API, and per worktree means a sibling worktree never
+   inherits the overlay. Rejected: the editor's workspace storage as first drafted, which
+   those readers cannot reach and which is lost when the same checkout is opened through a
+   different workspace file; and keeping both records, which is two answers to one
+   question that can disagree.
+7. **Clear on the landed sidecar, not on every path's bytes (FR-6, FR-21).** Rejected:
+   clearing only when `HEAD` holds every recorded path's exact blob, which never happens
+   when another decision regenerates the index first (issue 2021), so the record would
+   never end.
+8. **Retire whatever the setting says (FR-19).** Local, byte-proven, and only the
+   extension's own output. Rejected: gating it on FR-1's consent, which leaves the default
+   (`ask`) checkout dirty for the whole pull request, the issue 2974 problem.
 
 ## Clarify (recommended answers recorded by an agent 2026-10-17; ratified only by approval of this spec)
 
@@ -411,7 +541,8 @@ record of this window in it, so C5 would fail there for as long as the window is
 **Recorded selection: Option A,** follow only the presence root; name the rest.
 
 - **Option A - act only on the checkout this window's presence record names; report a
-  pending approval in any other folder once, naming it (rec).** No change to SPEC-026, and
+  pending approval found in any other open folder's git directory once, naming the
+  folder (rec).** No change to SPEC-026, and
   C5's fail direction holds. *Cost:* an approval made in a second folder of a multi-root
   window is never followed by that window; it needs the manual clean-up, or a window opened
   on that folder alone.
@@ -431,8 +562,10 @@ Under B, SPEC-026 is amended and FR-18 widens. C is not buildable under DR-065 a
   passes G3 while the editor is open, which is exactly when the founder approves.
 - **updater** - wait for SPEC-135's host updater. Not rejected so much as slower: planning,
   a host service and two more sign-offs. C6 makes the two compatible.
-- **revert** - restore the paths after the push. Rejected by the founder: unapproved in the
-  editor until a manual pull.
+- **revert** - restore the paths after the push. Rejected by the founder in queue item
+  d1167: unapproved in the editor until a manual pull. Adopted in a narrower form by the
+  2026-10-21 amendment (FR-19 to FR-21), with the record that keeps the item approved in
+  view; see Context.
 - **Discard identical leftovers** (the 2026-08-30 DR-065 amendment). Withdrawn: staging
   reaches a clean checkout without deleting a file.
 - **Stash and pop.** Rejected for the same reason autostash is off on this checkout: a pop
@@ -447,6 +580,11 @@ Under B, SPEC-026 is amended and FR-18 widens. C is not buildable under DR-065 a
 
 - Triggered by issue 1167 (G2 deadlock), founder answer `follow` to queue item d1167,
   2026-10-17.
-- Gate: DR-065 Amendment B. Presence: SPEC-026. Staging technique: SPEC-135 FR-21, FR-22.
+- Gate: DR-065 Amendment B for FR-1 to FR-18; FR-19 to FR-21 wait on the further DR-065
+  amendment issue 2992 asks for. Presence: SPEC-026. Staging technique: SPEC-135 FR-21, FR-22.
+- Amended 2026-10-21 for issue 2974 (primary left dirty after an approval): the pre-merge
+  window and the single pending-approval record, drafted in PR 2990 (in-flight approval
+  record), which is open and held until this amendment is approved and issue 2992's
+  amendment is accepted.
 - Related producers: issue 1354 (approve leaves an untracked sidecar), issue 2021 (accept
   commits the whole regenerated index), issue 1163 (Accept ADR lands its own output).

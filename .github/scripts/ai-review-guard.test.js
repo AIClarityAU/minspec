@@ -41,6 +41,9 @@ const {
   decideReviewCheck,
   isBenignRemovalError,
   sanitizeLogin,
+  isRateLimitError,
+  rateLimitWaitMs,
+  withRateLimitRetry,
 } = require('./ai-review-guard.js');
 
 // Shared timestamps for the recency tests: a pass applied AFTER the head commit
@@ -227,6 +230,178 @@ test('provenance-recency: missing/unparseable timestamps are NOT verified (canno
   });
   assert.equal(v.verified, false);
   assert.match(v.reason, /timestamp/);
+});
+
+// ── #3015 — a rate-limited read is not a provenance finding ─────────────────
+// Measured on PR 2557 (run 40139595165): the installation hit its core rate limit,
+// the label-timeline read threw, the workflow swallowed it into a warning, and the
+// gate reported "no record of who applied ai-review:pass - provenance unverifiable".
+// The pass was the reviewer bot's; a later run on the next head went green. The gate
+// must still fail closed, but must say the read failed and a re-run is the fix.
+function rateLimitError({ status = 403, remaining = '0', reset, retryAfter } = {}) {
+  const headers = { 'x-ratelimit-remaining': remaining };
+  if (reset !== undefined) headers['x-ratelimit-reset'] = String(reset);
+  if (retryAfter !== undefined) headers['retry-after'] = String(retryAfter);
+  const e = new Error('API rate limit exceeded for installation.');
+  e.status = status;
+  e.response = { status, headers };
+  return e;
+}
+
+test('isRateLimitError: primary (403, remaining 0) and secondary (429 / retry-after) limits', () => {
+  assert.equal(isRateLimitError(rateLimitError()), true);
+  assert.equal(isRateLimitError(rateLimitError({ status: 429, remaining: '12' })), true);
+  assert.equal(isRateLimitError(rateLimitError({ remaining: '40', retryAfter: 60 })), true);
+});
+
+test('isRateLimitError: a plain 403/404/500 is NOT a rate limit', () => {
+  const forbidden = new Error('Resource not accessible by integration');
+  forbidden.status = 403;
+  forbidden.response = { status: 403, headers: { 'x-ratelimit-remaining': '4000' } };
+  assert.equal(isRateLimitError(forbidden), false);
+  const notFound = new Error('Not Found');
+  notFound.status = 404;
+  assert.equal(isRateLimitError(notFound), false);
+  assert.equal(isRateLimitError(new Error('socket hang up')), false);
+  assert.equal(isRateLimitError(undefined), false);
+});
+
+test('rateLimitWaitMs: retry-after wins, then x-ratelimit-reset, else null', () => {
+  const now = 1_000_000_000_000;
+  assert.equal(rateLimitWaitMs(rateLimitError({ retryAfter: 30 }), now), 30_000);
+  assert.equal(
+    rateLimitWaitMs(rateLimitError({ reset: Math.floor(now / 1000) + 20 }), now),
+    21_000, // reset instant plus a one-second pad against clock skew
+  );
+  assert.equal(rateLimitWaitMs(rateLimitError({ reset: Math.floor(now / 1000) - 5 }), now), 1_000);
+  assert.equal(rateLimitWaitMs(rateLimitError(), now), null);
+});
+
+test('withRateLimitRetry: retries a rate-limited read and returns the eventual result', async () => {
+  const slept = [];
+  let calls = 0;
+  const out = await withRateLimitRetry(
+    async () => {
+      calls += 1;
+      if (calls < 3) throw rateLimitError({ retryAfter: 2 });
+      return 'events';
+    },
+    { sleep: async (ms) => slept.push(ms), now: () => 0 },
+  );
+  assert.equal(out, 'events');
+  assert.equal(calls, 3);
+  assert.deepEqual(slept, [2000, 2000]);
+});
+
+test('withRateLimitRetry: a non-rate-limit error is rethrown at once, never retried', async () => {
+  let calls = 0;
+  const boom = new Error('Not Found');
+  boom.status = 404;
+  await assert.rejects(
+    withRateLimitRetry(
+      async () => {
+        calls += 1;
+        throw boom;
+      },
+      { sleep: async () => assert.fail('must not sleep'), now: () => 0 },
+    ),
+    (e) => e === boom && e.rateLimited !== true,
+  );
+  assert.equal(calls, 1);
+});
+
+test('withRateLimitRetry: still fails (closed) when retries run out, marked rateLimited', async () => {
+  let calls = 0;
+  await assert.rejects(
+    withRateLimitRetry(
+      async () => {
+        calls += 1;
+        throw rateLimitError({ retryAfter: 1 });
+      },
+      { sleep: async () => {}, now: () => 0, maxAttempts: 3 },
+    ),
+    (e) => e.rateLimited === true,
+  );
+  assert.equal(calls, 3);
+});
+
+test('withRateLimitRetry: a reset beyond the wait budget is not slept on - fails at once', async () => {
+  let calls = 0;
+  await assert.rejects(
+    withRateLimitRetry(
+      async () => {
+        calls += 1;
+        throw rateLimitError({ reset: 3600 }); // an hour away
+      },
+      { sleep: async () => assert.fail('must not sleep past the budget'), now: () => 0 },
+    ),
+    (e) => e.rateLimited === true,
+  );
+  assert.equal(calls, 1);
+});
+
+test('provenance-recency (#3015): a rate-limited timeline read stays NOT verified but says so', () => {
+  const v = verifyPassProvenance({
+    labelActor: null,
+    labelAppliedAt: null,
+    headCommittedAt: HEAD_AT,
+    allowlist: BOT_ALLOWLIST,
+    timelineReadError: rateLimitError(),
+  });
+  assert.equal(v.verified, false);
+  assert.match(v.reason, /rate-limited/);
+  assert.match(v.reason, /re-run/);
+  assert.doesNotMatch(v.reason, /no record/);
+});
+
+test('provenance-recency (#3015): any other failed timeline read says the read failed, not "no record"', () => {
+  const v = verifyPassProvenance({
+    labelActor: null,
+    headCommittedAt: HEAD_AT,
+    allowlist: BOT_ALLOWLIST,
+    timelineReadError: new Error('socket hang up'),
+  });
+  assert.equal(v.verified, false);
+  assert.match(v.reason, /could not read the PR label timeline/);
+  assert.doesNotMatch(v.reason, /rate-limited/);
+});
+
+test('provenance-recency (#3015): a rate-limited head-commit read stays NOT verified but says so', () => {
+  const v = verifyPassProvenance({
+    labelActor: 'minspec-review-bot',
+    labelAppliedAt: AFTER_HEAD,
+    headCommittedAt: null,
+    allowlist: BOT_ALLOWLIST,
+    headReadError: rateLimitError(),
+  });
+  assert.equal(v.verified, false);
+  assert.match(v.reason, /rate-limited/);
+});
+
+test('provenance-recency (#3015): a read error never rescues a forged applier', () => {
+  const v = verifyPassProvenance({
+    labelActor: 'harvest316',
+    labelAppliedAt: AFTER_HEAD,
+    headCommittedAt: null,
+    allowlist: BOT_ALLOWLIST,
+    headReadError: rateLimitError(),
+  });
+  assert.equal(v.verified, false);
+  assert.match(v.reason, /not an allowlisted reviewer/);
+});
+
+test('decideStatus (#3015): the rate-limited reason reaches the gate description, gate stays red', () => {
+  const passProvenance = verifyPassProvenance({
+    labelActor: null,
+    headCommittedAt: HEAD_AT,
+    allowlist: BOT_ALLOWLIST,
+    timelineReadError: rateLimitError(),
+  });
+  const s = decideStatus({ labels: [PASS], passProvenance });
+  assert.equal(s.state, 'failure');
+  assert.match(s.description, /rate-limited/);
+  assert.match(s.description, /re-run/); // the actionable tail survives truncate()
+  assert.ok(s.description.length <= 140, `description is ${s.description.length} chars`);
 });
 
 // ── decideStatus + verifyPassProvenance end-to-end (the fail-open regressions) ─
@@ -1153,7 +1328,7 @@ test('verdictLabelFault: exactly the decided verdict is clean', () => {
 {
   const {
     patchFingerprint, renderPatchFingerprint, parsePatchFingerprint,
-    findReattestableVerdict, CHECK_NAME,
+    findReattestableVerdict, isAuthorizedReviewer, CHECK_NAME,
   } = require('./ai-review-guard.js');
 
   const ALLOW = ['minspec-sdd', 'minspec-sdd[bot]'];
@@ -1203,6 +1378,12 @@ test('verdictLabelFault: exactly the decided verdict is clean', () => {
   test('refuses a run posted by an app OUTSIDE the allowlist', () => {
     const impostor = run({ app: { slug: 'somebody-else' } });
     assert.equal(findReattestableVerdict({ checkRuns: [impostor], patchHash: fp, allowlist: ALLOW }).ok, false);
+  });
+
+  test('provenance case rule matches isAuthorizedReviewer (mixed-case app slug)', () => {
+    const mixed = run({ app: { slug: 'MinSpec-SDD' } });
+    assert.equal(isAuthorizedReviewer('MinSpec-SDD', ALLOW), true);
+    assert.equal(findReattestableVerdict({ checkRuns: [mixed], patchHash: fp, allowlist: ALLOW }).ok, true);
   });
 
   test('refuses when the allowlist is empty — never re-attest with no trusted producer', () => {
@@ -1605,10 +1786,14 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     parseRoundRecord,
     latestHeadRound,
     decideVerdictCarry,
+    inputTouchesMachinery,
+    MACHINERY_PATH_RE,
     renderCarriedComment,
     planVerdictCarry,
     carriedLabelFault,
     patchFingerprint,
+    reviewInputFingerprint,
+    REVIEW_INPUT_DIFF_CLOSE,
     VERDICT_BEGIN_TOKEN,
   } = g;
 
@@ -1655,6 +1840,7 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
       panelKey: KEY_A,
       listing: whole(checkRuns === undefined ? [round()] : checkRuns),
       allowlist: ALLOW,
+      touchesMachinery: false,
       ...rest,
     });
   };
@@ -1753,6 +1939,7 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
       panelKey: KEY_A,
       checkRuns: [round()],
       allowlist: ALLOW,
+      touchesMachinery: false,
     });
     assert.equal(old.carry, false);
     assert.match(old.reason, /could not be read/);
@@ -2223,7 +2410,7 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
   // ── the single seam the workflow calls ──
   const INPUT = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n';
   const rawPlan = (o = {}) => {
-    const inputHash = patchFingerprint(INPUT);
+    const inputHash = reviewInputFingerprint(INPUT);
     const panelKey = reviewPanelKey({ lsTree: TREE(), coverage: '' });
     const src = round({ output: { title: 't', summary: record({ inputHash, panelKey }) } });
     return {
@@ -2246,10 +2433,41 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     assert.equal(p.label, PASS);
     assert.equal(p.fromSha, P);
     assert.equal(p.reviewedSha, P);
-    assert.equal(p.inputHash, patchFingerprint(INPUT));
+    assert.equal(p.inputHash, reviewInputFingerprint(INPUT));
     assert.equal(p.panelKey, reviewPanelKey({ lsTree: TREE(), coverage: '' }));
     assert.match(p.comment, /carried forward/i);
     assert.ok(p.comment.includes(P));
+  });
+
+  const diffFor = (...paths) =>
+    paths.map((f) => `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1 +1 @@\n-a\n+b\n`).join('');
+
+  test('#3178 planVerdictCarry: a machinery-touching change is never carried (fresh voters)', () => {
+    for (const f of ['.github/workflows/x.yml', 'scripts/a.sh', '.githooks/pre-commit', 'packages/minspec/src/lib/machinery-paths.ts']) {
+      const inputText = diffFor('docs/a.md', f);
+      const hash = reviewInputFingerprint(inputText);
+      const src = round({ output: { title: 't', summary: record({ inputHash: hash, panelKey: reviewPanelKey({ lsTree: TREE(), coverage: '' }) }) } });
+      const p = planVerdictCarry(rawPlan({ inputText, checkRunsJson: JSON.stringify({ total_count: 1, check_runs: [src] }) }));
+      assert.equal(p.carry, false, f);
+      assert.equal(p.comment, '');
+      assert.match(p.reason, /machinery/);
+    }
+  });
+
+  test('#3178 planVerdictCarry: a non-machinery change still carries', () => {
+    const inputText = diffFor('docs/a.md', 'packages/minspec/src/lib/other.ts');
+    const hash = reviewInputFingerprint(inputText);
+    const src = round({ output: { title: 't', summary: record({ inputHash: hash, panelKey: reviewPanelKey({ lsTree: TREE(), coverage: '' }) }) } });
+    const p = planVerdictCarry(rawPlan({ inputText, checkRunsJson: JSON.stringify({ total_count: 1, check_runs: [src] }) }));
+    assert.equal(p.carry, true, p.reason);
+  });
+
+  test('#3178 inputTouchesMachinery: an unreadable file list fails toward machinery', () => {
+    assert.equal(inputTouchesMachinery(''), true);
+    assert.equal(inputTouchesMachinery('no headers here'), true);
+    assert.equal(inputTouchesMachinery('diff --git "a/we ird" "b/we ird"\n'), true);
+    assert.equal(inputTouchesMachinery('diff --git a/old.md b/scripts/new.sh\n'), true);
+    assert.equal(inputTouchesMachinery(diffFor('src/a.ts')), false);
   });
 
   test('#1688 planVerdictCarry: a refusal still returns the hashes, an empty label and NO comment', () => {
@@ -2286,6 +2504,117 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     }
     assert.equal(planVerdictCarry().carry, false);
     assert.equal(planVerdictCarry(null).carry, false);
+  });
+
+  // ── tm1: the input fingerprint ignores where the BASE put the change, nothing else ──
+  //
+  // A base merge that edits the same file away from the change moves two things the
+  // change did not: the old blob id on the `index` line and the hunk START numbers. Each
+  // case below changes one thing and says whether the key must see it.
+  const IN_DIFF = (o = {}) => {
+    const v = { index: 'index 1111111..2222222 100644', hunk: '@@ -18,7 +19,7 @@ int f()', body: ['   ctx 1', '-old', '+new', '   ctx 2'], after: '', ...o };
+    return ['<untrusted_diff>', 'diff --git a/x.c b/x.c', v.index, '--- a/x.c', '+++ b/x.c', v.hunk, ...v.body, REVIEW_INPUT_DIFF_CLOSE, v.after, ''].join('\n');
+  };
+
+  test('tm1 reviewInputFingerprint: blob ids and hunk start numbers are positional, so they do not count', () => {
+    const fp = reviewInputFingerprint(IN_DIFF());
+    assert.match(fp, /^[0-9a-f]{64}$/);
+    assert.equal(reviewInputFingerprint(IN_DIFF({ index: 'index abcdef0..1234567 100644' })), fp);
+    assert.equal(reviewInputFingerprint(IN_DIFF({ hunk: '@@ -218,7 +240,7 @@ int f()' })), fp);
+    assert.equal(reviewInputFingerprint(IN_DIFF({ index: 'index abcdef0..1234567 100644', hunk: '@@ -1,7 +9,7 @@ int f()' })), fp);
+    assert.equal(reviewInputFingerprint(IN_DIFF().replace(/\n/g, '\r\n')), fp);
+  });
+
+  test('tm1 reviewInputFingerprint: everything the voters read still counts', () => {
+    const fp = reviewInputFingerprint(IN_DIFF());
+    for (const [what, o] of [
+      ['an added line', { body: ['   ctx 1', '-old', '+NEW', '   ctx 2'] }],
+      ['whitespace on an added line', { body: ['   ctx 1', '-old', '+ new', '   ctx 2'] }],
+      ['a context line', { body: ['   ctx 1 moved by main', '-old', '+new', '   ctx 2'] }],
+      ['the file mode', { index: 'index 1111111..2222222 100755' }],
+      ['a hunk length', { hunk: '@@ -18,8 +19,7 @@ int f()' }],
+      ['the function text in the hunk header', { hunk: '@@ -18,7 +19,7 @@ int g()' }],
+      ['the approval facts after the diff', { after: '<approval_provenance>MISMATCH</approval_provenance>' }],
+      ['an index-shaped line in the approval facts', { after: 'index 3333333..4444444' }],
+    ]) {
+      assert.notEqual(reviewInputFingerprint(IN_DIFF(o)), fp, `${what} must change the key`);
+    }
+    // Normalisation stops at the diff's closing line: the same index-shaped line after it
+    // is hashed as written, so two different ones differ.
+    assert.notEqual(
+      reviewInputFingerprint(IN_DIFF({ after: 'index 3333333..4444444' })),
+      reviewInputFingerprint(IN_DIFF({ after: 'index 5555555..6666666' })),
+    );
+  });
+
+  // ── #2926 security finding: a binary file's only content signal is its blob ids ──
+  //
+  // `review-branch.sh` runs plain `git diff` (no --binary), so a changed binary file is a
+  // constant body line and the `index <old>..<new>` blob ids. Normalising those ids made
+  // two different binary contents hash equal, so a swapped binary would have carried a
+  // pass. A file section keeps its blob ids unless its content is shown as text hunks.
+  const SECTION = (o = {}) => {
+    const v = { path: 'img.png', index: 'index 1111111..2222222 100644', body: ['Binary files a/img.png and b/img.png differ'], ...o };
+    return [`diff --git a/${v.path} b/${v.path}`, v.index, ...v.body];
+  };
+  const IN = (...sections) => ['<untrusted_diff>', ...sections.flat(), REVIEW_INPUT_DIFF_CLOSE, '', ''].join('\n');
+  const TEXT_SECTION = (o = {}) => {
+    const v = { index: 'index 1111111..2222222 100644', hunk: '@@ -18,7 +19,7 @@ int f()', ...o };
+    return ['diff --git a/x.c b/x.c', v.index, '--- a/x.c', '+++ b/x.c', v.hunk, '   ctx 1', '-old', '+new', '   ctx 2'];
+  };
+
+  test('#2926 reviewInputFingerprint: a different binary content at the same path and mode changes the key', () => {
+    assert.notEqual(
+      reviewInputFingerprint(IN(SECTION())),
+      reviewInputFingerprint(IN(SECTION({ index: 'index 1111111..3333333 100644' }))),
+      'the "Binary files ... differ" form: the new blob id is the only content signal',
+    );
+    assert.notEqual(
+      reviewInputFingerprint(IN(SECTION())),
+      reviewInputFingerprint(IN(SECTION({ index: 'index 4444444..2222222 100644' }))),
+      'the old blob id counts too: the base content of a binary is not shown either',
+    );
+    const patch = (idx) => SECTION({ index: idx, body: ['GIT binary patch', 'literal 5', 'McmZ?wb@xD0000', '', 'literal 0', 'HcmV?d00001'] });
+    assert.notEqual(
+      reviewInputFingerprint(IN(patch('index 1111111..2222222 100644'))),
+      reviewInputFingerprint(IN(patch('index 1111111..3333333 100644'))),
+      'the "GIT binary patch" form',
+    );
+  });
+
+  test('#2926 reviewInputFingerprint: a section with no text hunk keeps its blob ids; text sections beside it still normalise', () => {
+    // An index line with no hunk at all (an empty file added, or any form this parser
+    // does not recognise) keeps its ids: the default is to count, never to drop.
+    const bare = (idx) => IN([`diff --git a/e b/e`, 'new file mode 100644', idx]);
+    assert.notEqual(reviewInputFingerprint(bare('index 0000000..e69de29')), reviewInputFingerprint(bare('index 0000000..1234567')));
+    // A binary section next to a text section: the text one still ignores position, the
+    // binary one still counts its ids, whichever order they come in.
+    const moved = TEXT_SECTION({ index: 'index abcdef0..1234567 100644', hunk: '@@ -218,7 +240,7 @@ int f()' });
+    assert.equal(reviewInputFingerprint(IN(SECTION(), moved)), reviewInputFingerprint(IN(SECTION(), TEXT_SECTION())));
+    assert.equal(reviewInputFingerprint(IN(moved, SECTION())), reviewInputFingerprint(IN(TEXT_SECTION(), SECTION())));
+    assert.notEqual(
+      reviewInputFingerprint(IN(TEXT_SECTION(), SECTION({ index: 'index 1111111..3333333 100644' }))),
+      reviewInputFingerprint(IN(TEXT_SECTION(), SECTION())),
+    );
+    // An added line that reads like a binary marker is a body line ('+' first), not a marker.
+    const lookalike = TEXT_SECTION().map((l) => (l === '+new' ? '+Binary files a/x and b/x differ' : l));
+    const lookalikeMoved = lookalike.map((l) => (l.startsWith('index ') ? 'index abcdef0..1234567 100644' : l));
+    assert.equal(reviewInputFingerprint(IN(lookalike)), reviewInputFingerprint(IN(lookalikeMoved)));
+  });
+
+  test('tm1 reviewInputFingerprint: no closing line means nothing is taken out; empty is null', () => {
+    const open = (idx) => ['<untrusted_diff>', idx, '@@ -1 +1 @@', '-a', '+b', ''].join('\n');
+    assert.notEqual(reviewInputFingerprint(open('index 1111111..2222222')), reviewInputFingerprint(open('index 3333333..4444444')));
+    assert.equal(reviewInputFingerprint(''), null);
+    assert.equal(reviewInputFingerprint('\n\n'), null);
+    assert.equal(reviewInputFingerprint(null), null);
+    // Never the same key as the un-normalised one, so an old record cannot be read as new.
+    assert.notEqual(reviewInputFingerprint(IN_DIFF()), patchFingerprint(IN_DIFF()));
+  });
+
+  test('tm1 REVIEW_INPUT_DIFF_CLOSE is the line review-branch.sh closes the diff block with', () => {
+    const script = require('fs').readFileSync(require('path').join(__dirname, '../../scripts/review-branch.sh'), 'utf8');
+    assert.ok(script.includes(`REVIEW_INPUT="<untrusted_diff>\n\${DIFF}\n${REVIEW_INPUT_DIFF_CLOSE}\n`), 'review-branch.sh must close REVIEW_INPUT with this exact line');
   });
 
   // ── invariant 3, continued: a listing that is not the WHOLE list ──

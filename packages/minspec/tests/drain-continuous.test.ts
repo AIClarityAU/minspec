@@ -13,6 +13,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+useShellTimeout();
 
 const DRAIN = path.resolve(__dirname, '../../../scripts/drain-inbox.sh');
 const DRAIN_SRC = fs.readFileSync(DRAIN, 'utf-8');
@@ -339,5 +342,171 @@ describe('drain-inbox.sh — single-instance lock records the LOOP pid, not the 
     const out = execFileSync('bash', ['-c', '( echo "$$ $BASHPID" ) & wait'], { encoding: 'utf-8' }).trim();
     const [dollarDollar, bashpid] = out.split(/\s+/);
     expect(bashpid).not.toBe(dollarDollar); // $$ = inherited parent pid; $BASHPID = the subshell's own
+  });
+});
+
+// ── #1187: pause/resume marker + SIGTERM/SIGINT cleanup ─────────────────────
+// Hermetic: temp lock/log/pause/HOME, a stub `gh` that reads an empty queue, and a
+// 100%-used quota reading so any cycle that DOES start defers at the gate before it
+// touches git or GitHub. Never the live drain's /tmp lock.
+describe('drain-inbox.sh — pause marker + signal cleanup (#1187)', () => {
+  const sleepMs = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+  async function waitFor(pred: () => boolean, ms = 15000): Promise<boolean> {
+    const end = Date.now() + ms;
+    while (Date.now() < end) { if (pred()) return true; await sleepMs(100); }
+    return pred();
+  }
+
+  function sandbox() {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'drain-pause-'));
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin);
+    fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const quota = path.join(dir, 'quota.json');
+    const now = nowSec();
+    fs.writeFileSync(quota, JSON.stringify({ used_percentage: 100, resets_at: now + 3600, observed_at: now, source: 'test' }));
+    const p = {
+      dir,
+      lock: path.join(dir, 'drain.lock'),
+      log: path.join(dir, 'drain.log'),
+      pause: path.join(dir, 'drain-pause'),
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        HOME: dir,
+        MINSPEC_DRAIN_LOCK: path.join(dir, 'drain.lock'),
+        MINSPEC_DRAIN_LOG: path.join(dir, 'drain.log'),
+        MINSPEC_DRAIN_PAUSE_FILE: path.join(dir, 'drain-pause'),
+        MINSPEC_QUOTA_FILE: quota,
+        MINSPEC_DRAIN_POLL: '1',
+        MINSPEC_DRAIN_INTERVAL: '1',
+      } as NodeJS.ProcessEnv,
+    };
+    return p;
+  }
+
+  const logOf = (s: ReturnType<typeof sandbox>) => (fs.existsSync(s.log) ? fs.readFileSync(s.log, 'utf-8') : '');
+  const countOf = (hay: string, needle: RegExp) => (hay.match(needle) ?? []).length;
+
+  function start(s: ReturnType<typeof sandbox>): number {
+    const r = spawnSync('bash', [DRAIN, '--continuous'], { env: s.env, encoding: 'utf-8' });
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    return Number(fs.readFileSync(s.lock, 'utf-8').trim());
+  }
+
+  it('--paused seam: present marker => exit 0, absent or removed => exit 1', () => {
+    const s = sandbox();
+    const env = s.env;
+    const probe = () => spawnSync('bash', [DRAIN, '--paused'], { env, encoding: 'utf-8' }).status;
+    expect(probe()).toBe(1);
+    fs.writeFileSync(s.pause, '');
+    expect(probe()).toBe(0);
+    fs.rmSync(s.pause);
+    expect(probe()).toBe(1);
+  });
+
+  it.skipIf(process.getuid?.() === 0)('--paused seam: a marker under an unreadable directory => not paused', () => {
+    const s = sandbox();
+    const locked = path.join(s.dir, 'locked');
+    fs.mkdirSync(locked);
+    fs.writeFileSync(path.join(locked, 'drain-pause'), '');
+    fs.chmodSync(locked, 0o000);
+    try {
+      const env = { ...s.env, MINSPEC_DRAIN_PAUSE_FILE: path.join(locked, 'drain-pause') };
+      expect(spawnSync('bash', [DRAIN, '--paused'], { env, encoding: 'utf-8' }).status).toBe(1);
+    } finally {
+      fs.chmodSync(locked, 0o700);
+    }
+  });
+
+  it('--pause / --resume write and remove the marker', () => {
+    const s = sandbox();
+    const run2 = (a: string) => spawnSync('bash', [DRAIN, a], { env: s.env, encoding: 'utf-8' });
+    expect(run2('--pause').status).toBe(0);
+    expect(fs.existsSync(s.pause)).toBe(true);
+    expect(run2('--resume').status).toBe(0);
+    expect(fs.existsSync(s.pause)).toBe(false);
+    expect(run2('--resume').status).toBe(0); // idempotent
+  });
+
+  it('paused: no cycle starts and "paused" is logged once; removing the marker resumes (logged once) and a cycle starts', async () => {
+    const s = sandbox();
+    fs.writeFileSync(s.pause, '');
+    const pid = start(s);
+    try {
+      expect(await waitFor(() => /PAUSED/.test(logOf(s)))).toBe(true);
+      await sleepMs(3500); // several polls while paused
+      const paused = logOf(s);
+      expect(countOf(paused, /\[drain\] PAUSED/g), 'paused logged once per transition').toBe(1);
+      // run_loop's own banner prints one "quota gate" line at start; a cycle prints more.
+      const gateLines = (t: string) => countOf(t, /\[drain\] (quota gate|quota window exhausted|quota cap)/g);
+      expect(gateLines(paused), 'no cycle ran while paused').toBe(1);
+      fs.rmSync(s.pause);
+      expect(await waitFor(() => gateLines(logOf(s)) > 1)).toBe(true);
+      const resumed = logOf(s);
+      expect(countOf(resumed, /\[drain\] RESUMED/g)).toBe(1);
+      expect(countOf(resumed, /\[drain\] PAUSED/g)).toBe(1);
+    } finally {
+      try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+    }
+  }, 40000);
+
+  it('SIGTERM while waiting: lock removed, loop exits, log says why', async () => {
+    const s = sandbox();
+    fs.writeFileSync(s.pause, ''); // idle in the wait path, never touch a cycle
+    const pid = start(s);
+    expect(await waitFor(() => /PAUSED/.test(logOf(s)))).toBe(true);
+    process.kill(pid, 'SIGTERM');
+    expect(await waitFor(() => !alive(pid))).toBe(true);
+    expect(fs.existsSync(s.lock), 'lock removed').toBe(false);
+    expect(logOf(s)).toMatch(/stopping on SIGTERM/);
+  }, 40000);
+
+  // T3 (#3064): the host slept for 8 h 17 m inside one 1200 s inter-cycle wait. `sleep`
+  // counts monotonic time, so the wait froze with the host and the log said nothing for
+  // 8.6 hours; it read as a stall. A `sleep` that takes 5 s whatever it is asked for
+  // stands in for the suspend: each 1 s chunk then overruns the wall clock by 4 s, past
+  // a slack of 2. The paused path idles in wait_interval without touching a cycle.
+  function slowSleepSandbox(slowSecs: number | null) {
+    const s = sandbox();
+    if (slowSecs !== null) {
+      const realSleep = execFileSync('sh', ['-c', 'command -v sleep'], { encoding: 'utf-8' }).trim();
+      fs.writeFileSync(path.join(s.dir, 'bin', 'sleep'), `#!/bin/sh\nexec ${realSleep} ${slowSecs}\n`, { mode: 0o755 });
+    }
+    s.env = { ...s.env, MINSPEC_DRAIN_WALL_JUMP_SLACK: '2' };
+    fs.writeFileSync(s.pause, '');
+    return s;
+  }
+
+  it('T3 (#3064): a wait chunk the wall clock overran (host suspend) is logged, with the jump and a UTC time', async () => {
+    const s = slowSleepSandbox(5);
+    const pid = start(s);
+    try {
+      expect(await waitFor(() => /wall clock moved/.test(logOf(s)), 20000), logOf(s)).toBe(true);
+      expect(logOf(s)).toMatch(/\[drain\] wall clock moved [0-9]+s during a 1s wait at \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ/);
+    } finally {
+      try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+    }
+  }, 40000);
+
+  it('CONTROL (#3064): an ordinary wait at the same slack logs no jump', async () => {
+    const s = slowSleepSandbox(null);
+    const pid = start(s);
+    try {
+      expect(await waitFor(() => /PAUSED/.test(logOf(s)))).toBe(true);
+      await sleepMs(4000); // several 1 s chunks
+      expect(logOf(s)).not.toMatch(/wall clock moved/);
+    } finally {
+      try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+    }
+  }, 40000);
+
+  it('source: pause is checked between cycles (top of the loop), never inside run_cycle', () => {
+    const loop = DRAIN_SRC.slice(DRAIN_SRC.indexOf('run_loop() {'), DRAIN_SRC.indexOf('# Parse EVERY argument'));
+    expect(loop).toMatch(/drain_paused/);
+    const cycle = DRAIN_SRC.slice(DRAIN_SRC.indexOf('run_cycle() {'), DRAIN_SRC.indexOf('run_cycle() {') + 4000);
+    expect(cycle).not.toMatch(/drain_paused/);
   });
 });

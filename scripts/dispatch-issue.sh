@@ -37,6 +37,11 @@ ROLES_DIR="${SCRIPT_DIR}/roles"
 #   DISPATCH_RC_DECLINED   refused before the claim. Nothing was started.
 #   DISPATCH_RC_STARTED    the claim was won, and the run ended the way it used to end on
 #                          0: built, escalated or crashed.
+#   DISPATCH_RC_AUTH_FAILED  this script's OWN first `gh` call (the issue read, before the
+#                          claim) was answered HTTP 401. Nothing was started. The caller
+#                          may re-mint its credential and ask again (#3176). Said by status
+#                          only: the caller never reads this script's output for it, because
+#                          the build agent's prose travels on that output (#2233).
 #   0                      NO ANSWER. An exit neither function below was called for. The
 #                          caller must read it as neither of the two.
 #   anything else          a failure, as before.
@@ -68,6 +73,7 @@ ROLES_DIR="${SCRIPT_DIR}/roles"
 # numbers, and exit_declined cannot once the claim is won.
 DISPATCH_RC_DECLINED=75
 DISPATCH_RC_STARTED=76
+DISPATCH_RC_AUTH_FAILED=78
 
 DISPATCH_STATUS_ASKED=0
 case "${MINSPEC_DISPATCH_OUTCOME_STATUS:-}" in
@@ -113,6 +119,14 @@ exit_started() {
   exit "$DISPATCH_RC_STARTED"
 }
 
+# exit_auth_failed: leave, before the claim, because this script's own `gh` read got a 401.
+# To a caller that did not ask it is the plain failure it always was (exit 1).
+exit_auth_failed() {
+  (( DISPATCH_STATUS_ASKED && ! DISPATCH_CLAIMED )) || exit 1
+  DISPATCH_EXIT_AS="$DISPATCH_RC_AUTH_FAILED"
+  exit "$DISPATCH_RC_AUTH_FAILED"
+}
+
 # _dispatch_on_exit: the ONE exit trap of this script. It has two jobs.
 #
 # It gives the claim back (D6/D10). That used to be a trap of its own, set where the
@@ -140,7 +154,7 @@ _dispatch_on_exit() {
     lease_stop_renew_ticker; lease_release_all >/dev/null 2>&1 || true
   fi
   if (( DISPATCH_STATUS_ASKED )) \
-    && [[ "$rc" == "$DISPATCH_RC_DECLINED" || "$rc" == "$DISPATCH_RC_STARTED" ]] \
+    && [[ "$rc" == "$DISPATCH_RC_DECLINED" || "$rc" == "$DISPATCH_RC_STARTED" || "$rc" == "$DISPATCH_RC_AUTH_FAILED" ]] \
     && [[ "$rc" != "$DISPATCH_EXIT_AS" ]]; then
     echo "WARNING: #$ISSUE was ending on status $rc, which this script keeps for its own 'started' and 'refused' answers and did not choose here. Reported as a plain failure instead (#2641)." >&2
     exit 1
@@ -168,6 +182,7 @@ if [[ ! -d "${REPO_ROOT}/.minspec" ]]; then
 fi
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/lib/agent-context.sh"
+agent_caveman_init
 # Agent writes carry the BOT's identity, never the human's (#1355). This arms a
 # `gh` wrapper; acquiring the token is LAZY, so reads pass through untouched and
 # only the first WRITE mints — aborting there, loudly, if it cannot.
@@ -556,6 +571,223 @@ if [[ "${ISSUE:-}" == "--may-merge" ]]; then
   if autonomy_may_merge "merge this PR (seam)" "$(cat)"; then exit 0; else exit 1; fi
 fi
 
+# autonomy_may_merge_delegated <pr> (#2981, DR-108)
+#
+#   stdout: one verdict JSON.  exit: 0 = the delegated merge may proceed, 1 = it may not.
+#
+# The delegated twin of autonomy_may_merge, for an EXISTING open spec PR that step 6b
+# held as needs-human-review. Same populator, same decider; the only thing added is the
+# one bridge DR-108 §1 allows between them:
+#
+#   1. autonomy_stop_classes_for_paths derives the stop classes for the PR's diff, exactly
+#      as step 6b did when it held the PR.
+#   2. scripts/lib/delegated-merge.ts judges, read-only, whether DLG-001 clears the
+#      `approval-or-acceptance` class at the PR's CURRENT head (spec requirements only,
+#      still specifying, tier T1..T4, ai-review:pass on that head, tripwire within cap,
+#      not memory-fabric; every unreadable input denies). It returns the classes left
+#      after stopClassesAfterDelegation, which can remove that one class and no other.
+#   3. autonomy_may_proceed asks mayProceed with the LEFTOVER classes, so the project's
+#      `autonomy` setting still decides: under `ask` nothing merges, delegation or not.
+#
+# Never arms anything itself; the `--delegated-spec-merge ... --arm` seam below does, and
+# only on a proceed. The judge's command can be replaced for tests
+# (MINSPEC_DELEGATED_MERGE_JUDGE_CMD); the decision downstream of it cannot.
+# delegated_merge_handoffs_spent <pr> <marker> (#3120)
+#
+# Exit 0 only when EVERY handoff comment predates the PR's newest commit. A handoff is a
+# claim about the head it was posted against: shepherd_hand_off writes it when automation
+# gives up (the ceiling, the attempt cap, a fix that produced nothing), and a commit
+# pushed after it means automation took the PR back, so the old handoff no longer speaks
+# for the founder. Without this, #2799, #2830 and #2945 stayed refused for good after
+# being remediated and green for a week. A handoff at or after the newest commit, or any
+# unreadable commit list, comment or timestamp, exits 1 and the handoff stays live.
+delegated_merge_handoffs_spent() {
+  local pr="$1" marker="$2" live=""
+  if ! live=$(gh pr view "$pr" --repo "$REPO" --json commits,comments 2>/dev/null \
+       | jq -r --arg m "$marker" '
+           (.commits | if type == "array" and length > 0
+                       then [.[] | .committedDate | fromdateiso8601] | max
+                       else error("no commits") end) as $head
+           | .comments | if type == "array" then . else error("no list") end
+           | [.[] | select((.body // "") | contains($m))
+                  | select((.createdAt | fromdateiso8601) >= $head)]
+           | length' 2>/dev/null); then
+    return 1
+  fi
+  [[ "$live" == "0" ]]
+}
+
+# delegated_merge_human_claims <pr> (#3050)
+#
+# Two reasons the bot must not merge a held spec PR, whatever the delegation says. Both
+# say a decision is still someone's, which a delegation of SPEC APPROVAL does not cover:
+#   1. an unconfirmed closing link. A drain PR is dispatched for issue N (branch
+#      `agent/issue-N`); merging it closes whatever GitHub says it closes
+#      (`closingIssuesReferences`), so that list must contain N. A branch that is not a
+#      drain branch names no issue, so it needs at least one confirmed link, EXCEPT (#3115)
+#      a PR authored by the App identity (`app/minspec-sdd` or `minspec-sdd[bot]`) whose
+#      body has no closing keyword: it claims to close nothing, so no link is expected.
+#   2. a creator-shepherd handoff. `shepherd_hand_off` stamps SHEPHERD_HANDOFF_MARKER on a
+#      comment when the creating session gives the PR to the founder; a bot merge would
+#      take that decision from him.
+# Prints the denial reason and detail (tab-separated) and returns 1 on a claim OR on any
+# unreadable input; returns 0 only when both are positively clear (reason 1 satisfied
+# either by the confirmed link or by the App-authored no-closing-keyword exception above).
+delegated_merge_human_claims() {
+  local pr="$1" view="" head="" refs="" handoffs="" issue=""
+  local marker="<!-- minspec-shepherd-handoff -->"
+  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments,author,body 2>/dev/null) \
+     || ! head=$(printf '%s' "$view" | jq -r '.headRefName' 2>/dev/null) \
+     || ! refs=$(printf '%s' "$view" | jq -r '.closingIssuesReferences | if type == "array" then .[].number else error("no list") end' 2>/dev/null) \
+     || ! handoffs=$(printf '%s' "$view" | jq -r --arg m "$marker" '.comments | if type == "array" then [.[] | select((.body // "") | contains($m))] | length else error("no list") end' 2>/dev/null); then
+    printf 'pr-claims-unreadable\tcould not read PR #%s closing links and comments; failing closed\n' "$pr"
+    return 1
+  fi
+  if [[ "$handoffs" != "0" ]] && ! delegated_merge_handoffs_spent "$pr" "$marker"; then
+    printf 'handed-to-human\tPR #%s was handed to the founder by its creator (shepherd handoff comment); a bot merge would take his decision\n' "$pr"
+    return 1
+  fi
+  if [[ "$head" =~ ^agent/issue-([0-9]+)$ ]]; then
+    issue="${BASH_REMATCH[1]}"
+    if ! grep -qxF "$issue" <<<"$refs"; then
+      printf 'closes-link-unconfirmed\tPR #%s was dispatched for issue #%s but GitHub does not confirm that it closes it (#2228); merging would close the wrong issue or none\n' "$pr" "$issue"
+      return 1
+    fi
+  elif [[ -z "${refs//[$'\n\r\t ']/}" ]]; then
+    # No confirmed link on a non-drain branch (#3115). Two cases look identical here: a
+    # `Closes #N` trailer GitHub failed to link (#2228), and a PR that claims to close nothing
+    # (a bot Clarify-selections PR). Admit only the latter: authored by the App identity AND
+    # no closing keyword in the body. The login must be `app/minspec-sdd` or `minspec-sdd[bot]`:
+    # the `[bot]`/`app/` forms cannot be registered by a person, whereas a bare `minspec-sdd`
+    # is an ordinary user login anyone could hold. An unreadable author/body fails closed.
+    local author="" body_closes=""
+    if author=$(printf '%s' "$view" | jq -r '.author.login | if type == "string" then . else error("no author") end' 2>/dev/null) \
+       && body_closes=$(printf '%s' "$view" | jq -r '.body | if type == "string" then (test("(^|[^a-z])(close[sd]?|fix(e[sd])?|resolve[sd]?)[: \\t]*([a-z0-9._-]+/[a-z0-9._-]+)?(#|https?://)"; "i")) else error("no body") end' 2>/dev/null) \
+       && [[ "$author" =~ ^(app/minspec-sdd|minspec-sdd\[bot\])$ && "$body_closes" == "false" ]]; then
+      return 0
+    fi
+    printf 'closes-link-unconfirmed\tPR #%s has no confirmed closing link; merging would close no issue\n' "$pr"
+    return 1
+  fi
+  return 0
+}
+
+autonomy_may_merge_delegated() {
+  local pr="${1-}" changed="" classes="" judged="" rc=0 after="" head="" dlg=""
+  local deny_fmt='{"proceed":false,"reason":"%s","detail":"%s","autonomy":"ask"}\n'
+  if [[ ! "$pr" =~ ^[1-9][0-9]*$ ]]; then
+    printf "$deny_fmt" "cli-usage" "a PR number is required"
+    return 1
+  fi
+  if ! changed=$(gh pr diff "$pr" --repo "$REPO" --name-only 2>/dev/null) \
+     || [[ -z "${changed//[$'\n\r\t ']/}" ]]; then
+    printf "$deny_fmt" "diff-unreadable" "could not enumerate PR #${pr}'s changed files, or there were none; failing closed"
+    return 1
+  fi
+  if ! classes=$(autonomy_stop_classes_for_paths "$changed"); then
+    printf "$deny_fmt" "stop-class-derivation-failed" "the stop-class derivation exited non-zero; failing closed"
+    return 1
+  fi
+  local claim=""
+  if ! claim=$(delegated_merge_human_claims "$pr"); then
+    printf "$deny_fmt" "${claim%%$'\t'*}" "${claim#*$'\t'}"
+    return 1
+  fi
+  local -a judge
+  if [[ -n "${MINSPEC_DELEGATED_MERGE_JUDGE_CMD:-}" ]]; then
+    judge=("$MINSPEC_DELEGATED_MERGE_JUDGE_CMD")
+  elif [[ -x "${AUTONOMY_REPO_ROOT}/node_modules/.bin/tsx" ]]; then
+    judge=("${AUTONOMY_REPO_ROOT}/node_modules/.bin/tsx" "${SCRIPT_DIR}/lib/delegated-merge.ts")
+  else
+    printf "$deny_fmt" "judge-unrunnable" "no pinned tsx runner at ${AUTONOMY_REPO_ROOT}/node_modules/.bin/tsx; failing closed"
+    return 1
+  fi
+  judged=$("${judge[@]}" --pr "$pr" --repo "$REPO" --repo-root "$AUTONOMY_REPO_ROOT" \
+             --base origin/main --stop-classes "$classes" 2>/dev/null) && rc=0 || rc=$?
+  judged=$(printf '%s\n' "$judged" | grep -v '^[[:space:]]*$' | tail -n 1 || true)  # swallow-ok: grep -v exits 1 on all-blank output, which leaves judged empty and is refused on the next line
+  if (( rc != 0 )) || [[ "$(printf '%s' "$judged" | jq -r '.arm' 2>/dev/null)" != "true" ]]; then
+    local jj=""
+    jj=$(printf '%s' "$judged" | jq -c . 2>/dev/null) || jj=""
+    [[ -n "$jj" ]] || jj=null
+    jq -cn --argjson j "$jj" --arg rc "$rc" \
+      '{proceed:false, reason:("delegation-" + (($j // {}).reason // "judge-unreadable")),
+        detail:(($j // {}).detail // ("the delegated-merge judge exited " + $rc + " with no readable verdict; failing closed")),
+        autonomy:"ask"}' 2>/dev/null \
+      || printf "$deny_fmt" "judge-unreadable" "the delegated-merge judge gave no readable verdict; failing closed"
+    return 1
+  fi
+  after=$(printf '%s' "$judged" | jq -r '.classesAfter | if type == "array" then join(",") else error("no list") end' 2>/dev/null) \
+    || { printf "$deny_fmt" "judge-unreadable" "the judge's classesAfter is not a list; failing closed"; return 1; }
+  head=$(printf '%s' "$judged" | jq -r '.headSha // ""' 2>/dev/null || true)  # swallow-ok: an unreadable SHA leaves head empty and is refused on the next line
+  dlg=$(printf '%s' "$judged" | jq -r '.delegationId // ""' 2>/dev/null || true)  # swallow-ok: as above, refused on the next line
+  if [[ ! "$head" =~ ^[0-9a-f]{40}$ || -z "$dlg" ]]; then
+    printf "$deny_fmt" "judge-unreadable" "the judge's verdict names no head SHA or delegation; failing closed"
+    return 1
+  fi
+  local verdict=""
+  if ! verdict=$(autonomy_may_proceed \
+      "arm GitHub-native auto-merge on spec PR #${pr} at ${head} under delegation ${dlg} (DR-108, #2981)" \
+      "$after" \
+      "hold the spec PR for the founder's merge keystroke - he has said that keystroke is not needed for a spec covered by ${dlg} (queue item dlg2981, 2026-10-21), so holding stalls the drain on the held cap for no check"); then
+    printf '%s\n' "$verdict"
+    return 1
+  fi
+  printf '%s' "$verdict" | jq -c --argjson j "$judged" \
+    '. + {headSha:$j.headSha, delegationId:$j.delegationId, verdictBy:$j.verdictBy}' 2>/dev/null \
+    || { printf "$deny_fmt" "verdict-unreadable" "the autonomy verdict could not be combined with the judge's; failing closed"; return 1; }
+}
+
+# Seam (#2981): ISSUE=--delegated-spec-merge <pr> [--arm]. Without --arm it is a dry run:
+# it prints the verdict and writes nothing. With --arm, on a proceed only, it arms
+# GitHub-native auto-merge bound to the judged head (--match-head-commit), through this
+# script's `gh` wrapper, so the write is minted as minspec-sdd[bot] or aborts (#1355);
+# never --admin. GitHub then merges only when the required checks (ready-to-merge: a
+# provenance-verified ai-review:pass on the head) are green. Exit 0 = armed (or would be),
+# 1 = denied, 2 = admitted but the arm failed.
+if [[ "${ISSUE:-}" == "--delegated-spec-merge" ]]; then
+  _dsm_pr="${2-}" _dsm_mode="${3-}"
+  if [[ -n "$_dsm_mode" && "$_dsm_mode" != "--arm" ]]; then
+    echo "usage: dispatch-issue.sh --delegated-spec-merge <pr> [--arm]" >&2
+    exit 1
+  fi
+  # The delegated arm IS a GitHub-native auto-merge, so the project's DR-061 opt-in
+  # governs it exactly as it governs step 6b: off (or the SPEC-024 consequence-hybrid
+  # gate owning merges) means no arm, delegation or not. Checked before any read.
+  if ! native_automerge_enabled; then
+    printf '%s\n' '{"proceed":false,"reason":"native-automerge-off","detail":"native auto-merge (DR-061) is not enabled for this project, or the consequence-hybrid gate owns merges; the delegated arm is native auto-merge and is off with it","autonomy":"ask"}'
+    exit 1
+  fi
+  gh_bot_warm_read
+  if ! _dsm_verdict=$(autonomy_may_merge_delegated "$_dsm_pr"); then
+    printf '%s\n' "$_dsm_verdict"
+    exit 1
+  fi
+  if [[ "$_dsm_mode" != "--arm" ]]; then
+    printf '%s\n' "$_dsm_verdict" | jq -c '. + {armed:false, dryRun:true}'
+    exit 0
+  fi
+  _dsm_head=$(printf '%s' "$_dsm_verdict" | jq -r '.headSha')
+  _dsm_dlg=$(printf '%s' "$_dsm_verdict" | jq -r '.delegationId')
+  _dsm_by=$(printf '%s' "$_dsm_verdict" | jq -r '.verdictBy')
+  # Flag order is `--auto --squash`, the reverse of step 6b's, on purpose: the step-6b
+  # source-text suites (drain-selfheal, autonomy-merge-gate SITE A) locate THAT arm by
+  # its literal flag pair. This arm's gating is pinned behaviourally instead, in
+  # delegated-merge-seam.test.ts.
+  if ! gh pr merge "$_dsm_pr" --repo "$REPO" --auto --squash --match-head-commit "$_dsm_head" >/dev/null 2>&1; then
+    printf '%s\n' "$_dsm_verdict" | jq -c '. + {armed:false, error:"arm-failed"}'
+    echo "WARNING: PR #${_dsm_pr}: the delegation admitted the merge but auto-merge could not be armed at ${_dsm_head} (head moved, already merged, or blocked); left held." >&2
+    exit 2
+  fi
+  # The hold label said "a human is the next actor" (#816); once armed that is false.
+  # Best-effort and loud: the arm already stands, and a stale label holds nothing.
+  gh pr edit "$_dsm_pr" --repo "$REPO" --remove-label "needs-human-review" >/dev/null 2>&1 \
+    || echo "WARNING: PR #${_dsm_pr}: armed, but the needs-human-review label could not be removed." >&2
+  gh pr comment "$_dsm_pr" --repo "$REPO" --body "$(printf '## Delegated merge armed - minspec-sdd[bot], not the founder (#2981)\n\nAuto-merge is armed on this spec pull request at `%s` under delegation **%s** (DR-108). The founder did not press merge: his delegation covers T1-T4 MinSpec spec content once an independent AI review passes (queue item dlg2981, 2026-10-21).\n\n- Independent verdict on this head: %s\n- GitHub merges only when the required checks are green on this head; a new push voids the arm.\n- Merging is not approving: the spec lands as `specifying`, and approval is recorded later, separately, by `delegated-approval-caller.ts`.\n\nRejected alternative (DR-086 section 4): hold for the founder'"'"'s merge keystroke.' "$_dsm_head" "$_dsm_dlg" "$_dsm_by")" >/dev/null 2>&1 \
+    || echo "WARNING: PR #${_dsm_pr}: armed, but the audit comment could not be posted." >&2
+  printf '%s\n' "$_dsm_verdict" | jq -c '. + {armed:true}'
+  exit 0
+fi
+
 # SPECIFY_SCOPE_RE (#1169) — the ONLY paths a SPECIFY-ONLY dispatch may touch.
 #
 # A specify-only dispatch replaces the human's pre-build read of the raw issue, so
@@ -697,7 +929,19 @@ echo "Fetching issue #$ISSUE..."
 # ONE read, used throughout: the title and body in this document are what the readiness
 # gate fingerprints, what the author gate further down requires the judged text to equal,
 # and what the prompt is built from. Nothing below reads the issue's text again.
-ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,labels,state,comments)
+#
+# A 401 here is the one failure the caller can act on (#3176), and it is told by exit
+# status (exit_auth_failed). gh's own stderr is read for it, which is safe: no agent has
+# run yet. stderr is passed on unchanged.
+ISSUE_ERR_FILE=$(mktemp)
+ISSUE_FETCH_RC=0
+ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,labels,state,comments 2>"$ISSUE_ERR_FILE") || ISSUE_FETCH_RC=$?
+cat "$ISSUE_ERR_FILE" >&2
+if (( ISSUE_FETCH_RC )); then
+  if grep -qE 'HTTP 401|Bad credentials' "$ISSUE_ERR_FILE"; then rm -f "$ISSUE_ERR_FILE"; exit_auth_failed; fi
+  rm -f "$ISSUE_ERR_FILE"; exit "$ISSUE_FETCH_RC"
+fi
+rm -f "$ISSUE_ERR_FILE"
 ISSUE_BODY=$(echo "$ISSUE_JSON" | jq -r '"# " + .title + "\n\n" + .body')
 ISSUE_TITLE=$(echo "$ISSUE_JSON" | jq -r '.title')
 ISSUE_LABELS=$(echo "$ISSUE_JSON" | jq -r '.labels[].name')
@@ -803,17 +1047,25 @@ fi
 
 READY_REASON=""
 READY_OK=1
-READY_REASON=$("${SCRIPT_DIR}/dispatch-ready-check.sh" \
-  "$ISSUE_STATE" "$ISSUE_LABELS_CSV" "$VERDICT_SRC" "$BODY_FILE") || READY_OK=0
+READY_REASON=$(BLOCKER_REPO="$REPO" "${SCRIPT_DIR}/dispatch-ready-check.sh" \
+  "$ISSUE_STATE" "$ISSUE_LABELS_CSV" "$VERDICT_SRC" "$BODY_FILE" "$ISSUE") || READY_OK=0
 rm -f "$VERDICT_SRC" "$BODY_FILE"
 
 if [[ "$READY_OK" -ne 1 ]]; then
   echo "Skipping #$ISSUE — not dispatchable at dispatch time: ${READY_REASON}"
   case "$READY_REASON" in
-    *'[closed]'*|*'[no-label]'*|*'[countermanded]'*)
+    *'[closed]'*|*'[no-label]'*|*'[countermanded]'*|*'[blocked]'*)
       # #406 staleness classes: self-evident from the issue's own state/labels, so
       # a quiet skip is honest — no new label, no comment.
       echo "  (was agent-ready when the drain enumerated it; re-validated stale here — #406)"
+      ;;
+    *'[blocker-unknown]'*)
+      # #3326: a blocker read FAILURE is a fault, not a property of the issue - and it
+      # repeats for every issue, so a quiet skip would stall the queue unseen. Loud, but
+      # no label or comment: it may be a transient gh error the next cycle clears.
+      echo "WARNING: #$ISSUE refused because its blockers could not be read - ${READY_REASON}" >&2
+      echo "  (a blocker that no longer exists never reads again: edit the issue body to remove or correct its 'Blocked by #N' line to clear this)" >&2
+      echo "  (agent-ready left in place; if this repeats across issues the blocker reader is broken - #3326)"
       ;;
     *)
       # #983 verdict classes (and anything unrecognised — fail toward VISIBLE):
@@ -1827,6 +2079,7 @@ shepherd_fix() {
   echo "  Dispatching a fresh fix agent into the warm worktree (no re-clone)..."
   (cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$fix_prompt" \
        "${AGENT_CONTEXT_ARGS[@]}" \
+       ${AGENT_CAVEMAN_ARGS[@]+"${AGENT_CAVEMAN_ARGS[@]}"} \
        "${SYS_PROMPT_ARGS[@]}" \
        --model "$RUN_MODEL" \
        --allowedTools "$ALLOWED_TOOLS" \
@@ -1903,6 +2156,10 @@ shepherd_own_pr() {
       | if length > 0 then "yes" else "no" end' <<<"$pr_json")
     automerge_armed=no
     [[ "$(jq -r '.autoMergeRequest // "null"' <<<"$pr_json")" != "null" ]] && automerge_armed=yes
+    # #3179: native auto-merge withheld for a human (needs-human-review) ⇒ only a human
+    # merge can land this PR, so polling running checks holds the dispatch slot for nothing.
+    local human_held=no
+    [[ ",$labels_csv," == *",needs-human-review,"* ]] && human_held=yes
 
     local action holds attempts decision
     local classify_rc=0 classify_errfile classify_err
@@ -1942,9 +2199,9 @@ shepherd_own_pr() {
     decision=$(bash "${SCRIPT_DIR}/lib/shepherd-pr.sh" --decide \
                  "$action" "$merged" "$holds" "${attempts:-0}" \
                  "$SHEPHERD_MAX_ATTEMPTS" "$elapsed" "$SHEPHERD_MAX_SECS" \
-                 "$checks_pending" "$automerge_armed" 2>/dev/null || echo "stop-not-automation")
+                 "$checks_pending" "$automerge_armed" "$human_held" 2>/dev/null || echo "stop-not-automation")
 
-    echo "  shepherd PR #$pr_num: action=$action merged=$merged holds=$holds attempts=${attempts:-0} elapsed=${elapsed}s pending=$checks_pending automerge=$automerge_armed → $decision"
+    echo "  shepherd PR #$pr_num: action=$action merged=$merged holds=$holds attempts=${attempts:-0} elapsed=${elapsed}s pending=$checks_pending automerge=$automerge_armed human_held=$human_held → $decision"
 
     case "$decision" in
       stop-merged)
@@ -1965,6 +2222,11 @@ shepherd_own_pr() {
         # gate above has already applied whatever hold signal is correct. Saying
         # "handed off" here would be a false signpost on a green PR.
         echo "  PR #$pr_num is green with no automated gate left — awaiting a human. Not polling further."
+        return 0 ;;
+      stop-human-held)
+        # #3179: human-held, auto-merge not armed, checks still running. Only a human
+        # merge can land it; a later red check is remediated by the drain's PR sweep.
+        echo "  PR #$pr_num is human-held (needs-human-review, auto-merge not armed) — not polling running checks; a red check is left to the drain sweep."
         return 0 ;;
       stop-unhandled-state)
         # #1803/#1813: classify_pr saw a mergeStateStatus it has never seen — a
@@ -2106,6 +2368,7 @@ fi
 # removed (the autocompact override, #1203) is not on the list, so it is still dropped.
 if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude -p "$RUN_PROMPT" \
       "${AGENT_CONTEXT_ARGS[@]}" \
+      ${AGENT_CAVEMAN_ARGS[@]+"${AGENT_CAVEMAN_ARGS[@]}"} \
       "${SYS_PROMPT_ARGS[@]}" \
       --model "$RUN_MODEL" \
       --allowedTools "$ALLOWED_TOOLS" \

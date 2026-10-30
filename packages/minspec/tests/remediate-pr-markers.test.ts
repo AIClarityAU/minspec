@@ -30,6 +30,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 
@@ -42,7 +43,7 @@ const CAPPED = '<!-- minspec-remediate-capped -->';
 
 // The constants above must BE the script's constants, or every test below is theatre.
 function markersInSource(): string[] {
-  return ['ATTEMPT_MARKER', 'CRASH_MARKER', 'CAPPED_MARKER'].map((name) => {
+  return ['ATTEMPT_MARKER', 'CRASH_MARKER', 'CAPPED_MARKER', 'RERUN_MARKER'].map((name) => {
     const m = new RegExp(`^${name}="([^"]+)"`, 'm').exec(SRC);
     if (!m) throw new Error(`${name} not found in remediate-pr.sh`);
     return m[1];
@@ -172,8 +173,10 @@ describe('remediate-pr.sh --count-markers: only this automation authors a budget
     expect(countMarkers(ATTEMPT, comments, 'minspec-sdd[bot]')).toBe('1');
     expect(countMarkers(ATTEMPT, comments, 'MINSPEC-SDD[BOT]')).toBe('1');
     expect(countMarkers(ATTEMPT, comments, 'minspec-sdd[bot], SECOND-Operator')).toBe('1');
-    // Still whole-login, still not loose: a different account does not match.
-    expect(countMarkers(ATTEMPT, comments, 'minspec-sdd')).toBe('0');
+    // `[bot]` is normalised on both sides (#3037: gh reports App authors without it), but
+    // the match stays whole-login — a different account does not match.
+    expect(countMarkers(ATTEMPT, comments, 'minspec-sdd')).toBe('1');
+    expect(countMarkers(ATTEMPT, comments, 'minspec')).toBe('0');
   });
 
   it('an allowlist of only whitespace/commas names NOBODY and degrades to any-author', () => {
@@ -249,7 +252,7 @@ describe('remediate-pr.sh --check-markers: the isolation gate compares by POSITI
     expect(r.stderr).not.toMatch(/Unknown arg/);
   });
 
-  it('accepts the three markers the script actually ships', () => {
+  it('accepts the four markers the script actually ships', () => {
     const r = run(['--check-markers', ...markersInSource()]);
     expect(r.code).toBe(0);
     expect(r.stderr).toBe('');
@@ -414,5 +417,51 @@ describe('remediate-pr.sh: the guard is structural, not a comment (enforce, do n
   it('no marker is interpolated into a comment body by any other call site', () => {
     // Any `_MARKER"` inside a `--body` argument would be a second, unsanitised emitter.
     expect(SRC).not.toMatch(/--body[^\n]*_MARKER/);
+  });
+});
+
+describe('remediate-pr.sh: a failed `gh api user` never becomes the author allowlist (#3037)', () => {
+  const BODY = '{"message":"Resource not accessible by integration","status":"403"}';
+  const marked: Comment[] = [
+    { author: { login: 'minspec-sdd' }, body: `a\n${ATTEMPT}` },
+    { author: { login: 'minspec-sdd' }, body: `b\n${ATTEMPT}` },
+  ];
+
+  function resolveWith(ghScript: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ghstub-'));
+    fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env bash\n${ghScript}\n`, { mode: 0o755 });
+    const r = spawnSync('bash', [SCRIPT, '--resolve-self-login'], {
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+    });
+    return r.stdout.trim();
+  }
+
+  it('a 403 body on stdout with exit 1 resolves to NO login', () => {
+    expect(resolveWith(`echo '${BODY}'; exit 1`)).toBe('');
+  });
+
+  it('a 403 body on stdout even with exit 0 is rejected as not login-shaped', () => {
+    expect(resolveWith(`echo '${BODY}'; exit 0`)).toBe('');
+  });
+
+  it('a real login still resolves', () => {
+    expect(resolveWith(`echo 'minspec-sdd'`)).toBe('minspec-sdd');
+  });
+
+  it('the 403 body used as an allowlist is not provable and the markers still count', () => {
+    // End to end: resolver yields '' -> any-author counting -> non-zero attempts.
+    const login = resolveWith(`echo '${BODY}'; exit 1`);
+    expect(countMarkers(ATTEMPT, marked, login)).toBe('2');
+    // Even if the blob reaches the seam directly, it must not hide the markers' authors.
+    const ours: Comment[] = [{ author: { login: 'minspec-sdd' }, body: `n\n${CAPPED}` }];
+    const r = run(['--cap-notice-decision', BODY], JSON.stringify({ comments: ours }));
+    expect(r.stdout.trim()).toBe('post'); // unprovable authorship never dedups
+  });
+
+  it('`[bot]` is normalised on both sides', () => {
+    expect(countMarkers(ATTEMPT, marked, 'minspec-sdd[bot]')).toBe('2');
+    const bot: Comment[] = [{ author: { login: 'minspec-sdd[bot]' }, body: `a\n${ATTEMPT}` }];
+    expect(countMarkers(ATTEMPT, bot, 'minspec-sdd')).toBe('1');
   });
 });
