@@ -10,8 +10,9 @@ depends_on: [DR-008, DR-105]  # DR-008 Layer 2 (no-credential execution before u
 relates_to: [SPEC-019, SPEC-254, "#2913", "#2691", "#2871", "#2693", "#2692", "#2698", "#2114"]
 implements: none
 implements_reason: >-
-  Specify phase only. Which files this spec will own (scripts/, the host unit, the sandbox
-  image) is decided at Plan, after Decisions D1-D7 are answered.
+  Clarify answers are recorded but not ratified (D1-D7, all option (a)). Which files this spec
+  will own (scripts/, the host unit, the sandbox image) is still decided at Plan; no recorded
+  option names a file by path, so implements stays none.
 phases:
   specify: in-progress
   clarify: pending
@@ -224,6 +225,28 @@ Read from the code at this base, not inferred:
 - Sandboxing the founder's interactive sessions or the drain itself.
 
 ## Decisions needed (Clarify)
+
+All 7 decisions are recorded: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001 covers spec approval and engineering-DR acceptance only). They are ratified only when a
+human or a covered delegation approves this spec.
+
+- **D1 - Recorded selection: Option (a),** every `claude -p` the drain starts moves into the
+  sandbox: dispatch, remediation/shepherd fix agents, triage, and the reviewers it calls.
+- **D2 - Recorded selection: Option (a),** the sandbox works in its own clone and hands back a
+  `git bundle` file, which the launcher verifies and fetches into the pinned git directory.
+- **D3 - Recorded selection: Option (a),** the sandbox holds one model login passed by name, as
+  `--model-login` does today.
+- **D4 - Recorded selection: Option (a),** a host-started sandbox runner takes jobs from a shared
+  spool directory; the `claude-agent` container gets no Docker socket.
+- **D5 - Recorded selection: Option (a),** on failure the drain pauses agent dispatch, writes the
+  pause marker with the reason, and the session-start banner shows it; FR-7 is a static test over
+  the sandbox run specification plus the AC-2 negative controls in CI.
+- **D6 - Recorded selection: Option (a),** egress stays open in this spec; the allowlist is filed
+  as its own follow-up.
+- **D7 - Recorded selection: Option (a),** yes, a DR is written at Plan, numbered by the DR
+  collision gate, amending DR-008's Layer 2 for the dev-time path and closing DR-105's #2691
+  follow-up.
 
 **D1 - Which agent runs move into the sandbox?**
 - (a) **(rec)** Every `claude -p` the drain starts: dispatch, remediation/shepherd fix

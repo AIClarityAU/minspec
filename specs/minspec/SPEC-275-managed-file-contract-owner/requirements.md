@@ -14,9 +14,10 @@ relates_to: [SPEC-038, SPEC-066, SPEC-070, SPEC-075, SPEC-079, SPEC-215, SPEC-22
 # every other in-flight change (scripts/hooks/spec-gate.py:556-586, the SPEC-215 concern).
 implements: none
 implements_reason: >-
-  Specify phase only. Which of template-registry.ts, template-engine.ts, slash-commands.ts,
-  hook-templates.ts and ci-review-templates.ts this spec owns, and in which key, is Decision D1,
-  answered at Clarify before Plan starts.
+  Clarify answers are recorded but not ratified (D1-D3 option (a), D4 no). D1(a) gives this spec
+  implements: for template-registry.ts, template-engine.ts and slash-commands.ts, but those are
+  existing shared files, and claiming them before approval would freeze them for every other
+  change (see the note above), so implements stays none until Plan.
 phases:
   specify: done
   clarify: pending
@@ -277,6 +278,22 @@ missing owner is the first.
 - Changing which paths the machinery check covers. D2 option (b) names that alternative.
 
 ## Decisions needed (Clarify)
+
+All 4 decisions are recorded: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001 covers spec approval and engineering-DR acceptance only). They are ratified only when a
+human or a covered delegation approves this spec.
+
+- **D1 - Recorded selection: Option (a),** this spec takes `implements:` for
+  `template-registry.ts`, `template-engine.ts` and `slash-commands.ts`; the two generated files
+  are owned by nobody and covered through C-1/R-3 (FR-2).
+- **D2 - Recorded selection: Option (a),** FR-4/FR-5 check the code against this spec's tables, so
+  a change to the managed set's shape cannot merge without editing and re-approving this spec.
+- **D3 - Recorded selection: Option (a),** the producer set is the five files named in #2680, in
+  one constant next to FR-3's check, and FR-4 also fails when `template-registry.ts` imports a
+  template-content string from a module outside that constant.
+- **D4 - Recorded selection: no decision record,** D1(a) and D2(a) are both reversible in under a
+  day, so the decision-record filter does not require one.
 
 **D1 - What ownership do the five files get?**
 - (a) **(rec)** This spec takes `implements:` for `template-registry.ts`, `template-engine.ts`
