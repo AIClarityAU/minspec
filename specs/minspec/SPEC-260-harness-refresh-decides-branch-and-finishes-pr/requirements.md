@@ -7,10 +7,10 @@ product: minspec
 epic: EPIC-003  # SDD Core Methodology - harness refresh is a core write path of the SDD scaffold
 aspects: [harness-refresh, branch-or-direct, push-consent, no-nagging, opt-in]
 depends_on: []
-relates_to: ["#2559", "#1298", "#2371", "#2325", "#2326", SPEC-050, SPEC-068]
+relates_to: ["#2559", "#1298", "#2371", "#2325", "#2326", SPEC-050, SPEC-058, SPEC-068]
 implements: none
 implements_reason: >-
-  Specify phase only. Files this spec will own are decided at Plan, after Decisions D1-D3 are resolved.
+  Specify phase only. Files this spec will own are decided at Plan, after Decisions D1-D4 are resolved.
 phases:
   specify: in-progress
   clarify: pending
@@ -74,7 +74,9 @@ anywhere but where it started.
   never leaves work that exists only in a parked checkout.
 - **FR-6 Consent reuses the approval setting.** The push and PR are network actions (invariant 1)
   and are governed by `minspec.pushOnApprove` (`never` -> no push; `prompt` -> one prompt; `always`
-  -> push) and `minspec.approvalPr` exactly as for approvals. **No new silent network path.**
+  -> push) and `minspec.approvalPr` (whether to open a PR) as for approvals, with one deliberate
+  difference: FR-9 withholds the `docs-lane` label that `approvalPr: auto` would otherwise apply.
+  **No new silent network path.**
   Persisted "always" answers share the existing store (no second consent store).
 - **FR-7 One decision per repository, remembered.** Any question that remains (the push consent
   under `prompt`) is asked at most once per repository and remembered through the existing
@@ -119,6 +121,23 @@ anywhere but where it started.
 - Making harness-refresh PRs pass their gate (#2371); the other Refresh defects (#2325, #2326).
 - Changing what files a refresh writes.
 
+## Relationship to SPEC-058 (overlap, stated explicitly)
+
+SPEC-058 (status `planning`, T4) already scopes giving the harness-refresh commit path
+(`offerScaffoldCommit` / `commitHarnessRefreshCommand`) the approvals push-then-open-PR recovery, for
+the push-protected default branch. SPEC-260 overlaps that transport on purpose; the two differ in
+trigger and aim:
+
+- **SPEC-058** concerns the protected-default-branch recovery and whether the docs-lane auto-merge
+  corpus needs widening for derived harness state.
+- **SPEC-260** concerns removing the branch-vs-direct prompt (decide it), the config key, and FR-4's
+  guarantee that the checkout is never left parked or unpushed, on every outcome.
+
+SPEC-260 does **not** claim to replace or narrow SPEC-058; it **defers to SPEC-058 for the shared
+push/PR transport** and adds the decision and checkout-restoration behaviour on top. Whether SPEC-260
+is folded into SPEC-058, narrowed to the non-transport parts, or sequenced after it is a Clarify
+decision (D4 below). Implementation must be coordinated at Plan: both touch the same code path.
+
 ## Decisions needed (Clarify)
 
 - **D1 - Unprotected branch: commit directly, or still branch?** (a) **Direct (rec)** matches the
@@ -132,3 +151,7 @@ anywhere but where it started.
 - **D3 - Config key vs implicit memory.** (a) **Config key `auto|branch|direct|never` (rec)** -
   explicit, visible in settings; cost: one more setting. (b) Reuse only `pushOnApprove` with no new
   key; cost: no way to pin "always direct" or "never commit" for a repo.
+- **D4 - Overlap with SPEC-058.** (a) **Sequence SPEC-260 after SPEC-058's transport (rec)** - SPEC-260
+  reuses it and adds the decide-and-restore behaviour; cost: SPEC-260 waits on SPEC-058's Plan. (b) Fold
+  SPEC-260 into SPEC-058; cost: a T4 spec absorbs a user-facing prompt change and slows it. (c) Keep
+  both independent; cost: two implementations of one transport diverge.
