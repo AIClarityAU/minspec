@@ -48,7 +48,15 @@ const spec = (n: number) => `specs/minspec/SPEC-${n}-x/requirements.md`;
 /** seamExit: per-PR exit code of the stub seam (default 0 = armed). */
 function run(
   rows: Row[] | string,
-  o: { listExit?: number; listStderr?: string; failFirst?: number; seamExit?: Record<number, number>; env?: Record<string, string> } = {},
+  o: {
+    listExit?: number;
+    listStderr?: string;
+    failFirst?: number;
+    seamExit?: Record<number, number>;
+    env?: Record<string, string>;
+    /** gh_bot_reauth_read stub: 'new' = a different credential is now in hand; 'same' = broker gave the same one. */
+    reauth?: 'new' | 'same';
+  } = {},
 ) {
   const calls = path.join(tmp, 'calls');
   fs.rmSync(calls, { force: true }); // one run's calls; the cursor file is what carries over
@@ -92,6 +100,7 @@ exit $code
       `if (( n <= ${o.failFirst ?? 0} )); then echo ${JSON.stringify(o.listStderr ?? 'boom')} >&2; return 1; fi; ` +
       `if [ ${o.listExit ?? 0} != 0 ]; then echo ${JSON.stringify(o.listStderr ?? '')} >&2; fi; ` +
       `cat ${JSON.stringify(path.join(tmp, 'list.json'))}; return ${o.listExit ?? 0}; }`,
+    `gh_bot_reauth_read() { echo REAUTH >> ${JSON.stringify(calls)}; ${o.reauth === 'new' ? 'return 0' : 'return 1'}; }`,
     stageBlock(),
     'arm_delegated_spec_merges; echo "rc=$?"',
   ].join('\n');
@@ -109,7 +118,8 @@ exit $code
   return {
     ...r,
     list: all.filter((l) => l.startsWith('GH ')),
-    seamCalls: all.filter((l) => !l.startsWith('GH ')),
+    reauths: all.filter((l) => l === 'REAUTH').length,
+    seamCalls: all.filter((l) => !l.startsWith('GH ') && l !== 'REAUTH'),
   };
 }
 
@@ -235,6 +245,29 @@ describe('never silent, never fatal', () => {
     expect(r.list).toHaveLength(3);
     expect(r.stderr).not.toContain('could not be read');
     expect(r.seamCalls).toEqual(['--delegated-spec-merge 10 --arm']);
+  });
+
+  it('a 401 re-mints the credential and the retry runs the stage (#3400)', () => {
+    const r = run([{ number: 10, files: [spec(10)] }], {
+      failFirst: 1,
+      listStderr: 'HTTP 401: Bad credentials (https://api.github.com/graphql)',
+      reauth: 'new',
+    });
+    expect(r.reauths).toBe(1);
+    expect(r.stderr).toContain('credential was stale — re-minted');
+    expect(r.stderr).not.toContain('could not be read');
+    expect(r.seamCalls).toEqual(['--delegated-spec-merge 10 --arm']);
+  });
+
+  it('a 401 the broker cannot cure (same token) still fails loudly after 2 attempts (#3400)', () => {
+    const r = run([{ number: 10, files: [spec(10)] }], {
+      failFirst: 2,
+      listStderr: 'HTTP 401: Bad credentials',
+      reauth: 'same',
+    });
+    expect(r.reauths).toBe(2);
+    expect(r.seamCalls).toEqual([]);
+    expect(r.stderr).toContain('could not be read after 2 attempts');
   });
 
   it('an unparseable list is loud', () => {
