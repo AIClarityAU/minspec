@@ -272,7 +272,14 @@ Check cases run in `identity-boundary-check.test.sh`'s hermetic sandbox (temp `H
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 ### D-1: Retry a `network` UNKNOWN before reporting it?
+
+**Recorded selection: Option (a),** no retry; a `network` UNKNOWN is reported with its class,
+so the verdict stays a true record of what happened.
 
 - **(a) No retry; report it with its class (rec).** The verdict stays a true record of what
   happened, and FR-1 keeps the evidence to measure how often it happens. Cost: a single
@@ -286,6 +293,9 @@ Check cases run in `identity-boundary-check.test.sh`'s hermetic sandbox (temp `H
 
 ### D-2: Should an `unreadable` credential store exit `1` (finding) instead of `2`?
 
+**Recorded selection: Option (a),** no; an `unreadable` credential store stays exit `2`, named
+first, with its own banner line.
+
 - **(a) No; it stays exit `2`, named first, with its own banner line (rec).** It is not an
   observed credential, and calling it one is the same cry-wolf the issue complains of, in
   the other direction. Cost: a store the agent cannot read but some other process can (and
@@ -295,6 +305,8 @@ Check cases run in `identity-boundary-check.test.sh`'s hermetic sandbox (temp `H
   alarm.
 
 ### D-3: How many non-PASS records to keep (FR-1)?
+
+**Recorded selection: Option (a),** keep the newest 20 non-PASS records.
 
 - **(a) The newest 20 (rec).** At one run per 30 minutes that is at least 10 hours of
   failures, and each record is about 1.5 KB. Cost: a long outage rolls the first failure out;

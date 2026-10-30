@@ -120,7 +120,13 @@ refuses; changing the verdict record grammar; ranking by anything other than tie
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 - **D1 — Where the shared parsing lives.**
+  **Recorded selection: Option (a),** add a `--tier` style entry point to
+  `dispatch-ready-check.sh` and have the ranker shell call it, so one file owns the grammar.
   - (a) **(rec)** Add a `--tier` style entry point to `dispatch-ready-check.sh` (it already hosts
     `--trusted-comment-bodies`, `--newest-record`, `--render-*`, `--may-approve`), and have the ranker shell
     call it. One file owns the grammar; costs a subprocess per candidate and keeps the bash script growing.
@@ -129,6 +135,8 @@ refuses; changing the verdict record grammar; ranking by anything other than tie
   - (c) Port the selection to TypeScript. Natural for the ranker; costs a second implementation of a trust
     decision, which this spec exists to avoid. Not recommended.
 - **D2 — How comments are fetched.**
+  **Recorded selection: Option (a),** extend the ranker's existing paginated GraphQL query with
+  `comments` (author type, association, body) for candidates.
   - (a) **(rec)** Extend the ranker's existing paginated GraphQL query with `comments` (author type,
     association, body) for candidates: one query path, bounded. Costs larger payloads and a GraphQL shape
     that differs from the `gh issue view --json comments` shape `--trusted-comment-bodies` expects, so an
@@ -138,6 +146,8 @@ refuses; changing the verdict record grammar; ranking by anything other than tie
 - **D3 — Fallback policy when the label and a trusted record disagree on class.** E.g. label `agent-ready`
   but record `tier: T4` (the target case) is the *correct* outcome of FR-1. The open question is a record
   that says `T1` while the label is `agent-ready-specify`.
+  **Recorded selection: Option (a),** trust the record's tier unconditionally, since ranking is
+  an order, not a gate.
   - (a) **(rec)** Trust the record's tier unconditionally (ranking is an order, not a gate); costs nothing
     extra, but a stale record could mis-order one row until re-triage.
   - (b) Mark such rows `disagrees` in the reason and keep the record's tier. Costs one more reason string
@@ -147,6 +157,8 @@ refuses; changing the verdict record grammar; ranking by anything other than tie
   later triage record (lower authority than a human approval) is newer. Recommendation: yes, inherit
   verbatim — a divergence would be a second trust rule; cost: a later automated re-triage can mask the
   human's tier statement in the ranking display (not in dispatch, which uses the same rule).
+  **Recorded selection: Option (yes),** the ranker inherits the gate's newest-`verdictAt` rule
+  verbatim, so there is no second trust rule.
 
 ## Follow-ups (tracked)
 

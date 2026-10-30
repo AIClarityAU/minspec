@@ -132,6 +132,25 @@ function writeStubs(dir: string, agentOut: string): string {
   fs.mkdirSync(bin, { recursive: true });
   fs.writeFileSync(path.join(dir, 'agent-out.txt'), agentOut);
 
+  // `npm`. remediate-pr.sh gives its worktree its own node_modules before an agent starts
+  // (#3238), and a fixture has no npm cache: `npm ci` here leaves the two things that
+  // install is checked for, and does nothing else.
+  fs.writeFileSync(
+    path.join(bin, 'npm'),
+    `#!/usr/bin/env bash
+if [[ "\${1:-}" == "ci" ]]; then
+  mkdir -p node_modules/.bin node_modules/handlebars
+  printf '#!/bin/sh\\n' > node_modules/.bin/tsx; chmod +x node_modules/.bin/tsx
+  echo 'module.exports={}' > node_modules/handlebars/index.js
+  exit 0
+fi
+# Anything else is the real npm: a test may plant the worktree's own checks for it to run.
+PATH="\${PATH//'${bin}:'/}"
+exec npm "$@"
+`,
+    { mode: 0o755 },
+  );
+
   // `claude`. Shell builtins only, and its directory is written into it rather than read
   // from the environment: an environment the launcher has cut down to an allowlist has
   // neither a helper variable nor, necessarily, a PATH to find `env` with.
@@ -227,6 +246,10 @@ if [[ "$noun $verb" == "api graphql" ]]; then
   case "$query" in
     *"nodes(ids:"*) third="nodes"; answer="$dir/comment-nodes.json" ;;
     *"pullRequest("*) third="pullRequest:$number"; answer="$dir/pr-comments.json" ;;
+    # The readiness gate's blocker read (#3326): not the author gate's provenance read, so
+    # it is answered "no native blockers" and kept out of gh-calls.log, which pins the
+    # author gate's reads exactly.
+    *"blockedBy("*) echo '{"data":{"repository":{"issue":{"blockedBy":{"totalCount":0,"nodes":[]}}}}}'; exit 0 ;;
     *"issue("*) third="issue:$number"; answer="$dir/provenance.$number.json" ;;
     *) third="unrecognised" ;;
   esac
@@ -1142,7 +1165,10 @@ export function runRemediate(opts: RemediateOptions = {}): RemediateRun {
   git('-C', seed, 'checkout', '-q', '-b', branch);
   fs.mkdirSync(path.join(seed, 'scripts', 'lib'), { recursive: true });
   fs.writeFileSync(path.join(seed, 'scripts', 'lib', 'agent-context.sh'), PASS_THROUGH_HELPER, { mode: 0o755 });
-  git('-C', seed, 'add', 'scripts/lib/agent-context.sh');
+  // remediate-pr.sh refuses `npm ci` without a vetted lockfile, so the branch carries the
+  // smallest valid one: no packages beyond the root, nothing for npm to fetch.
+  fs.writeFileSync(path.join(seed, 'package-lock.json'), '{"lockfileVersion":3,"packages":{"":{}}}\n');
+  git('-C', seed, 'add', 'scripts/lib/agent-context.sh', 'package-lock.json');
   git('-C', seed, 'commit', '-q', '-m', 'fixture: the branch under remediation');
   opts.prepare?.({ dir, repo, origin, seed, branch, worktree, git });
   git('-C', seed, 'push', '-q', 'origin', branch);
