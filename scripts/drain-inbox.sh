@@ -1435,7 +1435,7 @@ record_delegated_approvals() {
 #
 # The cap ROTATES (MINSPEC_DRAIN_DELEGATED_MERGE_CURSOR, the last PR judged). The cap
 # counts every judgement, held or armed, and a held PR is usually held again next cycle
-# (handed to the founder, hold:human, a plan artifact). Judged oldest-first from the top
+# (handed to the founder, hold:human). Judged oldest-first from the top
 # every cycle, the oldest held PRs took the whole cap: on 2026-10-30 seven of them filled
 # seven of ten slots, twelve cycles in a row ended "0 armed of 10 judged", and 36 newer
 # spec PRs were never judged. Each cycle now resumes after the last PR judged and wraps,
@@ -1500,9 +1500,26 @@ arm_delegated_spec_merges() {
 
   # Already-armed PRs are skipped (the arm stands); so are drafts and any PR with a
   # file outside specs/. Oldest first, so the longest-held spec goes first.
+  #
+  # A PR carrying a plan artifact is skipped too, by name. The judge denies it whatever
+  # else is true (PLAN_ARTIFACT in scripts/lib/delegated-merge.ts, #2980; the parity test
+  # pins this regex to that one), so judging it only spends a slot of the cap. On
+  # 2026-10-30, 21 of 26 candidates were such PRs and a cycle ended "0 armed of 10 judged"
+  # with #3391 waiting behind them. Skipping only removes: nothing here admits a PR.
+  local plan_only
+  plan_only=$(printf '%s' "$rows" | jq -r '[.[]
+      | select(.isDraft | not) | select(.autoMergeRequest == null)
+      | select((.files | length) > 0 and all(.files[]; .path | startswith("specs/")))
+      | select(any(.files[]; .path | test("(^|/)(design|tasks)\\.md$")))
+      | .number] | sort | map("#\(.)") | (if length > 0 then "\(length) held PR(s) carry a plan artifact (#2980), not judged: \(join(" "))" else empty end)' 2>/dev/null) || {
+    echo "[drain] WARNING: delegated spec merge NOT run: could not filter the held PR list." >&2
+    return 0
+  }
+  [[ -z "$plan_only" ]] || echo "[drain] delegated spec merge: ${plan_only}"
   candidates=$(printf '%s' "$rows" | jq -r '[.[]
       | select(.isDraft | not) | select(.autoMergeRequest == null)
       | select((.files | length) > 0 and all(.files[]; .path | startswith("specs/")))
+      | select(any(.files[]; .path | test("(^|/)(design|tasks)\\.md$")) | not)
       | .number] | sort | .[]' 2>/dev/null) || {
     echo "[drain] WARNING: delegated spec merge NOT run: could not filter the held PR list." >&2
     return 0
