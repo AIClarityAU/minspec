@@ -8,8 +8,10 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
+import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
 
 useShellTimeout();
+useHostileAmbientDrainKnobs();
 
 const DRAIN = path.resolve(__dirname, '../../../scripts/drain-inbox.sh');
 const DRAIN_SRC = fs.readFileSync(DRAIN, 'utf-8');
@@ -17,7 +19,7 @@ const DRAIN_SRC = fs.readFileSync(DRAIN, 'utf-8');
 function drift(args: string[], self: string) {
   const r = spawnSync('bash', [DRAIN, '--self-drift', ...args], {
     encoding: 'utf-8',
-    env: { ...process.env, MINSPEC_DRAIN_SELF: self },
+    env: { ...drainBaseEnv(), MINSPEC_DRAIN_SELF: self },
   });
   return { code: r.status, out: (r.stdout ?? '').trim() };
 }
