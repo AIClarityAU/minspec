@@ -914,4 +914,20 @@ scripts/drain-inbox.sh defaults to concurrency 1 and carries a caveat (around li
 <!-- dr-summary:DR-115 auto=f4b6ddc36218 -->
 ai-review.yml refuses to run unless CLAUDE_CODE_OAUTH_TOKEN, MINSPEC_APP_ID and MINSPEC_APP_PRIVATE_KEY are all set (.github/workflows/ai-review.yml:204-215), and the setup probe mirrors that (packages/minspec/src/lib/ruleset-advisor.ts:734-738). DR-054 intended consumer repos not to hold the App key (the shared broker, SPEC-034, is still in planning). Until the broker exists, every new repo needs the two App secrets set by hand, and the founder could not get review on a new work-PC repo without them.
 <!-- /dr-summary:DR-115 -->
+
+## [DR-116 — MinSpec has a machine-facing command line (the headless core's), for hooks, workflows and agents only - no MinSpec text tells a person to type it, and its result schema minspec-core/0 is unstable](DR-116.md)
+
+*Status: accepted · Date: 2026-10-28*
+
+<!-- dr-summary:DR-116 auto=95db563f243b -->
+SPEC-136 (headless core, status: planning, T4) packages the checks MinSpec already has into one editor-free program with two ways in: a command line (FR-9) and a stdio tool server (FR-10), both generated from one table of operations (FR-11). The founder allowed the command line on 2026-10-13, for hooks, workflows and agents only (FR-12); this record writes that answer down before any code depends on it.
+<!-- /dr-summary:DR-116 -->
+
+## [DR-117 — The ZCode container boundary - git through GitHub is the only bridge between ZCode's container and the host (BND-1 to BND-6), and measurement 12 checks the running container matches](DR-117.md)
+
+*Status: accepted · Date: 2026-10-28*
+
+<!-- dr-summary:DR-117 auto=f3bf57334586 -->
+ZCode (Z.ai's editor) runs apart from the host so that the host's editor and agents are never "infected" by reading what ZCode wrote; SPEC-136 set six boundary rules for that and said they outlive the spec and need a decision record. This is that record.
+<!-- /dr-summary:DR-117 -->
 <!-- minspec:dr-index:end -->
