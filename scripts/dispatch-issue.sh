@@ -599,16 +599,19 @@ fi
 #   1. an unconfirmed closing link. A drain PR is dispatched for issue N (branch
 #      `agent/issue-N`); merging it closes whatever GitHub says it closes
 #      (`closingIssuesReferences`), so that list must contain N. A branch that is not a
-#      drain branch names no issue, so it needs at least one confirmed link.
+#      drain branch names no issue, so it needs at least one confirmed link, EXCEPT (#3115)
+#      a PR authored by the App identity (`app/minspec-sdd` or `minspec-sdd[bot]`) whose
+#      body has no closing keyword: it claims to close nothing, so no link is expected.
 #   2. a creator-shepherd handoff. `shepherd_hand_off` stamps SHEPHERD_HANDOFF_MARKER on a
 #      comment when the creating session gives the PR to the founder; a bot merge would
 #      take that decision from him.
 # Prints the denial reason and detail (tab-separated) and returns 1 on a claim OR on any
-# unreadable input; returns 0 only when both are positively clear.
+# unreadable input; returns 0 only when both are positively clear (reason 1 satisfied
+# either by the confirmed link or by the App-authored no-closing-keyword exception above).
 delegated_merge_human_claims() {
   local pr="$1" view="" head="" refs="" handoffs="" issue=""
   local marker="<!-- minspec-shepherd-handoff -->"
-  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments 2>/dev/null) \
+  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments,author,body 2>/dev/null) \
      || ! head=$(printf '%s' "$view" | jq -r '.headRefName' 2>/dev/null) \
      || ! refs=$(printf '%s' "$view" | jq -r '.closingIssuesReferences | if type == "array" then .[].number else error("no list") end' 2>/dev/null) \
      || ! handoffs=$(printf '%s' "$view" | jq -r --arg m "$marker" '.comments | if type == "array" then [.[] | select((.body // "") | contains($m))] | length else error("no list") end' 2>/dev/null); then
@@ -626,6 +629,18 @@ delegated_merge_human_claims() {
       return 1
     fi
   elif [[ -z "${refs//[$'\n\r\t ']/}" ]]; then
+    # No confirmed link on a non-drain branch (#3115). Two cases look identical here: a
+    # `Closes #N` trailer GitHub failed to link (#2228), and a PR that claims to close nothing
+    # (a bot Clarify-selections PR). Admit only the latter: authored by the App identity AND
+    # no closing keyword in the body. The login must be `app/minspec-sdd` or `minspec-sdd[bot]`:
+    # the `[bot]`/`app/` forms cannot be registered by a person, whereas a bare `minspec-sdd`
+    # is an ordinary user login anyone could hold. An unreadable author/body fails closed.
+    local author="" body_closes=""
+    if author=$(printf '%s' "$view" | jq -r '.author.login | if type == "string" then . else error("no author") end' 2>/dev/null) \
+       && body_closes=$(printf '%s' "$view" | jq -r '.body | if type == "string" then (test("(^|[^a-z])(close[sd]?|fix(e[sd])?|resolve[sd]?)[: \\t]*([a-z0-9._-]+/[a-z0-9._-]+)?(#|https?://)"; "i")) else error("no body") end' 2>/dev/null) \
+       && [[ "$author" =~ ^(app/minspec-sdd|minspec-sdd\[bot\])$ && "$body_closes" == "false" ]]; then
+      return 0
+    fi
     printf 'closes-link-unconfirmed\tPR #%s has no confirmed closing link; merging would close no issue\n' "$pr"
     return 1
   fi
@@ -1007,17 +1022,25 @@ fi
 
 READY_REASON=""
 READY_OK=1
-READY_REASON=$("${SCRIPT_DIR}/dispatch-ready-check.sh" \
-  "$ISSUE_STATE" "$ISSUE_LABELS_CSV" "$VERDICT_SRC" "$BODY_FILE") || READY_OK=0
+READY_REASON=$(BLOCKER_REPO="$REPO" "${SCRIPT_DIR}/dispatch-ready-check.sh" \
+  "$ISSUE_STATE" "$ISSUE_LABELS_CSV" "$VERDICT_SRC" "$BODY_FILE" "$ISSUE") || READY_OK=0
 rm -f "$VERDICT_SRC" "$BODY_FILE"
 
 if [[ "$READY_OK" -ne 1 ]]; then
   echo "Skipping #$ISSUE — not dispatchable at dispatch time: ${READY_REASON}"
   case "$READY_REASON" in
-    *'[closed]'*|*'[no-label]'*|*'[countermanded]'*)
+    *'[closed]'*|*'[no-label]'*|*'[countermanded]'*|*'[blocked]'*)
       # #406 staleness classes: self-evident from the issue's own state/labels, so
       # a quiet skip is honest — no new label, no comment.
       echo "  (was agent-ready when the drain enumerated it; re-validated stale here — #406)"
+      ;;
+    *'[blocker-unknown]'*)
+      # #3326: a blocker read FAILURE is a fault, not a property of the issue - and it
+      # repeats for every issue, so a quiet skip would stall the queue unseen. Loud, but
+      # no label or comment: it may be a transient gh error the next cycle clears.
+      echo "WARNING: #$ISSUE refused because its blockers could not be read - ${READY_REASON}" >&2
+      echo "  (a blocker that no longer exists never reads again: edit the issue body to remove or correct its 'Blocked by #N' line to clear this)" >&2
+      echo "  (agent-ready left in place; if this repeats across issues the blocker reader is broken - #3326)"
       ;;
     *)
       # #983 verdict classes (and anything unrecognised — fail toward VISIBLE):

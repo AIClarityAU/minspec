@@ -111,6 +111,10 @@ describe('Step 0c hands held spec-only PRs to the seam, and nothing else', () =>
     const r = run([]);
     expect(r.list[0]).toContain('pr list --repo AIClarityAU/minspec --state open --label needs-human-review --limit 500');
     expect(r.list[0]).toContain('number,isDraft,autoMergeRequest,files');
+    // #3123: a spec PR opened outside the drain is held as awaiting-approval, not
+    // needs-human-review; `--label` ANDs, so each hold signal is its own read.
+    expect(r.list[1]).toContain('pr list --repo AIClarityAU/minspec --state open --label awaiting-approval --limit 500');
+    expect(r.list).toHaveLength(2);
     expect(r.stdout).toContain('no held spec-only PRs');
     expect(r.stdout).toContain('rc=0');
   });
@@ -128,6 +132,12 @@ describe('Step 0c hands held spec-only PRs to the seam, and nothing else', () =>
     ]);
     expect(r.seamCalls).toEqual(['--delegated-spec-merge 10 --arm', '--delegated-spec-merge 30 --arm']);
     expect(r.stdout).toContain('2 armed of 2 judged');
+  });
+
+  it('a PR carrying both hold labels is judged once (#3123)', () => {
+    const r = run([{ number: 10, files: [spec(10)] }]);
+    expect(r.list).toHaveLength(2);
+    expect(r.seamCalls).toEqual(['--delegated-spec-merge 10 --arm']);
   });
 
   it('a denial is reported with its reason and is not a failure', () => {
@@ -184,7 +194,7 @@ describe('never silent, never fatal', () => {
 
   it('a transient list failure is retried once and the stage then runs (#3098)', () => {
     const r = run([{ number: 10, files: [spec(10)] }], { failFirst: 1 });
-    expect(r.list).toHaveLength(2);
+    expect(r.list).toHaveLength(3);
     expect(r.stderr).not.toContain('could not be read');
     expect(r.seamCalls).toEqual(['--delegated-spec-merge 10 --arm']);
   });

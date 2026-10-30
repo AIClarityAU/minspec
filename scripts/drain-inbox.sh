@@ -59,6 +59,8 @@
 #                                    (`agent/issue-*`) sit at `needs-human-review` (#2939).
 #                                    An unreadable count pauses too. Anything but a whole
 #                                    number is read as 0, and said so.
+#   MINSPEC_DRAIN_SPECIFY_MAX_PENDING=40 — with spec-writing on, also pause it while this many
+#                                    specs on main are `new` or `specifying` (#3344).
 #   MINSPEC_DRAIN_INTERVAL=1200   — seconds between cycles (default 20 min).
 #   MINSPEC_DRAIN_QUOTA_BACKOFF=1800 — seconds to pause after a quota signal (30 min).
 #                  Now only a FALLBACK: when ~/.claude/quota.json carries a live
@@ -1340,30 +1342,47 @@ arm_delegated_spec_merges() {
   # One retry (#3098): the read failed intermittently (2 of 9 cycles) and skipped every
   # delegated merge for the whole cycle. Each attempt's stderr is kept so a persistent
   # failure names its cause in the WARNING instead of discarding it.
-  rows=""
-  rc=1
-  for attempt in 1 2; do
-    if rows=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit "$limit" \
-         --json number,isDraft,autoMergeRequest,files 2>"$errfile"); then
-      rc=0
-      break
+  # A held spec PR carries `needs-human-review` (opened by the drain) OR `awaiting-approval`
+  # (opened by a CoS/agent session outside it, #3123). `gh pr list --label` ANDs repeated
+  # flags, so each hold label is its own read; the results are merged and de-duplicated by
+  # PR number. Selection stays a prefilter: the seam's judge is the only decider.
+  local label one_rows="" all_rows="[]"
+  for label in needs-human-review awaiting-approval; do
+    one_rows=""
+    rc=1
+    for attempt in 1 2; do
+      if one_rows=$(gh pr list --repo "$REPO" --state open --label "$label" --limit "$limit" \
+           --json number,isDraft,autoMergeRequest,files 2>"$errfile"); then
+        rc=0
+        break
+      fi
+      gh_err=$(tr '\n' ' ' < "$errfile" 2>/dev/null | cut -c1-500 || true)  # swallow-ok: diagnostic text only; the failure itself is reported below
+      (( attempt == 1 )) && sleep "${MINSPEC_DRAIN_DELEGATED_MERGE_RETRY_SLEEP:-5}"
+    done
+    if (( rc != 0 )); then
+      [[ "$errfile" == /dev/null ]] || rm -f "$errfile"
+      echo "[drain] WARNING: delegated spec merge NOT run: the held PR list (label ${label}) could not be read after 2 attempts (gh stderr: ${gh_err:-<empty>}). This is not an empty queue." >&2
+      return 0
     fi
-    gh_err=$(tr '\n' ' ' < "$errfile" 2>/dev/null | cut -c1-500 || true)  # swallow-ok: diagnostic text only; the failure itself is reported below
-    (( attempt == 1 )) && sleep "${MINSPEC_DRAIN_DELEGATED_MERGE_RETRY_SLEEP:-5}"
+    if ! count=$(printf '%s' "$one_rows" | jq 'length' 2>/dev/null); then
+      [[ "$errfile" == /dev/null ]] || rm -f "$errfile"
+      echo "[drain] WARNING: delegated spec merge NOT run: the held PR list (label ${label}) did not parse." >&2
+      return 0
+    fi
+    if (( count >= limit )); then
+      [[ "$errfile" == /dev/null ]] || rm -f "$errfile"
+      echo "[drain] WARNING: delegated spec merge NOT run: the held PR list (label ${label}) returned ${count}, its limit; it may be cut off." >&2
+      return 0
+    fi
+    all_rows=$(jq -n --argjson a "$all_rows" --argjson b "$one_rows" '$a + $b') || {
+      [[ "$errfile" == /dev/null ]] || rm -f "$errfile"
+      echo "[drain] WARNING: delegated spec merge NOT run: could not merge the held PR lists." >&2
+      return 0
+    }
   done
   [[ "$errfile" == /dev/null ]] || rm -f "$errfile"
-  if (( rc != 0 )); then
-    echo "[drain] WARNING: delegated spec merge NOT run: the held PR list could not be read after 2 attempts (gh stderr: ${gh_err:-<empty>}). This is not an empty queue." >&2
-    return 0
-  fi
-  if ! count=$(printf '%s' "$rows" | jq 'length' 2>/dev/null); then
-    echo "[drain] WARNING: delegated spec merge NOT run: the held PR list did not parse." >&2
-    return 0
-  fi
-  if (( count >= limit )); then
-    echo "[drain] WARNING: delegated spec merge NOT run: the held PR list returned ${count}, its limit; it may be cut off." >&2
-    return 0
-  fi
+  rows=$(printf '%s' "$all_rows" | jq -c 'unique_by(.number)')
+
   # Already-armed PRs are skipped (the arm stands); so are drafts and any PR with a
   # file outside specs/. Oldest first, so the longest-held spec goes first.
   candidates=$(printf '%s' "$rows" | jq -r '[.[]
@@ -1629,6 +1648,51 @@ _held_drain_prs() {
   _held_out="$_held_val"
 }
 
+# SPECIFY_MAX_PENDING — the second half of the same brake (#3344). The held count above
+# sees a draft only while its pull request is open. Delegated spec merge (Step 0c, #2981)
+# lands a covered draft on main at `status: specifying`, which takes it out of that count
+# and reopens spec-writing while the draft still waits on Clarify and sign-off: specs at
+# specifying on main went from 30 to 77 between 2026-10-27 and 2026-10-29 with the held
+# cap reporting PAUSED throughout. So the same decision also counts specs on the tree the
+# drain runs from whose frontmatter `status:` is `new` or `specifying`, and leaves the
+# spec-writing queue alone while that count is at or above this cap. Same readings as the
+# held cap: anything but a whole number is read as 0, and a count nobody read pauses.
+SPECIFY_MAX_PENDING="${MINSPEC_DRAIN_SPECIFY_MAX_PENDING:-40}"
+
+# _pending_specs <varname> — count the specs on the tree the drain runs from whose
+# frontmatter `status:` is `new` or `specifying`, INTO a named variable. The tree is the
+# one the delegated-approval stage reads (the parent of the scripts the cycle runs, so
+# origin/main's verified run dir when self-refresh found it current). Only the
+# frontmatter counts: a body line quoting `status: specifying` is not a status. Returns 1
+# when the tree has no specs/ folder or the read fails: an absent folder is a count
+# nobody read, not zero (invariant 2).
+_pending_specs() {
+  local -n _pend_out="$1"
+  local root _pend_val
+  root="$(cd "$(dirname "$REMEDIATE")/.." 2>/dev/null && pwd)" || return 1
+  [[ -d "${root}/specs" ]] || return 1
+  # specs/<project>/SPEC-NNN-<slug>/requirements.md, the layout this repo's specs use.
+  # No pipeline: an empty folder is a count of 0, and awk's own exit is
+  # the only status, so a failed read cannot pass as a number.
+  local -a _pend_files=()
+  local _pend_ng=0
+  shopt -q nullglob && _pend_ng=1
+  shopt -s nullglob
+  _pend_files=("${root}"/specs/*/*/requirements.md)
+  (( _pend_ng )) || shopt -u nullglob
+  if (( ${#_pend_files[@]} == 0 )); then
+    _pend_out=0
+    return 0
+  fi
+  _pend_val=$(awk '
+      FNR == 1 { fm = ($0 ~ /^---[[:space:]]*$/); next }
+      fm && /^---[[:space:]]*$/ { fm = 0; nextfile }
+      fm && /^status:[[:space:]]*["'\'']?(new|specifying)["'\'']?[[:space:]]*(#.*)?$/ { n++; fm = 0; nextfile }
+      END { print n + 0 }' "${_pend_files[@]}") || return 1
+  [[ "$_pend_val" =~ ^[0-9]+$ ]] || return 1
+  _pend_out="$_pend_val"
+}
+
 # _specify_only <agent-ready numbers> <agent-ready-specify numbers>: the issues that are
 # queued for spec-writing and NOT also queued for a build, one per line. An issue in
 # both queues is a build (an approved spec leaves the old label beside the new one), so
@@ -1639,6 +1703,45 @@ _specify_only() {
   for n in $1; do build[$n]=1; done
   for n in $2; do [[ -n "${build[$n]:-}" ]] || printf '%s\n' "$n"; done
   return 0
+}
+
+# _pr_claims <varname> — INTO a named variable, one "<pr> <issue>" line per open pull
+# request that closes an issue (#3241): GitHub's closingIssuesReferences, plus a
+# `Closes/Fixes/Resolves #N` in the body, because a runner job opens its PR without a
+# drain lease and the closing reference is not always parsed yet. Returns gh's status: a
+# failed read is not "no PR claims anything", and the caller holds dispatch on it
+# (invariant 2).
+_pr_claims() {
+  local -n _claims_out="$1"
+  local _claims_val _claims_rc=0
+  _claims_val=$(gh pr list --repo "$REPO" --state open --limit 1000 \
+    --json number,body,closingIssuesReferences --jq '
+      .[] | .number as $pr
+      | ([(.closingIssuesReferences // [])[].number]
+         + [(.body // "") | match("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s*:?\\s+#([0-9]+)"; "g").captures[0].string | tonumber])
+      | unique[] | "\($pr) \(.)"') || _claims_rc=$?
+  if (( _claims_rc != 0 )); then return "$_claims_rc"; fi
+  _claims_out="$_claims_val"
+}
+
+# _drop_pr_claimed <varname> <claims> <issues> — INTO a named variable, <issues> (one per
+# line) without those an open pull request already closes (#3241: #3238 was dispatched
+# while #3240 `Closes #3238` was open). Names the pull request in one line per issue.
+_drop_pr_claimed() {
+  local -n _drop_out="$1"
+  local _drop_claims="$2" _drop_kept="" _drop_n _drop_pr
+  local -A _drop_by=()
+  while read -r _drop_pr _drop_n; do
+    [[ -n "$_drop_n" && -z "${_drop_by[$_drop_n]:-}" ]] && _drop_by[$_drop_n]="$_drop_pr"
+  done <<<"$_drop_claims"
+  for _drop_n in $3; do
+    if [[ -n "${_drop_by[$_drop_n]:-}" ]]; then
+      echo "[drain] skipping #${_drop_n}: open pull request #${_drop_by[$_drop_n]} already closes it (#3241)." >&2
+    else
+      _drop_kept+="${_drop_n}"$'\n'
+    fi
+  done
+  _drop_out="${_drop_kept%$'\n'}"
 }
 
 # _read_queue <varname> <label> — read one label's queue INTO a named variable, and
@@ -1848,6 +1951,21 @@ run_cycle() {
           echo "[drain] spec-writing is PAUSED: ${held} drain pull request(s) held for a human (needs-human-review on agent/issue-*), at or above the cap ${SPECIFY_MAX_HELD} (MINSPEC_DRAIN_SPECIFY_MAX_HELD, #2939): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
         fi
       fi
+      # The pile already on main (#3344, see SPECIFY_MAX_PENDING). Asked only while the
+      # held cap still leaves spec-writing on, so a cycle prints one PAUSED line at most.
+      if (( specify_on )); then
+        local pending=0
+        if [[ ! "$SPECIFY_MAX_PENDING" =~ ^[0-9]+$ ]]; then
+          specify_on=0
+          echo "[drain] spec-writing is PAUSED: MINSPEC_DRAIN_SPECIFY_MAX_PENDING=$(printf '%q' "$SPECIFY_MAX_PENDING") is not a whole number, so it is read as 0, the setting that spends nothing: ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+        elif ! _pending_specs pending; then
+          specify_on=0
+          echo "[drain] spec-writing is PAUSED: the unapproved specs on main could not be counted (no specs/ folder or an unreadable one under $(printf '%q' "$(dirname "$REMEDIATE")/..")), and a count nobody read is not zero (#3344): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+        elif (( 10#$pending >= 10#$SPECIFY_MAX_PENDING )); then
+          specify_on=0
+          echo "[drain] spec-writing is PAUSED: ${pending} spec(s) on main waiting for Clarify or sign-off (status new or specifying), at or above the cap ${SPECIFY_MAX_PENDING} (MINSPEC_DRAIN_SPECIFY_MAX_PENDING, #3344): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+        fi
+      fi
     fi
   fi
 
@@ -1882,6 +2000,26 @@ run_cycle() {
       echo "[drain] cycle done."
       return 0
     fi
+  fi
+
+  # Open pull request already closes the issue (#3241): never build it twice. A failed read
+  # holds ALL dispatch this cycle (fail closed, invariant 2); the PR sweep still runs.
+  local pr_claims="" pr_claims_rc=0
+  _pr_claims pr_claims || pr_claims_rc=$?
+  if (( pr_claims_rc != 0 )); then
+    echo "[drain] HOLDING dispatch: the open pull request list could not be read (gh exit ${pr_claims_rc}), so whether one already closes a ready issue is unknown (#3241). Nothing was dispatched this cycle." >&2
+    all_ready=""
+  else
+    _drop_pr_claimed all_ready "$pr_claims" "$all_ready"
+    if [[ -z "$all_ready" ]]; then
+      echo "[drain] nothing to dispatch this cycle: every ready issue is already closed by an open pull request. Going on to pull request remediation."
+    fi
+  fi
+  if [[ -z "$all_ready" ]]; then
+    sweep_open_prs || return $?
+    _sweep_fetch_verdict || return $?
+    echo "[drain] cycle done."
+    return $(( pr_claims_rc != 0 ))
   fi
 
   # Dispatch ORDER (#2196): what each issue unblocks, then the spec it serves, then
