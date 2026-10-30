@@ -882,9 +882,9 @@ for (const file of annFiles) {
   }
 }
 
-// Rule 24 (WARN, #3390): a Clarify block's wording is checked against the predicate that reads it.
+// Rule 25 (WARN, #3390): a Clarify block's wording is checked against the predicate that reads it.
 //
-// Nine specs recorded every selection under "All N decisions are recorded". findOpenClarify
+// Several specs recorded every selection under "All N decisions are recorded". findOpenClarify
 // accepts only resolved/answered/decided and fails closed, so each read as open and delegated
 // approval refused it; nothing compared the wording with the predicate, so the mismatch looked
 // like a pile of open questions. A spec that has "Recorded selection" lines yet is still read as

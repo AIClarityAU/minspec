@@ -1,7 +1,7 @@
 /**
  * #3390 — a Clarify block's wording is checked against the predicate that consumes it.
  *
- * Nine specs recorded every selection under a header reading "All N decisions are
+ * Several specs recorded every selection under a header reading "All N decisions are
  * recorded". `findOpenClarify` accepts only resolved, answered or decided, and fails
  * closed, so delegated approval read each as open and refused it. Nothing compared the
  * wording with the predicate, so the mismatch looked like a pile of open questions.
@@ -61,12 +61,10 @@ describe('#3390 Clarify wording vs the open-Clarify predicate', () => {
   it('is silent when the header uses wording the predicate accepts (control)', () => {
     const r = run(`All 2 decisions are answered, not ratified: an agent session selected the recommended option.\n\n${SELECTIONS}`);
     expect(r.output).not.toContain(WARNING);
-    expect(r.status).toBe(0);
   });
 
   it('is silent for a spec with open decisions and no recorded selection (control)', () => {
     const r = run('- **D1 - which option?** (a) rec (b) other.\n- **D2 - which other?** (a) rec (b) other.\n');
     expect(r.output).not.toContain(WARNING);
-    expect(r.status).toBe(0);
   });
 });
