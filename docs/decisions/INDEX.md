@@ -901,7 +901,7 @@ The step "Post honest ai-review verdict check-run" (.github/workflows/ai-review.
 
 ## [DR-114 — The host drain service runs the drain at concurrency 8 by default; drain-inbox.sh keeps its own default of 1](DR-114.md)
 
-*Status: proposed · Date: 2026-10-27*
+*Status: accepted · Date: 2026-10-27*
 
 <!-- dr-summary:DR-114 auto=5fb445350927 -->
 scripts/drain-inbox.sh defaults to concurrency 1 and carries a caveat (around lines 407-411): two queued issues touching the same file still produce competing pull requests, because each agent branches from origin/main and cannot see an unmerged sibling, so "keep the default at 1 until same-file serialisation exists, and de-duplicate the queue first". That caveat was written for the session-start drain.
