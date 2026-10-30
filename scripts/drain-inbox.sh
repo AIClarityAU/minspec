@@ -1409,8 +1409,36 @@ reconcile_unlaned_issues() {
     echo "[drain] lane check: could not parse the issue list — NOT evidence that every issue has a lane (#3355)."
     return 0
   fi
+  # Issues the chief-of-staff runner parked on purpose carry a comment ending "Do not
+  # re-triage" (triage reads title and body only, so it would never see that comment).
+  # A failed or unreadable search must not read as "nothing parked": edit nothing.
+  local pjson parked
+  if ! pjson=$(gh issue list --repo "$REPO" --state open --limit 5000 \
+        --search '"Do not re-triage" in:comments' --json number 2>/dev/null); then
+    echo "[drain] lane check: could not search for parked issues — NO edits this pass, NOT evidence that nothing is parked (#3355)."
+    return 0
+  fi
+  if ! parked=$(printf '%s' "$pjson" | jq -r '.[].number' 2>/dev/null); then
+    echo "[drain] lane check: could not parse the parked-issue search — NO edits this pass (#3355)."
+    return 0
+  fi
+  if [[ "$(printf '%s' "$pjson" | jq 'length' 2>/dev/null || echo 0)" -ge 5000 ]]; then
+    echo "[drain] lane check: parked-issue search hit the 5000 limit — some parked issues may be re-triaged (#3355)."
+  fi
+  # main-red reports are filed by main-red-watch for a human, and no queue reads them.
+  local red
+  red=$(printf '%s' "$json" | jq -r '.[] | select(any(.labels[]; .name == "main-red")) | .number' 2>/dev/null) || red=""
+  local skipped_parked=0 skipped_red=0
   while read -r n; do
     [[ -n "$n" ]] || continue
+    if grep -qxF "$n" <<< "$parked"; then
+      skipped_parked=$((skipped_parked + 1))
+      continue
+    fi
+    if grep -qxF "$n" <<< "$red"; then
+      skipped_red=$((skipped_red + 1))
+      continue
+    fi
     if gh issue edit "$n" --repo "$REPO" --add-label inbox >/dev/null 2>&1; then
       count=$((count + 1))
     else
@@ -1419,6 +1447,7 @@ reconcile_unlaned_issues() {
     fi
   done <<< "$nums"
   echo "[drain] lane check: ${count} open issue(s) had no lane label and got inbox; ${failed} could not be labelled (#3355)."
+  echo "[drain] lane check: skipped ${skipped_parked} parked on purpose (Do not re-triage) and ${skipped_red} main-red report(s) (#3355)."
 }
 
 # Never fatal: a reconciler exists to reduce drift, and must not become a new way for
