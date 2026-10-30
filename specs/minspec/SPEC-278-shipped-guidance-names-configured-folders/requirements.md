@@ -10,7 +10,9 @@ depends_on: []
 relates_to: ["#2682", "#2675", "#1522"]
 implements: none
 implements_reason: >-
-  Specify phase only. Which files this spec will own is decided at Plan, after Decisions D1-D3 are answered.
+  Clarify is partly recorded, not ratified (D1 option (a), D3 per-file; D2 is open, with no
+  recommendation). Which files this spec will own is still decided at Plan, so implements stays
+  none.
 phases:
   specify: in-progress
   clarify: pending
@@ -68,6 +70,18 @@ Read from the code, not inferred:
 3. Everything else - Low: string substitution inside generated text.
 
 ## Decisions needed (Clarify)
+
+2 of 3 decisions are recorded: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001 covers spec approval and engineering-DR acceptance only). They are ratified only when a
+human or a covered delegation approves this spec. D2 is not recorded: this document makes no
+recommendation for it (it asks for the packaging manifest to be checked first), so it stays open
+for a human.
+
+- **D1 - Recorded selection: Option (a),** thread config into the shim builders, so the exact
+  configured folder names appear in the shipped text.
+- **D3 - Recorded selection: per-file reason,** each FR-4 allow-list entry carries its own reason,
+  per file.
 
 **D1 - How to make the text true for any config.**
 - **(a) Thread config into the shim builders** `(rec)`: exact folder names appear, agents need no lookup. Cost: managed regions become config-dependent, so FR-3's refresh/drift rule is mandatory and the pinned-byte contract changes.

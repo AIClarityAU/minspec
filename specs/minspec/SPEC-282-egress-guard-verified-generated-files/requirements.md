@@ -10,8 +10,9 @@ depends_on: []
 relates_to: ["#2815", "#2814", "#2597", "#358", "#479", "#616", "#652", "#678", "#750", "#871", DR-008]
 implements: none
 implements_reason: >-
-  Specify phase only. The files this spec will own (expected: scripts/lib/agent-egress.sh and
-  its tests) are fixed at Plan, after Decisions D1-D3 are answered.
+  Clarify answers are recorded but not ratified (D1-D3, all option (a)). The files this spec will
+  own (expected: scripts/lib/agent-egress.sh and its tests, both existing) are still fixed at
+  Plan, so implements stays none.
 phases:
   specify: in-progress
   clarify: pending
@@ -193,6 +194,17 @@ Recorded here because this repo runs in act mode (DR-086 §4) and nobody sees th
   not pass the parent register's under-a-day ADR filter. DR-008 stays the governing decision.
 
 ## Decisions needed (Clarify)
+
+All 3 decisions are recorded: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001 covers spec approval and engineering-DR acceptance only). They are ratified only when a
+human or a covered delegation approves this spec.
+
+- **D1 - Recorded selection: Option (a),** every commit that touches a generated path verifies
+  (FR-3).
+- **D2 - Recorded selection: Option (a),** both generated files are in scope, through FR-2.
+- **D3 - Recorded selection: Option (a),** the trusted generator comes from `git merge-base HEAD
+  origin/main`.
 
 - **D1 How much history must verify.**
   - **(a) (rec)** Every commit that touches a generated path verifies (FR-3). Cost: one generator

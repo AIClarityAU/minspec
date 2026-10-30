@@ -10,7 +10,9 @@ depends_on: []
 relates_to: ["#2891", SPEC-054, SPEC-031, DR-066, DR-029]
 implements: none
 implements_reason: >-
-  Specify phase only. Owned files are decided at Plan, after the inventory (FR-1) and Decisions D1-D4 are answered.
+  Clarify answers are recorded but not ratified (D1-D5, all option (a)). D1(a) names the new file
+  docs/CODING_STANDARDS.md; owned files are still decided at Plan, after the FR-1 inventory, so
+  implements stays none.
 phases:
   specify: in-progress
   clarify: pending
@@ -139,6 +141,20 @@ separate fixer split is deliberate, `scripts/roles/reviewer.md:14`); the unrelat
 - A longer reviewer prompt costs about +0.02M tokens per round (research estimate, unmeasured here).
 
 ## Decisions needed (Clarify)
+
+All 5 decisions are recorded: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001 covers spec approval and engineering-DR acceptance only). They are ratified only when a
+human or a covered delegation approves this spec.
+
+- **D1 - Recorded selection: Option (a),** the reviewer-only file is `docs/CODING_STANDARDS.md`.
+- **D2 - Recorded selection: Option (a),** no pointer to it in `CLAUDE.md`.
+- **D3 - Recorded selection: Option (a),** the review runner concatenates the file into the system
+  prompt it passes (`--system-prompt-file`).
+- **D4 - Recorded selection: Option (a),** the three template lines are deleted on the research's
+  judgement, with no A/B run.
+- **D5 - Recorded selection: Option (a),** build the mechanism once whatever FR-1's movable-byte
+  count, so no threshold needs setting.
 
 - **D1 File path and ownership.** Options: (a) `docs/CODING_STANDARDS.md` (**rec**, conventional name,
   humans find it; cost: sits in a docs path other tools may glob and load); (b)
