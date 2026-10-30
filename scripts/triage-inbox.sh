@@ -358,7 +358,8 @@ CONTENT
     printf '%s' "$USER_CONTENT" > "$SHADOW_PROMPT"
     printf '%s\n' "$FIELDS" > "$SHADOW_FIELDS_FILE"
     "$SHADOW" record --issue "$ISSUE" --repo "$REPO" \
-      --prompt-file "$SHADOW_PROMPT" --live-fields "$SHADOW_FIELDS_FILE" >/dev/null || true
+      --prompt-file "$SHADOW_PROMPT" --live-fields "$SHADOW_FIELDS_FILE" \
+      --named-spec-status "$NAMED_SPEC_STATUS" >/dev/null || true
     rm -f "$SHADOW_PROMPT" "$SHADOW_FIELDS_FILE"
   fi
 
