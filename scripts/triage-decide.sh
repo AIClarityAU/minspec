@@ -8,6 +8,16 @@
 # or T3/T4 verdict can never become plain `agent-ready`, regardless of what the agent
 # "decided". It fails CLOSED: any missing/garbled field downgrades to a human gate.
 #
+# ONE exception, and only one (DR-118, proposed; founder decision 2026-10-30, queue
+# item pb1030; triggered by #3282): a T3/T4 the agent affirmed as auto-buildable
+# (decision agent-ready, human_only no) on an issue carrying the EXACT label
+# `pipeline-blocker` (passed in as `--label pipeline-blocker`) becomes `agent-ready`
+# / hold `none` instead of `agent-ready-specify` / `specify` — it skips the DR-076
+# spec-first read. Nothing else moves: human-only (asserted, missing or garbled),
+# needs-info, a T3/T4 the agent declined, and an unsized tier all keep their holds,
+# and with no `--label` input at all (the caller could not read the labels) the
+# issue keeps the spec-first route. See the `--label` section below.
+#
 # ── #1169 / DR-076: T3/T4 auto-buildable now dispatches SPECIFY-ONLY ──────────
 # DR-076 keeps exactly one review-shaped human moment: reading a T3/T4 SPEC before
 # anything is built from it. This gate used to spend a DIFFERENT one first — every
@@ -20,7 +30,8 @@
 #
 # So an auto-buildable, non-human-only T3/T4 now resolves to `agent-ready-specify`
 # (hold `specify`) — dispatchable for the SPECIFY PHASE ONLY. Nothing about the
-# IMPLEMENT path moved: plain `agent-ready` is still reachable from T1/T2 alone,
+# IMPLEMENT path moved: plain `agent-ready` is still reachable from T1/T2 alone
+# (plus the single `pipeline-blocker` exception, DR-118, documented at the top),
 # and building from a T3/T4 spec still waits on the human's spec approval.
 #
 # The class is DERIVED HERE from `tier`; the agent's input vocabulary is UNCHANGED
@@ -58,6 +69,18 @@
 # `--fields` prints the SAME decision as key=value lines instead of one space-joined
 # line, adding the two NORMALISED inputs the verdict record must carry for audit:
 #   label=… role=… hold=… tier=<T1|T2|T3|T4|unknown> human_only=<yes|no|unknown>
+#   exception=pipeline-blocker   — printed ONLY when the DR-118 exception fired;
+#                                  absent otherwise (absent means none)
+#
+# `--label <name>` (repeatable) passes ONE of the issue's labels in. The gate reads
+# exactly one name from them, `pipeline-blocker`, by exact string comparison (no
+# case folding, no trimming, no prefix match). The labels come from the caller's
+# `gh issue view`, not from the agent: the agent reads the untrusted issue text and
+# has no way to set this input. Labels are not proof of trust on their own (issue
+# templates can auto-apply labels, see dispatch-ready-check.sh), so the protection is
+# that (a) triage only runs on issues whose author passes the dispatch author
+# allowlist (triage-inbox.sh, dispatch_issue_gate) and (b) no issue template applies
+# `pipeline-blocker`. A missing value after `--label` adds nothing.
 # Same code path, same exit codes — only the projection differs. It exists so the
 # record written by triage-inbox.sh carries THIS gate's normalised view of tier /
 # human_only rather than a second, hand-rolled re-parse of the agent's raw text
@@ -78,6 +101,7 @@
 #            auto-buildable — too much ceremony,
 #            a human reads it (the pre-#1169 T3/T4 outcome, now the residue)
 #   none     the ONLY unrestricted affirmative       → agent-ready
+#            (T1/T2, or a T3/T4 under the DR-118 pipeline-blocker exception)
 #   unknown  no usable verdict could be derived — no verdict block at all, an
 #            unsizable/garbled tier, or a decision that fell through every rule.
 #            `unknown` is never affirmative; it is the fail-closed default.
@@ -92,9 +116,23 @@
 set -eu
 
 MODE="line"
-if [[ "${1:-}" == "--fields" ]]; then
-  MODE="fields"
-fi
+# Fail closed by default: the exception is OFF unless the exact label is passed in.
+PIPELINE_BLOCKER="no"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --fields) MODE="fields"; shift ;;
+    --label)
+      if [[ $# -ge 2 ]]; then
+        [[ "$2" == "pipeline-blocker" ]] && PIPELINE_BLOCKER="yes"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    *) shift ;;   # unknown arguments were always ignored; ignoring one never widens a route
+  esac
+done
+EXCEPTION_OUT="none"
 
 # The two normalised inputs the decision is derived FROM, carried alongside the
 # outcome so a verdict record can state them. Initialised to the fail-closed values
@@ -108,6 +146,11 @@ emit() {
   if [[ "$MODE" == "fields" ]]; then
     printf 'label=%s\nrole=%s\nhold=%s\ntier=%s\nhuman_only=%s\n' \
       "$1" "$2" "$3" "$TIER_OUT" "$HUMAN_OUT"
+    # Only when an exception fired, so every pre-DR-118 output stays byte-identical
+    # for the readers that compare whole field sets (shadow-triage.sh).
+    if [[ "$EXCEPTION_OUT" != "none" ]]; then
+      printf 'exception=%s\n' "$EXCEPTION_OUT"
+    fi
   else
     printf '%s %s %s\n' "$1" "$2" "$3"
   fi
@@ -172,9 +215,12 @@ esac
 # Deterministic gate — order matters, every fall-through lands on a human gate:
 # 1. human-only (any tier)                 → needs-review          (hold: human)
 # 2. agent asked for info                  → needs-info            (hold: info)
+# 3a. T3/T4 AND agent-ready AND the exact `pipeline-blocker` label
+#                                          → agent-ready           (hold: none — DR-118, the
+#                                                                   ONE exception to rule 3)
 # 3. T3/T4 AND agent-ready (auto-buildable)→ agent-ready-specify   (hold: specify — #1169)
 # 4. T3/T4 otherwise                       → needs-review          (hold: tier)
-# 5. T1/T2 AND agent-ready                 → agent-ready           (hold: none — the ONLY
+# 5. T1/T2 AND agent-ready                 → agent-ready           (hold: none — with 3a, the ONLY
 #                                                                   unrestricted auto path)
 # 6. anything else                         → needs-review          (hold: unknown — fail closed)
 #
@@ -193,6 +239,12 @@ if [[ "$DECISION" == "needs-info" ]]; then
 fi
 if [[ "$TIER" == "t3" || "$TIER" == "t4" ]]; then
   if [[ "$DECISION" == "agent-ready" ]]; then
+    # DR-118: reached only past the human and needs-info rules above, so it can
+    # never lift a human hold; it only swaps the specify pair for the build pair.
+    if [[ "$PIPELINE_BLOCKER" == "yes" ]]; then
+      EXCEPTION_OUT="pipeline-blocker"
+      emit agent-ready "$ROLE" none; exit 0
+    fi
     emit agent-ready-specify "$ROLE" specify; exit 0
   fi
   emit needs-review "$ROLE" tier; exit 0

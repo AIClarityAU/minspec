@@ -67,7 +67,7 @@ interface TriageRun {
 /** Drive scripts/triage-inbox.sh for one issue with stubbed `gh` and `claude`. */
 function runTriage(
   verdictBlock: string,
-  opts: { failBatchRemove?: boolean; labels?: string[] } = {},
+  opts: { failBatchRemove?: boolean; labels?: string[]; rawLabels?: unknown } = {},
 ): TriageRun {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-triage-'));
   const bin = path.join(dir, 'bin');
@@ -76,7 +76,7 @@ function runTriage(
   const issueJson = JSON.stringify({
     title: TITLE,
     body: BODY,
-    labels: (opts.labels ?? ['inbox']).map((name) => ({ name })),
+    labels: 'rawLabels' in opts ? opts.rawLabels : (opts.labels ?? ['inbox']).map((name) => ({ name })),
   });
   fs.writeFileSync(path.join(dir, 'issue.json'), issueJson);
   fs.writeFileSync(path.join(dir, 'agent-out.txt'), verdictBlock);
@@ -294,10 +294,13 @@ describe('triage-inbox.sh writes the verdict record dispatch requires (#983)', (
   });
 });
 
-// ── pipeline-blocker skips spec-first (founder decision 2026-10-30, queue item pb1030) ──
+// ── pipeline-blocker skips spec-first (DR-118, proposed; founder decision 2026-10-30,
+// queue item pb1030; triggered by #3282) ──
 // The spec-writing queue can be paused, and an issue that unblocks the pipeline itself
 // must not wait behind it. Exactly ONE label opts out of the specify class, and only the
 // specify class: every human gate (human_only, a declined T3/T4, needs-info) still holds.
+// The DECISION lives in triage-decide.sh (pinned in triage-decide.test.ts); these tests
+// pin that triage-inbox.sh feeds the issue's labels in and records the gate's output.
 describe('triage-inbox.sh routes a pipeline-blocker straight to build (pb1030)', () => {
   let dispatchBody: string;
   beforeAll(() => {
@@ -329,7 +332,7 @@ describe('triage-inbox.sh routes a pipeline-blocker straight to build (pb1030)',
       ).toBe(true);
       expect(run.comment).toContain('hold: specify');
     }
-  });
+  }, 30_000); // several real triage-inbox.sh runs in one test (#1099: 30s under load)
 
   it('pipeline-blocker never lifts a human-only hold', () => {
     const run = runTriage(verdict({ tier: 'T3', decision: 'agent-ready', human_only: 'yes' }), {
@@ -344,6 +347,19 @@ describe('triage-inbox.sh routes a pipeline-blocker straight to build (pb1030)',
     const info = runTriage(verdict({ tier: 'T3', decision: 'needs-info' }), { labels: ['inbox', 'pipeline-blocker'] });
     expect(info.calls.some((c) => c.includes('add=[role:dev,needs-info,hold:info]'))).toBe(true);
   });
+
+  it('a label list that does not name pipeline-blocker in .name fails closed to the specify route', () => {
+    // (A label list jq cannot read at all passes no --label: the gate test pins that
+    // "no label input" keeps the specify route.)
+    for (const rawLabels of [[], [{ nom: 'pipeline-blocker' }], [{ name: null }]]) {
+      const run = runTriage(verdict({ tier: 'T3', decision: 'agent-ready' }), { rawLabels });
+      expect(
+        run.calls.some((c) => c.includes('add=[role:dev,agent-ready-specify,hold:specify]')),
+        `${JSON.stringify(rawLabels)}: ${run.calls.join('\n')}`,
+      ).toBe(true);
+      expect(run.comment).toContain('hold: specify');
+    }
+  }, 30_000); // several real triage-inbox.sh runs in one test (#1099: 30s under load)
 
   it('a T1/T2 pipeline-blocker is unchanged (already a full build)', () => {
     const run = runTriage(verdict({ tier: 'T2' }), { labels: ['inbox', 'pipeline-blocker'] });

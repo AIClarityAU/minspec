@@ -922,4 +922,12 @@ SPEC-136 (headless core, status: planning, T4) packages the checks MinSpec alrea
 <!-- dr-summary:DR-117 auto=f3bf57334586 -->
 ZCode (Z.ai's editor) runs apart from the host so that the host's editor and agents are never "infected" by reading what ZCode wrote; SPEC-136 set six boundary rules for that and said they outlive the spec and need a decision record. This is that record.
 <!-- /dr-summary:DR-117 -->
+
+## [DR-118 — Issues labelled pipeline-blocker skip spec-first and route straight to a full build, decided inside the triage gate](DR-118.md)
+
+*Status: proposed · Date: 2026-10-30*
+
+<!-- dr-summary:DR-118 auto=3aa38b3fb488 -->
+DR-076 (solo mode, accepted 2026-08-01) keeps "genuinely human moments", the first of which reads: "**T3/T4 spec approval.** Reading a spec before building from it is where one human-hour has the highest leverage." #1169 implemented that in the triage gate (scripts/triage-decide.sh): an auto-buildable T3/T4 resolves to agent-ready-specify / hold specify, so an agent may write the spec but nothing is built until the spec is approved.
+<!-- /dr-summary:DR-118 -->
 <!-- minspec:dr-index:end -->

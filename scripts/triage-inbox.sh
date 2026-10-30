@@ -191,13 +191,25 @@ CONTENT
   # (not the space-joined default line) because the RECORD must carry the gate's own
   # view of tier / human_only, and re-parsing the agent's raw text here would be a
   # second parser of the same format — the classic way a gate and its record drift.
-  local FIELDS LABEL ROLE HOLD TIER HUMAN_ONLY
-  FIELDS=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" --fields || true)
+  #
+  # The issue's labels go IN to the gate as `--label` inputs, so the one exception the
+  # gate knows (`pipeline-blocker` skips spec-first, DR-118, triggered by #3282) is
+  # decided inside the gate and the record below is the gate's real output. FAIL CLOSED:
+  # if the label list cannot be read, no `--label` is passed and the gate keeps the
+  # spec-first route. Labels come from our own `gh issue view`, never from the agent.
+  local FIELDS LABEL ROLE HOLD TIER HUMAN_ONLY EXCEPTION
+  local -a LABEL_ARGS=()
+  local LABEL_NAME
+  while IFS= read -r LABEL_NAME; do
+    [[ -n "$LABEL_NAME" ]] && LABEL_ARGS+=(--label "$LABEL_NAME")
+  done < <(printf '%s' "$ISSUE_JSON" | jq -r '.labels[]?.name' 2>/dev/null || true)  # swallow-ok: an unreadable label list passes no --label, which keeps the restrictive spec-first route (DR-118)
+  FIELDS=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" --fields "${LABEL_ARGS[@]}" || true)
   LABEL=$(verdict_field label "$FIELDS")
   ROLE=$(verdict_field role "$FIELDS")
   HOLD=$(verdict_field hold "$FIELDS")
   TIER=$(verdict_field tier "$FIELDS")
   HUMAN_ONLY=$(verdict_field human_only "$FIELDS")
+  EXCEPTION=$(verdict_field exception "$FIELDS")
 
   if [[ -z "$LABEL" || -z "$ROLE" || -z "$HOLD" || -z "$TIER" || -z "$HUMAN_ONLY" ]]; then
     echo "WARNING: no verdict parsed for #$ISSUE — leaving in inbox" >&2
@@ -212,24 +224,10 @@ CONTENT
     | head -1 | sed -E 's/^[^:]*:[[:space:]]*//')  # swallow-ok: grep exits 1 when the agent emitted no rationale line, and the next line substitutes an explicit placeholder
   [[ -z "$RATIONALE" ]] && RATIONALE="(no rationale emitted)"
 
-  # ── pipeline-blocker skips spec-first (founder decision 2026-10-30, queue item pb1030) ──
-  # An issue that unblocks the pipeline itself must not wait in the spec-writing queue,
-  # which can be paused. So the ONE label `pipeline-blocker` converts the specify class
-  # (and only it) into a full build: `agent-ready-specify`/`specify` becomes
-  # `agent-ready`/`none`. Every other hold stands: human_only, a T3/T4 the agent declined,
-  # needs-info and the fail-closed `unknown` never reach this branch, because the gate
-  # emits `specify` only for a non-human-only, agent-affirmed T3/T4.
-  #
-  # Exact name match, read from the same issue JSON the verdict is keyed to. If the
-  # label list cannot be read, jq fails and the test is false: the issue keeps today's
-  # specify route, never a build. Labels are set by repo collaborators, not by the
-  # untrusted issue text the agent reads, so the agent cannot ask for this route.
-  if [[ "$LABEL" == "agent-ready-specify" && "$HOLD" == "specify" ]] \
-     && printf '%s' "$ISSUE_JSON" \
-          | jq -e 'any(.labels[]?; .name == "pipeline-blocker")' >/dev/null 2>&1; then  # swallow-ok: a jq failure means "label not proven present", which keeps the restrictive specify route
-    LABEL="agent-ready"
-    HOLD="none"
-    RATIONALE="${RATIONALE} [pipeline-blocker: spec-first skipped, routed to a full build (founder decision 2026-10-30, pb1030)]"
+  # DR-118 (proposed): the gate itself routed this issue past spec-first. Say so in the
+  # human-readable rationale; the label/hold pair is already the gate's own output.
+  if [[ "$EXCEPTION" == "pipeline-blocker" ]]; then
+    RATIONALE="${RATIONALE} [pipeline-blocker: spec-first skipped, routed to a full build (DR-118, founder decision 2026-10-30, pb1030)]"
   fi
 
   # Mint the machine-readable verdict record, keyed to the body we just triaged.
