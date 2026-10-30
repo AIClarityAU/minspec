@@ -208,7 +208,15 @@ export function signalCoverage(ranked: readonly RankedIssue[], graph: BlockingGr
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 **D1 - When does the coverage line become a WARNING?**
+
+**Recorded selection: Option (a),** warn when more than half of the candidates are ordered by
+issue number alone, or no candidate has `unblocks` > 0.
+
 - (a) **When more than half of the candidates are ordered by issue number alone, or no
   candidate has `unblocks` > 0 (rec).** Both are facts the line already carries. With the
   2026-09-30 corpus this warns, which is correct. Cost: under today's data it warns on every
@@ -220,6 +228,10 @@ export function signalCoverage(ranked: readonly RankedIssue[], graph: BlockingGr
   value.
 
 **D2 - Backfill blocking edges for the existing open backlog?**
+
+**Recorded selection: Option (a),** no backfill; record edges forward only, through SPEC-232,
+and watch FR-2's `withUnblocks` count.
+
 - (a) **No backfill. Record edges forward only, through SPEC-232, and watch FR-2's
   `withUnblocks` count (rec).** Cost: the existing ~890 open issues stay edge-less, so term 1
   stays inert for the old backlog until those issues close or someone records an edge while
@@ -232,6 +244,10 @@ export function signalCoverage(ranked: readonly RankedIssue[], graph: BlockingGr
   ranker's header warns about. A false edge promotes an issue above everything without one.
 
 **D3 - Where do spec/epic links for the ~132 unlinked issues come from?**
+
+**Recorded selection: Option (a),** triage proposes an `epic:` label as part of its existing
+verdict on new or re-triaged issues, written only when it names a single epic.
+
 - (a) **Triage proposes an `epic:` label as part of its existing verdict on new or re-triaged
   issues, written only when it names a single epic (rec).** There are ten epics, so the
   choice is coarse and one wrong label costs a limited jump. Cost: the label is model-judged,
@@ -244,6 +260,9 @@ export function signalCoverage(ranked: readonly RankedIssue[], graph: BlockingGr
   queue.
 
 **D4 - Keep `unblocks` as the first term?**
+
+**Recorded selection: Option (a),** keep the #2196 order.
+
 - (a) **Keep the #2196 order (rec).** It is founder-approved, and an empty first term costs
   nothing: it falls through. Once FR-2 is built, its counts are the evidence for revisiting
   the order. Cost: if the first term stays empty, the order rests on term 2 in practice
