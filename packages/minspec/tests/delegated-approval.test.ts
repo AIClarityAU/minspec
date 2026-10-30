@@ -25,7 +25,7 @@ import {
   parseCliArgs,
   planDelegatedApproval,
   specNotApprovable,
-  writtenHashMismatch,
+  withWrittenHash,
   type GhRunner,
   type PlanInput,
   type ReviewEvidence,
@@ -343,15 +343,17 @@ describe('the bot refuses what the founder\'s Approve Spec refuses', () => {
   });
 });
 
-describe('writtenHashMismatch (#3380)', () => {
-  it('flags a body **Status:** rewrite the canonical form does not strip', () => {
+describe('withWrittenHash (#3380)', () => {
+  it('re-binds the record to a body **Status:** rewrite the canonical form keeps', () => {
     const base = `---\nid: SPEC-900\nstatus: specifying\ntier: T3\n---\n\n**Status:** specifying\n`;
     const written = base.replace('**Status:** specifying', '**Status:** Planning');
-    expect(writtenHashMismatch(written, specHash(base))).toBe(true);
+    const rec = withWrittenHash({ specHash: specHash(base) }, written);
+    expect(rec.specHash).toBe(specHash(written));
+    expect(rec.specHash).not.toBe(specHash(base));
   });
-  it('accepts a frontmatter-only lifecycle change', () => {
+  it('leaves the hash unchanged for a frontmatter-only lifecycle change', () => {
     const base = `---\nid: SPEC-900\nstatus: specifying\ntier: T3\n---\n\nbody\n`;
     const written = base.replace('status: specifying', 'status: planning');
-    expect(writtenHashMismatch(written, specHash(base))).toBe(false);
+    expect(withWrittenHash({ specHash: specHash(base) }, written).specHash).toBe(specHash(base));
   });
 });

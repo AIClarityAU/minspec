@@ -550,27 +550,20 @@ function main(): number {
   }
 
   writeLifecycle(repoRoot, abs, plan.record.act);
-  // The record describes the base's bytes. A spec's writer also rewrites the body
-  // `**Status:**` line, which the canonical form does NOT strip, so the written file
-  // can hash differently from the record and the PR would carry a record that
-  // mismatches its own head (#3380). Fail closed and restore rather than push it.
-  if (plan.record.act === 'spec-approval') {
-    if (writtenHashMismatch(fs.readFileSync(abs, 'utf-8'), plan.record.specHash)) {
-      fs.writeFileSync(abs, onDisk, 'utf-8');
-      return deny(
-        'written-hash-mismatch',
-        `advancing ${artifact} changes its canonical content (e.g. a body **Status:** line), so the record's specHash would not match the committed file`,
-      );
-    }
-  }
-  console.log(JSON.stringify(plan));
+  // The lifecycle writers also rewrite body prose (`**Status:**` lines) that the canonical
+  // form keeps, so the committed file hashes differently from the base the review judged.
+  // Like the founder's Approve Spec, record the hash of the bytes as written (#3380); the
+  // review was bound to the base content above, and approval-integrity binds the record
+  // to the committed file.
+  const record = withWrittenHash(plan.record, fs.readFileSync(abs, 'utf-8'));
+  console.log(JSON.stringify({ ...plan, record }));
   const sidecar = path.join(repoRoot, '.minspec', 'approvals', `${artifact}.json`);
   if (!fs.existsSync(path.join(repoRoot, '.minspec'))) {
     console.error('no .minspec/ at the repo root: this repo has not opted in');
     return 1;
   }
   fs.mkdirSync(path.dirname(sidecar), { recursive: true });
-  fs.writeFileSync(sidecar, JSON.stringify(plan.record, null, 2) + '\n', 'utf-8');
+  fs.writeFileSync(sidecar, JSON.stringify(record, null, 2) + '\n', 'utf-8');
   return 0;
 }
 
@@ -605,12 +598,12 @@ export function specNotApprovable(repoRoot: string, abs: string, content?: strin
   return undefined;
 }
 
-/** The lifecycle half of the act, using the same writers the founder's commands use. */
-/** True when the file as written no longer hashes to the record's `specHash` (#3380). */
-export function writtenHashMismatch(written: string, recordHash: string): boolean {
-  return specHash(written) !== recordHash;
+/** The record re-bound to the file as written (#3380): the hash of the committed bytes. */
+export function withWrittenHash<R extends { specHash: string }>(record: R, written: string): R {
+  return { ...record, specHash: specHash(written) };
 }
 
+/** The lifecycle half of the act, using the same writers the founder's commands use. */
 function writeLifecycle(repoRoot: string, abs: string, act: DelegatedAct): void {
   if (act === 'engineering-dr-acceptance') {
     setAdrStatus(abs, 'accepted');
