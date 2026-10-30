@@ -91,23 +91,35 @@ chooses it; amendment acceptance inside an accepted DR (#3016, already reported 
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 - **D1 - Where the gate lives.**
   (a) Extend `scripts/approval-integrity.ts` with a "flip requires record" rule **(rec)**:
   reuses base/head plumbing and approver checks; cost: that file is explicitly scoped to
   approval-record PRs (DR-081 section 5), so widening it needs a scope amendment.
   (b) New standalone script and check: clean scope; cost: a second copy of the record
   predicate that can drift from `dr_accept_report` (mitigated by the FR-6 shared table).
+  **Recorded selection: Option (a),** extend `scripts/approval-integrity.ts` with a "flip
+  requires record" rule, reusing its base/head plumbing and approver checks.
 - **D2 - Legacy DRs without a record.**
   (a) Grandfather: no record needed unless status changes again **(rec)**: zero churn; cost:
   `UNVERIFIED` stays on ~105 DRs forever.
   (b) Back-fill `migrated: true` records: uniform tree; cost: a bulk write that manufactures
   sign-off records no human made at that moment, which sits badly with "never mint human
   approval". Not recommended.
+  **Recorded selection: Option (a),** grandfather legacy DRs: no record is needed unless their
+  status changes again.
 - **D3 - Set Status -> accepted.**
   (a) Refuse it, direct to Accept ADR **(rec)**: one route, one witness; cost: a command
   behaviour change for users who use Set Status as a shortcut.
   (b) Make it write the record: keeps the shortcut; cost: two write paths to keep in step.
+  **Recorded selection: Option (a),** refuse Set Status -> accepted and direct the user to
+  Accept ADR, so there is one route and one witness.
 - **D4 - Advisory first or gating at once.** DR-081 ran its check advisory before gating.
   (a) Advisory one week then required **(rec)**: catches false positives cheaply; cost: a
   week where an unwitnessed flip can merge. (b) Required immediately: no window; cost: a
   false positive blocks every DR acceptance, the exact failure #2153 reported.
+  **Recorded selection: Option (a),** run the check advisory for one week, then make it
+  required.

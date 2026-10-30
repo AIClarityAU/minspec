@@ -97,7 +97,15 @@ before the FR-7 flip of this rule family to `error`, by the option chosen in D1.
 
 ## Decisions needed (Clarify)
 
+All 2 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 **D1. What happens to the already-matching live files?**
+
+**Recorded selection: Option (A),** land the rule at `warn`, migrate the comments into body
+prose in a follow-up, before the `error` flip.
+
 - (rec) **A. Land the rule at `warn`, migrate the comments into body prose in a follow-up,
   before the `error` flip.** Cost: warnings sit visible in the corpus for a period; each
   migration edits a spec whose approval state must be checked first (edits to an approved
@@ -114,3 +122,6 @@ before the FR-7 flip of this rule family to `error`, by the option chosen in D1.
 goes stale; moving it to body prose is the fix. Cost: converts accurate notes into noise
 until migrated. Alternative: a marker comment form the rule ignores. Cost: a new
 convention that itself can rot, and a hole in the gate.
+
+**Recorded selection: Option (none),** no exemption: such a note is exactly what goes stale,
+and moving it to body prose is the fix.
