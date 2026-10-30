@@ -85,6 +85,22 @@ function runTriage(
   // scripts/lib/dispatch-author-gate.sh (dispatch-author-gate.test.ts covers the gate).
   // Here: opened by the founder, never edited, with the same title and body as above.
   fs.writeFileSync(path.join(dir, 'provenance.json'), provenanceAnswer({ title: TITLE, body: BODY }));
+  // Who last applied each label (DR-118): the founder. triage-label-applier.test.ts covers the refusals.
+  fs.writeFileSync(
+    path.join(dir, 'label-events.json'),
+    JSON.stringify({
+      data: {
+        repository: {
+          issue: {
+            timelineItems: {
+              totalCount: 1,
+              nodes: [{ label: { name: 'pipeline-blocker' }, actor: { __typename: 'User', login: 'harvest316', databaseId: 4125483 } }],
+            },
+          },
+        },
+      },
+    }),
+  );
 
   // Stub `gh`: serves the issue view, records every mutation in order, and captures
   // the comment body. Deliberately NOT a network call — the writer under test does
@@ -98,7 +114,11 @@ set -u
 sub="\${2:-}"
 case "$sub" in
   view) echo "view" >> "$STUB_LOG"; cat "$STUB_DIR/issue.json" ;;
-  graphql) cat "$STUB_DIR/provenance.json" ;;
+  graphql)
+    case "$*" in
+      *LabeledEvent*) cat "$STUB_DIR/label-events.json" ;;
+      *) cat "$STUB_DIR/provenance.json" ;;
+    esac ;;
   comment)
     echo "comment" >> "$STUB_LOG"
     while [[ $# -gt 0 ]]; do

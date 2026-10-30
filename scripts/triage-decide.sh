@@ -77,10 +77,11 @@
 # case folding, no trimming, no prefix match). The labels come from the caller's
 # `gh issue view`, not from the agent: the agent reads the untrusted issue text and
 # has no way to set this input. Labels are not proof of trust on their own (issue
-# templates can auto-apply labels, see dispatch-ready-check.sh), so the protection is
-# that (a) triage only runs on issues whose author passes the dispatch author
-# allowlist (triage-inbox.sh, dispatch_issue_gate) and (b) no issue template applies
-# `pipeline-blocker`. A missing value after `--label` adds nothing.
+# templates can auto-apply labels, see dispatch-ready-check.sh, and anyone GitHub lets
+# apply a label can apply this one), so triage-inbox.sh passes `pipeline-blocker` in only
+# when the account that last applied it is on the dispatch author list
+# (dispatch_issue_label_gate). This gate trusts that caller and does not re-check it.
+# A missing value after `--label` adds nothing.
 # Same code path, same exit codes — only the projection differs. It exists so the
 # record written by triage-inbox.sh carries THIS gate's normalised view of tier /
 # human_only rather than a second, hand-rolled re-parse of the agent's raw text
