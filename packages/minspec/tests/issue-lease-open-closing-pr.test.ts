@@ -17,15 +17,28 @@ beforeEach(() => {
 });
 afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
-function gate(opts: { prs: string; prFails?: boolean; issue?: number }) {
-  fs.writeFileSync(path.join(tmp, 'prs.json'), opts.prs);
+type Pr = { number: number; authorAssociation?: string; author?: object | null; refs?: number[]; refsTruncated?: boolean };
+const node = (p: Pr) => ({
+  number: p.number,
+  authorAssociation: p.authorAssociation ?? 'NONE',
+  author: p.author ?? null,
+  closingIssuesReferences: { pageInfo: { hasNextPage: !!p.refsTruncated }, nodes: (p.refs ?? []).map((n) => ({ number: n, repository: { nameWithOwner: 'x/y' } })) },
+});
+const page = (prs: Pr[], more = false) =>
+  JSON.stringify({ data: { repository: { pullRequests: { pageInfo: { hasNextPage: more, endCursor: more ? 'C' : null }, nodes: prs.map(node) } } } });
+
+/** `pages[0]` answers the first call, `pages[1]` the call that carries a cursor. */
+function gate(opts: { pages?: string[]; graphqlFails?: boolean; issue?: number }) {
+  (opts.pages ?? [page([])]).forEach((b, i) => fs.writeFileSync(path.join(tmp, `page${i}.json`), b));
   const stub = [
     '#!/usr/bin/env bash',
     'case "$1 $2" in',
     '  "issue view")',
     '    if [[ "$*" == *"--json state"* ]]; then echo OPEN; else echo \'{"comments":[]}\'; fi ;;',
-    '  "pr list")',
-    opts.prFails ? '    exit 1 ;;' : `    cat ${JSON.stringify(path.join(tmp, 'prs.json'))} ;;`,
+    // `gh pr list --json` has no authorAssociation field: the real command exits non-zero. The gate must not use it.
+    '  "pr list") echo "unknown JSON field" >&2; exit 1 ;;',
+    '  "api graphql")',
+    opts.graphqlFails ? '    exit 1 ;;' : `    if [[ "$*" == *"cursor="* ]]; then cat ${JSON.stringify(path.join(tmp, 'page1.json'))}; else cat ${JSON.stringify(path.join(tmp, 'page0.json'))}; fi ;;`,
     '  *) exit 1 ;;',
     'esac',
   ].join('\n');
@@ -39,42 +52,58 @@ function gate(opts: { prs: string; prFails?: boolean; issue?: number }) {
 }
 
 describe('lease_gate_open_unshipped: open closing PR (#3161)', () => {
-  const closes = (n: number, who: object) => ({ number: n, closingIssuesReferences: [{ number: 3115 }], ...who });
-  it('refuses when a non-agent/ branch PR closes the issue, and names it', () => {
-    const r = gate({ prs: JSON.stringify([closes(3116, { authorAssociation: 'OWNER', author: { login: 'x' } })]) });
+  const APP = { __typename: 'Bot', login: 'minspec-sdd', databaseId: 299695933 };
+  it('refuses when a collaborator PR closes the issue, and names it', () => {
+    const r = gate({ pages: [page([{ number: 3116, authorAssociation: 'OWNER', refs: [3115] }])] });
     expect(r.status).toBe(1);
     expect(r.out).toContain('#3116');
   });
-  it('refuses when the pipeline App opened the closing PR', () => {
-    const r = gate({ prs: JSON.stringify([closes(3116, { authorAssociation: 'CONTRIBUTOR', author: { login: 'app/minspec-sdd', is_bot: true } })]) });
+  it('refuses when the pipeline App (by account id) opened the closing PR', () => {
+    const r = gate({ pages: [page([{ number: 3116, authorAssociation: 'CONTRIBUTOR', author: APP, refs: [3115] }])] });
     expect(r.status).toBe(1);
   });
-  it('ignores a closing PR from an untrusted author (no permanent-denial vector)', () => {
+  it('ignores a closing PR from an untrusted author, including a lookalike App login', () => {
     for (const who of [
-      { authorAssociation: 'NONE', author: { login: 'rando' } },
-      { authorAssociation: 'FIRST_TIME_CONTRIBUTOR', author: { login: 'minspec-sdd', is_bot: false } },
-      { author: { login: 'rando' } },
+      { authorAssociation: 'NONE', author: { __typename: 'User', login: 'rando', databaseId: 5 } },
+      { authorAssociation: 'FIRST_TIME_CONTRIBUTOR', author: { __typename: 'User', login: 'minspec-sdd', databaseId: 6 } },
+      { author: { __typename: 'Bot', login: 'minspec-sdd', databaseId: 1 } },
+      { author: null },
     ]) {
-      expect(gate({ prs: JSON.stringify([closes(77, who)]) }).status).toBe(0);
+      expect(gate({ pages: [page([{ number: 77, refs: [3115], ...who }])] }).status).toBe(0);
     }
   });
-  it('fails closed when the PR list hits the cap', () => {
-    const prs = Array.from({ length: 1000 }, (_, i) => ({ number: i + 1, closingIssuesReferences: [], authorAssociation: 'NONE' }));
-    expect(gate({ prs: JSON.stringify(prs) }).status).toBe(1);
+  it('does not treat an issue of the same number in another repo as this one', () => {
+    const body = JSON.parse(page([{ number: 9, authorAssociation: 'OWNER', refs: [3115] }]));
+    body.data.repository.pullRequests.nodes[0].closingIssuesReferences.nodes[0].repository.nameWithOwner = 'other/repo';
+    expect(gate({ pages: [JSON.stringify(body)] }).status).toBe(0);
+  });
+  it('reads the next page: a closing PR on page 2 is found', () => {
+    const r = gate({ pages: [page([{ number: 1 }], true), page([{ number: 3116, authorAssociation: 'MEMBER', refs: [3115] }])] });
+    expect(r.status).toBe(1);
+    expect(r.out).toContain('#3116');
+  });
+  it('fails closed when the list never ends (cap)', () => {
+    expect(gate({ pages: [page([{ number: 1 }], true), page([{ number: 2 }], true)] }).status).toBe(1);
+  });
+  it('fails closed when a PR closing list is itself truncated', () => {
+    expect(gate({ pages: [page([{ number: 1, authorAssociation: 'OWNER', refsTruncated: true }])] }).status).toBe(1);
+  });
+  it('fails closed on a GraphQL errors payload', () => {
+    expect(gate({ pages: [JSON.stringify({ errors: [{ message: 'boom' }], data: null })] }).status).toBe(1);
   });
   it('allows when open PRs close other issues only', () => {
-    const r = gate({ prs: JSON.stringify([{ number: 9, authorAssociation: 'OWNER', closingIssuesReferences: [{ number: 1 }] }, { number: 10, closingIssuesReferences: [] }]) });
+    const r = gate({ pages: [page([{ number: 9, authorAssociation: 'OWNER', refs: [1] }, { number: 10 }])] });
     expect(r.status).toBe(0);
   });
   it('allows when there are no open PRs', () => {
-    expect(gate({ prs: '[]' }).status).toBe(0);
+    expect(gate({ pages: [page([])] }).status).toBe(0);
   });
   it('fails closed, visibly, when the PR list cannot be read', () => {
-    const r = gate({ prs: '[]', prFails: true });
+    const r = gate({ graphqlFails: true });
     expect(r.status).toBe(1);
     expect(r.out).toMatch(/fail closed/);
   });
   it('fails closed on unparseable PR output', () => {
-    expect(gate({ prs: 'not json' }).status).toBe(1);
+    expect(gate({ pages: ['not json'] }).status).toBe(1);
   });
 });

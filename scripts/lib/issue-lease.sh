@@ -42,6 +42,8 @@ _ISSUE_LEASE_REPO_ROOT="$(cd "${_ISSUE_LEASE_DIR}/../.." && pwd)"      # repo ro
 # and offline, so calling it per-writer costs nothing. (#1401 architect review.)
 # shellcheck source=scripts/lib/gh-bot.sh
 source "${_ISSUE_LEASE_DIR}/gh-bot.sh"
+# shellcheck source=scripts/lib/dispatch-author-gate.sh
+source "${_ISSUE_LEASE_DIR}/dispatch-author-gate.sh"
 : "${MINSPEC_LEASE_WORKTREE_BASE:=/tmp/minspec-agent}"
 
 # ── Work-item lease constants (SPEC-044 D10 / OQ-2) ──────────────────────────
@@ -237,28 +239,53 @@ lease_gate_open_unshipped() {
 
 # lease_open_closing_prs <item>: print the numbers (space-separated, "#N" form) of every
 # OPEN pull request whose closingIssuesReferences contains <item>; empty when none.
-# Non-zero on any gh/jq failure (the caller treats that as "unknown", never "none"), and
-# when the list hits the --limit cap (a truncated list cannot prove "none in flight").
+# Non-zero on any read/parse failure (the caller treats that as "unknown", never "none"),
+# and when the open-PR list is not read IN FULL (a truncated list cannot prove "none in
+# flight").
+#
+# Read with GraphQL, not `gh pr list --json`: that command has no `authorAssociation`
+# field (it exits non-zero, which this gate would turn into refusing EVERY dispatch), and
+# the association is what the trust filter below needs.
 #
 # TRUSTED PR authors only. This repo is PUBLIC and `Closes #N` in any fork PR's body fills
 # closingIssuesReferences, so an unfiltered read lets any internet user park a throwaway PR
 # and deny dispatch of #N for as long as it stays open — the same zero-permission denial
 # the shipped-marker read above filters against. Trusted = authorAssociation
-# OWNER/MEMBER/COLLABORATOR, or this pipeline's own App (is_bot, slug minspec-sdd: an App
-# slug is unique, and a person cannot register a bot account).
+# OWNER/MEMBER/COLLABORATOR, or an account on the dispatch author list (kind + number, never
+# a login: dispatch-author-gate.sh explains why a login is a spelling anyone can register).
 lease_open_closing_prs() {
-  local item="${1:?lease_open_closing_prs needs an item}" raw limit=1000
-  raw="$(gh pr list --repo "$MINSPEC_LEASE_REPO" --state open --limit "$limit" \
-           --json number,closingIssuesReferences,authorAssociation,author 2>/dev/null)" || return 1
-  printf '%s' "$raw" | jq -r --argjson n "$item" --argjson lim "$limit" '
-    if length >= $lim then error("open PR list hit the cap") else . end
-    | [ .[]
-        | select((.authorAssociation // "") as $a
-                 | $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR"
-                   or ((.author.is_bot // false) == true
-                       and ((.author.login // "") | . == "app/minspec-sdd" or . == "minspec-sdd" or . == "minspec-sdd[bot]")))
-        | select(any(.closingIssuesReferences[]?; .number == $n))
-        | "#\(.number)" ] | join(" ")'
+  local item="${1:?lease_open_closing_prs needs an item}" owner name listed defs
+  local cursor="" page more pages=0 max_pages=10 acc="[]" q
+  owner="${MINSPEC_LEASE_REPO%%/*}"; name="${MINSPEC_LEASE_REPO#*/}"
+  listed="$(_dispatch_trusted_identities_json 2>/dev/null)" && [[ -n "$listed" ]] || return 1
+  defs="$(_dispatch_gate_jq_defs)"
+  q='query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100,after:$cursor){pageInfo{hasNextPage endCursor} nodes{number authorAssociation author{'"$(_dispatch_actor_fields)"'} closingIssuesReferences(first:100){pageInfo{hasNextPage} nodes{number repository{nameWithOwner}}}}}}}'
+  while :; do
+    (( pages < max_pages )) || return 1          # more than 1000 open PRs: cannot prove "none"
+    pages=$((pages + 1))
+    if [[ -n "$cursor" ]]; then
+      page="$(_dispatch_graphql_read -f query="$q" -f owner="$owner" -f name="$name" -f cursor="$cursor" 2>/dev/null)" || return 1
+    else
+      page="$(_dispatch_graphql_read -f query="$q" -f owner="$owner" -f name="$name" 2>/dev/null)" || return 1
+    fi
+    # Absent/odd shape, GraphQL errors, or a PR whose closing list is itself truncated: unknown.
+    printf '%s' "$page" | jq -e '(.errors // [] | length) == 0
+        and (.data.repository.pullRequests.nodes | type) == "array"
+        and all(.data.repository.pullRequests.nodes[]; (.closingIssuesReferences.pageInfo.hasNextPage) == false)' >/dev/null 2>&1 || return 1
+    acc="$(jq -cn --argjson a "$acc" --argjson p "$page" '$a + $p.data.repository.pullRequests.nodes')" || return 1
+    more="$(printf '%s' "$page" | jq -r '.data.repository.pullRequests.pageInfo.hasNextPage')" || return 1
+    [[ "$more" == "false" ]] && break
+    [[ "$more" == "true" ]] || return 1
+    cursor="$(printf '%s' "$page" | jq -r '.data.repository.pullRequests.pageInfo.endCursor // empty')" || return 1
+    [[ -n "$cursor" ]] || return 1
+  done
+  printf '%s' "$acc" | jq -r --argjson n "$item" --argjson listed "$listed" --arg repo "$MINSPEC_LEASE_REPO" "$defs"'
+    [ .[]
+      | select((.authorAssociation // "") as $a
+               | $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR"
+                 or (.author | listed))
+      | select(any(.closingIssuesReferences.nodes[]?; .number == $n and .repository.nameWithOwner == $repo))
+      | "#\(.number)" ] | join(" ")'
 }
 
 # ── Claim comment body + read/enumerate ──────────────────────────────────────
