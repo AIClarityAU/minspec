@@ -93,7 +93,15 @@ Plan must first reproduce this on the installed Claude Code (FR-1) before any sw
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 **D1 — How to stop the load.**
+
+**Recorded selection: Option (a),** a per-dispatch `--settings` file plus env that disables
+auto-memory and excludes the project CLAUDE.md.
+
 - **(a) (rec) Per-dispatch `--settings` file plus env** disabling auto-memory and excluding the
   project CLAUDE.md. Cost: which keys exist is unverified and undocumented settings can change
   between Claude Code releases; FR-4 is what makes such a change visible.
@@ -106,9 +114,16 @@ plus a margin, set at Plan from FR-1) and whether over-budget aborts the dispatc
 flags it. **(rec)** flag-and-label first, abort once the baseline is stable. Cost: a regression
 still spends tokens until the label is acted on.
 
+**Recorded selection: Option (flag-and-label first),** an over-budget dispatch is flagged and
+labelled first, and aborted only once the baseline is stable; the ceiling (the measured slim
+baseline plus a margin) is set at Plan from FR-1.
+
 **D3 — Does the invariant content need to reach the agent?** If CLAUDE.md is no longer
 ambient, the agent depends on reading it. **(rec)** keep the explicit read (FR-5). Cost: the
 agent pays for the file once, on demand, instead of never.
+
+**Recorded selection: Option (keep the explicit read),** keep the explicit read of CLAUDE.md
+(FR-5), so the agent pays for the file once, on demand.
 
 ## Alternatives rejected
 

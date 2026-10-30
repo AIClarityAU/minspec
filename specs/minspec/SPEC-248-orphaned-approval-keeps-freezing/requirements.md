@@ -218,7 +218,15 @@ Each AC names the mutation it must turn red against, so it cannot pass vacuously
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 **D1. What form does a retirement take?**
+
+**Recorded selection: Option (a),** rewrite the sidecar in place, adding a `retired: {at, by,
+reason}` object.
+
 - (a) **(rec)** Rewrite the sidecar in place, adding a `retired: {at, by, reason}` object.
   One file, provenance kept (FR-9), the tree check sees it directly. Cost: a new optional
   field on the shared record schema, so `isValidRecord`/`normalizeRecord` and the Python
@@ -233,6 +241,10 @@ Each AC names the mutation it must turn red against, so it cannot pass vacuously
   drop it.
 
 **D2. Does `MinSpec: Revoke Approval` retire, or is revoke itself caught?**
+
+**Recorded selection: Option (a),** revoke on a snapshot-carrying record writes the retirement
+(D1) instead of deleting the file.
+
 - (a) **(rec)** Revoke on a snapshot-carrying record writes the retirement (D1) instead of
   deleting the file. The palette action is already the human act. Cost: revoke stops
   deleting the sidecar for those records, which changes a user-visible behaviour and keeps
@@ -243,6 +255,10 @@ Each AC names the mutation it must turn red against, so it cannot pass vacuously
 **D3. Renames: is `git mv` of a spec directory a release?** A move rekeys nothing today
 (records are path-keyed, `approval-store.ts` `sidecarPath`), so the old record becomes
 spec-missing and the new path is unapproved.
+
+**Recorded selection: Option (a),** yes, a `git mv` of a spec directory is treated like any
+release: the human retires the old record and re-approves the moved spec.
+
 - (a) **(rec)** Yes, treat it like any release: the human retires the old record and
   re-approves the moved spec. Cost: a pure rename costs a retirement plus a re-approval.
 - (b) Auto-carry: if the head contains a spec with the same `id:` whose resolved owned set
@@ -252,6 +268,10 @@ spec-missing and the new path is unapproved.
 
 **D4. Adopters: does this ship in the portable validator and managed workflow?** SPEC-070's
 producer ships in the extension, so adopters will hold snapshot-carrying records.
+
+**Recorded selection: Option (a),** this monorepo first; adopter parity is a separate issue
+filed at Plan.
+
 - (a) **(rec)** This monorepo first; adopter parity is a separate issue filed at Plan.
   Cost: adopters keep the release path open until that ships.
 - (b) Ship both now. Cost: the portable `validate.py` is a third twin, plus managed-template
