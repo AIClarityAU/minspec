@@ -1213,14 +1213,107 @@ reopened_after_close() {
 # outright when the issue's own history shows a reopen after the last close — that
 # is a standing human veto on the merged-branch inference, and re-deriving the same
 # conclusion from the same branch state on every cycle cannot see it otherwise.
+#
+# #3351 review: `awaiting-spec-signoff` is the one case where an open `agent-done` issue
+# is NOT a contradiction, provided its spec PR exists. A finished specify run leaves its
+# issue open on purpose to carry the build (#3348), so neither arm's inference holds: a
+# merged `agent/issue-<N>` PR is the SPEC, not the build, and an open one is a spec in
+# flight, not a false completion. Such an issue is left exactly as it is until sign-off
+# moves it on (#3350). An unmerged branch proves nothing, and the label does not either:
+# the stamp is written even when the push or `gh pr create` failed, so spec_pr_exists
+# below decides.
+#
+# Three outcomes, as in reopened_after_close above:
+#   0  awaiting — the labels were read and carry awaiting-spec-signoff. Leave it alone.
+#   1  ordinary — the labels were read and do not. Reconcile as usual.
+#   2  unknown  — no readable label list, or one without the `agent-done` the issue was
+#                 just selected on. The caller changes nothing on this issue.
+# The JSON is fetched raw and reduced here so the reduction is what a test exercises.
+awaits_spec_signoff() {
+  local n="$1" raw verdict
+  raw=$(gh issue view "$n" --repo "$REPO" --json labels 2>/dev/null) || return 2
+  verdict=$(printf '%s' "$raw" | jq -r '
+      if (.labels | type) != "array" then "unknown"
+      else
+        [.labels[].name] as $names
+        | if ($names | index("agent-done")) == null then "unknown"
+          elif ($names | index("awaiting-spec-signoff")) != null then "yes"
+          else "no" end
+      end' 2>/dev/null) || return 2
+  case "$verdict" in
+    yes) return 0 ;;
+    no)  return 1 ;;
+    *)   return 2 ;;   # empty, multi-line, or anything this function does not recognise
+  esac
+}
+
+# spec_pr_exists <n>: does this repo have an open or merged PR from `agent/issue-<n>`?
+# A fork can name a branch anything, so its PRs do not count. Fetched raw and reduced
+# here, as above.
+#   0  yes
+#   1  no — the list was read, and holds no such PR.
+#   2  unknown — no readable list. Never reported as "no PR" (#1855).
+spec_pr_exists() {
+  local n="$1" raw verdict
+  raw=$(gh pr list --repo "$REPO" --state all --head "agent/issue-${n}" --limit 100 \
+    --json number,state,isCrossRepository 2>/dev/null) || return 2
+  verdict=$(printf '%s' "$raw" | jq -r '
+      if type != "array" or (all(.[]; (.state | type) == "string") | not) then "unknown"
+      elif any(.[]; .isCrossRepository != true and (.state == "OPEN" or .state == "MERGED")) then "yes"
+      else "no" end' 2>/dev/null) || return 2
+  case "$verdict" in
+    yes) return 0 ;;
+    no)  return 1 ;;
+    *)   return 2 ;;   # empty, multi-line, or anything this function does not recognise
+  esac
+}
+
+# merged_pr_is_spec_only <pr>: spec and build share `agent/issue-<N>`, so a merged PR on
+# that branch whose whole diff is spec corpus says nothing about a build having landed
+# (#3351 review). The corpus is dispatch-issue.sh's own definition, asked rather than copied.
+#   0  spec-only
+#   1  touches something else
+#   2  unknown — the diff was unreadable or empty.
+merged_pr_is_spec_only() {
+  local pr="$1" changed rc=0
+  changed=$(gh pr diff "$pr" --repo "$REPO" --name-only 2>/dev/null) || return 2
+  [[ -n "${changed//[$'\n\r\t ']/}" ]] || return 2
+  "${SCRIPT_DIR}/dispatch-issue.sh" --specify-scope-stray <<<"$changed" >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0) return 1 ;;   # a path outside the corpus
+    1) return 0 ;;
+    *) return 2 ;;
+  esac
+}
+
 reconcile_done_issues() {
-  local done_issues n pr veto rc
-  done_issues=$(gh issue list --repo "$REPO" --state open --label "agent-done" \
+  local done_issues n pr veto rc awaiting spec_pr spec_only
+  # --limit: issues awaiting sign-off stay in this selector until sign-off, so gh's default
+  # 30-row page would fill with them and silently stop reconciling everything older.
+  done_issues=$(gh issue list --repo "$REPO" --state open --label "agent-done" --limit 1000 \
     --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no agent-done issues
   [[ -n "$done_issues" ]] || return 0
 
   while read -r n; do
     [[ -n "$n" ]] || continue
+    awaiting=0; awaits_spec_signoff "$n" || awaiting=$?
+    case "$awaiting" in
+      0)
+        spec_pr=0; spec_pr_exists "$n" || spec_pr=$?
+        case "$spec_pr" in
+          1)
+            echo "[drain] reconcile: #$n is awaiting spec sign-off but NO open or merged PR exists for agent/issue-${n} — stripping the stamp and surfacing (#3351 review)."
+            gh issue edit "$n" --repo "$REPO" \
+              --remove-label "agent-done,awaiting-spec-signoff" --add-label "needs-human-review" 2>/dev/null \
+              || echo "[drain] reconcile: could not correct #$n — left as-is." ;;
+          2)
+            echo "[drain] reconcile: could not read the PRs of agent/issue-${n} — leaving #$n exactly as it is. This is NOT evidence that no spec PR exists (#1855)." ;;
+        esac
+        continue ;;
+      2)
+        echo "[drain] reconcile: could not read the labels of #$n, so it may be awaiting spec sign-off — leaving it exactly as it is (#3351 review). The rest of the board is still reconciled."
+        continue ;;
+    esac
     # Keep the EXIT STATUS, not just the output (#1855). An empty $pr is consumed as a
     # BRANCH below, and the else arm is the MUTATING one: it strips `agent-done`, adds
     # `needs-human-review`, and prints "NO merged PR exists". With the status swallowed,
@@ -1235,6 +1328,18 @@ reconcile_done_issues() {
       continue
     fi
     if [[ -n "$pr" ]]; then
+      spec_only=0; merged_pr_is_spec_only "$pr" || spec_only=$?
+      case "$spec_only" in
+        0)
+          echo "[drain] reconcile: #$n is labelled agent-done but only spec-only PR #$pr merged for agent/issue-${n} — no build landed, so stripping the stamp and surfacing (#3351 review)."
+          gh issue edit "$n" --repo "$REPO" \
+            --remove-label "agent-done" --add-label "needs-human-review" 2>/dev/null \
+            || echo "[drain] reconcile: could not correct #$n — left as-is."
+          continue ;;
+        2)
+          echo "[drain] reconcile: could not read the diff of #$pr, so whether it is the build or only the spec is unknown — leaving #$n exactly as it is (#3351 review)."
+          continue ;;
+      esac
       veto=0; reopened_after_close "$n" || veto=$?
       case "$veto" in
         0)
@@ -2662,8 +2767,8 @@ _quota_read() {
 #
 # THIS FUNCTION MUST NEVER WRITE TO STDOUT. quota_gate's stdout IS the verdict
 # channel its callers capture (`quota_verdict=$(quota_gate)`), so a stray line here
-# would be parsed as an admission verdict. The producer's stdout goes to /dev/null
-# and every diagnostic to stderr.
+# would be parsed as an admission verdict. The producer's stdout and stderr are
+# captured into a variable (never printed raw), and every diagnostic goes to stderr.
 #
 # It cannot admit anything. On any failure the reading is left exactly as it was and
 # the stale / no-reading arms below still fail closed — this only ever makes a
@@ -2694,9 +2799,43 @@ _quota_try_refresh() {
   vals=$(_quota_read 2>/dev/null) || return 0
   read -r _ _ o _ wr <<<"$vals"
   [[ "${1:-}" == "force" ]] || (( now - o > QUOTA_REFRESH_MIN_AGE )) || (( wr > 0 && wr <= now )) || return 0
-  if ! timeout "$QUOTA_REFRESH_TIMEOUT" bash -c "$QUOTA_REFRESH_CMD" >/dev/null 2>&1; then
-    echo "[drain] quota refresh failed (\`$QUOTA_REFRESH_CMD\`) — the reading stands as-is and the gate still fails closed on it." >&2
+  # Judge the refresh by the outcome it exists for, a fresher reading (#2699). The
+  # producer's exit code is not that witness: cos.py reports every failure with exit 0
+  # and a reason on stdout, so an exit-code-only check was unreachable for them all.
+  # The producer's output is captured here, never printed to stdout (verdict channel),
+  # and only a bounded single-line excerpt reaches the log, on stderr.
+  local out rc=0 after="" vals2 o2 why
+  out=$(timeout "$QUOTA_REFRESH_TIMEOUT" bash -c "$QUOTA_REFRESH_CMD" 2>&1 </dev/null) || rc=$?
+  if vals2=$(_quota_read 2>/dev/null); then
+    read -r _ _ o2 _ _ <<<"$vals2"
+    [[ "$o2" =~ ^[0-9]+$ ]] && after="$o2"
   fi
+  # An absent or unreadable reading afterwards is a failed refresh, never a success.
+  if [[ -n "$after" ]] && (( after > o )); then
+    # Moved is not the same as fresh: a reading still past the staleness limit leaves the
+    # gate deferring, so say so. Log only; the decision is the gate's, unchanged.
+    (( $(date +%s) - after > QUOTA_STALE_SEC )) || return 0
+    why="reading moved but is still older than the staleness limit (${QUOTA_STALE_SEC}s)"
+  elif (( rc == 124 )); then
+    why="timed out after ${QUOTA_REFRESH_TIMEOUT}s"
+  elif (( rc != 0 )); then
+    why="exit $rc"
+  elif [[ -z "$after" ]]; then
+    why="reading absent or unreadable afterwards"
+  else
+    why="exit 0 but the reading did not move"
+  fi
+  out=$(printf '%s' "$out" | tr -s '[:space:][:cntrl:]' ' ' | cut -c1-200)
+  # Say only what is true of the reading AFTER the attempt; the decision stays the gate's.
+  local tail
+  if [[ -z "$after" ]]; then
+    tail="no reading is left for the gate to use"
+  elif (( $(date +%s) - after > QUOTA_STALE_SEC )); then
+    tail="the reading is past the staleness limit, so the gate fails closed on it"
+  else
+    tail="the reading is still within the staleness limit, so the gate judges it as it stands"
+  fi
+  echo "[drain] quota refresh failed (\`$QUOTA_REFRESH_CMD\`): $why${out:+; producer said: $out} — $tail." >&2
 }
 
 # ── The cap in force (#2514) ───────────────────────────────────────────────────
