@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-253-windows-external-program-resolution/requirements.md",
+  "specHash": "7b2b4f041ec59cae5c58d9cef7b4830facf0cda2c98b4ac622a82c19f0fdcf67",
+  "approvedAt": "2026-10-30T07:06:36.205Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-d",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3183#issuecomment-6515893280"
+}
