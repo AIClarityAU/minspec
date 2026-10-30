@@ -1327,7 +1327,17 @@ record_delegated_approvals() {
 # and is printed as one line with its reason; an arm that failed after admission, an
 # unreadable PR list, or a list cut off at its limit is printed LOUDLY on stderr.
 # Off: MINSPEC_DRAIN_DELEGATED_MERGE=0. Per-cycle cap: MINSPEC_DRAIN_DELEGATED_MERGE_MAX.
+#
+# The cap ROTATES (MINSPEC_DRAIN_DELEGATED_MERGE_CURSOR, the last PR judged). The cap
+# counts every judgement, held or armed, and a held PR is usually held again next cycle
+# (handed to the founder, hold:human, a plan artifact). Judged oldest-first from the top
+# every cycle, the oldest held PRs took the whole cap: on 2026-10-30 seven of them filled
+# seven of ten slots, twelve cycles in a row ended "0 armed of 10 judged", and 36 newer
+# spec PRs were never judged. Each cycle now resumes after the last PR judged and wraps,
+# so every candidate is judged within ceil(candidates / cap) cycles. The cursor only
+# orders the work; it admits nothing, so an unreadable one starts from the oldest.
 arm_delegated_spec_merges() {
+  local cursor_file="${MINSPEC_DRAIN_DELEGATED_MERGE_CURSOR:-/tmp/minspec-drain-delegated-merge.cursor}"
   if [[ "${MINSPEC_DRAIN_DELEGATED_MERGE:-1}" == "0" ]]; then
     echo "[drain] delegated spec merge: off (MINSPEC_DRAIN_DELEGATED_MERGE=0)."
     return 0
@@ -1396,6 +1406,12 @@ arm_delegated_spec_merges() {
     echo "[drain] delegated spec merge: no held spec-only PRs."
     return 0
   fi
+  # Resume after the last PR judged, then wrap to the oldest (see the header).
+  local cursor="" last=""
+  cursor=$(head -n 1 "$cursor_file" 2>/dev/null | tr -d '[:space:]' || true)  # swallow-ok: ordering only, an absent cursor is the first cycle
+  if [[ "$cursor" =~ ^[0-9]+$ ]]; then
+    candidates=$(awk -v c="$cursor" '$1 > c' <<< "$candidates"; awk -v c="$cursor" '$1 <= c' <<< "$candidates")
+  fi
   while read -r pr; do
     [[ -n "$pr" ]] || continue
     if (( tried >= max )); then
@@ -1403,6 +1419,7 @@ arm_delegated_spec_merges() {
       break
     fi
     tried=$((tried + 1))
+    last="$pr"
     out=$(bash "$DISPATCH" --delegated-spec-merge "$pr" --arm 2>/dev/null) && rc=0 || rc=$?
     out=$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -n 1 || true)  # swallow-ok: grep -v exits 1 when the seam printed nothing, which is reported below as an unreadable result
     case "$rc" in
@@ -1412,6 +1429,9 @@ arm_delegated_spec_merges() {
       *) echo "[drain] WARNING: delegated spec merge: #${pr} was admitted but NOT armed (seam exit ${rc}): ${out:-<no output>}" >&2 ;;
     esac
   done <<< "$candidates"
+  if [[ -n "$last" ]] && ! { printf '%s\n' "$last" > "$cursor_file"; } 2>/dev/null; then
+    echo "[drain] WARNING: delegated spec merge: could not record the cursor at ${cursor_file}; next cycle starts from the oldest PR again." >&2
+  fi
   echo "[drain] delegated spec merge: ${armed} armed of ${tried} judged."
   return 0
 }
