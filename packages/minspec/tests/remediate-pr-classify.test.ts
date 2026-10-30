@@ -628,7 +628,10 @@ describe('remediate-pr.sh: delegated-approval branches (dlg-approve/*) — mecha
   it('--derive-failed-runs keeps a red ai-review run only with-review; never ready-to-merge', () => {
     const roll = JSON.stringify({
       statusCheckRollup: [
-        { name: 'ai-review', conclusion: 'FAILURE', detailsUrl: 'https://x/actions/runs/111/job/1', startedAt: '2026-01-01T00:00:00Z' },
+        // Production's shape (read on #3382): the App posts `ai-review` with its homepage as the
+        // URL; the run id is on the `runner` job of the review workflow.
+        { name: 'ai-review', workflowName: '', conclusion: 'FAILURE', detailsUrl: 'https://minspec.dev/', startedAt: '2026-01-01T00:00:00Z' },
+        { name: 'runner', workflowName: 'ai-review-runner', conclusion: 'SUCCESS', detailsUrl: 'https://x/actions/runs/111/job/1', startedAt: '2026-01-01T00:00:00Z' },
         { name: 'test', conclusion: 'FAILURE', detailsUrl: 'https://x/actions/runs/222/job/2', startedAt: '2026-01-01T00:00:00Z' },
         { name: 'gate', workflowName: 'ready-to-merge', conclusion: 'FAILURE', detailsUrl: 'https://x/actions/runs/333/job/3', startedAt: '2026-01-01T00:00:00Z' },
       ],
