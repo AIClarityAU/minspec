@@ -2164,8 +2164,8 @@ run_cycle() {
     return $(( pr_claims_rc != 0 ))
   fi
 
-  # Dispatch ORDER (#2196): what each issue unblocks, then the spec it serves, then
-  # tier, then number — scripts/rank-issues.ts, run from the same scripts dir as TRIAGE
+  # Dispatch ORDER (#2196): a `pipeline-blocker` label first (prio-rcdd-1030), then what
+  # each issue unblocks, then the spec it serves, then tier, then number — scripts/rank-issues.ts, run from the same scripts dir as TRIAGE
   # (the hard-synced run dir once ensure_fresh_run_dir has verified it). `sort -un`
   # above fixes the SET; ordering is not a gate, so a ranker that fails, or returns
   # anything but exactly that set, is overruled LOUDLY and numeric order stands —
