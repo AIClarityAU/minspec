@@ -374,4 +374,13 @@ describe('a delegated spec approval never changes the spec body (#3380)', () => 
     expect(writeLifecycleHashNeutral(root, abs, 'spec-approval')).toBeUndefined();
     expect(fs.readFileSync(abs, 'utf-8')).not.toMatch(/status: specifying/);
   });
+  it('writeLifecycleHashNeutral leaves a DR acceptance alone: its body status flip is inherent', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dlgdr-'));
+    fs.mkdirSync(path.join(root, '.minspec'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'docs', 'decisions'), { recursive: true });
+    const abs = path.join(root, 'docs', 'decisions', 'DR-900.md');
+    fs.writeFileSync(abs, '---\nid: DR-900\ntitle: x\nstatus: proposed\ndate: 2026-10-31\n---\n\n## Status\n\nProposed\n\n## Context\n\nx\n');
+    expect(writeLifecycleHashNeutral(root, abs, 'engineering-dr-acceptance')).toBeUndefined();
+    expect(fs.readFileSync(abs, 'utf-8')).toMatch(/status: accepted/);
+  });
 });

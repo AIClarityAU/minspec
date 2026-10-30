@@ -605,11 +605,23 @@ export function specNotApprovable(repoRoot: string, abs: string, content?: strin
  * `writeLifecycle`, then re-hash: if the write changed the artifact's canonical hash the
  * recorded approval would be stale on arrival, so restore the original bytes and return the
  * reason (undefined when the hash held). Only ever adds a refusal.
+ *
+ * Spec approvals only: a DR acceptance inherently rewrites the body `## Status` token
+ * (proposed -> accepted), which the hash retains, so it cannot be hash-neutral.
  */
 export function writeLifecycleHashNeutral(repoRoot: string, abs: string, act: DelegatedAct): string | undefined {
+  if (act !== 'spec-approval') {
+    writeLifecycle(repoRoot, abs, act);
+    return undefined;
+  }
   const before = fs.readFileSync(abs);
   const hashBefore = specHash(before.toString('utf-8'));
-  writeLifecycle(repoRoot, abs, act);
+  try {
+    writeLifecycle(repoRoot, abs, act);
+  } catch (err) {
+    fs.writeFileSync(abs, before);
+    throw err;
+  }
   if (specHash(fs.readFileSync(abs, 'utf-8')) === hashBefore) return undefined;
   fs.writeFileSync(abs, before);
   return `the lifecycle write changed the hash of ${path.relative(repoRoot, abs)}; restored, nothing recorded`;
