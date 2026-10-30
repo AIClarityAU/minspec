@@ -1364,6 +1364,23 @@ echo "Launching $ROLE agent for: $ISSUE_TITLE"
 # None of this prose is the CONTROL. The control is specify_scope_stray below, which
 # refuses to publish a diff that left the spec corpus. The prompt exists so the agent
 # succeeds at the task; the guard exists so a failure cannot become an implementation.
+# Spec id (#3164): computed over the base, this worktree AND every open PR, because a
+# Specify agent's own checkout cannot see ids claimed by unmerged PRs (11 PRs all took
+# SPEC-232 that way). Fails closed to the old wording WITH a visible warning, never to a
+# silently narrower number.
+SPEC_ID_TEXT="the next unused number"
+if [[ "$SPECIFY_ONLY" == "1" ]]; then
+  # The dispatcher's own tsx by absolute path, run from the dispatcher's checkout - never
+  # `npx` or a cd into the agent's worktree (agent-launch-sites.test.ts). The worktree is a
+  # fresh branch of main, so the base listing already covers it.
+  if _next_spec_id=$("${REPO_ROOT}/node_modules/.bin/tsx" "${SCRIPT_DIR}/next-spec-id.ts" --repo "$REPO" --base main) \
+     && [[ "$_next_spec_id" =~ ^SPEC-[0-9]+$ ]]; then
+    SPEC_ID_TEXT="exactly ${_next_spec_id} - already the max over main and every open PR, plus one; do not recompute it. If a spec for this issue already exists, keep ITS id"
+  else
+    echo "WARNING: open-PR-aware spec id lookup failed for #$ISSUE - the agent falls back to a blind worktree read and may collide with an open PR (#3164)." >&2
+  fi
+fi
+
 if [[ "$SPECIFY_ONLY" == "1" ]]; then
 PROMPT=$(cat <<PROMPT
 # Agent Task: Issue #${ISSUE} — SPECIFY PHASE ONLY (Role: ${ROLE})
@@ -1421,8 +1438,7 @@ recent ones and follow their shape rather than inventing a format.
 Write, or refresh, the spec for this issue at
 \`specs/<product>/SPEC-NNN-<slug>/requirements.md\`:
 
-- Frontmatter matching the neighbouring specs: \`id: SPEC-NNN\` (the next unused
-  number), \`type: requirements\`, \`status: specifying\`, \`tier:\`, \`product:\`,
+- Frontmatter matching the neighbouring specs: \`id: SPEC-NNN\` (${SPEC_ID_TEXT}), \`type: requirements\`, \`status: specifying\`, \`tier:\`, \`product:\`,
   \`epic:\`, \`relates_to:\`.
 - A link back to this issue, and to any DR the design rests on.
 - Numbered functional requirements, acceptance criteria, and the invariants the
