@@ -203,7 +203,7 @@ CONTENT
   while IFS= read -r LABEL_NAME; do
     [[ -n "$LABEL_NAME" ]] && LABEL_ARGS+=(--label "$LABEL_NAME")
   done < <(printf '%s' "$ISSUE_JSON" | jq -r '.labels[]?.name' 2>/dev/null || true)  # swallow-ok: an unreadable label list passes no --label, which keeps the restrictive spec-first route (DR-118)
-  FIELDS=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" --fields "${LABEL_ARGS[@]}" || true)
+  FIELDS=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" --fields ${LABEL_ARGS[@]+"${LABEL_ARGS[@]}"} || true)
   LABEL=$(verdict_field label "$FIELDS")
   ROLE=$(verdict_field role "$FIELDS")
   HOLD=$(verdict_field hold "$FIELDS")
