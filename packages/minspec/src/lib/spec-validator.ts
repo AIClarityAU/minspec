@@ -740,6 +740,21 @@ export interface ValidateSpecOptions {
    * false positive from a caller without filesystem access.
    */
   readonly pathExists?: (repoRelativePath: string) => boolean;
+  /**
+   * The spec's task tally (`readSpecTaskTally` in artifact-graph.ts, the same reader
+   * the signpost's implement hole uses), for the implement close-out rules (#1595).
+   * Omit it to skip them: the read is fs work and lives in the caller, the same
+   * no-false-positive contract as `pathExists`.
+   */
+  readonly taskTally?: CloseoutTaskTally;
+}
+
+/** What the close-out rules need from a task tally (#1595). */
+export interface CloseoutTaskTally {
+  readonly total: number;
+  readonly remaining: number;
+  /** A fence open at EOF swallowed the rest of the list, so its count is not known. */
+  readonly unterminatedFence?: boolean;
 }
 
 // ─── Spec→code ownership (SPEC-038 / #460) ───────────────────────────────────
@@ -1102,6 +1117,75 @@ export function validateImplementEvidence(
 }
 
 /**
+ * Which close-out state a spec is in (#1595), or undefined for neither. Shared by the
+ * validator rules below and by the close-out producer (`scripts/lib/close-finished-specs.ts`),
+ * so the gate and the writer cannot disagree about what "finished" means.
+ *
+ *  - `finished`: `phases.implement` is `in-progress`, the task list has items and every one
+ *    is ticked, and the code it owns is on disk: every well-shaped `implements:` path exists,
+ *    or the spec declares `implements: none`. A spec that declares no `implements:` at all is
+ *    never finished: nothing ties its ticks to code.
+ *  - `phantom`: `phases.implement` is `in-progress`, the list has items and NONE is ticked,
+ *    and the spec declares code paths that all exist. That is SPEC-038's shape in #1595:
+ *    the build merged, nothing ticked a box, and the signpost pointed at finished work.
+ *
+ * Silent (undefined) when the count is not knowledge: no tally, an empty list, or an
+ * unterminated fence. Silent when an approval verdict is supplied and is not `approved`:
+ * closing such a spec would not derive `done` (`deriveStatus`, INV-1).
+ */
+export function implementCloseoutKind(
+  spec: ParsedSpec,
+  taskTally: CloseoutTaskTally | undefined,
+  pathExists: ((repoRelativePath: string) => boolean) | undefined,
+  approvalState?: ApprovalStatus,
+): 'finished' | 'phantom' | undefined {
+  if (!taskTally || !pathExists) return undefined;
+  if (!isPrimarySpec((spec.frontmatter.type ?? '').toLowerCase())) return undefined;
+  if (spec.frontmatter.phases.implement !== 'in-progress') return undefined;
+  if (approvalState !== undefined && approvalState !== 'approved') return undefined;
+  if (taskTally.total === 0 || taskTally.unterminatedFence) return undefined;
+
+  const implTokens = fmListField(spec.raw, 'implements');
+  const isNoneEscape = implTokens.length === 1 && implTokens[0].toLowerCase() === 'none';
+  const codeTokens = implTokens.filter(isValidOwnedPath);
+  const codeOnDisk = codeTokens.length > 0 && codeTokens.every((t) => pathExists(t));
+
+  if (taskTally.remaining === 0 && (isNoneEscape || codeOnDisk)) return 'finished';
+  if (taskTally.remaining === taskTally.total && codeOnDisk) return 'phantom';
+  return undefined;
+}
+
+/**
+ * `implement.finished-not-closed` and `implement.phantom-hole` (#1595) - the terminal
+ * half of the lifecycle that no rule checked. `validateImplementEvidence` asks whether a
+ * spec claiming implementation owns real files; nothing asked whether a spec whose build
+ * has landed was ever closed. Severity from `config.implementCloseout` (`warn` default).
+ */
+export function validateImplementCloseout(
+  spec: ParsedSpec,
+  config: MinspecConfig,
+  options: Pick<ValidateSpecOptions, 'taskTally' | 'pathExists' | 'approvalState'> = {},
+): ValidationViolation[] {
+  const kind = implementCloseoutKind(spec, options.taskTally, options.pathExists, options.approvalState);
+  if (!kind) return [];
+  const severity = config.implementCloseout === 'error' ? 'error' : 'warning';
+  if (kind === 'finished') {
+    return [{
+      rule: 'implement.finished-not-closed',
+      severity,
+      message: `Every task is ticked and the declared code is on disk, but phases.implement is still in-progress (${options.taskTally?.total} of ${options.taskTally?.total} tasks done).`,
+      fixHint: 'Close the implement phase: set phases.implement to done and status to the value it then derives (done), on this file and on each sibling that mirrors them. The drain\'s close-out step (scripts/lib/close-finished-specs.ts) does this as minspec-sdd[bot] with the commit that ticked the last task cited as evidence (#1595).',
+    }];
+  }
+  return [{
+    rule: 'implement.phantom-hole',
+    severity,
+    message: `Every declared implements: path is on disk, but none of the ${options.taskTally?.total} tasks is ticked: the signpost will point at this spec as unstarted work.`,
+    fixHint: 'Check each task against the merged code and tick the ones that landed (cite the pull request), or untick nothing and move phases.implement back if the code is not this spec\'s build. Ticks are never written by a machine without per-task evidence (#1595).',
+  }];
+}
+
+/**
  * Errors that approving this spec would NEWLY introduce (#1317).
  *
  * Approval does not merely record a signature — it ADVANCES the spec's phase map
@@ -1180,6 +1264,8 @@ export function validateSpec(
   // Implement-phase evidence (#1751) — the opposite direction from ownership:
   // does a spec CLAIMING implement progress/completion actually own real files?
   violations.push(...validateImplementEvidence(spec, config, options.pathExists));
+  // Implement close-out (#1595): a spec whose build has landed but was never closed.
+  violations.push(...validateImplementCloseout(spec, config, options));
 
   // 0. Epic reference (soft — warnings only, DR-013 FR-9). Two failure modes,
   //    both leave the spec stranded under "(no epic)":
