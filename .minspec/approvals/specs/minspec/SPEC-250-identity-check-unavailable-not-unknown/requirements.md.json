@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-250-identity-check-unavailable-not-unknown/requirements.md",
+  "specHash": "1279cff1acf7939dcd3dacb0ad4e2571d07cb1f63c366d66e7dfe2edfc2b2111",
+  "approvedAt": "2026-10-30T06:23:08.916Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-d",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3183#issuecomment-6515893280"
+}
