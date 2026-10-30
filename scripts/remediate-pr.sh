@@ -100,6 +100,8 @@ agent_caveman_init
 # THIS tree's hooks outright. The file's header has the reasoning and the limits.
 # shellcheck source=scripts/lib/agent-worktree.sh
 source "${SCRIPT_DIR}/lib/agent-worktree.sh"
+# shellcheck source=scripts/lib/provision-worktree-modules.sh
+source "${SCRIPT_DIR}/lib/provision-worktree-modules.sh"
 # Agent writes carry the BOT's identity, never the human's (#1355). This arms a
 # `gh` wrapper; acquiring the token is LAZY, so reads pass through untouched and
 # only the first WRITE mints — aborting there, loudly, if it cannot.
@@ -147,6 +149,10 @@ classify_pr() {
   # and drove here deliberately — keeps its existing 6-argument contract and is never
   # told to stand down from its own PR.
   local live_nonself_claim="${7:-no}"
+  # #3069: the DRAIN SWEEP (not the creator-shepherd) passes "yes" so a BEHIND PR that
+  # is already ai-review:pass is left for its one-at-a-time merge-time refresh instead
+  # of being merged-into on every cycle (which restarts CI on every green PR).
+  local sweep_defer_pass="${8:-no}"
 
   # 1. Scope gate — only automation branches.
   if ! [[ "$branch" =~ $AUTOMATION_BRANCH_RE ]]; then
@@ -175,6 +181,13 @@ classify_pr() {
   fi
   # 6. Behind base only — mechanical merge, no agent.
   if [[ "$merge_state" == "BEHIND" ]]; then
+    # #3069: conflicts, red checks and ai-review:changes were all ruled out above, so a
+    # BEHIND + ai-review:pass PR is only waiting for its merge turn. Under strict
+    # required checks every merge re-BEHINDs the rest, so refreshing it now is wasted
+    # CI; it is refreshed one at a time at merge time.
+    if [[ "$sweep_defer_pass" == "yes" && ",$labels_csv," == *",ai-review:pass,"* ]]; then
+      echo "skip-awaiting-merge-turn"; return 0
+    fi
     echo "rebase-only"; return 0
   fi
   # 7. UNKNOWN (#1803) — GitHub computes mergeStateStatus LAZILY, so a cold read
@@ -240,15 +253,23 @@ def latest_checks:
     | .value + {_i: .key} ]
   | group_by([(.workflowName // ""), (.name // .context // "")])
   | map(sort_by([(.startedAt // .completedAt // ""), (.completedAt // ""), ._i]) | last);
+# #3174: a CheckRun reports `conclusion`, but a commit StatusContext reports only `state`
+# (FAILURE/ERROR/...) and has NO `conclusion`. Reading `conclusion` alone made a red status
+# context an absent witness read as pass. `outcome` is the one place that folds both shapes.
+def outcome: (.conclusion // "") as $c | if $c != "" then $c else (.state // "") end;
+# Self-certification gates no commit can turn green: the ai-review check (a CheckRun named
+# `ai-review`, or the `ai-review/pass` StatusContext, which has `context` and no `name`) and
+# the ready-to-merge gate. Match on (.name // .context) so both shapes are excluded.
+def self_cert_gate:
+  ((.name // .context // "") | test("^ai-review"))
+  or ((.name // .context // "") == "ready-to-merge")
+  or ((.workflowName // "") == "ready-to-merge");
 '
 derive_failing_non_review() {
   jq -r "$ROLLUP_LATEST_JQ"'
     [ latest_checks[]
-      | select((.name // "") != "ai-review")
-      | select((.name // "") != "ready-to-merge")
-      | select((.context // "") != "ready-to-merge")
-      | select((.workflowName // "") != "ready-to-merge")
-      | (.conclusion // "") ]
+      | select(self_cert_gate | not)
+      | outcome ]
     | map(select(. == "FAILURE" or . == "ERROR" or . == "TIMED_OUT" or . == "CANCELLED"))
     | if length > 0 then "yes" else "no" end' <<<"$1"
 }
@@ -265,12 +286,9 @@ derive_failing_non_review() {
 derive_failed_run_ids() {
   jq -r "$ROLLUP_LATEST_JQ"'
     [ latest_checks[]
-      | select((.name // "") != "ai-review")
-      | select((.name // "") != "ready-to-merge")
-      | select((.context // "") != "ready-to-merge")
-      | select((.workflowName // "") != "ready-to-merge")
-      | select((.conclusion // "") == "FAILURE" or (.conclusion // "") == "ERROR"
-               or (.conclusion // "") == "TIMED_OUT" or (.conclusion // "") == "CANCELLED")
+      | select(self_cert_gate | not)
+      | select(outcome == "FAILURE" or outcome == "ERROR"
+               or outcome == "TIMED_OUT" or outcome == "CANCELLED")
       | ((.detailsUrl // .targetUrl // "") | capture("/actions/runs/(?<id>[0-9]+)")? | .id) ]
     | map(select(. != null)) | unique | .[]' <<<"$1"
 }
@@ -477,11 +495,11 @@ if [[ "${1:-}" == "--classify" ]]; then
   # Require 6 or 7 positional args, but allow empties (labels_csv is often "") — so
   # validate the COUNT, not each value (a `${n:?}` would reject an empty label). The
   # 7th (live_nonself_claim) is optional so the creator's 6-arg contract is unchanged.
-  if [[ $# -ne 6 && $# -ne 7 ]]; then
-    echo "Usage: remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> <labels_csv> <failing_non_review> <ai_review_bad> [<live_nonself_claim>]" >&2
+  if [[ $# -lt 6 || $# -gt 8 ]]; then
+    echo "Usage: remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> <labels_csv> <failing_non_review> <ai_review_bad> [<live_nonself_claim> [<sweep_defer_pass>]]" >&2
     exit 2
   fi
-  classify_pr "$1" "$2" "$3" "$4" "$5" "$6" "${7:-no}"
+  classify_pr "$1" "$2" "$3" "$4" "$5" "$6" "${7:-no}" "${8:-no}"
   exit 0
 fi
 if [[ "${1:-}" == "--derive-failing" ]]; then
@@ -745,7 +763,7 @@ if [[ -n "$ITEM" && "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
   fi
 fi
 
-ACTION=$(classify_pr "$BRANCH" "$MERGEABLE" "$MERGE_STATE" "$LABELS_CSV" "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD" "$LIVE_NONSELF_CLAIM")
+ACTION=$(classify_pr "$BRANCH" "$MERGEABLE" "$MERGE_STATE" "$LABELS_CSV" "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD" "$LIVE_NONSELF_CLAIM" yes)
 echo "PR #$PR [$BRANCH] mergeable=$MERGEABLE state=$MERGE_STATE failing_checks=$FAILING_NON_REVIEW ai_review_bad=$AI_REVIEW_BAD item=${ITEM:-none} live_owned=$LIVE_NONSELF_CLAIM → $ACTION"
 
 case "$ACTION" in
@@ -783,6 +801,10 @@ case "$ACTION" in
     exit 0 ;;
   skip-clean)
     echo "  No fixable problem — nothing to do."; exit 0 ;;
+  skip-awaiting-merge-turn)
+    # #3069: ai-review:pass and only BEHIND — no side effect, no attempt consumed; the
+    # merge-time updater refreshes it one at a time.
+    echo "  ai-review:pass and only BEHIND — not refreshing now (updated at its merge turn)."; exit 0 ;;
   skip-unhandled-state)
     # #1803: a mergeStateStatus this classifier doesn't recognise (a future GitHub
     # value, an empty read, or garbage) reached the terminal fallthrough. That used
@@ -922,6 +944,17 @@ PRE_SHA=$(agent_worktree_git rev-parse HEAD)
 
 cleanup() { launcher_git worktree remove "$WORKTREE" --force 2>/dev/null || true; }
 
+# The agent cannot install dependencies itself (no network), so the worktree gets its own
+# tree here (#3238). Without a runnable toolchain the agent can only escalate on the
+# fail-closed validate gate: skip the run, visibly, rather than spend one. rebase-only
+# needs no toolchain, so it is exempt.
+if [[ "$ACTION" != "rebase-only" ]] && ! provision_worktree_modules "$WORKTREE"; then
+  echo "ERROR: could not provision node_modules for $BRANCH - skipping the agent run (#3238)." >&2
+  post_marked_comment "$ATTEMPT_MARKER" 'remediation-unrunnable: no node_modules. The remediation worktree could not get its own dependencies (`npm ci --offline` failed), so no agent was started. Left for a human.'
+  cleanup
+  exit 0
+fi
+
 # ── rebase-only: mechanical merge of origin/main, no agent ─────────────────────
 if [[ "$ACTION" == "rebase-only" ]]; then
   echo "  Merging origin/main into $BRANCH (mechanical, no agent)..."
@@ -970,10 +1003,10 @@ else
   # injection channel) into the prompt.
   FAILED_NAMES=$(jq -r "$ROLLUP_LATEST_JQ"'
     [ latest_checks[]
-      | select((.name // "") != "ai-review")
-      | select((.conclusion // "") == "FAILURE" or (.conclusion // "") == "ERROR"
-               or (.conclusion // "") == "TIMED_OUT" or (.conclusion // "") == "CANCELLED")
-      | (.name // "?") ] | unique | join(", ")' <<<"$PR_JSON")
+      | select(self_cert_gate | not)
+      | select(outcome == "FAILURE" or outcome == "ERROR"
+               or outcome == "TIMED_OUT" or outcome == "CANCELLED")
+      | (.name // .context // "?") ] | unique | join(", ")' <<<"$PR_JSON")
   CONTEXT=$(printf 'These CI checks are FAILING on this PR: %s\n\nReproduce each locally in this worktree with `npm test`, `npm run lint`, `npm run build`, and `npm run validate`, find the ROOT CAUSE (RCDD — name the mechanism, not the symptom), fix it, and confirm every check passes before committing.' "$FAILED_NAMES")
 fi
 

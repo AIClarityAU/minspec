@@ -432,6 +432,59 @@ describe('remediate-pr.sh --derive-failing: ready-to-merge gate is not a code-fi
     ])).toBe('yes');
   });
 
+  // #3174 — a commit StatusContext carries `state`, never `conclusion`; reading conclusion
+  // alone read a red status context as passing, so a BEHIND PR stranded as failing_checks=no.
+  it('a status context failing via `state` only (no conclusion) → yes (#3174)', () => {
+    expect(derive([
+      { name: 'test', workflowName: 'ci', conclusion: 'SUCCESS' },
+      { context: 'MinSpec SDD validation', state: 'FAILURE' },
+    ])).toBe('yes');
+  });
+
+  it('classified end to end: BEHIND PR with a state-only red context is remediated, not parked (#3174)', () => {
+    const failing = derive([{ context: 'lint', state: 'ERROR' }]);
+    const action = execFileSync('bash', [SCRIPT, '--classify', 'agent/issue-2274', 'MERGEABLE', 'BEHIND', '', failing, 'no'], { encoding: 'utf-8' }).trim();
+    expect(failing).toBe('yes');
+    expect(action).not.toBe('skip-awaiting-merge-turn');
+  });
+
+  it('a pending/success status context is not a failure (#3174)', () => {
+    expect(derive([
+      { context: 'a', state: 'PENDING' },
+      { context: 'b', state: 'SUCCESS' },
+    ])).toBe('no');
+  });
+
+  it('a red ai-review/pass status context (context, no name) is not code-fixable → no (#3174 review)', () => {
+    expect(derive([{ context: 'ai-review/pass', state: 'FAILURE' }])).toBe('no');
+    expect(derive([{ context: 'ai-review/pass', state: 'ERROR' }])).toBe('no');
+    expect(derive([{ context: 'ai-review', state: 'FAILURE' }])).toBe('no');
+  });
+
+  it('a real red status context still counts beside a red ai-review/pass (#3174 review)', () => {
+    expect(derive([
+      { context: 'ai-review/pass', state: 'FAILURE' },
+      { context: 'lint', state: 'FAILURE' },
+    ])).toBe('yes');
+  });
+
+  it('a red ai-review/pass context yields no rerun run id (#3174 review)', () => {
+    const ids = execFileSync('bash', [SCRIPT, '--derive-failed-runs'], {
+      encoding: 'utf-8',
+      input: JSON.stringify({ statusCheckRollup: [
+        { context: 'ai-review/pass', state: 'FAILURE', targetUrl: 'https://github.com/o/r/actions/runs/111' },
+        { context: 'lint', state: 'FAILURE', targetUrl: 'https://github.com/o/r/actions/runs/222' },
+      ] }),
+    }).trim();
+    expect(ids).toBe('222');
+  });
+
+  it('FAILED_NAMES shares the same gate exclusion as derive_failing_non_review (#3174 review)', () => {
+    const src = fs.readFileSync(SCRIPT, 'utf-8');
+    const block = src.slice(src.indexOf('FAILED_NAMES=$(jq'));
+    expect(block.slice(0, block.indexOf('CONTEXT=$('))).toContain('select(self_cert_gate | not)');
+  });
+
   it('ai-review red stays excluded; in-flight check is not a failure', () => {
     expect(derive([
       { name: 'ai-review', conclusion: 'FAILURE' },
@@ -505,5 +558,33 @@ describe('remediate-pr.sh rerun-first gate (#3042)', () => {
     expect(code.indexOf('post_marked_comment "$RERUN_MARKER"')).toBeLessThan(rerun);
     // the rerun marker is in the isolation gate
     expect(code).toMatch(/assert_markers_isolated "\$ATTEMPT_MARKER" "\$CRASH_MARKER" "\$CAPPED_MARKER" "\$RERUN_MARKER"/);
+  });
+});
+
+describe('remediate-pr.sh --classify: sweep defers ai-review:pass BEHIND PRs (#3069)', () => {
+  const sweep = (labels: string, mergeState = 'BEHIND', failing: 'yes' | 'no' = 'no', bad: 'yes' | 'no' = 'no') =>
+    execFileSync(
+      'bash',
+      [SCRIPT, '--classify', 'agent/issue-1', 'MERGEABLE', mergeState, labels, failing, bad, 'no', 'yes'],
+      { encoding: 'utf-8' },
+    ).trim();
+
+  it('a sweep over three green ai-review:pass BEHIND PRs issues zero rebase-only actions', () => {
+    const actions = [1, 2, 3].map(() => sweep('ai-review:pass'));
+    expect(actions.filter((a) => a === 'rebase-only')).toHaveLength(0);
+    expect(actions).toEqual(Array(3).fill('skip-awaiting-merge-turn'));
+  });
+  it('still rebases a BEHIND PR that has no ai-review verdict yet', () => {
+    expect(sweep('')).toBe('rebase-only');
+  });
+  it('still routes red checks / review changes ahead of the deferral', () => {
+    expect(sweep('ai-review:pass', 'BEHIND', 'yes')).toBe('agent-remediate-checks');
+    expect(sweep('ai-review:changes,ai-review:pass', 'BEHIND', 'no', 'yes')).toBe('agent-remediate-review');
+  });
+  it('conflicts are still surfaced', () => {
+    expect(sweep('ai-review:pass', 'DIRTY')).toBe('skip-conflict');
+  });
+  it('the creator-shepherd contract (no 8th arg) still rebases a pass+BEHIND PR', () => {
+    expect(classify('agent/issue-1', 'MERGEABLE', 'BEHIND', 'ai-review:pass', 'no', 'no')).toBe('rebase-only');
   });
 });

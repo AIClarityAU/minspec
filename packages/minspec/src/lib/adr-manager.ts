@@ -262,6 +262,26 @@ function parseAmendmentTargets(raw: string): string[] {
  * @param decisionsDir Absolute path to the resolved decisions directory.
  */
 export function validateDrAmendments(decisionsDir: string): DrAmendmentGap[] {
+  return scanDrAmendments(decisionsDir, 'accepted');
+}
+
+/**
+ * Advisory twin of `validateDrAmendments` for PROPOSED sources (#3106).
+ *
+ * Rule 16 is fatal at acceptance and exempts `proposed` DRs, so nothing warned while
+ * the target notes could still be staged in the proposing PR; the gate first fired on
+ * the founder's own acceptance PR, which by construction cannot contain the fix. Same
+ * detection, same acknowledgement test, different source status: the caller WARNS on
+ * these (never fails — a pending amendment is what proposed means) and Accept refuses
+ * on them. One implementation, so the advisory can never disagree with the gate.
+ *
+ * @param decisionsDir Absolute path to the resolved decisions directory.
+ */
+export function validatePendingDrAmendments(decisionsDir: string): DrAmendmentGap[] {
+  return scanDrAmendments(decisionsDir, 'proposed');
+}
+
+function scanDrAmendments(decisionsDir: string, sourceStatus: 'accepted' | 'proposed'): DrAmendmentGap[] {
   if (!fs.existsSync(decisionsDir)) return [];
 
   const bodies = new Map<string, string>();
@@ -289,7 +309,7 @@ export function validateDrAmendments(decisionsDir: string): DrAmendmentGap[] {
   const seen = new Set<string>();
 
   for (const [source, body] of [...bodies].sort(([a], [b]) => a.localeCompare(b))) {
-    if (!/^status:[ \t]*accepted\s*$/m.test(body)) continue;
+    if (!new RegExp(`^status:[ \\t]*${sourceStatus}\\s*$`, 'm').test(body)) continue;
 
     /**
      * Record one claim, wherever it was written. Prose and frontmatter both funnel
@@ -323,7 +343,7 @@ export function validateDrAmendments(decisionsDir: string): DrAmendmentGap[] {
         target,
         relation,
         message:
-          `${source} (accepted) ${relation} ${target}, but ${target} never mentions ${source} — ` +
+          `${source} (${sourceStatus}) ${relation} ${target}, but ${target} never mentions ${source} — ` +
           `the amendment was recorded and never carried out, so ${target} still reads as if ` +
           `unchanged. Add a short "Amended by ${source}" note to ${target} at the point it ` +
           `actually changes — say what changed and what still stands — or reword ${source} ` +

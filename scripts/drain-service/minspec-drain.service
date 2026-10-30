@@ -12,8 +12,10 @@
 #                              starts anything, so a restart never resumes it.
 #   RestartPreventExitStatus   78 = refused (not in the container). Restarting cannot fix
 #                              that, so the unit fails and says so.
-#   StartLimit*                more than 6 starts in an hour (a drain that keeps failing)
-#                              leaves the unit FAILED and visible, not restarting forever.
+#   StartLimit*                more than 6 starts in an hour leaves the unit FAILED and
+#                              visible. drain-service.sh retries a failed drain launch or
+#                              end with backoff INSIDE one start (#3095), so a burst of
+#                              transient failures after a host resume cannot spend the limit.
 #   ExecStartPre               at boot the user manager starts this unit while the container is
 #                              still being created. A bare docker exec then fails at once, and
 #                              each failure spends one of the StartLimitBurst starts, so six
