@@ -51,7 +51,7 @@
 #       <labels_csv> <failing_non_review:yes|no> <ai_review_bad:yes|no> \
 #       [<live_nonself_claim:yes|no>]
 #     → prints ONE action token: skip-not-automation | skip-live-owned | skip-conflict |
-#       agent-remediate-checks | agent-remediate-review | rebase-only | retry-unknown |
+#       agent-remediate-checks | agent-remediate-review | dlg-rerun | rebase-only | retry-unknown |
 #       skip-clean | skip-unhandled-state
 #     The 7th argument is OPTIONAL and defaults to "no", so the creator-shepherd's
 #     existing 6-argument call keeps working and is never told to stand down from the
@@ -121,6 +121,24 @@ MAX_CRASHES="${MINSPEC_REMEDIATE_MAX_CRASHES:-2}"
 # real delimiter, so it never over-matches human branches like `fixture-…` (the
 # char after `fix` there is a letter, not `/` or `-`).
 AUTOMATION_BRANCH_RE='^(agent|fix|feat)[/-]'
+# #3036: the delegated-approval caller's PRs (scripts/lib/delegated-approval-caller.ts
+# BRANCH_PREFIX) carry a spec sidecar bound by hash to the spec body. They are in the
+# drain's scope for MECHANICAL actions only (rerun failed jobs / re-review, update the
+# branch from main). Never an agent edit: a hand edit of the sidecar or spec breaks the
+# hash binding. content_push_allowed below is the refusal seam.
+DELEGATED_BRANCH_RE='^dlg-approve/'
+
+# content_push_allowed <branch> <action> -> yes|no. An agent run commits CONTENT; on a
+# delegated-approval branch that is never allowed. Mechanical actions (merge of main,
+# job rerun) add no authored content, so they pass.
+content_push_allowed() {
+  local branch="$1" action="$2"
+  if [[ "$branch" =~ $DELEGATED_BRANCH_RE && "$action" == agent-* ]]; then
+    echo "no"
+  else
+    echo "yes"
+  fi
+}
 
 # ── Pure fork-guard (no gh/git/claude — safe to unit-test in isolation) ────────
 # #1894: `headRefName` alone is not enough to know which repo a branch lives in — a
@@ -154,8 +172,11 @@ classify_pr() {
   # of being merged-into on every cycle (which restarts CI on every green PR).
   local sweep_defer_pass="${8:-no}"
 
-  # 1. Scope gate — only automation branches.
-  if ! [[ "$branch" =~ $AUTOMATION_BRANCH_RE ]]; then
+  # 1. Scope gate — only automation branches (and, #3036, delegated-approval branches,
+  #    which are limited to mechanical actions below).
+  local delegated=no
+  [[ "$branch" =~ $DELEGATED_BRANCH_RE ]] && delegated=yes
+  if [[ "$delegated" != "yes" ]] && ! [[ "$branch" =~ $AUTOMATION_BRANCH_RE ]]; then
     echo "skip-not-automation"; return 0
   fi
   # 2. Owner gate (SPEC-044 FR-6/INV-4) — the drain is an ORPHAN-FALLBACK, not the
@@ -170,6 +191,15 @@ classify_pr() {
   # 3. Conflicts — surface only, never auto-resolve.
   if [[ "$mergeable" == "CONFLICTING" || "$merge_state" == "DIRTY" ]]; then
     echo "skip-conflict"; return 0
+  fi
+  # 3b. (#3036) A delegated-approval PR with a red check, a red ai-review or an
+  #     ai-review:changes label gets ONLY a rerun of the failed jobs (re-review included)
+  #     — never an agent, which would edit the hash-bound sidecar/spec.
+  if [[ "$delegated" == "yes" ]]; then
+    if [[ "$failing_non_review" == "yes" || "$ai_review_bad" == "yes" \
+          || ",$labels_csv," == *",ai-review:changes,"* ]]; then
+      echo "dlg-rerun"; return 0
+    fi
   fi
   # 4. A required check (other than ai-review) is red → fix the code first.
   if [[ "$failing_non_review" == "yes" ]]; then
@@ -284,9 +314,12 @@ derive_failing_non_review() {
 # check's detailsUrl — never a log, never free text. A red check with no such URL (a
 # status context) yields no id; the caller then falls through to the agent.
 derive_failed_run_ids() {
-  jq -r "$ROLLUP_LATEST_JQ"'
+  # $2 = "with-review" (#3036) also keeps a red ai-review run, so a delegated-approval
+  # PR can be re-reviewed by rerunning it; the ready-to-merge gate is always excluded.
+  jq -r --arg inc "${2:-}" "$ROLLUP_LATEST_JQ"'
     [ latest_checks[]
-      | select(self_cert_gate | not)
+      | select((self_cert_gate | not)
+               or ($inc == "with-review" and ((.name // .context // "") | test("^ai-review"))))
       | select(outcome == "FAILURE" or outcome == "ERROR"
                or outcome == "TIMED_OUT" or outcome == "CANCELLED")
       | ((.detailsUrl // .targetUrl // "") | capture("/actions/runs/(?<id>[0-9]+)")? | .id) ]
@@ -507,7 +540,11 @@ if [[ "${1:-}" == "--derive-failing" ]]; then
   exit 0
 fi
 if [[ "${1:-}" == "--derive-failed-runs" ]]; then
-  derive_failed_run_ids "$(cat)"
+  derive_failed_run_ids "$(cat)" "${2:-}"
+  exit 0
+fi
+if [[ "${1:-}" == "--content-push-allowed" ]]; then
+  content_push_allowed "${2:-}" "${3:-}"
   exit 0
 fi
 if [[ "${1:-}" == "--rerun-decision" ]]; then
@@ -832,7 +869,7 @@ fi
 # produce no fix — spend MAX_CRASHES instead, so neither class can exhaust the other's
 # quota. Whichever cap trips first stops automation and hands the PR to a human, and
 # the notice names WHICH one. Worst case is MAX_ATTEMPTS + MAX_CRASHES runs: finite.
-if [[ "$ACTION" == agent-* ]]; then
+if [[ "$ACTION" == agent-* || "$ACTION" == "dlg-rerun" ]]; then
   # Whose comments count? Only the ones THIS automation wrote — a human or the ai-review
   # bot quoting a marker (e.g. in a diff hunk of this very script) must never spend a
   # budget. The posting identity is the login of the token we hold, so ask for it; extra
@@ -891,9 +928,13 @@ if [[ "$ACTION" == agent-* ]]; then
   # jobs ONCE, before any agent is spent; remediate only if a later sweep still sees red.
   # The marker is posted BEFORE the rerun so a lost marker can never mean an unbounded
   # rerun loop; it sits in neither budget counter.
-  if [[ "$ACTION" == "agent-remediate-checks" ]]; then
+  if [[ "$ACTION" == "agent-remediate-checks" || "$ACTION" == "dlg-rerun" ]]; then
     RERUNS=$(count_marker "$RERUN_MARKER")
-    FAILED_RUN_IDS=$(derive_failed_run_ids "$PR_JSON")
+    if [[ "$ACTION" == "dlg-rerun" ]]; then
+      FAILED_RUN_IDS=$(derive_failed_run_ids "$PR_JSON" with-review)
+    else
+      FAILED_RUN_IDS=$(derive_failed_run_ids "$PR_JSON")
+    fi
     if [[ "$(rerun_decision "$RERUNS" "$FAILED_RUN_IDS")" == "rerun" ]]; then
       post_marked_comment "$RERUN_MARKER" 'A required check is red. Before spending a remediation agent, re-running the failed jobs once: a fault outside this PR (rate limit, network) clears on rerun. If the check is still red on the next sweep, remediation proceeds.'
       RERUN_FAILED=0
@@ -909,7 +950,23 @@ if [[ "$ACTION" == agent-* ]]; then
       if (( RERUN_FAILED == 0 )); then exit 0; fi
     fi
   fi
+  # #3036: a delegated-approval PR is never handed to an agent (a content edit breaks
+  # the sidecar's hash binding). The one rerun is spent or impossible, so it is a human's.
+  if [[ "$ACTION" == "dlg-rerun" ]]; then
+    echo "  Delegated-approval PR still red after its one rerun (or nothing to rerun) — no agent edit allowed; leaving for a human."
+    gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
+      --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
+    gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+    exit 0
+  fi
   echo "  Attempt $((ATTEMPTS + 1))/$MAX_ATTEMPTS (crashes so far: $CRASHES/$MAX_CRASHES)."
+fi
+
+# #3036 refusal: no agent (content) push onto a delegated-approval branch, whatever the
+# classifier said — a second witness independent of classify_pr.
+if [[ "$(content_push_allowed "$BRANCH" "$ACTION")" != "yes" ]]; then
+  echo "ERROR: refusing a content push on delegated-approval branch $BRANCH (action $ACTION) — it would break the hash binding." >&2
+  exit 0
 fi
 
 # ── Build a worktree on the PR's EXISTING branch ───────────────────────────────

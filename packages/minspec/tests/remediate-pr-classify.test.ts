@@ -588,3 +588,54 @@ describe('remediate-pr.sh --classify: sweep defers ai-review:pass BEHIND PRs (#3
     expect(classify('agent/issue-1', 'MERGEABLE', 'BEHIND', 'ai-review:pass', 'no', 'no')).toBe('rebase-only');
   });
 });
+
+describe('remediate-pr.sh: delegated-approval branches (dlg-approve/*) — mechanical actions only (#3036)', () => {
+  const dlg = 'dlg-approve/SPEC-130';
+
+  it('a red check on a dlg-approve PR is rerun, never agent-remediated', () => {
+    expect(classify(dlg, 'MERGEABLE', 'UNSTABLE', '', 'yes', 'no')).toBe('dlg-rerun');
+  });
+  it('a red ai-review, or an ai-review:changes label, is a re-review rerun, never an agent', () => {
+    expect(classify(dlg, 'MERGEABLE', 'BLOCKED', '', 'no', 'yes')).toBe('dlg-rerun');
+    expect(classify(dlg, 'MERGEABLE', 'BLOCKED', 'ai-review:changes', 'no', 'no')).toBe('dlg-rerun');
+  });
+  it('BEHIND is a mechanical branch update; conflicts stay human; clean is left alone', () => {
+    expect(classify(dlg, 'MERGEABLE', 'BEHIND', '', 'no', 'no')).toBe('rebase-only');
+    expect(classify(dlg, 'CONFLICTING', 'DIRTY', '', 'yes', 'no')).toBe('skip-conflict');
+    expect(classify(dlg, 'MERGEABLE', 'CLEAN', 'ai-review:pass', 'no', 'no')).toBe('skip-clean');
+  });
+  it('a live claim still wins (orphan-fallback only)', () => {
+    expect(classify(dlg, 'MERGEABLE', 'UNSTABLE', '', 'yes', 'no', 'yes')).toBe('skip-live-owned');
+  });
+  it('lookalike prefixes stay out of scope', () => {
+    expect(classify('dlg-approver/x', 'MERGEABLE', 'UNSTABLE', '', 'yes', 'no')).toBe('skip-not-automation');
+    expect(classify('dlg-approve-x', 'MERGEABLE', 'UNSTABLE', '', 'yes', 'no')).toBe('skip-not-automation');
+  });
+  it('non-dlg branches never get dlg-rerun', () => {
+    expect(classify('fix/1-x', 'MERGEABLE', 'UNSTABLE', '', 'yes', 'no')).toBe('agent-remediate-checks');
+  });
+
+  const allowed = (branch: string, action: string): string =>
+    execFileSync('bash', [SCRIPT, '--content-push-allowed', branch, action], { encoding: 'utf-8' }).trim();
+  it('refuses any agent content push on dlg-approve/*, allows mechanical actions', () => {
+    expect(allowed(dlg, 'agent-remediate-checks')).toBe('no');
+    expect(allowed(dlg, 'agent-remediate-review')).toBe('no');
+    expect(allowed(dlg, 'rebase-only')).toBe('yes');
+    expect(allowed(dlg, 'dlg-rerun')).toBe('yes');
+    expect(allowed('fix/1-x', 'agent-remediate-checks')).toBe('yes');
+  });
+
+  it('--derive-failed-runs keeps a red ai-review run only with-review; never ready-to-merge', () => {
+    const roll = JSON.stringify({
+      statusCheckRollup: [
+        { name: 'ai-review', conclusion: 'FAILURE', detailsUrl: 'https://x/actions/runs/111/job/1', startedAt: '2026-01-01T00:00:00Z' },
+        { name: 'test', conclusion: 'FAILURE', detailsUrl: 'https://x/actions/runs/222/job/2', startedAt: '2026-01-01T00:00:00Z' },
+        { name: 'gate', workflowName: 'ready-to-merge', conclusion: 'FAILURE', detailsUrl: 'https://x/actions/runs/333/job/3', startedAt: '2026-01-01T00:00:00Z' },
+      ],
+    });
+    const run = (extra: string[]) =>
+      execFileSync('bash', [SCRIPT, '--derive-failed-runs', ...extra], { encoding: 'utf-8', input: roll }).trim().split('\n');
+    expect(run([])).toEqual(['222']);
+    expect(run(['with-review'])).toEqual(['111', '222']);
+  });
+});
