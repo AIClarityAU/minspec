@@ -10,7 +10,8 @@ depends_on: []
 relates_to: [SPEC-012, "#2649", "#2375", "#1806", "#1317", "DR-012", "DR-056"]
 implements: none
 implements_reason: >-
-  Specify phase only. File ownership is decided at Plan, after Decisions D1-D4 are answered.
+  Clarify answers are recorded but not ratified (D1-D4, all option (a)). File ownership is still
+  decided at Plan; no recorded option names a new file, so implements stays none.
 phases:
   specify: in-progress
   clarify: pending
@@ -122,6 +123,18 @@ editing SPEC-135/SPEC-060 content would repeat the #2370 pattern (fix the instan
   the read side beyond sharing the predicate).
 
 ## Decisions needed (Clarify)
+
+All 4 decisions are recorded: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001 covers spec approval and engineering-DR acceptance only). They are ratified only when a
+human or a covered delegation approves this spec.
+
+- **D1 - Recorded selection: Option (a),** an open Clarify question is a `CQ<n>` heading or row
+  with no selection line in the spec body.
+- **D2 - Recorded selection: Option (a),** a dangling `depends_on` makes Approve Spec refuse.
+- **D3 - Recorded selection: Option (a),** the refusal is a hard refuse, with no override.
+- **D4 - Recorded selection: Option (a),** a dependency blocks exactly when the signpost says so:
+  not approved and not terminal.
 
 - **D1 - what is an "open Clarify question"?** (a) A `CQ<n>` heading/row with no selection line
   in the spec body **(rec)** - matches the filer's probe and needs no new field; costs a

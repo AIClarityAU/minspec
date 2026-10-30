@@ -59,6 +59,8 @@
 #                                    (`agent/issue-*`) sit at `needs-human-review` (#2939).
 #                                    An unreadable count pauses too. Anything but a whole
 #                                    number is read as 0, and said so.
+#   MINSPEC_DRAIN_SPECIFY_MAX_PENDING=40 — with spec-writing on, also pause it while this many
+#                                    specs on main are `new` or `specifying` (#3344).
 #   MINSPEC_DRAIN_INTERVAL=1200   — seconds between cycles (default 20 min).
 #   MINSPEC_DRAIN_QUOTA_BACKOFF=1800 — seconds to pause after a quota signal (30 min).
 #                  Now only a FALLBACK: when ~/.claude/quota.json carries a live
@@ -1629,6 +1631,51 @@ _held_drain_prs() {
   _held_out="$_held_val"
 }
 
+# SPECIFY_MAX_PENDING — the second half of the same brake (#3344). The held count above
+# sees a draft only while its pull request is open. Delegated spec merge (Step 0c, #2981)
+# lands a covered draft on main at `status: specifying`, which takes it out of that count
+# and reopens spec-writing while the draft still waits on Clarify and sign-off: specs at
+# specifying on main went from 30 to 77 between 2026-10-27 and 2026-10-29 with the held
+# cap reporting PAUSED throughout. So the same decision also counts specs on the tree the
+# drain runs from whose frontmatter `status:` is `new` or `specifying`, and leaves the
+# spec-writing queue alone while that count is at or above this cap. Same readings as the
+# held cap: anything but a whole number is read as 0, and a count nobody read pauses.
+SPECIFY_MAX_PENDING="${MINSPEC_DRAIN_SPECIFY_MAX_PENDING:-40}"
+
+# _pending_specs <varname> — count the specs on the tree the drain runs from whose
+# frontmatter `status:` is `new` or `specifying`, INTO a named variable. The tree is the
+# one the delegated-approval stage reads (the parent of the scripts the cycle runs, so
+# origin/main's verified run dir when self-refresh found it current). Only the
+# frontmatter counts: a body line quoting `status: specifying` is not a status. Returns 1
+# when the tree has no specs/ folder or the read fails: an absent folder is a count
+# nobody read, not zero (invariant 2).
+_pending_specs() {
+  local -n _pend_out="$1"
+  local root _pend_val
+  root="$(cd "$(dirname "$REMEDIATE")/.." 2>/dev/null && pwd)" || return 1
+  [[ -d "${root}/specs" ]] || return 1
+  # specs/<project>/SPEC-NNN-<slug>/requirements.md, the layout this repo's specs use.
+  # No pipeline: an empty folder is a count of 0, and awk's own exit is
+  # the only status, so a failed read cannot pass as a number.
+  local -a _pend_files=()
+  local _pend_ng=0
+  shopt -q nullglob && _pend_ng=1
+  shopt -s nullglob
+  _pend_files=("${root}"/specs/*/*/requirements.md)
+  (( _pend_ng )) || shopt -u nullglob
+  if (( ${#_pend_files[@]} == 0 )); then
+    _pend_out=0
+    return 0
+  fi
+  _pend_val=$(awk '
+      FNR == 1 { fm = ($0 ~ /^---[[:space:]]*$/); next }
+      fm && /^---[[:space:]]*$/ { fm = 0; nextfile }
+      fm && /^status:[[:space:]]*["'\'']?(new|specifying)["'\'']?[[:space:]]*(#.*)?$/ { n++; fm = 0; nextfile }
+      END { print n + 0 }' "${_pend_files[@]}") || return 1
+  [[ "$_pend_val" =~ ^[0-9]+$ ]] || return 1
+  _pend_out="$_pend_val"
+}
+
 # _specify_only <agent-ready numbers> <agent-ready-specify numbers>: the issues that are
 # queued for spec-writing and NOT also queued for a build, one per line. An issue in
 # both queues is a build (an approved spec leaves the old label beside the new one), so
@@ -1885,6 +1932,21 @@ run_cycle() {
         elif (( 10#$held >= 10#$SPECIFY_MAX_HELD )); then
           specify_on=0
           echo "[drain] spec-writing is PAUSED: ${held} drain pull request(s) held for a human (needs-human-review on agent/issue-*), at or above the cap ${SPECIFY_MAX_HELD} (MINSPEC_DRAIN_SPECIFY_MAX_HELD, #2939): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+        fi
+      fi
+      # The pile already on main (#3344, see SPECIFY_MAX_PENDING). Asked only while the
+      # held cap still leaves spec-writing on, so a cycle prints one PAUSED line at most.
+      if (( specify_on )); then
+        local pending=0
+        if [[ ! "$SPECIFY_MAX_PENDING" =~ ^[0-9]+$ ]]; then
+          specify_on=0
+          echo "[drain] spec-writing is PAUSED: MINSPEC_DRAIN_SPECIFY_MAX_PENDING=$(printf '%q' "$SPECIFY_MAX_PENDING") is not a whole number, so it is read as 0, the setting that spends nothing: ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+        elif ! _pending_specs pending; then
+          specify_on=0
+          echo "[drain] spec-writing is PAUSED: the unapproved specs on main could not be counted (no specs/ folder or an unreadable one under $(printf '%q' "$(dirname "$REMEDIATE")/..")), and a count nobody read is not zero (#3344): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+        elif (( 10#$pending >= 10#$SPECIFY_MAX_PENDING )); then
+          specify_on=0
+          echo "[drain] spec-writing is PAUSED: ${pending} spec(s) on main waiting for Clarify or sign-off (status new or specifying), at or above the cap ${SPECIFY_MAX_PENDING} (MINSPEC_DRAIN_SPECIFY_MAX_PENDING, #3344): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
         fi
       fi
     fi
