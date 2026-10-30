@@ -549,21 +549,21 @@ function main(): number {
     return 0;
   }
 
-  writeLifecycle(repoRoot, abs, plan.record.act);
-  // The lifecycle writers also rewrite body prose (`**Status:**` lines) that the canonical
-  // form keeps, so the committed file hashes differently from the base the review judged.
-  // Like the founder's Approve Spec, record the hash of the bytes as written (#3380); the
-  // review was bound to the base content above, and approval-integrity binds the record
-  // to the committed file.
-  const record = withWrittenHash(plan.record, fs.readFileSync(abs, 'utf-8'));
-  console.log(JSON.stringify({ ...plan, record }));
   const sidecar = path.join(repoRoot, '.minspec', 'approvals', `${artifact}.json`);
   if (!fs.existsSync(path.join(repoRoot, '.minspec'))) {
     console.error('no .minspec/ at the repo root: this repo has not opted in');
     return 1;
   }
+  writeLifecycle(repoRoot, abs, plan.record.act);
+  // The lifecycle writers also flip the body's status word, which the canonical form keeps,
+  // so the committed file can hash differently from the base the review judged. Like the
+  // founder's Approve Spec, record the hash of the bytes as written (#3380): the review was
+  // bound to the base content above, approval-integrity binds the record to the committed
+  // file, and `sameReviewedContent` proves the two are the same content.
+  const record = withWrittenHash(plan.record, fs.readFileSync(abs, 'utf-8'));
   fs.mkdirSync(path.dirname(sidecar), { recursive: true });
   fs.writeFileSync(sidecar, JSON.stringify(record, null, 2) + '\n', 'utf-8');
+  console.log(JSON.stringify({ ...plan, record }));
   return 0;
 }
 

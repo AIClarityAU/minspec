@@ -71,7 +71,7 @@ const DR_STATUS_WORDS: ReadonlySet<string> = new Set([
   'superseded',
 ]);
 
-function statusWords(kind: ArtifactKind): ReadonlySet<string> {
+export function statusWords(kind: ArtifactKind): ReadonlySet<string> {
   return kind === 'spec' ? SPEC_STATUS_WORDS : DR_STATUS_WORDS;
 }
 

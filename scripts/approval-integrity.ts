@@ -42,6 +42,7 @@ import {
 } from './lib/approval-actor';
 import { readRepeatFixShare, utcToday } from './lib/repeat-fix-share';
 import { readContentPullRequest } from './lib/content-pr';
+import { sameReviewedContent } from './lib/approvable-content';
 
 const APPROVALS_PREFIX = '.minspec/approvals/';
 
@@ -192,9 +193,10 @@ function checkOneRecord(
   // THE SCOPE BOUNDARY, ENFORCED (DR-081 §5). Everything above is self-referential: the
   // record and the approvable both arrive in the same PR, so a matching hash proves only
   // that the pusher was consistent with themselves, not that the content was reviewed.
-  // The approvable's CANONICAL hash must be identical on the merge base and at head —
-  // a status:/phases: flip is stripped by canonicalization and passes; a substantive edit
-  // does not. An approvable absent from the base has no reviewed version to attest to.
+  // The approvable must be the same reviewed content on the merge base and at head — a
+  // status:/phases: flip is stripped by canonicalization and passes; the body status word
+  // the writers flip with it passes by replaying them (#3380); a substantive edit does not.
+  // An approvable absent from the base has no reviewed version to attest to.
   if (changed.includes(derivedSpecPath)) {
     const baseContent = readBase(derivedSpecPath);
     if (baseContent === null) {
@@ -203,12 +205,11 @@ function checkOneRecord(
         detail: at('does not exist on the merge base, so this PR both introduces the approvable and approves it (DR-081 §5)'),
       });
     } else if (fs.existsSync(approvableAbs)) {
-      const baseHash = specHash(baseContent);
-      const headHash = specHash(fs.readFileSync(approvableAbs, 'utf-8'));
-      if (baseHash !== headHash) {
+      const headContent = fs.readFileSync(approvableAbs, 'utf-8');
+      if (!sameReviewedContent(derivedSpecPath, baseContent, headContent)) {
         failures.push({
           check: 'approvable-unreviewed',
-          detail: at(`canonicalizes to ${baseHash} on the merge base but ${headHash} here — an approval PR may flip status:/phases: (hash-neutral) and nothing else (DR-081 §5)`),
+          detail: at(`canonicalizes to ${specHash(baseContent)} on the merge base but ${specHash(headContent)} here — an approval PR may flip status:/phases: and the body status word to match, and nothing else (DR-081 §5)`),
         });
       }
     }

@@ -21,6 +21,9 @@ import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { specHash } from '../../shared/src/canonical';
 import { evaluateApprovalIntegrity, type ReadBase } from '../../../scripts/approval-integrity';
+import { sameReviewedContent } from '../../../scripts/lib/approvable-content';
+import { advanceSpecToImplementing } from '../src/lib/spec';
+import { setAdrStatus } from '../src/lib/adr-manager';
 
 const SPEC_REL = 'specs/minspec/SPEC-900-fixture/requirements.md';
 const SIDECAR_REL = `.minspec/approvals/${SPEC_REL}.json`;
@@ -271,6 +274,111 @@ describe('approval-integrity — the scope boundary (DR-081 §5)', () => {
   it('REFUSES a derived path that escapes the repo', () => {
     const root = fixture({ approvers: [HUMAN] });
     expect(checks(root, ['.minspec/approvals/../../etc/passwd.json'])).toContain('path-shape');
+  });
+});
+
+describe('approval-integrity — the body status word the writers flip (#3380)', () => {
+  const BODY_SPEC = `---
+id: SPEC-900
+type: requirements
+status: specifying
+tier: T2
+---
+
+# Fixture spec
+
+**Status:** Specifying (hand-written note stays)
+
+- FR-1. Content.
+`;
+  const DR_REL = 'docs/decisions/DR-900.md';
+  const BODY_DR = `---
+id: DR-900
+title: Fixture
+status: proposed
+---
+
+# DR-900
+
+## Status
+
+Proposed 2026-10-01.
+
+## Decision
+
+Content.
+`;
+
+  /** The real lifecycle writer applied to `base`, in a throwaway file. */
+  const written = (rel: string, base: string, run: (abs: string) => unknown): string => {
+    const abs = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'apint-write-')), path.basename(rel));
+    fs.writeFileSync(abs, base);
+    run(abs);
+    return fs.readFileSync(abs, 'utf-8');
+  };
+  const advanced = (base: string) => written(SPEC_REL, base, advanceSpecToImplementing);
+
+  /** An approval PR for `rel` whose approvable is `head` and whose record binds it. */
+  const prChecks = (rel: string, base: string, head: string): string[] => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apint-body-'));
+    const sidecar = `.minspec/approvals/${rel}.json`;
+    write(root, '.minspec/config.json', JSON.stringify({ version: '1', approvers: [HUMAN] }, null, 2));
+    write(root, rel, head);
+    write(root, sidecar, JSON.stringify({ specPath: rel, specHash: specHash(head), approvedBy: HUMAN, tier: 'T2' }, null, 2));
+    return evaluateApprovalIntegrity(root, [rel, sidecar], () => base).map((f) => f.check);
+  };
+
+  it('the real spec writer moves the hash, so the base comparison alone would refuse it', () => {
+    const head = advanced(BODY_SPEC);
+    expect(head).toContain('**Status:** Planning (hand-written note stays)');
+    expect(specHash(head)).not.toBe(specHash(BODY_SPEC));
+  });
+
+  it('PASSES the approval PR the real spec writer produces', () => {
+    expect(prChecks(SPEC_REL, BODY_SPEC, advanced(BODY_SPEC))).toEqual([]);
+  });
+
+  it('PASSES the approval PR the real DR writer produces', () => {
+    const head = written(DR_REL, BODY_DR, (abs) => setAdrStatus(abs, 'accepted'));
+    expect(head).toContain('Accepted 2026-10-01.');
+    expect(specHash(head)).not.toBe(specHash(BODY_DR));
+    expect(prChecks(DR_REL, BODY_DR, head)).toEqual([]);
+  });
+
+  it('PASSES a CRLF base, which is how the writers restore line endings', () => {
+    const crlf = BODY_SPEC.replace(/\n/g, '\r\n');
+    expect(prChecks(SPEC_REL, crlf, advanced(crlf))).toEqual([]);
+  });
+
+  it.each([
+    ['a body edit riding along', (h: string) => h.replace('FR-1. Content.', 'FR-1. Other content.')],
+    ['prose beside the status word', (h: string) => h.replace('hand-written note stays', 'note rewritten')],
+    ['a second status line added', (h: string) => `${h}\n**Status:** Planning\n`],
+    ['a body word disagreeing with the frontmatter', (h: string) => h.replace('**Status:** Planning', '**Status:** Done')],
+    ['a body word in the wrong case', (h: string) => h.replace('**Status:** Planning', '**Status:** planning')],
+    ['a retained frontmatter key changed', (h: string) => h.replace('tier: T2', 'tier: T1')],
+  ])('REFUSES %s', (_name, tamper) => {
+    const head = tamper(advanced(BODY_SPEC));
+    expect(prChecks(SPEC_REL, BODY_SPEC, head)).toContain('approvable-unreviewed');
+  });
+
+  it('REFUSES free text carried from the unhashed frontmatter status into the body', () => {
+    // The replay alone would agree: the word in both places matches. The vocabulary check
+    // is the only thing stopping it, so this is what proves that check is load-bearing.
+    const head = BODY_SPEC.replace('status: specifying', 'status: Pwned').replace('**Status:** Specifying', '**Status:** Pwned');
+    expect(prChecks(SPEC_REL, BODY_SPEC, head)).toContain('approvable-unreviewed');
+    const lower = BODY_SPEC.replace('status: specifying', 'status: pwned').replace('**Status:** Specifying', '**Status:** Pwned');
+    expect(sameReviewedContent(SPEC_REL, BODY_SPEC, lower)).toBe(false);
+  });
+
+  it('judges a DR by the DR vocabulary and a spec by the spec vocabulary', () => {
+    const asSpecWord = BODY_DR.replace('status: proposed', 'status: planning');
+    expect(sameReviewedContent(DR_REL, BODY_DR, asSpecWord.replace('Proposed 2026', 'Planning 2026'))).toBe(false);
+  });
+
+  it('stays exact for an artifact with no body status claim', () => {
+    expect(sameReviewedContent(SPEC_REL, SPEC_BODY, SPEC_BODY.replace('status: planning', 'status: implementing'))).toBe(true);
+    expect(sameReviewedContent(SPEC_REL, SPEC_BODY, SPEC_BODY.replace('FR-1. A fixture', 'FR-1. Another'))).toBe(false);
   });
 });
 

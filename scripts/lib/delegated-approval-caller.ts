@@ -58,6 +58,7 @@ import { readContentPullRequest } from './content-pr';
 import { readRepeatFixShare, utcToday } from './repeat-fix-share';
 import { openClarifyDetail } from './clarify-open';
 import { specNotApprovable } from './delegated-approval';
+import { sameReviewedContent } from './approvable-content';
 
 /** The commit identity of `minspec-sdd[bot]` (the App's bot user). */
 export const BOT_EMAIL = '299695933+minspec-sdd[bot]@users.noreply.github.com';
@@ -537,8 +538,12 @@ function recordOne(
     const run = deps.approve({ repoRoot, worktree: wt, artifact: c.artifact, pr: c.pr, repo, base, write: opts.write, token });
     const verdict = readCliVerdict(run, c.artifact, repo);
     if (!verdict.ok) return at('denied', verdict.reason, verdict.detail);
-    if (verdict.record.specHash !== c.hash) {
-      return at('denied', 'record-hash-differs', 'the CLI judged other content than the base holds');
+    // The record binds the file as written, which a body status word can move off the base
+    // hash (#3380), so the base hash alone cannot be the check: the written file must be
+    // what the record names, and must still be the content the base holds.
+    const artifactNow = opts.write ? fs.readFileSync(path.join(wt, c.artifact), 'utf-8') : c.content;
+    if (verdict.record.specHash !== specHash(artifactNow) || !sameReviewedContent(c.artifact, c.content, artifactNow)) {
+      return at('denied', 'record-hash-differs', 'the record does not bind the written file, or the write changed more than the lifecycle of the content the base holds');
     }
     if (!opts.write) return at('would-open', 'covered', `${verdict.delegationId}, verdict ${verdict.record.verdictBy}`);
 

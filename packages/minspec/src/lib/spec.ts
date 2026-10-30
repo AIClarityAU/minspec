@@ -546,15 +546,21 @@ export function specStatusProseWouldInvert(content: string): { line: number; tex
  * write restores (SPEC-095).
  */
 function setBodyStatusToken(filePath: string, content: string, status: SpecStatus, original: string): void {
+  if (!bodyStatusToken(content, 'spec')) return;
+  fs.writeFileSync(filePath, restoreLineEndings(withBodyStatusToken(content, status), original), 'utf-8');
+}
+
+/** The pure half of {@link setBodyStatusToken}: `content` (LF) with its status word rewritten. */
+export function withBodyStatusToken(content: string, status: SpecStatus): string {
   const existing = bodyStatusToken(content, 'spec');
-  if (!existing) return;
+  if (!existing) return content;
   const lines = content.split('\n');
   const capitalized = status.charAt(0).toUpperCase() + status.slice(1);
   lines[existing.line - 1] = lines[existing.line - 1].replace(
     /^(\*\*Status:\*\*[ \t]*)[A-Za-z]+/,
     `$1${capitalized}`,
   );
-  fs.writeFileSync(filePath, restoreLineEndings(lines.join('\n'), original), 'utf-8');
+  return lines.join('\n');
 }
 
 /**

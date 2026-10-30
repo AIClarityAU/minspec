@@ -39,6 +39,8 @@ import {
   type CallerDeps,
   type CallerOptions,
 } from '../../../scripts/lib/delegated-approval-caller';
+import { sameReviewedContent } from '../../../scripts/lib/approvable-content';
+import { advanceSpecToImplementing } from '../src/lib/spec';
 import { useShellTimeout } from './helpers/shell-timeout';
 
 // Module scope, never in a hook (#1399): these suites spawn git/bash per assertion (#1285).
@@ -470,6 +472,63 @@ describe('T0 - scope exclusions', () => {
     });
     expect(report2.results.find((r) => r.artifact === SPEC)).toMatchObject({ outcome: 'skipped', reason: 'approval-pr-open' });
     expect(sh(origin, 'rev-parse', branch).trim()).toBe(sh(origin, 'rev-parse', 'main').trim());
+  });
+});
+
+describe('T0 - a body status word the writer flips (#3380)', () => {
+  const BODY = 'specs/minspec/SPEC-910-body/requirements.md';
+  const bodySpec = spec('SPEC-910', 'specifying').replace('tier: T3', 'tier: T2').replace('# SPEC-910\n', '# SPEC-910\n\n**Status:** Specifying\n');
+
+  /** The CLI with the real writer: flips the file, then records the hash of what it wrote. */
+  const realWrite = (edit: (written: string) => string = (w) => w) => (c: ApproveCall) => {
+    if (c.artifact !== BODY) return passingApprove(c);
+    const abs = path.join(c.worktree, c.artifact);
+    const base = fs.readFileSync(abs, 'utf-8');
+    const baseRun = JSON.parse(passingApprove({ ...c, write: false }).stdout.trim().split('\n').pop()!);
+    if (!c.write) return { code: 0, stdout: JSON.stringify({ ...baseRun, record: { ...baseRun.record, specHash: specHash(base) } }) };
+    advanceSpecToImplementing(abs);
+    fs.writeFileSync(abs, edit(fs.readFileSync(abs, 'utf-8')));
+    const record = { ...baseRun.record, tier: 'T2', specHash: specHash(fs.readFileSync(abs, 'utf-8')) };
+    const side = path.join(c.worktree, sidecarPathFor(c.artifact));
+    fs.mkdirSync(path.dirname(side), { recursive: true });
+    fs.writeFileSync(side, JSON.stringify(record, null, 2) + '\n');
+    return { code: 0, stdout: JSON.stringify({ ...baseRun, record }) };
+  };
+  const run = (approve: CallerDeps['approve']) => {
+    commit({ [BODY]: bodySpec }, 'feat: SPEC-910 fixture spec (#43)');
+    sh(root, 'push', '-q', 'origin', 'main');
+    sh(root, 'fetch', '-q', 'origin');
+    const report = runCaller(opts(), deps(newRec(), { approve }));
+    return report.results.find((r) => r.artifact === BODY)!;
+  };
+
+  it('opens the approval pull request: the record binds the written file, not the base', () => {
+    const r = run(realWrite());
+    expect(r).toMatchObject({ outcome: 'opened', reason: 'covered' });
+    const pushed = sh(origin, 'show', `${r.branch}:${BODY}`);
+    expect(pushed).toContain('**Status:** Planning');
+    const side = JSON.parse(sh(origin, 'show', `${r.branch}:${sidecarPathFor(BODY)}`));
+    expect(side.specHash).toBe(specHash(pushed));
+    expect(side.specHash).not.toBe(specHash(bodySpec));
+    expect(sameReviewedContent(BODY, bodySpec, pushed)).toBe(true);
+  });
+
+  it('refuses before the push when the write changed more than the lifecycle', () => {
+    const r = run(realWrite((w) => w.replace('FR-1. Content', 'FR-1. Smuggled')));
+    expect(r).toMatchObject({ outcome: 'denied', reason: 'record-hash-differs' });
+    expect(remoteBranches().filter((b) => b.includes('spec-910'))).toEqual([]);
+  });
+
+  it('refuses before the push when the record names the base but the write moved the hash', () => {
+    const rewrite = realWrite();
+    const r = run((c) => {
+      if (c.artifact !== BODY) return passingApprove(c);
+      const out = rewrite(c);
+      const j = JSON.parse(out.stdout);
+      return { code: 0, stdout: JSON.stringify({ ...j, record: { ...j.record, specHash: specHash(bodySpec) } }) };
+    });
+    expect(r).toMatchObject({ outcome: 'denied', reason: 'record-hash-differs' });
+    expect(remoteBranches().filter((b) => b.includes('spec-910'))).toEqual([]);
   });
 });
 
