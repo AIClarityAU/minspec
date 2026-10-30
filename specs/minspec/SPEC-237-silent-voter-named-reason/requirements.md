@@ -238,6 +238,10 @@ Each AC is red on today's code and green after the change.
 
 ## Decisions needed (Clarify)
 
+All 5 decisions (D1 to D5) are resolved: an agent session recorded each option this document
+already recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No
+human chose them; they are ratified only by approval of this spec. D6 is not a choice.
+
 - **D1 - Reason channel.**
   - **(a) Sidecar file (rec).** The runner writes `<vote>.reason` next to its stdout,
     with the path passed by the workflow. `review-decide.sh` is untouched, and no new
