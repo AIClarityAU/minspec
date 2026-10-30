@@ -352,3 +352,49 @@ describe('#2699 — the refresh is judged by a fresher reading, not by the produ
     expect(r.err).toMatch(/quota refresh failed.*absent or unreadable/);
   });
 });
+
+describe('#2699 — the failure line states only what is true of the reading afterwards', () => {
+  const stale = () =>
+    write({ used_percentage: 1, resets_at: nowSec() + 3600, observed_at: nowSec() - 5000 });
+  const failLine = (err: string) => err.split('\n').filter((l) => /quota refresh failed/.test(l));
+
+  it('reading absent afterwards → says no reading is left, not that it "stands as-is"', () => {
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: `rm -f "${quotaFile}"` });
+    const lines = failLine(r.err);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/no reading is left/);
+    expect(lines[0]).not.toMatch(/stands as-is/);
+  });
+
+  it('reading moved but still stale → does not claim it stands as-is, and says the gate fails closed', () => {
+    stale();
+    const p = path.join(tmpDir, 'older2.sh');
+    fs.writeFileSync(
+      p,
+      `#!/usr/bin/env bash\nprintf '{"used_percentage":1,"resets_at":%s,"observed_at":%s}' ` +
+        `"$(( $(date +%s) + 3600 ))" "$(( $(date +%s) - 4000 ))" > "${quotaFile}"\n`,
+    );
+    fs.chmodSync(p, 0o755);
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: `bash ${p}` });
+    const lines = failLine(r.err);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toMatch(/stands as-is/);
+    expect(lines[0]).toMatch(/past the staleness limit, so the gate fails closed on it/);
+    expect(r.code).toBe(42);
+  });
+
+  it('refresh run on a FRESH reading (weekly reset passed) that does not move → does not claim the gate fails closed', () => {
+    write({ used_percentage: 1, resets_at: nowSec() + 3600, observed_at: nowSec() });
+    const q = JSON.parse(fs.readFileSync(quotaFile, 'utf-8'));
+    q.seven_day_percentage = 1;
+    q.seven_day_resets_at = nowSec() - 10;
+    fs.writeFileSync(quotaFile, JSON.stringify(q));
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: 'echo "nothing new"' });
+    const lines = failLine(r.err);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/still within the staleness limit/);
+    expect(lines[0]).not.toMatch(/fails closed/);
+    expect(lines[0]).not.toMatch(/stands as-is/);
+  });
+});

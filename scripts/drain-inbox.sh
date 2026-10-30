@@ -2721,7 +2721,16 @@ _quota_try_refresh() {
     why="exit 0 but the reading did not move"
   fi
   out=$(printf '%s' "$out" | tr -s '[:space:][:cntrl:]' ' ' | cut -c1-200)
-  echo "[drain] quota refresh failed (\`$QUOTA_REFRESH_CMD\`): $why${out:+; producer said: $out} — the reading stands as-is and the gate still fails closed on it." >&2
+  # Say only what is true of the reading AFTER the attempt; the decision stays the gate's.
+  local tail
+  if [[ -z "$after" ]]; then
+    tail="no reading is left for the gate to use"
+  elif (( $(date +%s) - after > QUOTA_STALE_SEC )); then
+    tail="the reading is past the staleness limit, so the gate fails closed on it"
+  else
+    tail="the reading is still within the staleness limit, so the gate judges it as it stands"
+  fi
+  echo "[drain] quota refresh failed (\`$QUOTA_REFRESH_CMD\`): $why${out:+; producer said: $out} — $tail." >&2
 }
 
 # ── The cap in force (#2514) ───────────────────────────────────────────────────
