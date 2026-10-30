@@ -17,7 +17,7 @@ implements_reason: >-
 affects: [.github/workflows/docs-lane.yml, packages/minspec/src/lib/ci-review-templates.ts, packages/minspec/src/lib/governance-transition.ts, scripts/lib/governance-transition.sh, scripts/push-docs.sh, packages/minspec/src/lib/approval-pr.ts, packages/minspec/tests/governance-lane-eligibility.test.ts, packages/minspec/tests/approval-pr.test.ts]
 phases:
   specify: done
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending
@@ -191,13 +191,16 @@ this change.
 
 ## Decisions needed (Clarify)
 
-All 5 decisions are answered, not ratified. DQ-3 is the founder's: his answer to task-queue item c217
-(2026-10-27, "Yes (Recommended)", via AskUserQuestion) is verbatim in the task log, and the selection below is
-attributed to it. DQ-1, DQ-2, DQ-4 and DQ-5 are not: an agent session copied this document's (rec) option for
-each, and no human chose them (each says so). Delegation DLG-001 (DR-108) made none of these selections and
-covers spec approval and engineering-DR acceptance only. A queue answer is not consent (DR-108 section 4: any
-session can write the queue), so the DQ-3 selection binds only when the founder or a covered delegation approves
-this spec with it in its text. The settling of the agent-copied items rests on the founder's instruction of 2026-10-26 (task-queue items in66 and in67: open Clarify items are settled on the recommended option); ratification still happens at approval. The evidence gap named under DQ-3 is a fact to verify at approval, not a decision left unanswered.
+DQ-3 has a selection recorded from the answer to task-queue item c217 (2026-10-27: "Yes
+(Recommended)"), an answer the queue attributes to the founder. A queue answer is not consent and is
+not verified here: DR-108 (delegated approval) section 4 holds that a queue item cannot carry
+consent, because any session can write the queue. DQ-1, DQ-2, DQ-4 and DQ-5 carry the (rec) option
+an agent session copied; no human chose them (each says so). Delegation DLG-001 (DR-108) made none
+of these selections and covers spec approval and engineering-DR acceptance only. An agent-recorded
+selection carries no consent, whoever prompted it. It is ratified only by approval of this spec, the
+founder's or the bot's under DLG-001, and that approval may overturn it. Every decision has a
+recorded selection, but the evidence gap under DQ-3 stays open and that text leaves it to the
+founder, so `phases.clarify` stays `pending`.
 
 **DQ-1 — `.minspec/` present but `config.json` absent.** The extension treats this as "all
 defaults" (`config.ts:210-212`).

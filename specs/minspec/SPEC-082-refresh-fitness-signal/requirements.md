@@ -201,14 +201,16 @@ no new stored value. It only changes what is said about a fact SPEC-068 already 
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are answered, not ratified. DQ-1 is the founder's: his answer to task-queue item c082
-(2026-10-27, "Fold in (Recommended)", via AskUserQuestion) is verbatim in the task log, and the selection
-below is attributed to it. DQ-2 and DQ-3 are not: an agent session copied this document's (rec) option for each,
-and no human chose them (each says so). Delegation DLG-001 (DR-108) made none of these selections and covers
-spec approval and engineering-DR acceptance only. A queue answer is not consent (DR-108 section 4: any session
-can write the queue), so the DQ-1 selection binds only when the founder or a covered delegation approves this
-spec with it in its text. DQ-1's fold amends SPEC-068's FR-4/FR-5; this record changes nothing in SPEC-068,
-whose amendment and re-approval are separate acts. The settling of the agent-copied items rests on the founder's instruction of 2026-10-26 (task-queue items in66 and in67: open Clarify items are settled on the recommended option); ratification still happens at approval.
+All 3 decisions are answered, not ratified. DQ-1 has a selection recorded from the answer to
+task-queue item c082 (2026-10-27: "Fold in (Recommended)"), an answer the queue attributes to the
+founder. A queue answer is not consent and is not verified here: DR-108 (delegated approval) section
+4 holds that a queue item cannot carry consent, because any session can write the queue. DQ-2 and
+DQ-3 carry the (rec) option an agent session copied; no human chose them (each says so). Delegation
+DLG-001 (DR-108) made none of these selections and covers spec approval and engineering-DR
+acceptance only. An agent-recorded selection carries no consent, whoever prompted it. It is ratified
+only by approval of this spec, the founder's or the bot's under DLG-001, and that approval may
+overturn it. DQ-1's fold amends SPEC-068's FR-4/FR-5; this record changes nothing in SPEC-068, whose
+amendment and re-approval are separate acts.
 
 - **DQ-1 — Fold into SPEC-068, or ship as this spec's own increment?** SPEC-068 is
   `plan: in-progress` — unbuilt — and FR-1 here is a small, natural extension of its own
@@ -227,8 +229,8 @@ whose amendment and re-approval are separate acts. The settling of the agent-cop
   **Recorded selection: fold FR-1–FR-3 into SPEC-068** as an amendment to its FR-4/FR-5,
   with SPEC-082 standing only as the traceability anchor for #1492. Source: the answer to
   task-queue item c082, 2026-10-27 ("Fold in (Recommended)"). A queue answer is not consent
-  (DR-108 section 4), so this selection is unverified and binds only if the founder approves
-  this spec's text with it in place. SPEC-068 is already approved, so the amendment needs its
+  (DR-108 section 4), so this selection is unverified and binds only if this spec is approved with it in place, by the
+  founder or by the bot under DLG-001. SPEC-068 is already approved, so the amendment needs its
   re-approval; this record does not edit SPEC-068.
 
 - **DQ-2 — Does FR-1's message apply to every `level` refresh, or only when asked?** The

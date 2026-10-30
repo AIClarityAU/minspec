@@ -7,6 +7,12 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a sign-off must never silently attest to text nobody approved
 aspects: [approval, gate-integrity, no-silent-gate, never-wrong, tier-0, offline]
 relates_to: [DR-081, DR-029, DR-003, SPEC-069, SPEC-136, "#2017", "#1029"]
+phases:
+  specify: in-progress
+  clarify: done
+  plan: pending
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec - A PR that edits an approved spec must say it strands the sign-off (Requirements)

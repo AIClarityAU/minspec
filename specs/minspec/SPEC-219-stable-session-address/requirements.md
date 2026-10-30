@@ -94,21 +94,23 @@ unless the sender notices and reroutes it.
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are answered, not ratified. D1 is the founder's: his answer to task-queue item c219
-(2026-10-27, "Upstream (Recommended)", via AskUserQuestion) is verbatim in the task log, and the selection
-below is attributed to it. D2 and D3 are not: an agent session copied this document's (rec) option for each, and
-no human chose them (each says so). Delegation DLG-001 (DR-108) made none of these selections and covers spec
-approval and engineering-DR acceptance only. A queue answer is not consent (DR-108 section 4: any session can
-write the queue), so the D1 selection binds only when the founder or a covered delegation approves this spec
-with it in its text. The settling of the agent-copied items rests on the founder's instruction of 2026-10-26 (task-queue items in66 and in67: open Clarify items are settled on the recommended option); ratification still happens at approval.
+All 3 decisions are answered, not ratified. D1 has a selection recorded from the answer to
+task-queue item c219 (2026-10-27: "Upstream (Recommended)"), an answer the queue attributes to the
+founder. A queue answer is not consent and is not verified here: DR-108 (delegated approval) section
+4 holds that a queue item cannot carry consent, because any session can write the queue. D2 and D3
+carry the (rec) option an agent session copied; no human chose them (each says so). Delegation
+DLG-001 (DR-108) made none of these selections and covers spec approval and engineering-DR
+acceptance only. An agent-recorded selection carries no consent, whoever prompted it. It is ratified
+only by approval of this spec, the founder's or the bot's under DLG-001, and that approval may
+overturn it.
 
 **D1 - Where does this land?** (gating; blocks Plan)
 
 **Recorded selection: (a),** route the fix upstream to the owner of the host messaging
 layer, and keep this spec as the contract plus acceptance tests for it. Source: the answer
 to task-queue item c219, 2026-10-27 ("Upstream (Recommended)"). A queue answer is not
-consent (DR-108 section 4), so this selection is unverified and binds only if the founder
-approves this spec's text with it in place. The upstream report itself is a separate
+consent (DR-108 section 4), so this selection is unverified and binds only if this spec is approved with it in place, by the
+founder or by the bot under DLG-001. The upstream report itself is a separate
 outward-facing act; this record makes none.
 
 - (a) **(rec)** File/route upstream to the owner of the host messaging layer, and keep this

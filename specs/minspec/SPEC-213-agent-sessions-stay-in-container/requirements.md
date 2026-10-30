@@ -20,7 +20,7 @@ implements: [scripts/lib/agent-location.sh, packages/minspec/tests/agent-locatio
 affects: [scripts/hooks/host-write-guard.py, packages/minspec/tests/host-write-guard.test.ts, scripts/drain-inbox.sh, scripts/dispatch-issue.sh, scripts/remediate-pr.sh, scripts/triage-inbox.sh, scripts/push-docs.sh, scripts/check-gh-bot-attribution.sh, scripts/lib/gh-bot.sh]
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending
@@ -261,10 +261,13 @@ founder's D-3 act. A single green probe, a closed issue or an empty file is not 
 
 ## Decisions needed (Clarify)
 
-All 5 decisions are answered, not ratified: an agent session selected, for each, the option this document
-already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+Each of the 5 decisions has a recorded selection, not ratified: an agent session selected the option
+this document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers (DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these selections bind nothing until a human or a covered delegation approves it. This
+spec is T4, and the FR-2 table (`specs/minspec/requirements.md:74`) requires stakeholder review of a
+T4 Clarify. No stakeholder has reviewed these selections (SPEC-281 D3 proposes dropping that phrase,
+and that selection is itself unratified), so `phases.clarify` stays `pending`.
 
 **D-1 - How much may a host session do in a MinSpec repo?**
 - (a) Writes only, as today: refuse ambient `gh` and `git push` by command text. Cost: evaded by
