@@ -11,8 +11,8 @@
  *   0. pipeline blocker — carries PIPELINE_BLOCKER_LABEL. FIRST. Added 2026-10-30
  *      (prio-rcdd-1030): a fix to the drain, dispatcher, ranker or merge path blocks ALL
  *      queued work, an edge nobody declares, so on terms 1-4 it ranked as ordinary
- *      work. The same label orders `cos.py pr-drive`'s branch updates, so building and
- *      landing read one predicate.
+ *      work. The intent is that `cos.py pr-drive` (host tool, outside this repo) reads the
+ *      same label; that is NOT verified from this repo - see PIPELINE_BLOCKER_LABEL.
  *   1. unblocks — how many other OPEN issues this one unblocks, transitively. DESC.
  *   2. spec rank — the signpost's STRUCTURAL position of the spec (or epic) the
  *      issue explicitly serves. ASC; an issue that serves none sorts after every
@@ -44,8 +44,9 @@
 
 /**
  * The one shared priority signal: an issue (or PR) that unblocks the pipeline itself.
- * Exact, case-sensitive match. `cos.py pr-drive` reads the SAME string for PRs (on the
- * PR, or on an open issue the PR closes); renaming one side silently splits them.
+ * Exact, case-sensitive match. Intended to be the same string `cos.py pr-drive` reads for
+ * PRs; that counterpart lives outside this repo and is unverified here (no cross-boundary
+ * test), so renaming either side could silently split them.
  */
 export const PIPELINE_BLOCKER_LABEL = 'pipeline-blocker';
 

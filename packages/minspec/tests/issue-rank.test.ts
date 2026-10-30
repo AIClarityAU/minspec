@@ -353,10 +353,10 @@ describe('INV-4: an issue with no declared relation falls through to terms 2-4',
 // Work that unblocks the pipeline itself (a fix to the drain, dispatcher, ranker or merge
 // path) declares no issue→issue edge — it blocks ALL queued work, which nobody writes
 // down — so on terms 1-4 it ranked as ordinary work and queued behind it. The shared
-// signal is one label, PIPELINE_BLOCKER_LABEL, read here and by `cos.py pr-drive` for PRs.
+// signal is one label, PIPELINE_BLOCKER_LABEL, read here; `cos.py pr-drive` is intended to read it for PRs (unverified from this repo).
 
 describe('INV-0: a pipeline-blocker issue outranks every other term', () => {
-  it('the label name is the one pr-drive reads (shared predicate, do not rename one side)', () => {
+  it('pins the TS-side label literal (does not observe cos.py; keep both sides in step by hand)', () => {
     expect(PIPELINE_BLOCKER_LABEL).toBe('pipeline-blocker');
   });
 
