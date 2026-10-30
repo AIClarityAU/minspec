@@ -197,7 +197,7 @@ attributed to it. DQ-1, DQ-2, DQ-4 and DQ-5 are not: an agent session copied thi
 each, and no human chose them (each says so). Delegation DLG-001 (DR-108) made none of these selections and
 covers spec approval and engineering-DR acceptance only. A queue answer is not consent (DR-108 section 4: any
 session can write the queue), so the DQ-3 selection binds only when the founder or a covered delegation approves
-this spec with it in its text. The settling of the agent-copied items rests on the founder's standing instruction of 2026-10-26 (task-queue items in66 and in67: open Clarify items are settled on the recommended option); ratification still happens at approval. The evidence gap named under DQ-3 is a fact to verify at approval, not a decision left unanswered.
+this spec with it in its text. The settling of the agent-copied items rests on the founder's instruction of 2026-10-26 (task-queue items in66 and in67: open Clarify items are settled on the recommended option); ratification still happens at approval. The evidence gap named under DQ-3 is a fact to verify at approval, not a decision left unanswered.
 
 **DQ-1 — `.minspec/` present but `config.json` absent.** The extension treats this as "all
 defaults" (`config.ts:210-212`).

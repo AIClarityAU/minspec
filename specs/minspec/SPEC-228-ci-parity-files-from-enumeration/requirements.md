@@ -293,7 +293,7 @@ selections below are attributed to it. DQ-2 and DQ-5 are not: an agent session c
 option for each, and no human chose them (each says so). Delegation DLG-001 (DR-108) made none of these
 selections and covers spec approval and engineering-DR acceptance only. A queue answer is not consent (DR-108
 section 4: any session can write the queue), so the DQ-1, DQ-3 and DQ-4 selections bind only when the founder or a
-covered delegation approves this spec with them in its text. The settling of the agent-copied items rests on the founder's standing instruction of 2026-10-26 (task-queue items in66 and in67: open Clarify items are settled on the recommended option); ratification still happens at approval.
+covered delegation approves this spec with them in its text. The settling of the agent-copied items rests on the founder's instruction of 2026-10-26 (task-queue items in66 and in67: open Clarify items are settled on the recommended option); ratification still happens at approval.
 
 - **DQ-1 - How the adopter gets the derived list.**
 
