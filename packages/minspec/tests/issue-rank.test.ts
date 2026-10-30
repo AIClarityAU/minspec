@@ -26,6 +26,7 @@ import {
   explicitLinks,
   tierFromLabels,
   tierKey,
+  PIPELINE_BLOCKER_LABEL,
   structuralOrder,
   blockingGraph,
   type IssueRecord,
@@ -346,6 +347,58 @@ describe('INV-4: an issue with no declared relation falls through to terms 2-4',
 });
 
 // ─── INV-5 Lexicographic order ───────────────────────────────────────────────
+
+// ─── INV-0 A pipeline blocker outranks everything (prio-rcdd-1030) ───────────
+//
+// Work that unblocks the pipeline itself (a fix to the drain, dispatcher, ranker or merge
+// path) declares no issue→issue edge — it blocks ALL queued work, which nobody writes
+// down — so on terms 1-4 it ranked as ordinary work and queued behind it. The shared
+// signal is one label, PIPELINE_BLOCKER_LABEL, read here and by `cos.py pr-drive` for PRs.
+
+describe('INV-0: a pipeline-blocker issue outranks every other term', () => {
+  it('the label name is the one pr-drive reads (shared predicate, do not rename one side)', () => {
+    expect(PIPELINE_BLOCKER_LABEL).toBe('pipeline-blocker');
+  });
+
+  it('outranks higher unblocks, better spec rank, better tier and lower number', () => {
+    // Broken implementation this catches: the label added as a lower term, or as a
+    // weight that enough unblocks can outvote. #950 is worse on every other term.
+    const ctx = ctxOf([
+      issue(1, { title: 'feat(SPEC-001): best spec', labels: ['agent-ready'] }),
+      issue(2, { body: 'Blocked by #1' }),
+      issue(3, { body: 'Blocked by #1' }),
+      issue(950, { title: 'bug: drain starves', labels: ['agent-ready-specify', PIPELINE_BLOCKER_LABEL] }),
+    ]);
+    expect(numbers(ctx, [1, 950])).toEqual([950, 1]);
+    const top = rankIssues([1, 950], ctx)[0];
+    expect(top.pipelineBlocker).toBe(true);
+    expect(top.reasons.pipeline).toMatch(/pipeline-blocker/);
+  });
+
+  it('two blockers fall through to the ordinary terms between themselves', () => {
+    const ctx = ctxOf([
+      issue(10, { labels: ['agent-ready-specify', PIPELINE_BLOCKER_LABEL] }),
+      issue(20, { labels: ['agent-ready', PIPELINE_BLOCKER_LABEL] }),
+      issue(5, { labels: ['agent-ready'] }),
+    ]);
+    expect(numbers(ctx, [5, 10, 20])).toEqual([20, 10, 5]);
+  });
+
+  it('only the exact label counts: a look-alike or a title mention is not a blocker', () => {
+    const ctx = ctxOf([
+      issue(1, { labels: ['agent-ready'] }),
+      issue(2, { title: 'pipeline-blocker: not a label', labels: ['pipeline-blocker-maybe', 'Pipeline-Blocker '] }),
+    ]);
+    expect(numbers(ctx, [2, 1])).toEqual([1, 2]);
+    expect(rankIssues([2], ctx)[0].pipelineBlocker).toBe(false);
+  });
+
+  it('a candidate with no data is never a blocker (no label was read)', () => {
+    const r = rankIssues([77], ctxOf([issue(1)]))[0];
+    expect(r.hasData).toBe(false);
+    expect(r.pipelineBlocker).toBe(false);
+  });
+});
 
 describe('INV-5: unblocks > spec rank > tier > issue number', () => {
   it('a higher unblocks count outranks a better spec rank, tier and number', () => {

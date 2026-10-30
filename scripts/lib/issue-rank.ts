@@ -8,6 +8,11 @@
  * measured dispatches), so arrival order spends the budget on whatever is oldest.
  *
  * ── The order (founder-approved on #2196, 2026-09-28), strictly lexicographic ──
+ *   0. pipeline blocker — carries PIPELINE_BLOCKER_LABEL. FIRST. Added 2026-10-30
+ *      (prio-rcdd-1030): a fix to the drain, dispatcher, ranker or merge path blocks ALL
+ *      queued work, an edge nobody declares, so on terms 1-4 it ranked as ordinary
+ *      work. The same label orders `cos.py pr-drive`'s branch updates, so building and
+ *      landing read one predicate.
  *   1. unblocks — how many other OPEN issues this one unblocks, transitively. DESC.
  *   2. spec rank — the signpost's STRUCTURAL position of the spec (or epic) the
  *      issue explicitly serves. ASC; an issue that serves none sorts after every
@@ -36,6 +41,13 @@
  */
 
 // ─── Types ───────────────────────────────────────────────────────────────────
+
+/**
+ * The one shared priority signal: an issue (or PR) that unblocks the pipeline itself.
+ * Exact, case-sensitive match. `cos.py pr-drive` reads the SAME string for PRs (on the
+ * PR, or on an open issue the PR closes); renaming one side silently splits them.
+ */
+export const PIPELINE_BLOCKER_LABEL = 'pipeline-blocker';
 
 /**
  * A precise triage tier, or a READY-CLASS range when only the class is known.
@@ -82,6 +94,8 @@ export interface RankContext {
 
 export interface RankedIssue {
   number: number;
+  /** Carries PIPELINE_BLOCKER_LABEL — term 0, outranks every other term. */
+  pipelineBlocker: boolean;
   /** Distinct OPEN issues reachable through declared blocking edges, excluding itself. */
   unblocks: number;
   unblocked: readonly number[];
@@ -93,7 +107,7 @@ export interface RankedIssue {
   tier: Tier | null;
   /** False when the candidate was not among the fetched open issues. */
   hasData: boolean;
-  reasons: { unblocks: string; spec: string; tier: string; number: string };
+  reasons: { pipeline: string; unblocks: string; spec: string; tier: string; number: string };
 }
 
 // ─── The declaration grammar ─────────────────────────────────────────────────
@@ -559,8 +573,9 @@ function tierReason(tier: Tier | null, explicit: boolean): string {
   return tier === 'T1-T2' ? 'T1-T2 (agent-ready)' : 'T3-T4 (agent-ready-specify)';
 }
 
-/** The total order: unblocks DESC, spec rank ASC (none last), tier ASC, number ASC. */
+/** The total order: pipeline blocker first, unblocks DESC, spec rank ASC (none last), tier ASC, number ASC. */
 export function compareRanked(a: RankedIssue, b: RankedIssue): number {
+  if (a.pipelineBlocker !== b.pipelineBlocker) return a.pipelineBlocker ? -1 : 1;
   if (a.unblocks !== b.unblocks) return b.unblocks - a.unblocks;
   const sa = a.specRank ?? INF;
   const sb = b.specRank ?? INF;
@@ -624,11 +639,14 @@ export function rankIssues(candidates: readonly number[], ctx: RankContext): Ran
       }
     }
 
+    const pipelineBlocker = rec !== undefined && rec.labels.includes(PIPELINE_BLOCKER_LABEL);
+
     const explicitTier = ctx.tiers?.get(number);
     const tier = explicitTier ?? (rec ? tierFromLabels(rec.labels) : null);
 
     return {
       number,
+      pipelineBlocker,
       unblocks: unblocked.length,
       unblocked,
       waitsOn,
@@ -637,6 +655,7 @@ export function rankIssues(candidates: readonly number[], ctx: RankContext): Ran
       tier,
       hasData,
       reasons: {
+        pipeline: pipelineBlocker ? `${PIPELINE_BLOCKER_LABEL} — unblocks the pipeline, ranked first` : 'no',
         unblocks: unblocksReason,
         spec: specReason,
         tier: tierReason(tier, explicitTier !== undefined),
