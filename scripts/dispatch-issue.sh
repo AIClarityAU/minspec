@@ -599,12 +599,15 @@ fi
 #   1. an unconfirmed closing link. A drain PR is dispatched for issue N (branch
 #      `agent/issue-N`); merging it closes whatever GitHub says it closes
 #      (`closingIssuesReferences`), so that list must contain N. A branch that is not a
-#      drain branch names no issue, so it needs at least one confirmed link.
+#      drain branch names no issue, so it needs at least one confirmed link, EXCEPT (#3115)
+#      a PR authored by the App identity (`app/minspec-sdd` or `minspec-sdd[bot]`) whose
+#      body has no closing keyword: it claims to close nothing, so no link is expected.
 #   2. a creator-shepherd handoff. `shepherd_hand_off` stamps SHEPHERD_HANDOFF_MARKER on a
 #      comment when the creating session gives the PR to the founder; a bot merge would
 #      take that decision from him.
 # Prints the denial reason and detail (tab-separated) and returns 1 on a claim OR on any
-# unreadable input; returns 0 only when both are positively clear.
+# unreadable input; returns 0 only when both are positively clear (reason 1 satisfied
+# either by the confirmed link or by the App-authored no-closing-keyword exception above).
 delegated_merge_human_claims() {
   local pr="$1" view="" head="" refs="" handoffs="" issue=""
   local marker="<!-- minspec-shepherd-handoff -->"
