@@ -65,7 +65,10 @@ interface TriageRun {
 }
 
 /** Drive scripts/triage-inbox.sh for one issue with stubbed `gh` and `claude`. */
-function runTriage(verdictBlock: string, opts: { failBatchRemove?: boolean } = {}): TriageRun {
+function runTriage(
+  verdictBlock: string,
+  opts: { failBatchRemove?: boolean; labels?: string[] } = {},
+): TriageRun {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-triage-'));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
@@ -73,7 +76,7 @@ function runTriage(verdictBlock: string, opts: { failBatchRemove?: boolean } = {
   const issueJson = JSON.stringify({
     title: TITLE,
     body: BODY,
-    labels: [{ name: 'inbox' }],
+    labels: (opts.labels ?? ['inbox']).map((name) => ({ name })),
   });
   fs.writeFileSync(path.join(dir, 'issue.json'), issueJson);
   fs.writeFileSync(path.join(dir, 'agent-out.txt'), verdictBlock);
@@ -288,5 +291,63 @@ describe('triage-inbox.sh writes the verdict record dispatch requires (#983)', (
     const run = runTriage(verdict({ decision: 'needs-info' }));
     expect(run.calls.some((c) => c.includes('add=[role:dev,needs-info,hold:info]'))).toBe(true);
     expect(run.calls.find((c) => /remove=\[[^\]]+\]/.test(c))).toContain('agent-ready');
+  });
+});
+
+// ── pipeline-blocker skips spec-first (founder decision 2026-10-30, queue item pb1030) ──
+// The spec-writing queue can be paused, and an issue that unblocks the pipeline itself
+// must not wait behind it. Exactly ONE label opts out of the specify class, and only the
+// specify class: every human gate (human_only, a declined T3/T4, needs-info) still holds.
+describe('triage-inbox.sh routes a pipeline-blocker straight to build (pb1030)', () => {
+  let dispatchBody: string;
+  beforeAll(() => {
+    dispatchBody = composeBody(bodyComposer(DISPATCH), JSON.stringify({ title: TITLE, body: BODY, labels: [] }));
+  });
+
+  it('an auto-buildable T3 labelled pipeline-blocker is recorded as a FULL build', () => {
+    const run = runTriage(verdict({ tier: 'T3', decision: 'agent-ready' }), {
+      labels: ['role:dev', 'agent-ready-specify', 'hold:specify', 'pipeline-blocker'],
+    });
+    expect(run.calls.some((c) => c.includes('add=[role:dev,agent-ready]')), run.calls.join('\n')).toBe(true);
+    expect(run.comment).toContain('hold: none');
+    expect(run.comment).toContain('decision: agent-ready');
+    expect(run.comment).toContain('pipeline-blocker');
+    const removed = run.calls.find((c) => /remove=\[[^\]]+\]/.test(c)) ?? '';
+    expect(removed).toContain('agent-ready-specify');
+    expect(removed).toContain('hold:specify');
+    const r = gate('agent-ready,role:dev,pipeline-blocker', run.comment, dispatchBody);
+    expect(r.ok, r.out).toBe(true);
+    expect(r.out).toBe('ready');
+  });
+
+  it('only the exact label counts: a look-alike label keeps the specify route', () => {
+    for (const label of ['pipeline-blocker-candidate', 'blocker', 'Pipeline-Blocker', 'pipeline blocker']) {
+      const run = runTriage(verdict({ tier: 'T3', decision: 'agent-ready' }), { labels: ['inbox', label] });
+      expect(
+        run.calls.some((c) => c.includes('add=[role:dev,agent-ready-specify,hold:specify]')),
+        `${label}: ${run.calls.join('\n')}`,
+      ).toBe(true);
+      expect(run.comment).toContain('hold: specify');
+    }
+  });
+
+  it('pipeline-blocker never lifts a human-only hold', () => {
+    const run = runTriage(verdict({ tier: 'T3', decision: 'agent-ready', human_only: 'yes' }), {
+      labels: ['inbox', 'pipeline-blocker'],
+    });
+    expect(run.calls.some((c) => c.includes('add=[role:dev,needs-review,hold:human]'))).toBe(true);
+  });
+
+  it('pipeline-blocker never lifts a T3 the agent declined, nor a needs-info', () => {
+    const declined = runTriage(verdict({ tier: 'T4', decision: 'needs-review' }), { labels: ['inbox', 'pipeline-blocker'] });
+    expect(declined.calls.some((c) => c.includes('add=[role:dev,needs-review,hold:tier]'))).toBe(true);
+    const info = runTriage(verdict({ tier: 'T3', decision: 'needs-info' }), { labels: ['inbox', 'pipeline-blocker'] });
+    expect(info.calls.some((c) => c.includes('add=[role:dev,needs-info,hold:info]'))).toBe(true);
+  });
+
+  it('a T1/T2 pipeline-blocker is unchanged (already a full build)', () => {
+    const run = runTriage(verdict({ tier: 'T2' }), { labels: ['inbox', 'pipeline-blocker'] });
+    expect(run.calls.some((c) => c.includes('add=[role:dev,agent-ready]'))).toBe(true);
+    expect(run.comment).toContain('hold: none');
   });
 });

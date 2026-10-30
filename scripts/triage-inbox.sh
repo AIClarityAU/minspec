@@ -212,6 +212,26 @@ CONTENT
     | head -1 | sed -E 's/^[^:]*:[[:space:]]*//')  # swallow-ok: grep exits 1 when the agent emitted no rationale line, and the next line substitutes an explicit placeholder
   [[ -z "$RATIONALE" ]] && RATIONALE="(no rationale emitted)"
 
+  # ── pipeline-blocker skips spec-first (founder decision 2026-10-30, queue item pb1030) ──
+  # An issue that unblocks the pipeline itself must not wait in the spec-writing queue,
+  # which can be paused. So the ONE label `pipeline-blocker` converts the specify class
+  # (and only it) into a full build: `agent-ready-specify`/`specify` becomes
+  # `agent-ready`/`none`. Every other hold stands: human_only, a T3/T4 the agent declined,
+  # needs-info and the fail-closed `unknown` never reach this branch, because the gate
+  # emits `specify` only for a non-human-only, agent-affirmed T3/T4.
+  #
+  # Exact name match, read from the same issue JSON the verdict is keyed to. If the
+  # label list cannot be read, jq fails and the test is false: the issue keeps today's
+  # specify route, never a build. Labels are set by repo collaborators, not by the
+  # untrusted issue text the agent reads, so the agent cannot ask for this route.
+  if [[ "$LABEL" == "agent-ready-specify" && "$HOLD" == "specify" ]] \
+     && printf '%s' "$ISSUE_JSON" \
+          | jq -e 'any(.labels[]?; .name == "pipeline-blocker")' >/dev/null 2>&1; then  # swallow-ok: a jq failure means "label not proven present", which keeps the restrictive specify route
+    LABEL="agent-ready"
+    HOLD="none"
+    RATIONALE="${RATIONALE} [pipeline-blocker: spec-first skipped, routed to a full build (founder decision 2026-10-30, pb1030)]"
+  fi
+
   # Mint the machine-readable verdict record, keyed to the body we just triaged.
   # FAIL CLOSED: if the record cannot be rendered we apply NO labels at all —
   # an `agent-ready` with no verdict behind it is precisely the #983 hole, and
