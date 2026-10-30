@@ -2939,9 +2939,14 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude
     # and build share `agent/issue-N`, so a label surviving into a build would have the
     # reconciler read a merged spec PR as a reason to leave a failed build alone, whichever
     # route started that build (#3351 review).
-    gh label create "awaiting-spec-signoff" --repo "$REPO" --color c5def5 \
-      --description "Specify-only run finished: the spec PR references this issue, which stays open to carry the build once the spec is signed off (#3348)" \
-      2>/dev/null || true
+    # GitHub rejects a label description over 100 chars with HTTP 422, so keep it short.
+    # Only "already exists" is tolerated; any other failure is surfaced, not swallowed.
+    LABEL_ERR=$(gh label create "awaiting-spec-signoff" --repo "$REPO" --color c5def5 \
+      --description "Specify-only run done; spec PR references this open issue, which carries the build (#3348)" 2>&1) || {
+      if [[ "$LABEL_ERR" != *"already exists"* ]]; then
+        echo "WARN: could not create label awaiting-spec-signoff on $REPO: $LABEL_ERR" >&2
+      fi
+    }
     if [[ "$SPECIFY_ONLY" == "1" ]]; then
       gh issue edit "$ISSUE" --repo "$REPO" \
         --remove-label "agent-running,agent-ready" --add-label "agent-done,awaiting-spec-signoff" 2>/dev/null || true
