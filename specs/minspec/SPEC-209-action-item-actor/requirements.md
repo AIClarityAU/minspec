@@ -19,7 +19,7 @@ implements: [packages/shared/src/action-items.ts, packages/shared/tests/action-i
 # unapproved spec past Clarify for all sessions (#3234).
 phases:
   specify: done
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

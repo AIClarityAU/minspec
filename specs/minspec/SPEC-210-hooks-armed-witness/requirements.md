@@ -16,7 +16,7 @@ implements: [packages/minspec/src/lib/hooks-armed.ts, packages/minspec/tests/hoo
 # unapproved spec past Clarify for all sessions (#3234).
 phases:
   specify: done
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending
