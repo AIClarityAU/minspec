@@ -80,16 +80,34 @@ The HOLD-suppression premise ("if native auto-merge is armed on this PR") is dec
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 **D1. How does the gate learn the arm outcome (FR-3)?**
+
+**Recorded selection: Option (a),** read `autoMergeRequest` for the yes/no and carry the arm
+step's `hold_why` via a variable, so observation decides and the variable only supplies the
+reason text.
+
 - (a) Read `autoMergeRequest` for the yes/no, and carry the arm step's `hold_why` via a variable **(rec)**: observation decides, the variable only supplies the reason text. Cost: the reason is still an inference about our own write; if the two disagree the comment may name the wrong reason (mitigate: print both).
 - (b) Variable only, no read. Cost: repeats the defect, an inference about our write rather than an observation of the PR.
 - (c) Read only, and a generic reason. Cost: the founder loses the WITHHELD reason on the PR, which is what FR-4 exists for.
 
 **D2. Stand-down split (FR-6): where?**
+
+**Recorded selection: Option (a),** add a distinct `shepherd_decide` token
+(`stand-down-expired` vs `stand-down-foreign`), testable in the existing `shepherd-decide`
+suite.
+
 - (a) Add a distinct `shepherd_decide` token (`stand-down-expired` vs `stand-down-foreign`) **(rec)**: testable in the existing `shepherd-decide` suite. Cost: callers matching on `stand-down` must be audited and updated.
 - (b) Keep one token; compute the wording at the call site from `classify_claim`. Cost: the distinction is untested by the pure decider.
 
 **D3. Should an expired own claim stand the shepherd down at all?**
+
+**Recorded selection: Option (a),** keep the status quo: an expired own claim stands the
+shepherd down.
+
 - (a) Keep: stand down (status quo, D3/INV-5 re-verify before credentialed steps) **(rec)**. Cost: a long-but-live build still loses the shepherd if renewal genuinely fails; the renew-failure log (#2305) is the only witness.
 - (b) Re-claim once if no other claim exists. Cost: new write path in a lease protocol, wider diff and more risk; widens scope beyond this issue.
 
