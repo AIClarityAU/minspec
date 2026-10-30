@@ -277,3 +277,68 @@ describe('the cadence relationship that caused #1859', () => {
     expect(r.code).toBe(0);
   });
 });
+
+describe('#2699 — the refresh is judged by a fresher reading, not by the producer exit code', () => {
+  // cos.py reports every failure with exit 0 and a reason on stdout, so the old
+  // exit-code-only check could not see any of them. These run the gate and read the
+  // log line it leaves on stderr (a deferral exits 42, so run() returns stderr).
+  const stale = () =>
+    write({ used_percentage: 1, resets_at: nowSec() + 3600, observed_at: nowSec() - 5000 });
+
+  it('(a) exit 0 + a reason on stdout + no new reading → the log says refresh failed and quotes the reason', () => {
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: 'echo "sign-in expired, run login"' });
+    expect(r.code).toBe(42);
+    expect(r.out).toMatch(/^defer:stale/);
+    expect(r.err).toMatch(/quota refresh failed/);
+    expect(r.err).toContain('sign-in expired, run login');
+    // The reason must not leak onto the verdict channel.
+    expect(r.out).not.toContain('sign-in expired');
+  });
+
+  it('(a) a noisy producer is bounded to one line', () => {
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: 'for i in $(seq 1 500); do echo "noise line $i xxxxxxxxxxxxxxxxxxxx"; done' });
+    const lines = r.err.split('\n').filter((l) => /quota refresh failed/.test(l));
+    expect(lines).toHaveLength(1);
+    expect(r.err.length).toBeLessThan(700);
+  });
+
+  it('(b) a non-zero exit is reported with its reason', () => {
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: 'echo "boom reason"; exit 7' });
+    expect(r.err).toMatch(/quota refresh failed/);
+    expect(r.err).toContain('boom reason');
+  });
+
+  it('(b) a timeout says it timed out', () => {
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: 'sleep 30', MINSPEC_QUOTA_REFRESH_TIMEOUT: '1' });
+    expect(r.code).toBe(42);
+    expect(r.err).toMatch(/quota refresh failed.*timed out/);
+  });
+
+  it('(c) exit 0 and observed_at moves → no failure line, and it admits', () => {
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: producerWritesFresh() });
+    expect(r.code).toBe(0);
+    expect(r.err).not.toMatch(/quota refresh failed/);
+  });
+
+  it('(d) the producer leaves the reading absent afterwards → reported as failed, never success', () => {
+    // A reading must exist BEFORE (INV-R3: a missing one is never refreshed), so the
+    // absent-witness case is the producer removing or corrupting it.
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: `rm -f "${quotaFile}"; echo "wiped"` });
+    expect(r.code).toBe(42);
+    expect(r.err).toMatch(/quota refresh failed/);
+    expect(r.err).toMatch(/absent or unreadable/);
+  });
+
+  it('(d) the producer leaves an unreadable reading → reported as failed', () => {
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: `printf 'not json' > "${quotaFile}"` });
+    expect(r.code).toBe(42);
+    expect(r.err).toMatch(/quota refresh failed.*absent or unreadable/);
+  });
+});
