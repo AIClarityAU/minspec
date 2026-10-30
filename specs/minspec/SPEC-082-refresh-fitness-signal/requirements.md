@@ -208,7 +208,7 @@ and no human chose them (each says so). Delegation DLG-001 (DR-108) made none of
 spec approval and engineering-DR acceptance only. A queue answer is not consent (DR-108 section 4: any session
 can write the queue), so the DQ-1 selection binds only when the founder or a covered delegation approves this
 spec with it in its text. DQ-1's fold amends SPEC-068's FR-4/FR-5; this record changes nothing in SPEC-068,
-whose amendment and re-approval are separate acts.
+whose amendment and re-approval are separate acts. The settling of the agent-copied items rests on the founder's standing instruction of 2026-10-26 (task-queue items in66 and in67: open Clarify items are settled on the recommended option); ratification still happens at approval.
 
 - **DQ-1 — Fold into SPEC-068, or ship as this spec's own increment?** SPEC-068 is
   `plan: in-progress` — unbuilt — and FR-1 here is a small, natural extension of its own
