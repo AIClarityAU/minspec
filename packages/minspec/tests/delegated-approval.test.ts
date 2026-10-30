@@ -25,6 +25,7 @@ import {
   parseCliArgs,
   planDelegatedApproval,
   specNotApprovable,
+  writtenHashMismatch,
   type GhRunner,
   type PlanInput,
   type ReviewEvidence,
@@ -339,5 +340,18 @@ describe('the bot refuses what the founder\'s Approve Spec refuses', () => {
     const abs = path.join(dir, 'requirements.md');
     fs.writeFileSync(abs, '---\nid: SPEC-900\ntitle: x\nstatus: specifying\ntier: T3\n---\n\n# x\n');
     expect(specNotApprovable(root, abs)).toMatch(/not complete/);
+  });
+});
+
+describe('writtenHashMismatch (#3380)', () => {
+  it('flags a body **Status:** rewrite the canonical form does not strip', () => {
+    const base = `---\nid: SPEC-900\nstatus: specifying\ntier: T3\n---\n\n**Status:** specifying\n`;
+    const written = base.replace('**Status:** specifying', '**Status:** Planning');
+    expect(writtenHashMismatch(written, specHash(base))).toBe(true);
+  });
+  it('accepts a frontmatter-only lifecycle change', () => {
+    const base = `---\nid: SPEC-900\nstatus: specifying\ntier: T3\n---\n\nbody\n`;
+    const written = base.replace('status: specifying', 'status: planning');
+    expect(writtenHashMismatch(written, specHash(base))).toBe(false);
   });
 });

@@ -544,10 +544,26 @@ function main(): number {
     const unready = specNotApprovable(repoRoot, abs);
     if (unready !== undefined) return deny('spec-not-approvable', unready);
   }
-  console.log(JSON.stringify(plan));
-  if (!parsed.write) return 0;
+  if (!parsed.write) {
+    console.log(JSON.stringify(plan));
+    return 0;
+  }
 
   writeLifecycle(repoRoot, abs, plan.record.act);
+  // The record describes the base's bytes. A spec's writer also rewrites the body
+  // `**Status:**` line, which the canonical form does NOT strip, so the written file
+  // can hash differently from the record and the PR would carry a record that
+  // mismatches its own head (#3380). Fail closed and restore rather than push it.
+  if (plan.record.act === 'spec-approval') {
+    if (writtenHashMismatch(fs.readFileSync(abs, 'utf-8'), plan.record.specHash)) {
+      fs.writeFileSync(abs, onDisk, 'utf-8');
+      return deny(
+        'written-hash-mismatch',
+        `advancing ${artifact} changes its canonical content (e.g. a body **Status:** line), so the record's specHash would not match the committed file`,
+      );
+    }
+  }
+  console.log(JSON.stringify(plan));
   const sidecar = path.join(repoRoot, '.minspec', 'approvals', `${artifact}.json`);
   if (!fs.existsSync(path.join(repoRoot, '.minspec'))) {
     console.error('no .minspec/ at the repo root: this repo has not opted in');
@@ -590,6 +606,11 @@ export function specNotApprovable(repoRoot: string, abs: string, content?: strin
 }
 
 /** The lifecycle half of the act, using the same writers the founder's commands use. */
+/** True when the file as written no longer hashes to the record's `specHash` (#3380). */
+export function writtenHashMismatch(written: string, recordHash: string): boolean {
+  return specHash(written) !== recordHash;
+}
+
 function writeLifecycle(repoRoot: string, abs: string, act: DelegatedAct): void {
   if (act === 'engineering-dr-acceptance') {
     setAdrStatus(abs, 'accepted');
