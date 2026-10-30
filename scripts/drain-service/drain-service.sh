@@ -60,6 +60,9 @@
 #   MINSPEC_DRAIN_SERVICE_STOP_GRACE  seconds to wait for the drain on stop (default 90)
 #   MINSPEC_DRAIN_SERVICE_RETRY_BASE  first backoff after a failed launch/end (default 15, doubles)
 #   MINSPEC_DRAIN_SERVICE_RETRY_MAX   backoff ceiling in seconds (default 600)
+#   MINSPEC_DRAIN_CONCURRENCY    parallel agents per cycle for the drain this script starts
+#                                (default 8, DR-114; drain-inbox.sh clamps
+#                                bad values). The unit passes none, so 8 is what runs.
 
 set -uo pipefail
 
@@ -77,6 +80,9 @@ STOP_GRACE="${MINSPEC_DRAIN_SERVICE_STOP_GRACE:-90}"
 # Backoff between retries of a failed launch or failed drain end, inside ONE start (#3095).
 RETRY_BASE="${MINSPEC_DRAIN_SERVICE_RETRY_BASE:-15}"
 RETRY_MAX="${MINSPEC_DRAIN_SERVICE_RETRY_MAX:-600}"
+# The service's default is 8 (DR-114); drain-inbox.sh's own default (1, used by the
+# session-start drain) is unchanged. Set only for the drain this script launches.
+export MINSPEC_DRAIN_CONCURRENCY="${MINSPEC_DRAIN_CONCURRENCY:-8}"
 
 say() { echo "[drain-service] $*"; }
 
@@ -120,12 +126,25 @@ on_term() {
       sleep 1; waited=$((waited + 1))
     done
     if kill -0 "$pid" 2>/dev/null; then
-      say "WARNING: drain pid $pid still running after ${STOP_GRACE}s. A cycle's foreground step defers the drain's SIGTERM trap; it stops when that step returns."
-    else
-      say "drain pid $pid stopped."
+      say "FAILED: drain pid $pid still running after ${STOP_GRACE}s. A cycle's foreground step defers the drain's SIGTERM trap; it stops when that step returns. Exiting 1 so the stop is not reported as a success (#3195)."
+      exit 1
     fi
+    say "drain pid $pid stopped."
   fi
   exit 0
+}
+
+# describe_adopted <pid>: log when the drain being adopted started and the concurrency
+# it runs with, and say STALE when that differs from this supervisor's configured value,
+# so an adopted drain with old settings is visible rather than silent (#3195).
+describe_adopted() {
+  local pid="$1" started conc=""
+  started="$(ps -o lstart= -p "$pid" 2>/dev/null | sed 's/^ *//')"
+  conc="$(tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | sed -n 's/^MINSPEC_DRAIN_CONCURRENCY=//p' | head -n 1)"
+  say "adopted drain pid $pid: started ${started:-unknown}, concurrency=${conc:-unset/default}."
+  if [[ "$conc" != "$MINSPEC_DRAIN_CONCURRENCY" ]]; then
+    say "STALE: adopted drain runs concurrency=${conc:-unset/default} but this service is configured for $MINSPEC_DRAIN_CONCURRENCY. New settings take effect only once that drain ends."
+  fi
 }
 
 # report_end <log-offset> <pid>: print what the drain wrote since <log-offset> and
@@ -183,6 +202,7 @@ cmd_run() {
   while :; do
     if pid="$(drain_holder)"; then
       say "adopting the running drain (pid $pid); starting nothing."
+      describe_adopted "$pid"
       if watch "$pid" "$(log_size)"; then exit 0; fi
       retry_wait delay; continue
     fi
@@ -227,6 +247,10 @@ cmd_stop() {
   kill -TERM "$pid"
   exec 9>>"$SVC_LOCK"
   if flock -w "$((STOP_GRACE + 15))" 9; then
+    if pid="$(drain_holder)"; then
+      say "FAILED: drain-service stopped but drain pid $pid is still alive; the stop did not take effect (#3195)."
+      exit 1
+    fi
     say "drain-service stopped."
     exit 0
   fi
