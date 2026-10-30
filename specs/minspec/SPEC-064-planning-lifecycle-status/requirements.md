@@ -154,17 +154,6 @@ return 'implementing';                                   // approved + ANY incom
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are resolved: an agent session recorded each option this document already
-recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
-chose them; they are ratified only by approval of this spec.
-
-- **D1 - Recorded selection: Option A,** a merge-gating validator rule (not a new hook): a spec whose
-  derived or literal status is `implementing` must have `phases.implement` in-progress or done.
-- **D2 - Recorded selection: Option A,** pull #899 (the freeze-gate-twin parity test) into this spec's
-  scope, so INV-3 ships with its enforcement.
-- **D3 - Recorded selection: Option B,** require a `phases:` block before a spec can be approved,
-  removing the phaseless shape (#957) rather than picking a lossy default for it.
-
 These are the parts DR-069 left open. Each is a real trade-off; none should be guessed.
 
 - **D1 — Should `implementing ⟺ implement-phase-active` become a *deterministic, merge-gating*
