@@ -57,6 +57,7 @@ import { readRepeatFixShare, utcToday } from './repeat-fix-share';
 import { openClarifyDetail } from './clarify-open';
 import { readContentPullRequest } from './content-pr';
 import { readSpecFile, parseSpec, advanceSpecToImplementing } from '../../packages/minspec/src/lib/spec';
+import { bodyStatusToken } from '../../packages/minspec/src/lib/status-parity';
 import { isTerminalSpecStatus } from '../../packages/minspec/src/lib/spec-vocabulary';
 import { loadConfig } from '../../packages/minspec/src/lib/config';
 import { validateSpec } from '../../packages/minspec/src/lib/spec-validator';
@@ -547,7 +548,8 @@ function main(): number {
   console.log(JSON.stringify(plan));
   if (!parsed.write) return 0;
 
-  writeLifecycle(repoRoot, abs, plan.record.act);
+  const changed = writeLifecycleHashNeutral(repoRoot, abs, plan.record.act);
+  if (changed !== undefined) return deny('lifecycle-changed-hash', changed);
   const sidecar = path.join(repoRoot, '.minspec', 'approvals', `${artifact}.json`);
   if (!fs.existsSync(path.join(repoRoot, '.minspec'))) {
     console.error('no .minspec/ at the repo root: this repo has not opted in');
@@ -572,6 +574,16 @@ export function specNotApprovable(repoRoot: string, abs: string, content?: strin
   const parsed = content === undefined ? readSpecFile(abs) : parseSpec(content);
   const status = parsed.frontmatter.status;
   if (isTerminalSpecStatus(status)) return `the spec is ${String(status)}, past the approval gate`;
+  // The approval hash covers the body, and the lifecycle write rewrites a body status word
+  // (setBodyStatusToken). A delegated approval must leave the body untouched (DR-081 s5:
+  // the exemption covers the record, never the approvable), so refuse up front.
+  const body = bodyStatusToken(content ?? fs.readFileSync(abs, 'utf-8'), 'spec');
+  if (body !== null && body.token !== 'implementing') {
+    return (
+      `the body status line (line ${body.line}, "${body.token}") would be rewritten by the approval, ` +
+      `which changes the spec's hash; open a content pull request that removes that line, then retry`
+    );
+  }
   const result = validateSpec(parsed, loadConfig(repoRoot), {
     knownEpicRefs: epicRefSet(repoRoot),
     siblingShardFiles: readShardIdFiles(path.dirname(abs)),
@@ -587,6 +599,20 @@ export function specNotApprovable(repoRoot: string, abs: string, content?: strin
     return `the phase advance would violate: ${err instanceof Error ? err.message : String(err)}`;
   }
   return undefined;
+}
+
+/**
+ * `writeLifecycle`, then re-hash: if the write changed the artifact's canonical hash the
+ * recorded approval would be stale on arrival, so restore the original bytes and return the
+ * reason (undefined when the hash held). Only ever adds a refusal.
+ */
+export function writeLifecycleHashNeutral(repoRoot: string, abs: string, act: DelegatedAct): string | undefined {
+  const before = fs.readFileSync(abs);
+  const hashBefore = specHash(before.toString('utf-8'));
+  writeLifecycle(repoRoot, abs, act);
+  if (specHash(fs.readFileSync(abs, 'utf-8')) === hashBefore) return undefined;
+  fs.writeFileSync(abs, before);
+  return `the lifecycle write changed the hash of ${path.relative(repoRoot, abs)}; restored, nothing recorded`;
 }
 
 /** The lifecycle half of the act, using the same writers the founder's commands use. */
