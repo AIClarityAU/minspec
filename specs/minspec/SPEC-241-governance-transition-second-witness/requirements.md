@@ -217,7 +217,13 @@ own predicate), and add a test that fails whenever a docs-lane refusal reason ha
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 - **DQ-1 - What the witness keys on.**
+  **Recorded selection: Option (a),** armed **and** transition, as this spec is written,
+  mirroring exactly the act docs-lane refuses.
   - `a` **(rec)** Armed **and** transition (this spec as written). Mirrors exactly the act
     docs-lane refuses, keeps DR-111 self-merge and new-spec PRs green. **Cost:** it does
     not stop a direct, non-auto merge of a status transition by an automated actor holding
@@ -231,6 +237,8 @@ own predicate), and add a test that fails whenever a docs-lane refusal reason ha
   sequence lets an armed PR acquire a `README`/`CHANGELOG`/`sites/**` change and merge;
   no required check reads `OUTWARD_DOC_PATTERN` (it is consumed by
   `scripts/auto-merge-gate.ts` and docs-lane only).
+  **Recorded selection: Option (a),** witness it here, by the FR-5 pattern (armed + outward
+  path → failure).
   - `a` **(rec)** Witness it here, by the FR-5 pattern (armed + outward path → failure).
     **Cost:** scope grows past the issue's ask (one more pattern pinned in a third place);
     a human who arms their own README PR must disarm and merge by hand.
@@ -239,6 +247,8 @@ own predicate), and add a test that fails whenever a docs-lane refusal reason ha
     keeps it open, and `sites/**` deploys on merge.
 - **DQ-3 - Arming by a human.** Under DQ-1 `a`, a founder who arms auto-merge on their own
   approval PR also goes red.
+  **Recorded selection: Option (a),** hold regardless of who armed, since the shared App token
+  makes "who armed" no reliable human signal.
   - `a` **(rec)** Hold regardless of who armed. **Cost:** one disarm + one click for the
     founder in that case. The App token is shared by every session and drain process, so
     "who armed" is not a reliable human signal (SPEC-222 Context point 2).
@@ -248,6 +258,8 @@ own predicate), and add a test that fails whenever a docs-lane refusal reason ha
 - **DQ-4 - The direct-merge path (security finding, outside docs-lane's scope).** Any
   automated actor with merge rights can merge a status-transition PR directly once
   `ready-to-merge` is green; only DR-111's judge is meant to do that.
+  **Recorded selection: Option (a),** out of scope here; the dispatcher or founder files a
+  follow-up issue.
   - `a` **(rec)** Out of scope here; the dispatcher or founder files a follow-up issue
     (this dispatch has no network permission to file one). **Cost:** the hole stays open
     until then; it pre-dates this spec.
