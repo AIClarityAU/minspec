@@ -1,7 +1,7 @@
 ---
 id: SPEC-247
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a gate MinSpec runs on itself but does not ship to adopters blocks nothing where adopters commit
@@ -18,15 +18,15 @@ implements_reason: >-
 affects: [packages/minspec/src/lib/template-registry.ts, scripts/validate-frontmatter.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
 
 # SPEC-247: Every FATAL rule in the Node validator is either shipped in validate.py or recorded as dev-only
 
-**Status:** specifying
+**Status:** Planning
 
 ## In plain terms
 

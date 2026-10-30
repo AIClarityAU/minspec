@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-247-shipped-validator-rule-parity/requirements.md",
+  "specHash": "08023b3474c3ff931d28c584f55d1c1fb7d40d6c296b02960080b5bffc5c7373",
+  "approvedAt": "2026-10-30T06:22:31.527Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-c",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3182#issuecomment-6515774347"
+}
