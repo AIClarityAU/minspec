@@ -42,6 +42,7 @@ interface DecideArgs {
   maxSecs?: number;
   checksPending?: 'yes' | 'no';
   automergeArmed?: 'yes' | 'no';
+  humanHeld?: 'yes' | 'no';
 }
 
 /** Run `--decide`; returns the single action token. */
@@ -57,6 +58,7 @@ function decide({
   // exercising the polling path; the human-gate cases opt out explicitly.
   checksPending = 'yes',
   automergeArmed = 'no',
+  humanHeld = 'no',
 }: DecideArgs): string {
   return execFileSync(
     'bash',
@@ -72,6 +74,7 @@ function decide({
       String(maxSecs),
       checksPending,
       automergeArmed,
+      humanHeld,
     ],
     { encoding: 'utf-8' },
   ).trim();
@@ -219,6 +222,33 @@ describe('shepherd --decide: action routing (D4 — classify_pr is the one sourc
     // "Nothing fixable" is not "merged". Declaring done here would be the classic
     // false signpost this project treats as the worst defect.
     expect(decide({ action: 'skip-clean', checksPending: 'yes' })).toBe('wait');
+  });
+});
+
+describe('shepherd --decide: human-held PR does not hold the dispatch slot (#3179)', () => {
+  it('stops instead of polling running checks when human-held and not armed', () => {
+    expect(
+      decide({ action: 'skip-clean', checksPending: 'yes', automergeArmed: 'no', humanHeld: 'yes' }),
+    ).toBe('stop-human-held');
+  });
+  it('armed PRs still wait', () => {
+    expect(
+      decide({ action: 'skip-clean', checksPending: 'yes', automergeArmed: 'yes', humanHeld: 'yes' }),
+    ).toBe('wait');
+  });
+  it('not human-held still waits on running checks', () => {
+    expect(decide({ action: 'skip-clean', checksPending: 'yes', humanHeld: 'no' })).toBe('wait');
+  });
+  it('a red check seen on a poll is still fixed, merged/ceiling unchanged', () => {
+    expect(decide({ action: 'agent-remediate-checks', humanHeld: 'yes' })).toBe('do-fix');
+    expect(decide({ action: 'skip-clean', merged: 'yes', humanHeld: 'yes' })).toBe('stop-merged');
+    expect(decide({ action: 'skip-clean', holds: 'no', humanHeld: 'yes' })).toBe('stand-down');
+    expect(decide({ action: 'skip-clean', elapsed: 3600, humanHeld: 'yes' })).toBe('stop-timeout');
+  });
+  it('nothing pending + human-held keeps the existing awaiting-human token', () => {
+    expect(decide({ action: 'skip-clean', checksPending: 'no', humanHeld: 'yes' })).toBe(
+      'stop-awaiting-human',
+    );
   });
 });
 
