@@ -94,7 +94,25 @@ unless the sender notices and reroutes it.
 
 ## Decisions needed (Clarify)
 
+D1 has a selection recorded from the answer to task-queue item c219 (2026-10-27: "Upstream
+(Recommended)"), an answer the queue attributes to the founder. A queue answer is not
+consent and is not verified here: DR-108 (delegated approval) section 4 holds that a queue
+item cannot carry consent, because any session can write the queue. That selection therefore
+binds nothing on its own. It binds only if the founder approves this spec with it in its
+text; that approval, not this record, is the consent act, and it may overturn it. The other
+selections carry the (rec) option an agent session copied; no human chose them (each says
+so). Delegation DLG-001 (DR-108) made none of these selections. This section stays open, and
+the spec is not ready to approve, until the founder answers or confirms the rest.
+
 **D1 - Where does this land?** (gating; blocks Plan)
+
+**Recorded selection: (a),** route the fix upstream to the owner of the host messaging
+layer, and keep this spec as the contract plus acceptance tests for it. Source: the answer
+to task-queue item c219, 2026-10-27 ("Upstream (Recommended)"). A queue answer is not
+consent (DR-108 section 4), so this selection is unverified and binds only if the founder
+approves this spec's text with it in place. The upstream report itself is a separate
+outward-facing act; this record makes none.
+
 - (a) **(rec)** File/route upstream to the owner of the host messaging layer, and keep this
   spec as the contract plus acceptance tests for it. Cost: MinSpec cannot ship the fix
   itself, so timing is outside our control and nothing improves here until it lands.
@@ -106,6 +124,10 @@ unless the sender notices and reroutes it.
   (5 sends) because the TTL is shorter than composition time.
 
 **D2 - Ref-wins versus a stable alias.** (the issue's two options)
+
+**Recorded selection: (a),** accept a stale name when the ref matches. An agent session
+copied this document's (rec) option; no human chose this item.
+
 - (a) **(rec)** Accept a stale name when the ref matches. Smallest change, uses data already
   in every row. Cost: a sender who picked the wrong session but the right-looking ref
   gets no name-mismatch error; only FR-5's notice reveals it.
@@ -117,6 +139,9 @@ rejected as a likely mistake?** (a) **(rec)** No, ref wins (FR-3 as written); co
 mis-typed ref that happens to be live delivers to the wrong session. (b) Yes, reject on
 conflict; cost: reintroduces failures for the legitimate stale-name case when the old name
 was since taken by another session.
+
+**Recorded selection: (a),** no: the ref wins (FR-3 as written). An agent session copied
+this document's (rec) option; no human chose this item.
 
 ## Out of scope
 

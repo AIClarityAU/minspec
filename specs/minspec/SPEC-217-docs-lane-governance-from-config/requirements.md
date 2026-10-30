@@ -191,8 +191,22 @@ this change.
 
 ## Decisions needed (Clarify)
 
+DQ-3 has a selection recorded from the answer to task-queue item c217 (2026-10-27: "Yes
+(Recommended)"), an answer the queue attributes to the founder. A queue answer is not
+consent and is not verified here: DR-108 (delegated approval) section 4 holds that a queue
+item cannot carry consent, because any session can write the queue. That selection therefore
+binds nothing on its own. It binds only if the founder approves this spec with it in its
+text; that approval, not this record, is the consent act, and it may overturn it. The other
+selections carry the (rec) option an agent session copied; no human chose them (each says
+so). Delegation DLG-001 (DR-108) made none of these selections. This section stays open, and
+the spec is not ready to approve, until the founder answers or confirms the rest.
+
 **DQ-1 — `.minspec/` present but `config.json` absent.** The extension treats this as "all
 defaults" (`config.ts:210-212`).
+
+**Recorded selection: `a`,** fail closed: refuse to arm and say why. An agent session copied
+this document's (rec) option; no human chose this item.
+
 - `a` **(rec)** Fail closed: refuse to arm and say why. *Cost:* a repo initialised without a
   config file (hand-built, or an older init) loses the lane until it commits one, which is one
   visible red per PR.
@@ -201,6 +215,10 @@ defaults" (`config.ts:210-212`).
   path.
 
 **DQ-2 — Union with defaults, or configured directories only.**
+
+**Recorded selection: `a`,** union with defaults (FR-3). An agent session copied this
+document's (rec) option; no human chose this item.
+
 - `a` **(rec)** Union (FR-3). *Cost:* an adopter whose `docs/decisions/` is an ordinary, non-DR
   folder gets over-refusals there. Those are fail-safe but noisy.
 - `b` Configured only. *Cost:* a repo that moved `decisionsDir` but left old DRs in
@@ -208,6 +226,18 @@ defaults" (`config.ts:210-212`).
 
 **DQ-3 — Govern `epicsDir` too.** Epics are approvables (`approvable.ts:15`) and are not
 governed even at defaults today. That gap exists in this repo now, not only for adopters.
+
+**Recorded selection: `a`,** include `epicsDir` (default `docs/epics`) in this change, so an
+epic `status:` edit in this repo now needs a human merge. Source: the answer to task-queue
+item c217, 2026-10-27 ("Yes (Recommended)"). A queue answer is not consent (DR-108 section
+4), so this selection is unverified and binds only if the founder approves this spec's text
+with it in place.
+
+The evidence gap stays open: no record yet decides whether an epic `status:` change is a
+human act, the search for one was partial, and the note below still stands. This selection
+does not close that gap. The founder confirms or reverses it, with the gap in view, when
+approving this spec's text.
+
 - `a` **(rec)** Include `epicsDir` (default `docs/epics`) in this change. *Cost:* it changes
   behaviour for this repo: an epic `status:` edit, for example `active` to `done`, now needs a
   human merge. It also widens the scope of a defect fix. Whether an epic status change is a human
@@ -217,6 +247,10 @@ governed even at defaults today. That gap exists in this repo now, not only for 
   directories" the issue names are only two-thirds derived.
 
 **DQ-4 — Derive `allowed` from config in the same change (the issue's recommendation).**
+
+**Recorded selection: `a`,** keep `allowed` hardcoded (FR-11) and track derivation
+separately. An agent session copied this document's (rec) option; no human chose this item.
+
 - `a` **(rec)** No: keep `allowed` hardcoded (FR-11) and track it separately. A mismatch there
   fails **closed**: a spec under a non-default `specsDir` is refused from the lane, loudly.
   Deriving it turns a config value into a knob that widens the **auto-merge** corpus. For
@@ -232,6 +266,11 @@ governed even at defaults today. That gap exists in this repo now, not only for 
 **DQ-5 — Directories set only in VS Code settings.** `minspec.specsDir` and
 `minspec.decisionsDir` override the file inside the editor (`applyVSCodeOverrides`), and CI can
 never see them. For such an adopter the extension and the lane disagree about where DRs live.
+
+**Recorded selection: `a`,** document that `.minspec/config.json` is the only source CI
+honours, with a follow-up for the extension warning. An agent session copied this document's
+(rec) option; no human chose this item.
+
 - `a` **(rec)** In this spec, document that `.minspec/config.json` is the only source CI honours.
   File a follow-up so the extension warns when a workspace setting differs from the file.
   *Cost:* until that follow-up ships, an editor-settings-only adopter is still exposed. The gap is
