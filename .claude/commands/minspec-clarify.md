@@ -11,5 +11,5 @@ List concrete answerable questions blocking the plan. For each question add an a
 
 Update the active spec's Clarify section.
 
-**When the last open question is answered or recorded (the final `Recorded selection:` line), set `phases.clarify: done` in the spec frontmatter in the same commit** (use `skipped` instead when the phase is deliberately skipped). Nothing else writes it before approval, and the approve gate refuses a T3/T4 spec whose `phases.clarify` is still `pending` as `clarify-pending`. Leave `status:` unchanged. Arguments: $ARGUMENTS
+**When the last open question is answered or recorded (the final `Recorded selection:` line), set `phases.clarify: done` in the spec frontmatter in the same commit** (use `skipped` instead when the phase is deliberately skipped). The delegated approve gate does not read this field; it refuses (`clarify-open`) a spec whose "Decisions needed (Clarify)" section still lists unanswered decision items, so answer or record each one. Leave `status:` unchanged. Arguments: $ARGUMENTS
 <!-- <<< minspec:managed:slash-claude-clarify <<< -->
