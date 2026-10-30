@@ -133,8 +133,12 @@ exit 0
   fs.chmodSync(path.join(bin, 'claude'), 0o755);
 
   // MINSPEC_* is dropped so a live operator setting (a shadow key, a drain log path)
-  // can never reach a run that must stay hermetic.
-  const inherited = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('MINSPEC_')));
+  // can never reach a run that must stay hermetic. The one exception is the stub App
+  // token script that vitest.setup.ts points MINSPEC_GH_APP_TOKEN_SCRIPT at: it is the
+  // test double for the bot-token mint, and without it a machine with no real
+  // ~/.claude/scripts/gh-app-token.sh (CI) hits gh-bot's refusal to write as the human.
+  const KEEP = new Set(['MINSPEC_GH_APP_TOKEN_SCRIPT']);
+  const inherited = Object.fromEntries(Object.entries(process.env).filter(([k]) => KEEP.has(k) || !k.startsWith('MINSPEC_')));
   const env = {
     ...inherited,
     PATH: `${bin}:${process.env.PATH}`,
