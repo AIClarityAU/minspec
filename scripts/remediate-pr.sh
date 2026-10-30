@@ -100,6 +100,8 @@ agent_caveman_init
 # THIS tree's hooks outright. The file's header has the reasoning and the limits.
 # shellcheck source=scripts/lib/agent-worktree.sh
 source "${SCRIPT_DIR}/lib/agent-worktree.sh"
+# shellcheck source=scripts/lib/provision-worktree-modules.sh
+source "${SCRIPT_DIR}/lib/provision-worktree-modules.sh"
 # Agent writes carry the BOT's identity, never the human's (#1355). This arms a
 # `gh` wrapper; acquiring the token is LAZY, so reads pass through untouched and
 # only the first WRITE mints — aborting there, loudly, if it cannot.
@@ -251,15 +253,23 @@ def latest_checks:
     | .value + {_i: .key} ]
   | group_by([(.workflowName // ""), (.name // .context // "")])
   | map(sort_by([(.startedAt // .completedAt // ""), (.completedAt // ""), ._i]) | last);
+# #3174: a CheckRun reports `conclusion`, but a commit StatusContext reports only `state`
+# (FAILURE/ERROR/...) and has NO `conclusion`. Reading `conclusion` alone made a red status
+# context an absent witness read as pass. `outcome` is the one place that folds both shapes.
+def outcome: (.conclusion // "") as $c | if $c != "" then $c else (.state // "") end;
+# Self-certification gates no commit can turn green: the ai-review check (a CheckRun named
+# `ai-review`, or the `ai-review/pass` StatusContext, which has `context` and no `name`) and
+# the ready-to-merge gate. Match on (.name // .context) so both shapes are excluded.
+def self_cert_gate:
+  ((.name // .context // "") | test("^ai-review"))
+  or ((.name // .context // "") == "ready-to-merge")
+  or ((.workflowName // "") == "ready-to-merge");
 '
 derive_failing_non_review() {
   jq -r "$ROLLUP_LATEST_JQ"'
     [ latest_checks[]
-      | select((.name // "") != "ai-review")
-      | select((.name // "") != "ready-to-merge")
-      | select((.context // "") != "ready-to-merge")
-      | select((.workflowName // "") != "ready-to-merge")
-      | (.conclusion // "") ]
+      | select(self_cert_gate | not)
+      | outcome ]
     | map(select(. == "FAILURE" or . == "ERROR" or . == "TIMED_OUT" or . == "CANCELLED"))
     | if length > 0 then "yes" else "no" end' <<<"$1"
 }
@@ -276,12 +286,9 @@ derive_failing_non_review() {
 derive_failed_run_ids() {
   jq -r "$ROLLUP_LATEST_JQ"'
     [ latest_checks[]
-      | select((.name // "") != "ai-review")
-      | select((.name // "") != "ready-to-merge")
-      | select((.context // "") != "ready-to-merge")
-      | select((.workflowName // "") != "ready-to-merge")
-      | select((.conclusion // "") == "FAILURE" or (.conclusion // "") == "ERROR"
-               or (.conclusion // "") == "TIMED_OUT" or (.conclusion // "") == "CANCELLED")
+      | select(self_cert_gate | not)
+      | select(outcome == "FAILURE" or outcome == "ERROR"
+               or outcome == "TIMED_OUT" or outcome == "CANCELLED")
       | ((.detailsUrl // .targetUrl // "") | capture("/actions/runs/(?<id>[0-9]+)")? | .id) ]
     | map(select(. != null)) | unique | .[]' <<<"$1"
 }
@@ -937,6 +944,17 @@ PRE_SHA=$(agent_worktree_git rev-parse HEAD)
 
 cleanup() { launcher_git worktree remove "$WORKTREE" --force 2>/dev/null || true; }
 
+# The agent cannot install dependencies itself (no network), so the worktree gets its own
+# tree here (#3238). Without a runnable toolchain the agent can only escalate on the
+# fail-closed validate gate: skip the run, visibly, rather than spend one. rebase-only
+# needs no toolchain, so it is exempt.
+if [[ "$ACTION" != "rebase-only" ]] && ! provision_worktree_modules "$WORKTREE"; then
+  echo "ERROR: could not provision node_modules for $BRANCH - skipping the agent run (#3238)." >&2
+  post_marked_comment "$ATTEMPT_MARKER" 'remediation-unrunnable: no node_modules. The remediation worktree could not get its own dependencies (`npm ci --offline` failed), so no agent was started. Left for a human.'
+  cleanup
+  exit 0
+fi
+
 # ── rebase-only: mechanical merge of origin/main, no agent ─────────────────────
 if [[ "$ACTION" == "rebase-only" ]]; then
   echo "  Merging origin/main into $BRANCH (mechanical, no agent)..."
@@ -985,10 +1003,10 @@ else
   # injection channel) into the prompt.
   FAILED_NAMES=$(jq -r "$ROLLUP_LATEST_JQ"'
     [ latest_checks[]
-      | select((.name // "") != "ai-review")
-      | select((.conclusion // "") == "FAILURE" or (.conclusion // "") == "ERROR"
-               or (.conclusion // "") == "TIMED_OUT" or (.conclusion // "") == "CANCELLED")
-      | (.name // "?") ] | unique | join(", ")' <<<"$PR_JSON")
+      | select(self_cert_gate | not)
+      | select(outcome == "FAILURE" or outcome == "ERROR"
+               or outcome == "TIMED_OUT" or outcome == "CANCELLED")
+      | (.name // .context // "?") ] | unique | join(", ")' <<<"$PR_JSON")
   CONTEXT=$(printf 'These CI checks are FAILING on this PR: %s\n\nReproduce each locally in this worktree with `npm test`, `npm run lint`, `npm run build`, and `npm run validate`, find the ROOT CAUSE (RCDD — name the mechanism, not the symptom), fix it, and confirm every check passes before committing.' "$FAILED_NAMES")
 fi
 
