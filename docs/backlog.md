@@ -10,6 +10,8 @@ bear on a near-term decision, file it as an issue and strike it here with the is
 
 Newest first.
 
+- 2026-10-30 - a normal build dispatch whose only deliverable is a spec or decision record, with a legitimate `Closes #N`, is refused by the delegated spec merge with `spec-pr-closes-build-issue`; fails closed, code left as it is (source: #3351)
+- 2026-10-28 - CLAUDE.md "never write, suggest, or attempt a `minspec` shell command" needs a carve-out for agents calling the headless core's `minspec-core.cjs` once SPEC-136 ships; person-facing half stays (source: DR-116)
 - 2026-10-18 - `parseVoterRecords` greedy base64 group over-consumes if two voter records are ever concatenated without a separator; fails safe (digest mismatch drops the record) (source: #2371)
 - 2026-10-18 - `validate.py` `is_escaping_path` reports `error` regardless of `ownershipDeclaration`, so a `..` segment in `implements:` newly fails in a repo still at `warn`; unannounced (source: #2371)
 - 2026-10-18 - a voter on voip-sms-inbox #121 read a harness-refresh PR as reverting a DR from accepted to proposed; not reproduced from the three-dot diff (`scripts/review-branch.sh:75`), only from a two-dot diff against a moved base; possibly related to #2052 (source: #2371)

@@ -116,7 +116,15 @@ behaviour as a side effect.
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 **D1. Which approve path for a terminal-stale flat spec?**
+
+**Recorded selection: Option (a),** make focused-file classification recognise any file
+`listSpecs` returns for the folder's configured `specsDir`.
+
 - `a` **(rec)** Make focused-file classification recognise any file `listSpecs` returns for
   the folder's configured `specsDir`. Restores the path #2117 intended, for every layout, with
   no new menu surface. *Cost:* classification stops being a pure filename test; it needs the
@@ -134,10 +142,16 @@ approves a spec that skipped the gate, so FR-4 messaging should state it was nev
 (b) Refuse with an explanation; *cost:* diverges from split layout and keeps a dead end for
 specs that predate adoption.
 
+**Recorded selection: Option (a),** allow it: an explicit per-artifact act matching
+split-layout behaviour, with FR-4 messaging stating the spec was never approved.
+
 **D3. Classifier shape.** (a) **(rec)** Keep the pure `classifyApprovablePath` and add a
 config-aware resolver used only by `approveActive` step 2; *cost:* two functions to explain,
 but FR-6 consumers stay untouched. (b) Make the classifier itself config-aware; *cost:* wider
 blast radius and the sidecar-scan behaviour change above.
+
+**Recorded selection: Option (a),** keep the pure `classifyApprovablePath` and add a
+config-aware resolver used only by `approveActive` step 2.
 
 ## Follow-ups (tracked)
 
