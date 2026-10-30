@@ -1,6 +1,6 @@
 #!/usr/bin/env -S npx tsx
 /**
- * check-spec-id-collision.ts — advisory per-PR spec-id collision check (#3164), the
+ * check-spec-id-collision.ts — advisory spec-id collision check (#3164), run by hand, the
  * sibling of check-dr-id-collision.ts.
  *
  *   npx tsx scripts/check-spec-id-collision.ts --repo OWNER/NAME --pr 3153 --base main
@@ -8,6 +8,10 @@
  * Exit 0 = every spec id the PR adds is free on the base and across other open PRs.
  * Exit 1 = a clash, OR the check could not look (fail closed, DR-066) — never a green
  * because it didn't run. Decision logic is the pure `lib/spec-id-claims.ts`.
+ *
+ * NOT WIRED INTO CI YET: no workflow runs this script (unlike its DR sibling's
+ * dr-id-collision.yml), so today it is run by hand. Only the allocator half
+ * (next-spec-id.ts, called from dispatch-issue.sh) runs automatically.
  */
 
 import { openPrSpecClaims, baseSpecDirs, prSpecDirs, SpecIdGateError } from './lib/open-pr-spec-claims';

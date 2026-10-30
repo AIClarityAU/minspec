@@ -110,16 +110,38 @@ case "$*" in
 esac
 `;
 
+  /**
+   * tsx by ABSOLUTE path, found by walking up from the repo (#1032). `npx tsx` with a
+   * cwd outside the repo cannot resolve tsx and falls back to the npx cache or a
+   * registry fetch, which a Tier-0/offline gate must not depend on.
+   */
+  function tsxBin(): string {
+    let dir = REPO_ROOT;
+    for (let i = 0; i < 8; i++) {
+      const candidate = path.join(dir, 'node_modules', '.bin', 'tsx');
+      if (fs.existsSync(candidate)) return candidate;
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    throw new Error(`could not find node_modules/.bin/tsx at or above ${REPO_ROOT}`);
+  }
+
+  /** The caller's env minus every MINSPEC_* var, so a live drain's settings cannot leak in. */
+  function scrubbedEnv(): NodeJS.ProcessEnv {
+    return Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('MINSPEC_')));
+  }
+
   function run(script: string, args: string[], stub: string): { status: number; stdout: string; stderr: string } {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-id-cli-'));
     const bin = path.join(tmp, 'gh');
     fs.writeFileSync(bin, stub, { mode: 0o755 });
     // cwd is an empty dir so the allocator's working-tree read is empty and deterministic
     try {
-      const out = execFileSync('npx', ['tsx', path.join(REPO_ROOT, 'scripts', script), ...args], {
+      const out = execFileSync(tsxBin(), [path.join(REPO_ROOT, 'scripts', script), ...args], {
         cwd: tmp,
         encoding: 'utf-8',
-        env: { ...process.env, SPEC_ID_GH_BIN: bin, GITHUB_ACTIONS: '' },
+        env: { ...scrubbedEnv(), SPEC_ID_GH_BIN: bin, GITHUB_ACTIONS: '' },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       return { status: 0, stdout: out, stderr: '' };
