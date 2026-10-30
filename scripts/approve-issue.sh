@@ -286,4 +286,12 @@ if ! gh issue edit "$ISSUE" --repo "$REPO" \
   fi
 fi
 
+# `awaiting-spec-signoff` is not in the set above because it countermands nothing. It is
+# cleared because this approval starts a build, and that state ends here (#3351 review).
+# Only when carried: a repo with no specify run yet has no such label to name.
+if grep -qx "awaiting-spec-signoff" <<<"$CURRENT_LABELS" \
+   && ! gh issue edit "$ISSUE" --repo "$REPO" --remove-label "awaiting-spec-signoff" >/dev/null 2>&1; then
+  echo "WARNING: could not clear awaiting-spec-signoff on #${ISSUE}; clear it by hand. The build's own completion also removes it." >&2
+fi
+
 echo "Approved #${ISSUE} as ${APPROVER} (lifted hold:${V_HOLD}). It is now dispatchable."
