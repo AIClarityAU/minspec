@@ -100,6 +100,8 @@ agent_caveman_init
 # THIS tree's hooks outright. The file's header has the reasoning and the limits.
 # shellcheck source=scripts/lib/agent-worktree.sh
 source "${SCRIPT_DIR}/lib/agent-worktree.sh"
+# shellcheck source=scripts/lib/provision-worktree-modules.sh
+source "${SCRIPT_DIR}/lib/provision-worktree-modules.sh"
 # Agent writes carry the BOT's identity, never the human's (#1355). This arms a
 # `gh` wrapper; acquiring the token is LAZY, so reads pass through untouched and
 # only the first WRITE mints — aborting there, loudly, if it cannot.
@@ -941,6 +943,17 @@ agent_worktree_pin "$WORKTREE" || {
 PRE_SHA=$(agent_worktree_git rev-parse HEAD)
 
 cleanup() { launcher_git worktree remove "$WORKTREE" --force 2>/dev/null || true; }
+
+# The agent cannot install dependencies itself (no network), so the worktree gets its own
+# tree here (#3238). Without a runnable toolchain the agent can only escalate on the
+# fail-closed validate gate: skip the run, visibly, rather than spend one. rebase-only
+# needs no toolchain, so it is exempt.
+if [[ "$ACTION" != "rebase-only" ]] && ! provision_worktree_modules "$WORKTREE"; then
+  echo "ERROR: could not provision node_modules for $BRANCH - skipping the agent run (#3238)." >&2
+  post_marked_comment "$ATTEMPT_MARKER" 'remediation-unrunnable: no node_modules. The remediation worktree could not get its own dependencies (`npm ci --offline` failed), so no agent was started. Left for a human.'
+  cleanup
+  exit 0
+fi
 
 # ── rebase-only: mechanical merge of origin/main, no agent ─────────────────────
 if [[ "$ACTION" == "rebase-only" ]]; then
