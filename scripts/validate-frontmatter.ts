@@ -34,6 +34,7 @@ import {
   validateFrontmatterProse,
 } from '../packages/minspec/src/lib/spec-validator';
 import { parseSpec } from '../packages/minspec/src/lib/spec';
+import { findOpenClarify } from './lib/clarify-open';
 import { DEFAULT_CONFIG, loadConfig } from '../packages/minspec/src/lib/config';
 import type { Tier } from '../packages/minspec/src/lib/config';
 import {
@@ -878,6 +879,31 @@ for (const file of annFiles) {
   for (const v of findings) {
     if (v.severity === 'error') fail(file, `${v.message} ${v.fixHint}`);
     else warn(`status-annotation ${relative(ROOT, file)}: ${v.message}`);
+  }
+}
+
+// Rule 24 (WARN, #3390): a Clarify block's wording is checked against the predicate that reads it.
+//
+// Nine specs recorded every selection under "All N decisions are recorded". findOpenClarify
+// accepts only resolved/answered/decided and fails closed, so each read as open and delegated
+// approval refused it; nothing compared the wording with the predicate, so the mismatch looked
+// like a pile of open questions. A spec that has "Recorded selection" lines yet is still read as
+// open is flagged. WARN only: a spec can be open on purpose (some decisions genuinely
+// unanswered), and `recorded` is NOT added to the predicate, which would widen a fail-closed gate.
+// Reuses annFiles, the specs listing Rule 23 already built (a listing failure is reported there).
+for (const file of annFiles) {
+  try {
+    const content = readFileSync(file, 'utf-8');
+    if (!/recorded selection/i.test(content)) continue;
+    const verdict = findOpenClarify(content);
+    if (verdict.open) {
+      warn(
+        `clarify-wording ${relative(ROOT, file)}: has "Recorded selection" lines but the open-Clarify gate still reads ${verdict.items.join(', ')} as open. ` +
+          'Word the Decisions header with resolved, answered or decided (for example "All N decisions are answered, not ratified"), or leave it open on purpose.',
+      );
+    }
+  } catch (error) {
+    warn(`clarify-wording ${relative(ROOT, file)}: the check could not run on this file (${(error as Error).message})`);
   }
 }
 
