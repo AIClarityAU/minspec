@@ -148,10 +148,17 @@ Each criterion is a fixture-driven unit test over the pure predicates. Fixtures 
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 **D1. Scope. (rec) Build FR-5 and the FR-4 header fix only.** Cost: `PARENT_FLOOR = 200` stays
 a fixed floor that expires when the register nears 200 (87 away at highest id 113). Rejected:
 re-deriving the boundary from the register, which #3140 already settled differently and which
 alone gives zero leak coverage, because a leaked `DR-362.md` is a local file claiming its number.
+
+**Recorded selection: Option (FR-5 and the FR-4 header fix only),** build FR-5 and the FR-4
+header fix only, leaving `PARENT_FLOOR = 200` as a fixed floor.
 
 **D2. The margin `M`. (rec) 20.** The largest step on disk is 2; the largest in-flight batch
 seen is four consecutive records (`DR-106.md:20-27`); the nearest cited parent number, 172, is
@@ -159,12 +166,18 @@ seen is four consecutive records (`DR-106.md:20-27`); the nearest cited parent n
 FR-5 cannot detect a leak of that number. A larger `M`, such as 50, absorbs bigger batches but
 loses the 172 coverage sooner; only DR-053 v2 prefixed refs (#679 / #681) disambiguate after.
 
+**Recorded selection: Option (20),** the margin `M` is 20.
+
 **D3. Where FR-5 runs. (rec) A pure function in `scripts/lib/dr-id-collision.ts`, called as a
 new fatal rule in `scripts/validate-frontmatter.ts`, and unit-tested.** It sits next to Rule 17,
 which already reads the same files. Cost: `npm run validate` gains a fatal rule, so a leak
 blocks local validation as well as CI. That is intended, but it is a new way for validation
 to stop. Alternative: keep it inside the T0 vitest file. That is less visible locally, and it
 couples two jobs in one test again, which is how this gap arose.
+
+**Recorded selection: Option (pure function),** a pure function in
+`scripts/lib/dr-id-collision.ts`, called as a new fatal rule in
+`scripts/validate-frontmatter.ts`, and unit-tested.
 
 ## Alternatives rejected
 

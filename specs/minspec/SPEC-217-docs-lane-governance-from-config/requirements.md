@@ -191,14 +191,15 @@ this change.
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended. An
-agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
-on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
-chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
-(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
-context, not verified. No human chose any single item. DQ-3 is left open (its recommendation
-is evidence-incomplete by this document's own note); this section stays open, and the spec
-is not ready to approve, until the founder answers.
+DQ-3 has a selection recorded from the answer to task-queue item c217 (2026-10-27: "Yes
+(Recommended)"), an answer the queue attributes to the founder. A queue answer is not
+consent and is not verified here: DR-108 (delegated approval) section 4 holds that a queue
+item cannot carry consent, because any session can write the queue. That selection therefore
+binds nothing on its own. It binds only if the founder approves this spec with it in its
+text; that approval, not this record, is the consent act, and it may overturn it. The other
+selections carry the (rec) option an agent session copied; no human chose them (each says
+so). Delegation DLG-001 (DR-108) made none of these selections. This section stays open, and
+the spec is not ready to approve, until the founder answers or confirms the rest.
 
 **DQ-1 — `.minspec/` present but `config.json` absent.** The extension treats this as "all
 defaults" (`config.ts:210-212`).
@@ -226,10 +227,16 @@ document's (rec) option; no human chose this item.
 **DQ-3 — Govern `epicsDir` too.** Epics are approvables (`approvable.ts:15`) and are not
 governed even at defaults today. That gap exists in this repo now, not only for adopters.
 
-**Not recorded:** the recommendation is evidence-incomplete by this document's own note:
-whether an epic `status:` change is a human act has not been decided, and the search for one
-was partial. It also moves epic status edits in this repo from the docs lane to a human
-merge. Needs the founder's answer.
+**Recorded selection: `a`,** include `epicsDir` (default `docs/epics`) in this change, so an
+epic `status:` edit in this repo now needs a human merge. Source: the answer to task-queue
+item c217, 2026-10-27 ("Yes (Recommended)"). A queue answer is not consent (DR-108 section
+4), so this selection is unverified and binds only if the founder approves this spec's text
+with it in place.
+
+The evidence gap stays open: no record yet decides whether an epic `status:` change is a
+human act, the search for one was partial, and the note below still stands. This selection
+does not close that gap. The founder confirms or reverses it, with the gap in view, when
+approving this spec's text.
 
 - `a` **(rec)** Include `epicsDir` (default `docs/epics`) in this change. *Cost:* it changes
   behaviour for this repo: an epic `status:` edit, for example `active` to `done`, now needs a
