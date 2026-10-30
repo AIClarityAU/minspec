@@ -794,3 +794,88 @@ describe('#1855 — a failed lookup is never read as proof of absence', () => {
     expect(ghCalls()).toContain('issue close 4242');
   });
 });
+
+describe('#3355 — an open issue with no lane label gets inbox', () => {
+  /**
+   * A `gh` stub for the lane check. `issue list ... --json number,labels` answers `list`
+   * (or exits 4 when `listFails`); `issue edit N` exits 4 for every N in `editFails`;
+   * every other call is silent success. Every argv is logged.
+   */
+  function runLaneCheck(
+    fn: string,
+    opts: { list?: string; listFails?: boolean; editFails?: number[] },
+    env: Record<string, string> = {},
+  ): string {
+    const bin = path.join(tmp, 'bin-lane');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'lane-list.json'), opts.list ?? '[]', 'utf-8');
+    fs.writeFileSync(
+      path.join(bin, 'gh'),
+      `#!/usr/bin/env bash\n` +
+        `printf '%s\\n' "$*" >> ${JSON.stringify(path.join(tmp, 'gh-calls.log'))}\n` +
+        `if [[ "$*" == *"--json number,labels"* ]]; then\n` +
+        (opts.listFails ? `  exit 4\n` : `  cat ${JSON.stringify(path.join(tmp, 'lane-list.json'))}; exit 0\n`) +
+        `fi\n` +
+        `if [[ "$1 $2" == "issue edit" ]]; then\n` +
+        `  for n in ${JSON.stringify((opts.editFails ?? []).join(' '))}; do [[ "$n" == "$3" ]] && exit 4; done\n` +
+        `fi\n` +
+        `exit 0\n`,
+      { mode: 0o755 },
+    );
+    const script = ['set -uo pipefail', 'REPO=owner/repo', `SCRIPT_DIR=${JSON.stringify(path.dirname(DRAIN))}`, reconcilerBlock(), fn].join('\n');
+    return execFileSync('bash', ['-c', script], {
+      encoding: 'utf-8',
+      env: { ...process.env, ...env, PATH: `${bin}:${process.env.PATH}` },
+    });
+  }
+  const issues = (rows: Array<[number, string[]]>): string =>
+    JSON.stringify(rows.map(([number, labels]) => ({ number, labels: labels.map((name) => ({ name })) })));
+
+  it('T0: an open issue with only role:dev gets inbox; a laned one is not touched', () => {
+    const out = runLaneCheck('reconcile_unlaned_issues', {
+      list: issues([[11, ['role:dev']], [12, ['inbox', 'role:dev']], [13, []]]),
+    });
+    const calls = ghCalls();
+    expect(calls).toContain('issue edit 11 --repo owner/repo --add-label inbox');
+    expect(calls).toContain('issue edit 13 --repo owner/repo --add-label inbox');
+    expect(calls).not.toContain('issue edit 12');
+    expect(out).toContain('2 open issue(s) had no lane label and got inbox; 0 could not be labelled');
+  });
+
+  it('prints the count even when every issue has a lane (never silent at zero)', () => {
+    const out = runLaneCheck('reconcile_unlaned_issues', { list: issues([[1, ['inbox']], [2, ['parked']]]) });
+    expect(out).toContain('0 open issue(s) had no lane label and got inbox; 0 could not be labelled');
+    expect(ghCalls()).not.toContain('issue edit');
+  });
+
+  it('a failed list is reported as unchecked, never as zero unlaned', () => {
+    const out = runLaneCheck('reconcile_unlaned_issues', { listFails: true });
+    expect(out).toContain('could not list open issues');
+    expect(out).toContain('NOT evidence that every issue has a lane');
+    expect(out).not.toContain('had no lane label');
+    expect(ghCalls()).not.toContain('issue edit');
+  });
+
+  it('an unparseable list is reported as unchecked, never as zero unlaned', () => {
+    const out = runLaneCheck('reconcile_unlaned_issues', { list: 'this is not json' });
+    expect(out).toContain('could not parse the issue list');
+    expect(out).not.toContain('had no lane label');
+    expect(ghCalls()).not.toContain('issue edit');
+  });
+
+  it('a failed edit is counted and named, and the others still get inbox', () => {
+    const out = runLaneCheck('reconcile_unlaned_issues', {
+      list: issues([[21, []], [22, []], [23, []]]),
+      editFails: [22],
+    });
+    expect(out).toContain('could not add inbox to #22');
+    expect(out).toContain('2 open issue(s) had no lane label and got inbox; 1 could not be labelled');
+    expect(ghCalls()).toContain('issue edit 23 --repo owner/repo --add-label inbox');
+  });
+
+  it('reconcile_labels runs the lane check', () => {
+    const out = runLaneCheck('reconcile_labels', { list: issues([[31, ['role:dev']]]) });
+    expect(ghCalls()).toContain('issue edit 31 --repo owner/repo --add-label inbox');
+    expect(out).toContain('1 open issue(s) had no lane label and got inbox');
+  });
+});
