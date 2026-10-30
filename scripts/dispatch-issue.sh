@@ -628,12 +628,14 @@ delegated_merge_human_claims() {
   elif [[ -z "${refs//[$'\n\r\t ']/}" ]]; then
     # No confirmed link on a non-drain branch (#3115). Two cases look identical here: a
     # `Closes #N` trailer GitHub failed to link (#2228), and a PR that claims to close nothing
-    # (a bot Clarify-selections PR). Admit only the latter: authored by minspec-sdd[bot] AND
-    # no closing keyword in the body. An unreadable author/body fails closed.
+    # (a bot Clarify-selections PR). Admit only the latter: authored by the App identity AND
+    # no closing keyword in the body. The login must be `app/minspec-sdd` or `minspec-sdd[bot]`:
+    # the `[bot]`/`app/` forms cannot be registered by a person, whereas a bare `minspec-sdd`
+    # is an ordinary user login anyone could hold. An unreadable author/body fails closed.
     local author="" body_closes=""
     if author=$(printf '%s' "$view" | jq -r '.author.login | if type == "string" then . else error("no author") end' 2>/dev/null) \
        && body_closes=$(printf '%s' "$view" | jq -r '.body | if type == "string" then (test("(^|[^a-z])(close[sd]?|fix(e[sd])?|resolve[sd]?)[: \\t]*([a-z0-9._-]+/[a-z0-9._-]+)?(#|https?://)"; "i")) else error("no body") end' 2>/dev/null) \
-       && [[ "$author" =~ ^(app/)?minspec-sdd(\[bot\])?$ && "$body_closes" == "false" ]]; then
+       && [[ "$author" =~ ^(app/minspec-sdd|minspec-sdd\[bot\])$ && "$body_closes" == "false" ]]; then
       return 0
     fi
     printf 'closes-link-unconfirmed\tPR #%s has no confirmed closing link; merging would close no issue\n' "$pr"

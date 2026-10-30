@@ -216,6 +216,8 @@ describe('human claims: a covered PR the bot must still not merge (#3050)', () =
     ['another bot with no link', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [], author: { login: 'dependabot[bot]' }, body: '' }) }, 'closes-link-unconfirmed'],
     ['minspec-sdd[bot] with an unlinked Closes trailer', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [], author: { login: 'minspec-sdd[bot]' }, body: 'x\n\nCloses #12' }) }, 'closes-link-unconfirmed'],
     ['minspec-sdd[bot] with an unlinked fixes: trailer', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [], author: { login: 'minspec-sdd[bot]' }, body: 'Fixes: org/repo#12' }) }, 'closes-link-unconfirmed'],
+    ['a bare minspec-sdd user login (spoofable, no [bot]/app/ form)', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [], author: { login: 'minspec-sdd' }, body: '' }) }, 'closes-link-unconfirmed'],
+    ['minspec-sdd[bot] with no readable body', { view: JSON.stringify({ headRefName: 'cos/x', closingIssuesReferences: [], comments: [], author: { login: 'minspec-sdd[bot]' } }) }, 'closes-link-unconfirmed'],
     ['minspec-sdd[bot] with no readable author', { view: JSON.stringify({ headRefName: 'cos/x', closingIssuesReferences: [], comments: [], body: '' }) }, 'closes-link-unconfirmed'],
     ['a creator-shepherd handoff comment', { view: view({ comments: [{ body: 'x <!-- minspec-shepherd-handoff -->' }] }) }, 'handed-to-human'],
     ['an unreadable PR view', { viewExit: 1 }, 'pr-claims-unreadable'],
