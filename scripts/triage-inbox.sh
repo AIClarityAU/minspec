@@ -192,7 +192,18 @@ CONTENT
   # view of tier / human_only, and re-parsing the agent's raw text here would be a
   # second parser of the same format — the classic way a gate and its record drift.
   local FIELDS LABEL ROLE HOLD TIER HUMAN_ONLY
-  FIELDS=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" --fields || true)
+  # #3282 — a `build: SPEC-NNN` title names a spec; hand its on-disk status to the
+  # gate so an already-approved spec is never sent to the specify queue.
+  local NAMED_SPEC_STATUS=""
+  if [[ "$ISSUE_TITLE" =~ ^[[:space:]]*[Bb]uild:[[:space:]]*SPEC-([0-9]+) ]]; then
+    local SPEC_FILE SPEC_NUM
+    SPEC_NUM=$(printf '%03d' "$((10#${BASH_REMATCH[1]}))")
+    SPEC_FILE=$(ls "${SCRIPT_DIR}"/../specs/*/SPEC-"${SPEC_NUM}"-*/requirements.md 2>/dev/null | head -1 || true)  # swallow-ok: no matching spec dir means no status; the gate treats empty as "no spec named"
+    if [[ -n "$SPEC_FILE" ]]; then
+      NAMED_SPEC_STATUS=$(awk 'NR>1 && /^---$/{exit} NR>1 && /^status:/{print $2; exit}' "$SPEC_FILE" || true)  # swallow-ok: unreadable frontmatter leaves status empty = no spec named
+    fi
+  fi
+  FIELDS=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" --fields "--named-spec-status=${NAMED_SPEC_STATUS}" || true)
   LABEL=$(verdict_field label "$FIELDS")
   ROLE=$(verdict_field role "$FIELDS")
   HOLD=$(verdict_field hold "$FIELDS")
