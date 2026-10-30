@@ -39,6 +39,7 @@
 #   scripts/drain-inbox.sh --should-continue <pid> <epoch>  # exit 0 continue / 1 stop
 #   scripts/drain-inbox.sh --paused                         # exit 0 paused / 1 not (#1187)
 #   scripts/drain-inbox.sh --zai-key-note                   # where the z.ai key comes from (never its value; zaikey23)
+#   scripts/drain-inbox.sh --unlaned    (<json on stdin)    # issue numbers carrying no lane label (#3355)
 #   scripts/drain-inbox.sh --is-quota   (<text on stdin)    # exit 0 iff the CLI's OWN limit line is in it
 #   scripts/drain-inbox.sh --resolve-session-pid            # print session anchor PID
 #   scripts/drain-inbox.sh --quota-gate                     # exit 0 admit / 42 defer
@@ -1367,11 +1368,94 @@ reconcile_done_issues() {
   done <<< "$done_issues"
 }
 
+# ── Lane reconciler (#3355) ──────────────────────────────────────────────────
+#
+# triage-inbox.sh reads only `--label inbox` and the drain reads only `agent-ready*`, so
+# an open issue carrying NO lane label is invisible to every producer (103 of 1029 were,
+# on 2026-10-30, including the drain bug #2699). Nothing asserted that every open issue
+# sits in a lane; triage validated what it was given and never that it was given all.
+#
+# A lane label is any label an actor reads: inbox, agent-* (ready, ready-specify, running,
+# done, escalated, ...), hold:*, needs-review, needs-human-review, needs-info, blocked-by*, parked.
+# unlaned_numbers is the pure decision (stdin: `gh issue list --json number,labels`,
+# stdout: one number per issue with no lane label). It needs jq; without it the caller
+# reports loudly instead of guessing.
+unlaned_numbers() {
+  jq -r '.[] | select(([.labels[].name | select(
+      . == "inbox" or . == "needs-review" or . == "needs-human-review" or . == "needs-info" or . == "parked"
+      or startswith("agent-") or startswith("hold:") or startswith("blocked-by")
+    )] | length) == 0) | .number'
+}
+
+# Adds `inbox` to every open issue with no lane label and ALWAYS prints the count, even
+# when zero (invariant 2: never silent). Never fatal: a failed query or edit is printed
+# loudly and the cycle goes on; an unreadable list is NOT read as "no unlaned issues".
+reconcile_unlaned_issues() {
+  local json nums n count=0 failed=0
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "[drain] lane check: jq missing — could not look for issues with no lane label (#3355)."
+    return 0
+  fi
+  if ! json=$(gh issue list --repo "$REPO" --state open --limit 5000 --json number,labels 2>/dev/null); then
+    echo "[drain] lane check: could not list open issues — NOT evidence that every issue has a lane (#3355)."
+    return 0
+  fi
+  local listed
+  listed=$(printf '%s' "$json" | jq 'length' 2>/dev/null || echo 0)
+  if [[ "$listed" -ge 5000 ]]; then
+    echo "[drain] lane check: open-issue list hit the 5000 limit — issues beyond it were NOT checked (#3355)."
+  fi
+  if ! nums=$(printf '%s' "$json" | unlaned_numbers); then
+    echo "[drain] lane check: could not parse the issue list — NOT evidence that every issue has a lane (#3355)."
+    return 0
+  fi
+  # Issues the chief-of-staff runner parked on purpose carry a comment ending "Do not
+  # re-triage" (triage reads title and body only, so it would never see that comment).
+  # A failed or unreadable search must not read as "nothing parked": edit nothing.
+  local pjson parked
+  if ! pjson=$(gh issue list --repo "$REPO" --state open --limit 5000 \
+        --search '"Do not re-triage" in:comments' --json number 2>/dev/null); then
+    echo "[drain] lane check: could not search for parked issues — NO edits this pass, NOT evidence that nothing is parked (#3355)."
+    return 0
+  fi
+  if ! parked=$(printf '%s' "$pjson" | jq -r '.[].number' 2>/dev/null); then
+    echo "[drain] lane check: could not parse the parked-issue search — NO edits this pass (#3355)."
+    return 0
+  fi
+  if [[ "$(printf '%s' "$pjson" | jq 'length' 2>/dev/null || echo 0)" -ge 5000 ]]; then
+    echo "[drain] lane check: parked-issue search hit the 5000 limit — some parked issues may be re-triaged (#3355)."
+  fi
+  # main-red reports are filed by main-red-watch for a human, and no queue reads them.
+  local red
+  red=$(printf '%s' "$json" | jq -r '.[] | select(any(.labels[]; .name == "main-red")) | .number' 2>/dev/null) || red=""
+  local skipped_parked=0 skipped_red=0
+  while read -r n; do
+    [[ -n "$n" ]] || continue
+    if grep -qxF "$n" <<< "$parked"; then
+      skipped_parked=$((skipped_parked + 1))
+      continue
+    fi
+    if grep -qxF "$n" <<< "$red"; then
+      skipped_red=$((skipped_red + 1))
+      continue
+    fi
+    if gh issue edit "$n" --repo "$REPO" --add-label inbox >/dev/null 2>&1; then
+      count=$((count + 1))
+    else
+      failed=$((failed + 1))
+      echo "[drain] lane check: could not add inbox to #$n — left as-is."
+    fi
+  done <<< "$nums"
+  echo "[drain] lane check: ${count} open issue(s) had no lane label and got inbox; ${failed} could not be labelled (#3355)."
+  echo "[drain] lane check: skipped ${skipped_parked} parked on purpose (Do not re-triage) and ${skipped_red} main-red report(s) (#3355)."
+}
+
 # Never fatal: a reconciler exists to reduce drift, and must not become a new way for
 # a cycle to die. Failures are reported, then the cycle proceeds.
 reconcile_labels() {
   reconcile_stale_claims || echo "[drain] reconcile: stale-claim pass errored — continuing."
   reconcile_done_issues  || echo "[drain] reconcile: agent-done pass errored — continuing."
+  reconcile_unlaned_issues || echo "[drain] reconcile: lane check errored — continuing."
 }
 
 # record_delegated_approvals: Step 0b of a cycle (#2981, DR-108). For content that a
@@ -3811,6 +3895,11 @@ case "$1" in
     rm -f "$PAUSE_FILE"
     echo "▶️   Drain pause marker removed ($PAUSE_FILE). A running loop resumes within one poll."
     exit 0
+    ;;
+  --unlaned)
+    # Pure seam (#3355): stdin = `gh issue list --json number,labels`; prints numbers with no lane label.
+    unlaned_numbers
+    exit $?
     ;;
   --is-quota)
     # Pure seam: classify combined agent output (stdin) as quota/limit or not.
