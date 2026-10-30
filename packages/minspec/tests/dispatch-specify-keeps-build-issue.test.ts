@@ -8,15 +8,21 @@
  * this way and their builds were never started. No gate asserted that a spec PR closes
  * nothing, so the state was never rejected.
  *
- * Pinned here, as behaviour through the real seams where one exists:
- *   - `--specify-pr-body N` turns every closing keyword into a plain reference and
- *     leaves exactly one `Refs #N`, whatever the agent's summary or the review block said;
- *   - the delegated spec merge refuses a spec-only drain PR that would close anything
- *     (the second witness: an in-flight PR opened before this fix still carries `Closes`);
- *   - the publish path wires both, and a finished specify run leaves the issue open
- *     with `awaiting-spec-signoff` beside `agent-done`.
- * The inverted post-create link witness (arm only on a read, empty closing list) is
- * driven through the real 6a..6b span in dispatch-issue-closing-link-verify.test.ts.
+ * Pinned here:
+ *   - as behaviour, through the real seam: `--specify-pr-body N` turns every closing
+ *     keyword into a plain reference and leaves exactly one `Refs #N`, whatever the
+ *     agent's summary or the review block said;
+ *   - as source text only, which proves the lines exist and not that they run: the publish
+ *     path calls that seam, and the specify arm applies `awaiting-spec-signoff` beside
+ *     `agent-done`.
+ * Pinned elsewhere:
+ *   - the inverted post-create link witness (arm only on a read, empty closing list), through
+ *     the real 6a..6b span: dispatch-issue-closing-link-verify.test.ts;
+ *   - the delegated spec merge refusing a spec PR that would close anything:
+ *     delegated-merge-seam.test.ts;
+ *   - the issue surviving the drain after its spec PR merges, through the real reconciler:
+ *     drain-reconcile.test.ts.
+ * Nothing here runs a dispatch or follows an issue past the merge.
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';

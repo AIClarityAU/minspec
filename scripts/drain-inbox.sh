@@ -1213,14 +1213,55 @@ reopened_after_close() {
 # outright when the issue's own history shows a reopen after the last close — that
 # is a standing human veto on the merged-branch inference, and re-deriving the same
 # conclusion from the same branch state on every cycle cannot see it otherwise.
+#
+# #3351 review: `awaiting-spec-signoff` is the one case where an open `agent-done` issue
+# is NOT a contradiction. A finished specify run leaves its issue open on purpose to carry
+# the build (#3348), so neither arm's inference holds: a merged `agent/issue-<N>` is the
+# SPEC, not the build, and an unmerged one is a spec PR in flight, not a false completion.
+# Such an issue is left exactly as it is until sign-off moves it on (#3350).
+#
+# Three outcomes, as in reopened_after_close above:
+#   0  awaiting — the labels were read and carry awaiting-spec-signoff. Leave it alone.
+#   1  ordinary — the labels were read and do not. Reconcile as usual.
+#   2  unknown  — no readable label list, or one without the `agent-done` the issue was
+#                 just selected on. The caller changes nothing on this issue.
+# The JSON is fetched raw and reduced here so the reduction is what a test exercises.
+awaits_spec_signoff() {
+  local n="$1" raw verdict
+  raw=$(gh issue view "$n" --repo "$REPO" --json labels 2>/dev/null) || return 2
+  verdict=$(printf '%s' "$raw" | jq -r '
+      if (.labels | type) != "array" then "unknown"
+      else
+        [.labels[].name] as $names
+        | if ($names | index("agent-done")) == null then "unknown"
+          elif ($names | index("awaiting-spec-signoff")) != null then "yes"
+          else "no" end
+      end' 2>/dev/null) || return 2
+  case "$verdict" in
+    yes) return 0 ;;
+    no)  return 1 ;;
+    *)   return 2 ;;   # empty, multi-line, or anything this function does not recognise
+  esac
+}
+
 reconcile_done_issues() {
-  local done_issues n pr veto rc
-  done_issues=$(gh issue list --repo "$REPO" --state open --label "agent-done" \
+  local done_issues n pr veto rc awaiting
+  # --limit: issues awaiting sign-off stay in this selector until sign-off, so gh's default
+  # 30-row page would fill with them and silently stop reconciling everything older.
+  done_issues=$(gh issue list --repo "$REPO" --state open --label "agent-done" --limit 1000 \
     --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no agent-done issues
   [[ -n "$done_issues" ]] || return 0
 
   while read -r n; do
     [[ -n "$n" ]] || continue
+    awaiting=0; awaits_spec_signoff "$n" || awaiting=$?
+    case "$awaiting" in
+      0)
+        continue ;;
+      2)
+        echo "[drain] reconcile: could not read the labels of #$n, so it may be awaiting spec sign-off — leaving it exactly as it is (#3351 review). The rest of the board is still reconciled."
+        continue ;;
+    esac
     # Keep the EXIT STATUS, not just the output (#1855). An empty $pr is consumed as a
     # BRANCH below, and the else arm is the MUTATING one: it strips `agent-done`, adds
     # `needs-human-review`, and prints "NO merged PR exists". With the status swallowed,

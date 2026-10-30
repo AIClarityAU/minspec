@@ -136,6 +136,7 @@ function stubGh(
       `  *"--label agent-running"*) key=running ;;\n` +
       `  *"--label agent-done"*)    key=done ;;\n` +
       `  "pr list"*)                key=pr ;;\n` +
+      `  "issue view"*)             key=labels ;;\n` +
       `esac\n` +
       `for f in ${JSON.stringify(failKeys.join(' '))}; do\n` +
       // `-n "$f"` guards the degenerate case: with failKeys=[] (the default), the
@@ -145,6 +146,19 @@ function stubGh(
       // `issue edit --remove-label`), not just the ones a test actually meant to fail.
       `  [[ -n "$f" && "$key" == "$f" ]] && exit 4\n` +   // 4 = what real gh returns unauthenticated
       `done\n` +
+      // `issue view N --json labels`: the raw JSON gh prints, per issue (`labels:N`) or for
+      // all (`labels`). Default: an ordinary agent-done issue, so a test that is not about
+      // the sign-off exemption need not say so.
+      `if [[ "$key" == labels ]]; then\n` +
+      `  node -e 'const t=require(process.argv[1]);process.stdout.write(t["labels:"+process.argv[2]]??t.labels??JSON.stringify({labels:[{name:"agent-done"}]}))' ${JSON.stringify(table)} "$3"\n` +
+      `  exit 0\n` +
+      `fi\n` +
+      // Real gh returns 30 rows unless told otherwise, and a selector that ignored that
+      // could not be told apart from one that handled it.
+      `if [[ "$key" == done && "$*" != *"--limit"* ]]; then\n` +
+      `  node -e 'const t=require(process.argv[1]);process.stdout.write(t.done??"")' ${JSON.stringify(table)} | head -30\n` +
+      `  exit 0\n` +
+      `fi\n` +
       `[[ -n "$key" ]] && node -e 'const t=require(process.argv[1]);process.stdout.write(t[process.argv[2]]??"")' ${JSON.stringify(table)} "$key"\n` +
       `exit 0\n`,
     { mode: 0o755 },
@@ -220,6 +234,19 @@ function stubGhOneLinePerPage(
       `case "$*" in\n` +
       `  *"--label agent-running"*) key=running ;;\n` +
       `esac\n` +
+      // `issue view N --json labels`: the raw JSON gh prints, per issue (`labels:N`) or for
+      // all (`labels`). Default: an ordinary agent-done issue, so a test that is not about
+      // the sign-off exemption need not say so.
+      `if [[ "$key" == labels ]]; then\n` +
+      `  node -e 'const t=require(process.argv[1]);process.stdout.write(t["labels:"+process.argv[2]]??t.labels??JSON.stringify({labels:[{name:"agent-done"}]}))' ${JSON.stringify(table)} "$3"\n` +
+      `  exit 0\n` +
+      `fi\n` +
+      // Real gh returns 30 rows unless told otherwise, and a selector that ignored that
+      // could not be told apart from one that handled it.
+      `if [[ "$key" == done && "$*" != *"--limit"* ]]; then\n` +
+      `  node -e 'const t=require(process.argv[1]);process.stdout.write(t.done??"")' ${JSON.stringify(table)} | head -30\n` +
+      `  exit 0\n` +
+      `fi\n` +
       `[[ -n "$key" ]] && node -e 'const t=require(process.argv[1]);process.stdout.write(t[process.argv[2]]??"")' ${JSON.stringify(table)} "$key"\n` +
       `exit 0\n`,
     { mode: 0o755 },
@@ -372,6 +399,94 @@ describe('#1322 — an open agent-done issue is reconciled against its PR', () =
     const out = runReconciler('reconcile_done_issues', { done: '', pr: '1230\n' });
     expect(out.trim()).toBe('');
     expect(ghCalls()).not.toContain('issue close');
+  });
+});
+
+describe('#3351 review — an issue awaiting spec sign-off is left alone until sign-off', () => {
+  // The defect this pins: a finished specify run leaves its issue OPEN with
+  // `agent-done,awaiting-spec-signoff` (#3348), and the reconciler treats every open
+  // `agent-done` issue as a contradiction to resolve. Merged spec PR: it closed the build
+  // issue one cycle later, the #3348 bug by another path. Open spec PR: it told a human
+  // the run had failed.
+  const LABELS = (...names: string[]) => JSON.stringify({ labels: names.map((name) => ({ name })) });
+  const AWAITING = LABELS('agent-done', 'awaiting-spec-signoff', 'hold:specify');
+
+  function expectUntouched(n: number) {
+    const calls = ghCalls();
+    expect(calls).not.toContain(`issue close ${n}`);
+    expect(calls).not.toContain(`issue edit ${n}`);
+  }
+
+  it('a merged spec PR does not close the build issue', () => {
+    const out = runReconciler('reconcile_done_issues', { done: '42\n', pr: '77\n', labels: AWAITING }, [[]]);
+    expectUntouched(42);
+    expect(out).not.toContain('closing #42');
+  });
+
+  it('a spec PR still open is not reported as a failed run', () => {
+    const out = runReconciler('reconcile_done_issues', { done: '42\n', pr: '', labels: AWAITING });
+    expectUntouched(42);
+    expect(out).not.toContain('NO merged PR exists');
+    expect(ghCalls()).not.toContain('needs-human-review');
+  });
+
+  it('control: agent-done without the label still closes on a merged PR', () => {
+    const out = runReconciler(
+      'reconcile_done_issues',
+      { done: '42\n', pr: '77\n', labels: LABELS('agent-done', 'hold:specify') },
+      [[]],
+    );
+    expect(out).toContain('closing #42');
+    expect(ghCalls()).toContain('issue close 42');
+    expect(ghCalls()).toContain('--remove-label agent-done');
+  });
+
+  it('control: agent-done without the label is still surfaced when nothing merged', () => {
+    const out = runReconciler('reconcile_done_issues', { done: '42\n', pr: '', labels: LABELS('agent-done') });
+    expect(out).toContain('NO merged PR exists');
+    expect(ghCalls()).toContain('--remove-label agent-done');
+    expect(ghCalls()).toContain('--add-label needs-human-review');
+  });
+
+  it.each([
+    ['empty output', ''],
+    ['not JSON', 'HTTP 502'],
+    ['a null label list', '{"labels":null}'],
+    ['no label field', '{}'],
+    ['a list without the agent-done it was selected on', LABELS('hold:specify')],
+    ['two documents', `${LABELS('agent-done')}\n${LABELS('agent-done')}`],
+  ])('unreadable labels (%s), merged PR or not: no close, no relabel, and it says so', (_n, labels) => {
+    for (const pr of ['77\n', '']) {
+      const out = runReconciler('reconcile_done_issues', { done: '42\n', pr, labels }, [[]]);
+      expectUntouched(42);
+      expect(out).toMatch(/could not read the labels of #42/);
+    }
+  });
+
+  it('a failed label read changes nothing on that issue and the rest of the board is still reconciled', () => {
+    const out = runReconciler('reconcile_done_issues', { done: '42\n', pr: '77\n' }, [[]], {}, ['labels']);
+    expectUntouched(42);
+    expect(out).toMatch(/could not read the labels of #42/);
+
+    const bad = runReconciler(
+      'reconcile_done_issues',
+      { done: '42\n43\n', pr: '77\n', 'labels:42': '', 'labels:43': LABELS('agent-done') },
+      [[]],
+    );
+    expect(bad).toContain('closing #43');
+    expect(ghCalls()).toContain('issue close 43');
+    expect(ghCalls()).not.toContain('issue close 42');
+  });
+
+  it('issues parked for sign-off cannot crowd an ordinary one out of the 30-row default page', () => {
+    // These issues now sit in the selector for as long as sign-off takes, so a default-page
+    // selector would stop reconciling everything older than the newest 30 of them.
+    const parked = Array.from({ length: 30 }, (_, i) => 1000 - i);
+    const responses: Record<string, string> = { done: `${[...parked, 42].join('\n')}\n`, pr: '77\n' };
+    for (const n of parked) responses[`labels:${n}`] = AWAITING;
+    const out = runReconciler('reconcile_done_issues', responses, [[]]);
+    expect(out).toContain('closing #42');
+    expect(ghCalls()).not.toContain('issue close 1000');
   });
 });
 
