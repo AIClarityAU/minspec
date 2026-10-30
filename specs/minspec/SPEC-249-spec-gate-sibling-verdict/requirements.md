@@ -158,7 +158,14 @@ option A) changes **no** verdict on the current corpus; it closes a latent hole 
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 **D1. Whose approval decides one spec id's verdict?**
+
+**Recorded selection: Option (A),** the requirements doc's approval decides one spec id's
+verdict (FR-1/FR-2/FR-3).
 
 - **A. The requirements doc's approval (FR-1/FR-2/FR-3) (rec).** This closes the masking hole,
   keeps the solo-mode mid-cycle shape permissive, and changes zero verdicts today. **Cost:** if
@@ -179,6 +186,8 @@ option A) changes **no** verdict on the current corpus; it closes a latent hole 
 
 **D2. A gated group with no requirements doc (FR-3).**
 
+**Recorded selection: Option (A),** fail closed: the weakest verdict wins.
+
 - **A. Fail closed: weakest verdict wins (rec).** This matches constitution 2. **Cost:** a
   spec that put `tier:`/`phases:` only on `design.md` (a convention breach) blocks until a
   requirements doc is approved. Zero instances today.
@@ -187,6 +196,9 @@ option A) changes **no** verdict on the current corpus; it closes a latent hole 
 
 **D3. How the gate learns the approvable definition (FR-2).** The extension's classifier is
 TypeScript and the gate is Python, so the definition cannot be shared by import.
+
+**Recorded selection: Option (A),** a Python constant mirroring the basenames, plus a parity
+test against the TS classifier.
 
 - **A. A Python constant mirroring the basenames, plus a parity test (rec).** The test asserts
   that the Python constant and the TS classifier agree over every `specs/**/*.md`. **Cost:** a
