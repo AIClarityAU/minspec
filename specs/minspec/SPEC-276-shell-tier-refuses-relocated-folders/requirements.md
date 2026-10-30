@@ -10,7 +10,9 @@ depends_on: []
 relates_to: [SPEC-075, SPEC-218, "#2678", "#2675", "#1569", "#2684", "#1908"]
 implements: none
 implements_reason: >-
-  Specify phase only. Which files this spec will own is decided at Plan, after Decision D1 is answered.
+  Clarify answers are recorded but not ratified (D1 option a, D2 and D3 as recommended). Which
+  files this spec will own is still decided at Plan; no recorded option names a new file, so
+  implements stays none.
 phases:
   specify: in-progress
   clarify: pending
@@ -59,6 +61,19 @@ phases:
 - Sibling rule: the same literal-path assumption must be hunted in other managed files (#2675); this spec fixes the shell tier only and does not close the family.
 
 ## Decisions needed (Clarify)
+
+All 3 decisions are recorded: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001 covers spec approval and engineering-DR acceptance only). They are ratified only when a
+human or a covered delegation approves this spec.
+
+- **D1 - Recorded selection: Option a,** refuse visibly when config names other folders: a bounded
+  grep on `"specsDir"` / `"decisionsDir"`, then a fail-closed message.
+- **D2 - Recorded selection: the recommendation,** any of `specsDir`, `decisionsDir` or
+  `validatedCorpora` naming a non-default folder counts as relocated under option a, so no
+  precedence rule is needed.
+- **D3 - Recorded selection: the recommendation,** yes, build the refusal now, even if #1569 makes
+  the shell tier rarely reached.
 
 ### D1: refuse, or read the folders?
 
