@@ -17,7 +17,7 @@ implements_reason: >-
 affects: [.github/workflows/docs-lane.yml, packages/minspec/src/lib/ci-review-templates.ts, packages/minspec/src/lib/governance-transition.ts, scripts/lib/governance-transition.sh, scripts/push-docs.sh, packages/minspec/src/lib/approval-pr.ts, packages/minspec/tests/governance-lane-eligibility.test.ts, packages/minspec/tests/approval-pr.test.ts]
 phases:
   specify: done
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -191,15 +191,13 @@ this change.
 
 ## Decisions needed (Clarify)
 
-DQ-3 has a selection recorded from the answer to task-queue item c217 (2026-10-27: "Yes
-(Recommended)"), an answer the queue attributes to the founder. A queue answer is not
-consent and is not verified here: DR-108 (delegated approval) section 4 holds that a queue
-item cannot carry consent, because any session can write the queue. That selection therefore
-binds nothing on its own. It binds only if the founder approves this spec with it in its
-text; that approval, not this record, is the consent act, and it may overturn it. The other
-selections carry the (rec) option an agent session copied; no human chose them (each says
-so). Delegation DLG-001 (DR-108) made none of these selections. This section stays open, and
-the spec is not ready to approve, until the founder answers or confirms the rest.
+All 5 decisions are answered, not ratified. DQ-3 is the founder's: his answer to task-queue item c217
+(2026-10-27, "Yes (Recommended)", via AskUserQuestion) is verbatim in the task log, and the selection below is
+attributed to it. DQ-1, DQ-2, DQ-4 and DQ-5 are not: an agent session copied this document's (rec) option for
+each, and no human chose them (each says so). Delegation DLG-001 (DR-108) made none of these selections and
+covers spec approval and engineering-DR acceptance only. A queue answer is not consent (DR-108 section 4: any
+session can write the queue), so the DQ-3 selection binds only when the founder or a covered delegation approves
+this spec with it in its text; the evidence gap it names stays open.
 
 **DQ-1 — `.minspec/` present but `config.json` absent.** The extension treats this as "all
 defaults" (`config.ts:210-212`).

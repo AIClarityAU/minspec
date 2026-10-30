@@ -107,6 +107,11 @@ Out: blocking edits to approved specs (Alternative 2 in the issue, rejected: DR-
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 - **D1 - blocking or advisory for `STRANDS`?**
   - (a) **Annotate, exit 0** (rec): print the verdict and surface it as a PR comment/summary
     line. Cost: it is a warning, so nothing stops a PR that strands a sign-off if nobody reads
@@ -114,12 +119,15 @@ Out: blocking edits to approved specs (Alternative 2 in the issue, rejected: DR-
   - (b) Exit 1 unless the PR labels/declares intent to re-approve. Cost: needs an
     intent-declaration mechanism and blocks the routine "edit now, re-approve next" flow,
     inviting `--admin` bypass, which is the failure DR-081 was written against.
+  **Recorded selection: Option (a),** annotate and exit 0; print the verdict and surface it as a PR comment or summary line. An agent session copied this document's (rec) option; no human chose this item.
 - **D2 - where does the signal live?** (a) `approval-integrity.ts` only (rec: it is the shipped
   copy adopters run; cost: the LLM voters, fed by `approval-provenance.py`, do not see it).
   (b) Also add it to `approval-provenance.py` so voters see it; cost: two implementations of one
   predicate that can drift (the project's recurring duplicate-predicate failure) unless one
   calls the other.
+  **Recorded selection: Option (a),** the signal lives in `approval-integrity.ts` only. An agent session copied this document's (rec) option; no human chose this item.
 - **D3 - wiring.** `approval-integrity` is currently advisory, not in the required-check set
   (its own header). Should this verdict wait for that wiring, or ship ahead as advisory output
   on every PR? Rec: ship ahead as advisory output; cost: output on every PR touching an
   approved spec until the check is wired.
+  **Recorded selection: ship ahead,** ship the verdict ahead of the wiring, as advisory output. An agent session copied this document's (rec) option; no human chose this item.

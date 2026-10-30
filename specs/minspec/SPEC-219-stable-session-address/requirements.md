@@ -14,7 +14,7 @@ implements_reason: >-
   files this spec will own is decided at Plan, after Decision D1.
 phases:
   specify: done
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -94,15 +94,13 @@ unless the sender notices and reroutes it.
 
 ## Decisions needed (Clarify)
 
-D1 has a selection recorded from the answer to task-queue item c219 (2026-10-27: "Upstream
-(Recommended)"), an answer the queue attributes to the founder. A queue answer is not
-consent and is not verified here: DR-108 (delegated approval) section 4 holds that a queue
-item cannot carry consent, because any session can write the queue. That selection therefore
-binds nothing on its own. It binds only if the founder approves this spec with it in its
-text; that approval, not this record, is the consent act, and it may overturn it. The other
-selections carry the (rec) option an agent session copied; no human chose them (each says
-so). Delegation DLG-001 (DR-108) made none of these selections. This section stays open, and
-the spec is not ready to approve, until the founder answers or confirms the rest.
+All 3 decisions are answered, not ratified. D1 is the founder's: his answer to task-queue item c219
+(2026-10-27, "Upstream (Recommended)", via AskUserQuestion) is verbatim in the task log, and the selection
+below is attributed to it. D2 and D3 are not: an agent session copied this document's (rec) option for each, and
+no human chose them (each says so). Delegation DLG-001 (DR-108) made none of these selections and covers spec
+approval and engineering-DR acceptance only. A queue answer is not consent (DR-108 section 4: any session can
+write the queue), so the D1 selection binds only when the founder or a covered delegation approves this spec
+with it in its text.
 
 **D1 - Where does this land?** (gating; blocks Plan)
 

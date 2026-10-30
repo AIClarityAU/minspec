@@ -14,7 +14,7 @@ implements_reason: >-
   single rule) is answered; D1 changes which of five places is the odd one out.
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -106,7 +106,12 @@ Nothing asserts the per-tier rule itself.
 
 ## Decisions needed (Clarify)
 
-**D1. Which rule is the single rule for T3?** Open.
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
+**D1. Which rule is the single rule for T3?**
 - **(rec) A — T3 Clarify is optional, T4 required.** Matches the three executable/shipped
   surfaces (config, slash command, example spec) and the `CLAUDE.md` tier table. Only FR-2
   and `CLAUDE.md:223` change, both prose. *Cost:* T3 specs can skip Clarify, so a T3 spec
@@ -120,7 +125,9 @@ Nothing asserts the per-tier rule itself.
   content, not of tier). *Cost:* changes the tier model that FR-1/FR-2 are built on
   (DR-024 defers that); larger than this issue and likely a separate T4 decision.
 
-**D2. Should a check assert the rule, and how far?** Open.
+**Recorded selection: Option A,** T3 Clarify is optional, T4 required. An agent session copied this document's (rec) option; no human chose this item.
+
+**D2. Should a check assert the rule, and how far?**
 - **(rec) A — Drift check only (FR-4), no new approval gate.** Cheap, deterministic, closes
   the "three answers" defect. *Cost:* still nothing proves Clarify ran on a required tier.
 - **B — Drift check plus approval gate (FR-4 and FR-5).** Closes the enforcement gap using
@@ -129,12 +136,16 @@ Nothing asserts the per-tier rule itself.
   legitimate T3 specs that have nothing to clarify unless an explicit "no open questions"
   form is allowed.
 
-**D3. Is "stakeholder review" at T4 (FR-2 table) part of the rule?** Open.
+**Recorded selection: Option A,** a drift check only (FR-4), no new approval gate. An agent session copied this document's (rec) option; no human chose this item.
+
+**D3. Is "stakeholder review" at T4 (FR-2 table) part of the rule?**
 - **(rec) A — Drop the phrase from FR-2.** MinSpec is solo-first (DR-075/DR-076) and nothing
   implements or checks it. *Cost:* loses a team-mode hook; restore it when the parked
   `mode: team` profile lands.
 - **B — Keep it as team-mode-only text, labelled so.** *Cost:* another sentence that nothing
   checks, the same kind of unverified prose this spec is removing.
+
+**Recorded selection: Option A,** drop the "stakeholder review" phrase from FR-2. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Out of scope
 

@@ -18,7 +18,7 @@ implements_reason: >-
 affects: [packages/minspec/src/lib/template-registry.ts, scripts/gen-ci-templates.mjs]
 phases:
   specify: done
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -287,16 +287,13 @@ which option it took is not established here. DQ-4 asks the human to settle it o
 
 ## Decisions needed (Clarify)
 
-DQ-1, DQ-3 and DQ-4 have selections recorded from the answer to task-queue item c228
-(2026-10-27: "All three (Recommended)"), an answer the queue attributes to the founder. A
-queue answer is not consent and is not verified here: DR-108 (delegated approval) section 4
-holds that a queue item cannot carry consent, because any session can write the queue. Those
-selections therefore bind nothing on their own. They bind only if the founder approves this
-spec with them in its text; that approval, not this record, is the consent act, and it may
-overturn them. The other selections carry the (rec) option an agent session copied; no human
-chose them (each says so). Delegation DLG-001 (DR-108) made none of these selections. This
-section stays open, and the spec is not ready to approve, until the founder answers or
-confirms the rest.
+All 5 decisions are answered, not ratified. DQ-1, DQ-3 and DQ-4 are the founder's: his answer to task-queue item
+c228 (2026-10-27, "All three (Recommended)", via AskUserQuestion) is verbatim in the task log, and those
+selections below are attributed to it. DQ-2 and DQ-5 are not: an agent session copied this document's (rec)
+option for each, and no human chose them (each says so). Delegation DLG-001 (DR-108) made none of these
+selections and covers spec approval and engineering-DR acceptance only. A queue answer is not consent (DR-108
+section 4: any session can write the queue), so the DQ-1, DQ-3 and DQ-4 selections bind only when the founder or a
+covered delegation approves this spec with them in its text.
 
 - **DQ-1 - How the adopter gets the derived list.**
 

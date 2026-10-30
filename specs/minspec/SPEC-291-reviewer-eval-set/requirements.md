@@ -13,7 +13,7 @@ implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan, after Decisions D1-D5.
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -116,6 +116,11 @@ automatically, so the set grows without founder attention (tenet 1).
 
 ## Decisions needed (Clarify)
 
+All 6 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 - **D1 - How is a scoring run triggered?**
   - **Option A (rec): on-demand command plus a CI job that runs only when a PR touches the
     reviewer prompt files.** *Cost:* each such PR spends tokens (cases x K) and CI needs the
@@ -124,6 +129,7 @@ automatically, so the set grows without founder attention (tenet 1).
     change to score unless prompts changed; mostly measures LLM noise.
   - Option C: on-demand only. *Cost:* the "kept only if score does not drop" rule becomes
     a human remembering, i.e. prose-trust (the failure the constitution warns of).
+  **Recorded selection: Option A,** an on-demand command plus a CI job that runs only when a PR touches the reviewer prompt files. An agent session copied this document's (rec) option; no human chose this item.
 - **D2 - What counts as a repeat-fix, and what triggers filing?**
   - **Option A (rec): GitHub-side signals only - a `Revert` PR, or a `fix` PR whose changed
     lines blame to a PR merged within a window (window at Plan).** *Cost:* blame heuristics
@@ -131,21 +137,26 @@ automatically, so the set grows without founder attention (tenet 1).
   - Option B: revert PRs only. *Cost:* cheap and precise but misses most repeat-fixes, the
     case the issue names first.
   - Option C: manual labelling. *Cost:* reintroduces founder attention the issue forbids.
+  **Recorded selection: Option A,** GitHub-side signals only: a `Revert` PR, or a `fix` PR whose changed lines blame to a PR merged within a window (window set at Plan). An agent session copied this document's (rec) option; no human chose this item.
 - **D3 - Score-drop tolerance.** Option A (rec): zero tolerance on false-block rate and a
   fixed small tolerance on recall, set from measured flip rate at first baseline. *Cost:*
   the tolerance is a guess until the first baseline is measured. Option B: strict no-drop on
   both. *Cost:* LLM noise makes it flap and train people to bypass it.
+  **Recorded selection: Option A,** zero tolerance on false-block rate and a fixed small tolerance on recall, set from the measured flip rate at the first baseline. An agent session copied this document's (rec) option; no human chose this item.
 - **D4 - Who promotes a draft case to scored?** Option A (rec): a deterministic check - the
   draft's expected verdict is accepted when the proving fix/revert diff itself is attached
   and the case replays consistently over K runs. *Cost:* a mislabelled case can enter
   silently. Option B: founder approves each case. *Cost:* the attention tenet 1 retires.
+  **Recorded selection: Option A,** a deterministic check promotes a draft case to scored. An agent session copied this document's (rec) option; no human chose this item.
 - **D5 - Where do cases live?** Option A (rec): `tests/review-eval/` (fixtures) with the
   runner under `scripts/`. *Cost:* the allowlist for dev agents covers it, but large diffs
   bloat the repo. Option B: a separate private repo. *Cost:* the BASE-prompts coupling in
   FR3 spans two repos and fixtures drift from the code they test.
+  **Recorded selection: Option A,** cases live in `tests/review-eval/` with the runner under `scripts/`. An agent session copied this document's (rec) option; no human chose this item.
 - **D6 - Does this need a decision record?** The case format and baseline-gate semantics are
   reversible in under a day, so I recommend no DR unless D1 picks a scheduled run with
   recurring spend. *Cost:* if wrong, the spend commitment lands undocumented.
+  **Recorded selection: no DR,** no decision record is needed unless D1 picks a scheduled run with recurring spend. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Follow-ups (tracked)
 

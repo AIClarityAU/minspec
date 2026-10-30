@@ -15,7 +15,7 @@ implements_reason: >-
   answered and the FR-0 baseline is measured.
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -240,6 +240,11 @@ spend for that run, so the FR-0 comparison can be redone from logs after the cha
 
 ## Decisions needed (Clarify)
 
+All 6 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 **D1 - What is the default allowlist?**
 - **(a) Empty: lane off until the adopter names data paths (rec).** Zero risk of misclassifying
   code in a repo nobody looked at. Cost: adopters get no saving until they set the key, and most
@@ -247,6 +252,8 @@ spend for that run, so the FR-0 comparison can be redone from logs after the cha
 - (b) A conventional default (`fixtures/**`, `testdata/**`, `data/**` with extensions `csv tsv
   json ndjson jsonl yaml yml parquet`). Cost: a repo whose `data/loader.json` drives its build gets
   a cheap review on a behavioural change, the exact case #2973 says must not count as data.
+
+**Recorded selection: Option (a),** the default allowlist is empty; the lane is off until the adopter names data paths. An agent session copied this document's (rec) option; no human chose this item.
 
 **D2 - What does the cheap path run?** (The token decision.)
 - **(a) One reviewer voter with a data-lane prompt, other voters skipped (rec).** Roughly a
@@ -261,6 +268,8 @@ spend for that run, so the FR-0 comparison can be redone from logs after the cha
 - (c) The reviewer voter on a smaller model. Cost: adds a model-selection path to the shipped
   workflow, and a weaker model is still spend.
 
+**Recorded selection: Option (a),** one reviewer voter with a data-lane prompt, other voters skipped. An agent session copied this document's (rec) option; no human chose this item.
+
 **D3 - Does an eligible PR auto-merge?**
 - **(a) Yes, for authors who are repo members or an App bot the adopter lists; no for everyone
   else (rec).** Gets "automated data updates" off the founder's desk, matching the docs lane. Cost:
@@ -271,6 +280,8 @@ spend for that run, so the FR-0 comparison can be redone from logs after the cha
 - (c) Yes for every author. Cost: an outside contributor's data lands with no human ever seeing
   it; not recommended.
 
+**Recorded selection: Option (a),** an eligible PR auto-merges for repo members or an App bot the adopter lists, and not for anyone else. An agent session copied this document's (rec) option; no human chose this item.
+
 **D4 - Can a lockfile ever be data?**
 - **(a) No, never (rec).** A lockfile decides which third-party code runs; it is the supply chain,
   and the security voter exists for it. Cost: Dependabot or Renovate lockfile bumps, the most
@@ -278,6 +289,8 @@ spend for that run, so the FR-0 comparison can be redone from logs after the cha
   see FR-0.)
 - (b) Yes, if the adopter explicitly lists it. Cost: an adopter can switch off review of their
   supply chain with one config line.
+
+**Recorded selection: Option (a),** a lockfile is never data. An agent session copied this document's (rec) option; no human chose this item.
 
 **D5 - Is "not referenced by code" checked, or only path conventions?**
 - **(a) Path conventions plus the FR-4 denylist only (rec).** Pure, cheap, predictable. Cost: a
@@ -287,12 +300,16 @@ spend for that run, so the FR-0 comparison can be redone from logs after the cha
   Cost: a repo-wide scan per PR, false refusals on harmless references (a test that loads a
   fixture is code referencing data), and it still misses computed paths.
 
+**Recorded selection: Option (a),** path conventions plus the FR-4 denylist only. An agent session copied this document's (rec) option; no human chose this item.
+
 **D6 - If FR-0 shows the target bot PRs spend zero tokens today, what then?**
 - **(a) Return to Clarify with the numbers before Plan (rec).** The founder's goal was tokens; if
   the spend is already zero, the real cost is founder merge time, which is D3's question, not D2's.
   Cost: one more round-trip before any build.
 - (b) Build anyway for human-authored data PRs. Cost: may build a lane for a class that barely
   exists.
+
+**Recorded selection: Option (a),** return to Clarify with the FR-0 numbers before Plan. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Follow-ups (tracked)
 

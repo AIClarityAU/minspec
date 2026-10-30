@@ -133,10 +133,13 @@ from the head, with no version handshake (#1834), which makes the failure reacha
 
 ## Decisions needed (Clarify)
 
-5 of 6 decisions are resolved: an agent session recorded each selection (D1-D4 the option
-this document already recommended, D6 the option to write a DR), under delegation DLG-001
-(DR-108, the delegated-approval record). No human chose them; they are ratified only by
-approval of this spec. D5 names no recommended option, so it stays open for Clarify.
+5 of 6 decisions are answered, not ratified. D6 is the founder's: his choice of "All rec (Recommended)" on
+task-queue item clr1027 (2026-10-26, via AskUserQuestion) set SPEC-182 D6 to "YES, write a DR recording the
+guard-free second witness and the preflight contract", verbatim in the task log. D1 to D4 are not: an agent
+session recorded, under delegation DLG-001 (DR-108, which covers spec approval and engineering-DR acceptance
+only), the option this document already recommended, and no human chose them. D5 is not answered: it names no
+recommended option, and its delivery step is a human act (the App cannot push `.github/workflows/`), so it stays
+open. Except D6, these selections bind nothing until a human or a covered delegation approves this spec.
 
 - **D1 - Preflight placement.** (a) Separate early step that fails the job before the
   review runs **(rec)**: fastest, clearest signal; costs a CI step and a failed job that
@@ -170,5 +173,5 @@ approval of this spec. D5 names no recommended option, so it stays open for Clar
     preflight contract in a decision record, so the design choice outlives this spec.
   **Recorded selection: Option (write a DR),** drafted as DR-113 (`proposed`), which records
   the guard-free second witness and the preflight contract as this spec describes them.
-  Recorded by an agent session under delegation DLG-001 (DR-108, the delegated-approval
-  record); ratified only by approval of this spec, and DR-113 takes effect only on acceptance.
+  The founder chose this item (task-queue item clr1027, 2026-10-26); an agent session recorded it. It
+  binds only on approval of this spec, and DR-113 takes effect only on its acceptance.

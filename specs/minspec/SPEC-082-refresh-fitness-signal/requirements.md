@@ -17,7 +17,7 @@ relates_to: [DR-092, SPEC-068, SPEC-060, SPEC-079, DR-003, DR-066]
 # is deferred to Plan, once DQ-1 resolves.
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -201,17 +201,14 @@ no new stored value. It only changes what is said about a fact SPEC-068 already 
 
 ## Decisions needed (Clarify)
 
-DQ-1 has a selection recorded from the answer to task-queue item c082 (2026-10-27: "Fold in
-(Recommended)"), an answer the queue attributes to the founder. A queue answer is not
-consent and is not verified here: DR-108 (delegated approval) section 4 holds that a queue
-item cannot carry consent, because any session can write the queue. That selection therefore
-binds nothing on its own. It binds only if the founder approves this spec with it in its
-text; that approval, not this record, is the consent act, and it may overturn it. DQ-2 and
-DQ-3 carry the (rec) option an agent session copied; no human chose them (each says so).
-Delegation DLG-001 (DR-108) made none of these selections. DQ-1's fold amends SPEC-068's
-FR-4/FR-5; this record changes nothing in SPEC-068, whose amendment and re-approval are
-separate acts. This section stays open, and the spec is not ready to approve, until the
-founder answers or confirms DQ-2 and DQ-3.
+All 3 decisions are answered, not ratified. DQ-1 is the founder's: his answer to task-queue item c082
+(2026-10-27, "Fold in (Recommended)", via AskUserQuestion) is verbatim in the task log, and the selection
+below is attributed to it. DQ-2 and DQ-3 are not: an agent session copied this document's (rec) option for each,
+and no human chose them (each says so). Delegation DLG-001 (DR-108) made none of these selections and covers
+spec approval and engineering-DR acceptance only. A queue answer is not consent (DR-108 section 4: any session
+can write the queue), so the DQ-1 selection binds only when the founder or a covered delegation approves this
+spec with it in its text. DQ-1's fold amends SPEC-068's FR-4/FR-5; this record changes nothing in SPEC-068,
+whose amendment and re-approval are separate acts.
 
 - **DQ-1 — Fold into SPEC-068, or ship as this spec's own increment?** SPEC-068 is
   `plan: in-progress` — unbuilt — and FR-1 here is a small, natural extension of its own
