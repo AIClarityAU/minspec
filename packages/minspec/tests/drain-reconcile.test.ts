@@ -93,7 +93,13 @@ type TimelineFixture = Record<string, unknown>[][] | { raw: string } | undefined
  * api.github.com: a 19-event timeline at `per_page=2` printed 10 lines); without
  * `--jq`, it prints each page's array one after another for the caller to flatten.
  *
- * `failKeys` lists non-timeline query keys (`running`/`done`/`pr`) that make the stub
+ * Two PR questions are told apart, because one of them being mistaken for the other is
+ * a defect (#3351 review): `pr` answers the MERGED lookup (`--state merged`, a number)
+ * and `prAll` answers the raw `--state all` lookup. `files` answers `gh pr diff` and
+ * defaults to a path outside the spec corpus, so a merged PR is a build unless a test
+ * says otherwise. `prAll` has no default: unanswered reads as unreadable.
+ *
+ * `failKeys` lists non-timeline query keys (`running`/`done`/`pr`/`prAll`/`files`) that make the stub
  * exit non-zero INSTEAD of answering. Without this the stub could only ever succeed,
  * so no test could distinguish "the query ran and found nothing" from "the query
  * failed" — the entire #1855 defect class.
@@ -135,7 +141,9 @@ function stubGh(
       `case "$*" in\n` +
       `  *"--label agent-running"*) key=running ;;\n` +
       `  *"--label agent-done"*)    key=done ;;\n` +
+      `  "pr list"*"--state all"*)  key=prAll ;;\n` +
       `  "pr list"*)                key=pr ;;\n` +
+      `  "pr diff"*)                key=files ;;\n` +
       `  "issue view"*)             key=labels ;;\n` +
       `esac\n` +
       `for f in ${JSON.stringify(failKeys.join(' '))}; do\n` +
@@ -151,6 +159,10 @@ function stubGh(
       // the sign-off exemption need not say so.
       `if [[ "$key" == labels ]]; then\n` +
       `  node -e 'const t=require(process.argv[1]);process.stdout.write(t["labels:"+process.argv[2]]??t.labels??JSON.stringify({labels:[{name:"agent-done"}]}))' ${JSON.stringify(table)} "$3"\n` +
+      `  exit 0\n` +
+      `fi\n` +
+      `if [[ "$key" == files ]]; then\n` +
+      `  node -e 'const t=require(process.argv[1]);process.stdout.write(t.files??"packages/minspec/src/feature.ts\\n")' ${JSON.stringify(table)}\n` +
       `  exit 0\n` +
       `fi\n` +
       // Real gh returns 30 rows unless told otherwise, and a selector that ignored that
@@ -174,7 +186,7 @@ function runReconciler(
   failKeys: string[] = [],
 ): string {
   const bin = stubGh(responses, timeline, failKeys);
-  const script = ['set -uo pipefail', 'REPO=owner/repo', reconcilerBlock(), fn].join('\n');
+  const script = ['set -uo pipefail', 'REPO=owner/repo', `SCRIPT_DIR=${JSON.stringify(path.dirname(DRAIN))}`, reconcilerBlock(), fn].join('\n');
   return execFileSync('bash', ['-c', script], {
     encoding: 'utf-8',
     env: { ...process.env, ...env, PATH: `${bin}:${process.env.PATH}` },
@@ -417,17 +429,61 @@ describe('#3351 review — an issue awaiting spec sign-off is left alone until s
     expect(calls).not.toContain(`issue edit ${n}`);
   }
 
-  it('a merged spec PR does not close the build issue', () => {
-    const out = runReconciler('reconcile_done_issues', { done: '42\n', pr: '77\n', labels: AWAITING }, [[]]);
+  const PRS = (...states: string[]) => JSON.stringify(states.map((state, i) => ({ number: 70 + i, state, isCrossRepository: false })));
+
+  it.each([
+    ['merged', PRS('MERGED')],
+    ['still open', PRS('OPEN')],
+    ['merged, after an earlier attempt closed unmerged', PRS('MERGED', 'CLOSED')],
+    ['open, after an earlier attempt closed unmerged', PRS('OPEN', 'CLOSED')],
+  ])('a spec PR %s: the issue is left alone, neither closed nor reported as failed', (_n, prAll) => {
+    const out = runReconciler('reconcile_done_issues', { done: '42\n', pr: '77\n', prAll, labels: AWAITING }, [[]]);
     expectUntouched(42);
     expect(out).not.toContain('closing #42');
-  });
-
-  it('a spec PR still open is not reported as a failed run', () => {
-    const out = runReconciler('reconcile_done_issues', { done: '42\n', pr: '', labels: AWAITING });
-    expectUntouched(42);
     expect(out).not.toContain('NO merged PR exists');
     expect(ghCalls()).not.toContain('needs-human-review');
+  });
+
+  // The hole the first exemption opened: the stamp is written on every path through a
+  // specify run, including a failed push, a failed `gh pr create`, and a spec PR closed
+  // unmerged later. The label alone proves nothing about a spec existing.
+  it.each([
+    ['no PR at all (push or `gh pr create` failed)', '[]'],
+    ['a spec PR closed unmerged', PRS('CLOSED')],
+    ['only a PR from a fork that reuses the branch name', JSON.stringify([{ number: 70, state: 'OPEN', isCrossRepository: true }])],
+  ])('%s: surfaced as the older arm surfaces it, and never closed', (_n, prAll) => {
+    const out = runReconciler('reconcile_done_issues', { done: '42\n', pr: '', prAll, labels: AWAITING });
+    expect(out).toContain('NO open or merged PR exists');
+    const calls = ghCalls();
+    expect(calls).toContain('--remove-label agent-done,awaiting-spec-signoff');
+    expect(calls).toContain('--add-label needs-human-review');
+    expect(calls).not.toContain('issue close 42');
+  });
+
+  it.each([
+    ['empty output', ''],
+    ['not JSON', 'HTTP 502'],
+    ['an object, not a list', '{"message":"rate limited"}'],
+    ['a row with no state', '[{"number":70}]'],
+    ['two documents', `${PRS('CLOSED')}\n${PRS('CLOSED')}`],
+  ])('an unreadable PR query (%s) is never read as "no PR": nothing changes, and it says so', (_n, prAll) => {
+    const out = runReconciler('reconcile_done_issues', { done: '42\n', pr: '', prAll, labels: AWAITING });
+    expectUntouched(42);
+    expect(out).toMatch(/could not read the PRs of agent\/issue-42/);
+  });
+
+  it('a failed PR query changes nothing on that issue and the rest of the board is still reconciled', () => {
+    const out = runReconciler(
+      'reconcile_done_issues',
+      { done: '42\n43\n', pr: '77\n', 'labels:42': AWAITING, 'labels:43': LABELS('agent-done') },
+      [[]],
+      {},
+      ['prAll'],
+    );
+    expect(out).toMatch(/could not read the PRs of agent\/issue-42/);
+    expect(ghCalls()).not.toContain('issue close 42');
+    expect(ghCalls()).not.toContain('issue edit 42');
+    expect(ghCalls()).toContain('issue close 43');
   });
 
   it('control: agent-done without the label still closes on a merged PR', () => {
@@ -482,11 +538,47 @@ describe('#3351 review — an issue awaiting spec sign-off is left alone until s
     // These issues now sit in the selector for as long as sign-off takes, so a default-page
     // selector would stop reconciling everything older than the newest 30 of them.
     const parked = Array.from({ length: 30 }, (_, i) => 1000 - i);
-    const responses: Record<string, string> = { done: `${[...parked, 42].join('\n')}\n`, pr: '77\n' };
+    const responses: Record<string, string> = { done: `${[...parked, 42].join('\n')}\n`, pr: '77\n', prAll: PRS('OPEN') };
     for (const n of parked) responses[`labels:${n}`] = AWAITING;
     const out = runReconciler('reconcile_done_issues', responses, [[]]);
     expect(out).toContain('closing #42');
     expect(ghCalls()).not.toContain('issue close 1000');
+  });
+});
+
+describe('#3351 review — a merged spec PR is not evidence that the build landed', () => {
+  // Spec and build share `agent/issue-N`. A build that fails to publish still gets
+  // `agent-done`, so once the label is gone the only merged PR on the branch is the SPEC,
+  // and "a branch named for it merged" closed the build issue: #3348 by another path.
+  const LABELS = JSON.stringify({ labels: [{ name: 'agent-done' }] });
+  const SPEC_FILES = 'specs/foo/spec.md\ndocs/decisions/DR-200.md\n';
+
+  it('a failed build whose only merged PR is the spec is surfaced, not closed', () => {
+    const out = runReconciler('reconcile_done_issues', { done: '42\n', pr: '77\n', labels: LABELS, files: SPEC_FILES }, [[]]);
+    expect(out).toContain('only spec-only PR #77 merged');
+    expect(ghCalls()).not.toContain('issue close 42');
+    expect(ghCalls()).toContain('--remove-label agent-done');
+    expect(ghCalls()).toContain('--add-label needs-human-review');
+  });
+
+  it('control: a merged PR that touches anything outside the spec corpus still closes', () => {
+    const out = runReconciler(
+      'reconcile_done_issues',
+      { done: '42\n', pr: '77\n', labels: LABELS, files: 'specs/foo/spec.md\nscripts/x.sh\n' },
+      [[]],
+    );
+    expect(out).toContain('closing #42');
+    expect(ghCalls()).toContain('issue close 42');
+  });
+
+  it.each([
+    ['fails', { files: '' }, ['files']],
+    ['is empty', { files: '\n' }, []],
+  ] as [string, Record<string, string>, string[]][])('a merged PR whose diff %s changes nothing, and it says so', (_n, extra, failKeys) => {
+    const out = runReconciler('reconcile_done_issues', { done: '42\n', pr: '77\n', labels: LABELS, ...extra }, [[]], {}, failKeys);
+    expect(out).toMatch(/could not read the diff of #77/);
+    expect(ghCalls()).not.toContain('issue close 42');
+    expect(ghCalls()).not.toContain('issue edit 42');
   });
 });
 

@@ -13,8 +13,14 @@
  *     keyword into a plain reference and leaves exactly one `Refs #N`, whatever the
  *     agent's summary or the review block said;
  *   - as source text only, which proves the lines exist and not that they run: the publish
- *     path calls that seam, and the specify arm applies `awaiting-spec-signoff` beside
- *     `agent-done`.
+ *     path calls that seam;
+ *   - through the real completion block with a stubbed `gh`: a specify run applies
+ *     `awaiting-spec-signoff` beside `agent-done`, and a build run removes it in the same
+ *     call that stamps `agent-done`;
+ *   - through the real approve-issue.sh label clear with a stubbed `gh`: an approval
+ *     clears `awaiting-spec-signoff`;
+ *   - both copies of the closing-keyword grammar, extracted from the script and executed
+ *     over one table of bodies.
  * Pinned elsewhere:
  *   - the inverted post-create link witness (arm only on a read, empty closing list), through
  *     the real 6a..6b span: dispatch-issue-closing-link-verify.test.ts;
@@ -27,10 +33,12 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 import { spawnSync } from 'child_process';
 
 const ROOT = path.resolve(__dirname, '../../..');
 const DISPATCH = path.join(ROOT, 'scripts', 'dispatch-issue.sh');
+const APPROVE = path.join(ROOT, 'scripts', 'approve-issue.sh');
 
 /** Comment-only lines stripped, so a prose mention can never satisfy a wiring assertion. */
 const dispatchCode = fs
@@ -110,8 +118,134 @@ describe('dispatch-issue.sh: the publish path uses the guard in specify-only mod
     expect(guard).toBeLessThan(reviewer);
   });
 
+});
+
+/** Run a span of real script with a `gh` stub that logs argv and exits per `ghExit`. */
+function runSpanWithGh(span: string, vars: string, ghExit = 'exit 0'): string[] {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'specify-keeps-'));
+  try {
+    const log = path.join(dir, 'calls.log');
+    fs.writeFileSync(
+      path.join(dir, 'gh'),
+      `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\n${ghExit}\n`,
+      { mode: 0o755 },
+    );
+    const r = spawnSync('bash', ['-c', `set -uo pipefail\n${vars}\n${span}`], {
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    return fs.existsSync(log) ? fs.readFileSync(log, 'utf-8').trim().split('\n') : [];
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function between(src: string, from: string, to: string): string {
+  const a = src.indexOf(from);
+  const b = src.indexOf(to, a);
+  if (a < 0 || b < 0) throw new Error(`markers moved: ${from} .. ${to}. Fix this extractor, do not delete the test (#3351 review).`);
+  return src.slice(a, b);
+}
+
+describe('the sign-off label cannot outlive the spec stage (#3351 review)', () => {
+  const dispatchSrc = fs.readFileSync(DISPATCH, 'utf-8');
+  const approveSrc = fs.readFileSync(APPROVE, 'utf-8');
+  const completion = between(dispatchSrc, 'gh label create "awaiting-spec-signoff"', 'echo "Agent completed issue #$ISSUE');
+  const stampOf = (calls: string[]) => calls.filter((c) => c.startsWith('issue edit 42'));
+
   it('a finished specify run labels the open issue awaiting-spec-signoff, keeping agent-done', () => {
-    expect(dispatchCode).toMatch(/gh label create "awaiting-spec-signoff"/);
-    expect(dispatchCode).toMatch(/--add-label "agent-done,awaiting-spec-signoff"/);
+    const calls = runSpanWithGh(completion, 'REPO=o/r; ISSUE=42; SPECIFY_ONLY=1');
+    expect(calls[0]).toMatch(/^label create awaiting-spec-signoff/);
+    expect(stampOf(calls)).toHaveLength(1);
+    expect(stampOf(calls)[0]).toContain('--add-label agent-done,awaiting-spec-signoff');
+  });
+
+  it('a finished build stamps agent-done and removes the label in the SAME call, so no reader sees both', () => {
+    const calls = runSpanWithGh(completion, 'REPO=o/r; ISSUE=42; SPECIFY_ONLY=0');
+    // Created first: `gh` fails the whole edit on a name the repo does not have.
+    expect(calls[0]).toMatch(/^label create awaiting-spec-signoff/);
+    expect(stampOf(calls)).toHaveLength(1);
+    expect(stampOf(calls)[0]).toContain('--remove-label agent-running,agent-ready,awaiting-spec-signoff');
+    expect(stampOf(calls)[0]).toContain('--add-label agent-done');
+    expect(stampOf(calls)[0]).not.toContain('--add-label agent-done,awaiting-spec-signoff');
+  });
+
+  const clearSpan = between(approveSrc, 'if grep -qx "awaiting-spec-signoff"', 'echo "Approved #${ISSUE} as');
+  const CARRIED = `REPO=o/r; ISSUE=42; CURRENT_LABELS=$'agent-done\\nawaiting-spec-signoff\\nhold:specify'`;
+
+  it('an approval clears the label when the issue carries it, because a build follows', () => {
+    expect(runSpanWithGh(clearSpan, CARRIED)).toEqual(['issue edit 42 --repo o/r --remove-label awaiting-spec-signoff']);
+  });
+
+  it('an approval names no such label when the issue does not carry it', () => {
+    expect(runSpanWithGh(clearSpan, `REPO=o/r; ISSUE=42; CURRENT_LABELS=$'hold:tier'`)).toEqual([]);
+  });
+
+  it('a failed clear warns, and does not stop the approval', () => {
+    const r = spawnSync('bash', ['-c', `set -euo pipefail\ngh() { return 1; }\n${CARRIED}\n${clearSpan}\necho reached`], { encoding: 'utf-8' });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('could not clear awaiting-spec-signoff');
+    expect(r.stdout).toContain('reached');
+  });
+});
+
+/**
+ * Both copies of the grammar, as the script holds them: the ERE run through `grep -iE` and
+ * every jq `test(...)` run through real jq. The expected column is GitHub's grammar written
+ * here by hand, and GITHUB_CLOSES above is checked against it too.
+ */
+describe('CLOSING_KEYWORD_ERE and the jq copies agree with one table (#3348)', () => {
+  const dispatchSrc = fs.readFileSync(DISPATCH, 'utf-8');
+  const ereLine = dispatchSrc.split('\n').find((l) => l.startsWith('CLOSING_KEYWORD_ERE='));
+  const jqFilters = [...dispatchSrc.matchAll(/\(test\("\(\^\|\[\^a-z\]\)\(close.*?"; "i"\)\)/g)].map((m) => m[0]);
+
+  const TABLE: [string, boolean][] = [
+    ['Closes #42', true],
+    ['closed #42', true],
+    ['CLOSE #42', true],
+    ['Fix #42', true],
+    ['fixes: #42', true],
+    ['FIXED #42', true],
+    ['Resolve #42', true],
+    ['resolves #42', true],
+    ['resolved:#42', true],
+    ['closes#42', true],
+    ['Resolves\t#42', true],
+    ['Fixes AIClarityAU/minspec#42', true],
+    ['Fixes: AIClarityAU/minspec#42', true],
+    ['closes https://github.com/AIClarityAU/minspec/issues/42', true],
+    ['summary\nFIXED #42\nmore', true],
+    ['(fixes #42)', true],
+    ['Refs #42', false],
+    ['Discloses #5', false],
+    ['Prefix #5', false],
+    ['unresolved #5', false],
+    ['this closes nothing', false],
+    ['fixes the bug in issue 42', false],
+    ['', false],
+  ];
+
+  function ereMatches(body: string): boolean {
+    const r = spawnSync('bash', ['-c', `${ereLine}\ngrep -qiE "$CLOSING_KEYWORD_ERE"`], { input: body, encoding: 'utf-8' });
+    expect(r.status === 0 || r.status === 1, r.stderr).toBe(true);
+    return r.status === 0;
+  }
+
+  function jqMatches(filter: string, body: string): boolean {
+    const r = spawnSync('jq', ['-r', `.body | ${filter}`], { input: JSON.stringify({ body }), encoding: 'utf-8' });
+    expect(r.status, r.stderr).toBe(0);
+    return r.stdout.trim() === 'true';
+  }
+
+  it('the extractors found the ERE and both jq copies', () => {
+    expect(ereLine).toBeTruthy();
+    expect(jqFilters).toHaveLength(2);
+  });
+
+  it.each(TABLE)('%j -> %s, in the ERE, in each jq copy, and in the hand-written grammar', (body, expected) => {
+    expect(ereMatches(body)).toBe(expected);
+    for (const f of jqFilters) expect(jqMatches(f, body)).toBe(expected);
+    expect(GITHUB_CLOSES.test(body)).toBe(expected);
   });
 });

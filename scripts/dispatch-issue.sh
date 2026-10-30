@@ -643,8 +643,8 @@ specify_scope_stray() {
 # close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved, an optional colon,
 # then `#N`, `owner/repo#N` or an issue URL. The preceding-character arm keeps
 # "Discloses #5" from counting. The same grammar is written in jq (Oniguruma) inside
-# delegated_merge_human_claims below; dispatch-specify-keeps-build-issue.test.ts holds
-# both to one independent copy of it, so a change to either shows up there.
+# delegated_merge_human_claims below; dispatch-specify-keeps-build-issue.test.ts extracts
+# and runs both over one table of bodies, so a change to either shows up there.
 CLOSING_KEYWORD_ERE="(^|[^a-z])(close[sd]?|fix(e[sd])?|resolve[sd]?)[: "$'\t'"]*([a-z0-9._-]+/[a-z0-9._-]+)?(#|https?://)"
 
 # specify_pr_body <issue>: PR body on stdin -> the same body with every closing keyword
@@ -677,6 +677,13 @@ specify_pr_body() {
 # Pure seam: prove the rewrite without gh/dispatch. Body on stdin, issue as $2.
 if [[ "${ISSUE:-}" == "--specify-pr-body" ]]; then
   specify_pr_body "${2-}"
+  exit $?
+fi
+
+# Pure seam: the one definition of a spec-only diff, for the drain's reconciler. Changed
+# paths on stdin; exit 0 (with the reason) if any fall outside the corpus, 1 if none do.
+if [[ "${ISSUE:-}" == "--specify-scope-stray" ]]; then
+  specify_scope_stray
   exit $?
 fi
 
@@ -2921,17 +2928,26 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude
     # it) because the issue carries the build that follows spec sign-off.
     # `agent-done` still countermands a second specify run; `awaiting-spec-signoff`
     # names the state so the step that routes it to a build after sign-off can find
-    # it. The label is created first: `--add-label` fails the whole call on a name the
-    # repo does not have, which would also drop the `agent-running` removal.
+    # it. The label is created first: a label name the repo does not have fails the whole
+    # call, which would also drop the `agent-running` removal.
+    #
+    # This stamp is written on every path to here, including a failed push or `gh pr
+    # create`, so the label does not prove a spec PR exists: reconcile_done_issues
+    # checks that and surfaces the issue if there is none (#3351 review).
+    #
+    # A BUILD completion removes the label in the same call that adds `agent-done`. Spec
+    # and build share `agent/issue-N`, so a label surviving into a build would have the
+    # reconciler read a merged spec PR as a reason to leave a failed build alone, whichever
+    # route started that build (#3351 review).
+    gh label create "awaiting-spec-signoff" --repo "$REPO" --color c5def5 \
+      --description "Specify-only run finished: the spec PR references this issue, which stays open to carry the build once the spec is signed off (#3348)" \
+      2>/dev/null || true
     if [[ "$SPECIFY_ONLY" == "1" ]]; then
-      gh label create "awaiting-spec-signoff" --repo "$REPO" --color c5def5 \
-        --description "Specify-only run finished: the spec PR references this issue, which stays open to carry the build once the spec is signed off (#3348)" \
-        2>/dev/null || true
       gh issue edit "$ISSUE" --repo "$REPO" \
         --remove-label "agent-running,agent-ready" --add-label "agent-done,awaiting-spec-signoff" 2>/dev/null || true
     else
       gh issue edit "$ISSUE" --repo "$REPO" \
-        --remove-label "agent-running,agent-ready" --add-label "agent-done" 2>/dev/null || true
+        --remove-label "agent-running,agent-ready,awaiting-spec-signoff" --add-label "agent-done" 2>/dev/null || true
     fi
     echo "Agent completed issue #$ISSUE (role: $ROLE). Worktree: $WORKTREE"
 
