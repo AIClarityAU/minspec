@@ -17,9 +17,11 @@ relates_to: [SPEC-040, SPEC-041, SPEC-042, SPEC-043, SPEC-044, SPEC-046, DR-003,
 > before any code changes.
 
 Materializes **#972** - *"sibling spec docs advertise `status: specifying` under an approved
-requirements.md."* Id `SPEC-212` is the collision-gate shape: one above the highest `SPEC-NNN` on `origin/main` at
-revision b6ec4ff6 (`SPEC-211-shipped-guard-test-parity`), not a gap-fill below it. Open
-pull requests are not visible offline, so renumber if it still collides.
+requirements.md."* Id `SPEC-212` is a free number below the register's head, reserved when the spec was
+drafted; it is not a "next number" allocation. Measured at origin/main 7905665a: the highest
+`SPEC-NNN` is SPEC-293, no `SPEC-212` folder or approval sidecar exists, and no open pull
+request other than this one carries it. It stays, so the issue link and the review history
+keep one stable id. Open pull requests change, so the collision gate decides at merge time.
 
 ## Problem
 
@@ -28,7 +30,7 @@ per file, and the approve command writes the new status to the approved artifact
 (`requirements.md`) only. Siblings keep whatever they were drafted with, so each approval
 opens a gap and the answer to "may work proceed?" depends on which file you open.
 
-**Measured on this worktree's base** (first `status:` line of each file; the issue's table is
+**Measured at origin/main 7905665a** (first `status:` line of each file; the issue's table is
 partly stale, so the rows below replace it):
 
 | Spec | requirements.md | design.md | tasks.md |
