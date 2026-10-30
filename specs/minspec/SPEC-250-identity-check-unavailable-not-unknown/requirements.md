@@ -293,7 +293,15 @@ All check cases run in `identity-boundary-check.test.sh`'s hermetic sandbox (tem
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 ### D-1: What does a mute exit 1 mean?
+
+**Recorded selection: Option (a),** narrow the acceptance to helpers with an independent
+witness: mute exit 1 is `[clean]` only for `gh auth git-credential`, and every other mute
+non-zero exit is `[unavailable]`.
 
 Today `rc 1` + empty stderr + empty stdout is `[clean]` for **any** helper (`:324`). The
 header justifies it for one helper only: "that is how `gh auth git-credential` says 'not
@@ -319,6 +327,9 @@ failure of, say, a libsecret-backed helper with a locked keyring reads as "no cr
 
 ### D-2: Does the same rule apply to the keyring probe (P1)?
 
+**Recorded selection: Option (a),** yes; `gh auth token` exiting with an error and no token is
+`[unavailable]`, not `[UNKNOWN]`, and it still fails the run (INV-1).
+
 - **(a) Yes (rec).** `gh auth token` exiting with an error and no token is `[unavailable]`,
   not `[UNKNOWN]`. The header's D-Bus concern is kept: it still fails the run (INV-1). Cost:
   a keyring error that is in fact a *permission* problem on a populated keyring (the
@@ -328,6 +339,9 @@ failure of, say, a libsecret-backed helper with a locked keyring reads as "no cr
   one section, and a keyring hiccup still reads as unverifiable.
 
 ### D-3: Is a timeout (rc 124) unavailable or unknown?
+
+**Recorded selection: Option (a),** a timeout (rc 124) is unavailable when stdout carried no
+credential, the same state of nothing handed over.
 
 - **(a) Unavailable, when stdout carried no credential (rec).** It is the same state - nothing
   handed over - and a hung broker is the second most likely outage shape (inferred). Cost: a

@@ -201,14 +201,17 @@ no new stored value. It only changes what is said about a fact SPEC-068 already 
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended. An
-agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
-on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
-chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
-(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
-context, not verified. No human chose any single item. DQ-1 is left open (its recommendation
-amends an already-approved spec); this section stays open, and the spec is not ready to
-approve, until the founder answers.
+DQ-1 has a selection recorded from the answer to task-queue item c082 (2026-10-27: "Fold in
+(Recommended)"), an answer the queue attributes to the founder. A queue answer is not
+consent and is not verified here: DR-108 (delegated approval) section 4 holds that a queue
+item cannot carry consent, because any session can write the queue. That selection therefore
+binds nothing on its own. It binds only if the founder approves this spec with it in its
+text; that approval, not this record, is the consent act, and it may overturn it. DQ-2 and
+DQ-3 carry the (rec) option an agent session copied; no human chose them (each says so).
+Delegation DLG-001 (DR-108) made none of these selections. DQ-1's fold amends SPEC-068's
+FR-4/FR-5; this record changes nothing in SPEC-068, whose amendment and re-approval are
+separate acts. This section stays open, and the spec is not ready to approve, until the
+founder answers or confirms DQ-2 and DQ-3.
 
 - **DQ-1 — Fold into SPEC-068, or ship as this spec's own increment?** SPEC-068 is
   `plan: in-progress` — unbuilt — and FR-1 here is a small, natural extension of its own
@@ -224,9 +227,12 @@ approve, until the founder answers.
   SPEC-082 standalone) is fully independent but duplicates "where is the `level` message
   owned" the way SPEC-079 DQ-3 flagged for a different pair of specs.
 
-  **Not recorded:** the recommended fold amends SPEC-068's FR-4/FR-5, and SPEC-068 is
-  already approved (`status: planning`, approval record committed), so taking it forces a
-  re-approval of that spec. Needs the founder's answer.
+  **Recorded selection: fold FR-1–FR-3 into SPEC-068** as an amendment to its FR-4/FR-5,
+  with SPEC-082 standing only as the traceability anchor for #1492. Source: the answer to
+  task-queue item c082, 2026-10-27 ("Fold in (Recommended)"). A queue answer is not consent
+  (DR-108 section 4), so this selection is unverified and binds only if the founder approves
+  this spec's text with it in place. SPEC-068 is already approved, so the amendment needs its
+  re-approval; this record does not edit SPEC-068.
 
 - **DQ-2 — Does FR-1's message apply to every `level` refresh, or only when asked?** The
   common case for `level` is a healthy repo that is genuinely current — printing "this
