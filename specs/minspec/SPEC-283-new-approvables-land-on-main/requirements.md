@@ -10,8 +10,9 @@ depends_on: [DR-051, DR-108, SPEC-140]  # DR-051 section 4b must be amended (D1)
 relates_to: [DR-065, DR-063, DR-061, DR-086, SPEC-026, SPEC-031, SPEC-217, "#2852", "#2981", "#833", "#575", "#1614", "#1847", "#2557", "#2555", "#2542"]
 implements: none
 implements_reason: >-
-  Specify phase only. Which files this spec will own is decided at Plan, after Decisions D1-D4
-  are answered. The candidate producers are named in "Measured state" below.
+  Clarify answers are recorded but not ratified (D1-D4, all option A). Which files this spec will
+  own is still decided at Plan; no recorded option names a new file, so implements stays none. The
+  candidate producers are named in "Measured state" below.
 phases:
   specify: in-progress
   clarify: pending
@@ -254,6 +255,21 @@ for.
 - The approval flow itself (SPEC-050, SPEC-140 FR-1 to FR-7).
 
 ## Decisions needed (Clarify)
+
+All 4 decisions are recorded: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001 covers spec approval and engineering-DR acceptance only). They are ratified only when a
+human or a covered delegation approves this spec.
+
+- **D1 - Recorded selection: Option A,** keep the PR as transport, a Draft PR auto-merges on
+  `ai-review:pass`, and DR-051 §4b is amended; that amendment still needs founder acceptance
+  before build (note below).
+- **D2 - Recorded selection: Option A,** extend SPEC-140's extension follow (FR-8) to move the
+  founder's checkout.
+- **D3 - Recorded selection: Option A,** specs, DRs, epics and domain docs merge as drafts; plan
+  artifacts do not.
+- **D4 - Recorded selection: Option A,** no delegation record: merging an unapproved draft is not
+  an approval act.
 
 - **D1 — How a new approvable reaches `main`.** DR-051 §4b (accepted) says new specs and DRs go
   through a review PR; the founder now wants them on `main` before approval.

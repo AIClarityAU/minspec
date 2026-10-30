@@ -10,7 +10,9 @@ depends_on: []
 relates_to: ["#2794", "#735", "#847", "#1418", "#1226", "#1120", "#1305", "SPEC-073"]
 implements: none
 implements_reason: >-
-  Specify phase only. Which files this spec will own is decided at Plan, after Decisions D1-D3.
+  Clarify answers are recorded but not ratified (D1-D3 option (a), D4 as recommended). Which files
+  this spec will own is still decided at Plan; no recorded option names a new file, so implements
+  stays none.
 phases:
   specify: in-progress
   clarify: pending
@@ -158,6 +160,20 @@ Checked in this repo at `804a899d`:
 - Making `validate` reject a duplicate spec id earlier than CI; it already does at `npm run validate`.
 
 ## Decisions needed (Clarify)
+
+All 4 decisions are recorded: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001 covers spec approval and engineering-DR acceptance only). They are ratified only when a
+human or a covered delegation approves this spec.
+
+- **D1 - Recorded selection: Option (a),** a failed publish keeps `agent-ready`, drops
+  `agent-running`, and adds `needs-human-review` plus a comment, with an attempt cap.
+- **D2 - Recorded selection: Option (a),** unpublished commits are pushed to a differently named
+  rescue ref under the same remote (e.g. `agent-rescue/issue-N`), with a fallback.
+- **D3 - Recorded selection: Option (a),** if the cause stays unknown, ship FR-2, FR-3 and FR-4
+  now, and FR-6/FR-7 as the id fix.
+- **D4 - Recorded selection: the recommendation,** the id allocator uses the GitHub open-PR file
+  list, as the DR gate does.
 
 - **D1 — what state does a failed publish leave the issue in?**
   - (a) Keep `agent-ready`, drop `agent-running`, add `needs-human-review` plus a comment
