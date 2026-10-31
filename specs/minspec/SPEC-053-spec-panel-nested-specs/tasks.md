@@ -79,7 +79,10 @@ none touches `.github/`. They run in sequence: tasks 3.1 and 4.1 share a test fi
   returns `migrated: 2` with each landing under its own product; a split spec migrates into a new directory inside its feature
   directory, leaves `design.md` and `tasks.md` unchanged, and `listSpecs()` still reports one entry with both role flags; a nested target
   that already exists returns `success: false`; top-level `SPEC-001-a.md` and `SPEC-001-b.md` return
-  `success: true, migrated: 1` with the other file byte-identical at its path.
+  `success: false, migrated: 1` and warning `Target directory already exists: <dirName>`, the same
+  result as on main, with the other file byte-identical at its path (PQ6(b); pins FR-5). After a flat
+  entry is written for spec-kit, `migrateLayout()` checks the entry's own directory for another
+  `SPEC-NNN-*.md` file with the same `id` and returns that result.
   *Prerequisites:* 1.1.
   *Done when:* green; the existing `migrateLayout()` suite passes with no edit to its lines;
   `scripts/check-import-cycles.ts` reports 0 runtime cycles; and the pull request body carries "re-run
@@ -89,7 +92,7 @@ none touches `.github/`. They run in sequence: tasks 3.1 and 4.1 share a test fi
 
 - [ ] **4.1** (FR-1, FR-4a, FR-5, AC-1, AC-4, AC-5a, D-1, PQ5) `packages/minspec/src/lib/spec-manager.ts`,
   `packages/minspec/src/lib/artifact-graph.ts`, `packages/minspec/tests/spec-manager.test.ts`,
-  `packages/minspec/tests/features.test.ts` - delete `listSpecsShallow()` and `SPEC_FILE_RE`; sweep
+  `packages/minspec/tests/features.test.ts` - delete `listSpecsShallow()` (`SPEC_FILE_RE` stays, read by task 3.1's same-id check); sweep
   the `SpecSummary` doc comment and the near-namesake sentence in `artifact-graph.ts`. Repoint all 16
   test calls at `listSpecs()`, the four with a `filter` argument becoming `.filter(...)` with the
   same predicate and expected values, and rename the titles and the comment naming the dead function.
