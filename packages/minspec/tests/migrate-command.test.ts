@@ -8,6 +8,7 @@ vi.mock('vscode', () => ({
   window: {
     showErrorMessage: vi.fn(),
     showInformationMessage: vi.fn(),
+    showWarningMessage: vi.fn(),
     showQuickPick: vi.fn(),
   },
   workspace: {
@@ -189,5 +190,32 @@ describe('migrateLayoutCommand()', () => {
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
       'MinSpec: Migrated 0 specs to flat layout.',
     );
+  });
+});
+
+describe('migrateLayoutCommand() success with a warning (#3441)', () => {
+  it('shows the warning message, not the information message, and still saves the layout', async () => {
+    vi.clearAllMocks();
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+      update: mockConfigUpdate,
+    } as unknown as vscode.WorkspaceConfiguration);
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce({
+      label: 'spec-kit',
+      description: 'specs/NNN-slug/',
+    } as unknown as vscode.QuickPickItem);
+    vi.mocked(migrateLayout).mockReturnValueOnce({
+      success: true,
+      migrated: 2,
+      target: 'spec-kit',
+      warning: '1 approval moved but now reads stale',
+    });
+
+    await migrateLayoutCommand('/tmp/ws');
+
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('1 approval moved but now reads stale'),
+    );
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+    expect(mockConfigUpdate).toHaveBeenCalledWith('specsLayout', 'spec-kit', 1);
   });
 });
