@@ -87,6 +87,23 @@ describe('#811 — MinSpec SDD validation is a fail-closed required check (DR-06
     expect(WORKFLOW).toContain('python3 .minspec/hooks/validate.py');
   });
 
+  it('always runs validate.py when present; an npm validate script never replaces it (#2263)', () => {
+    // A generic `validate` npm script (e.g. a leads validator) used to be tier 1 and
+    // short-circuited the portable validator, so the required check could go green
+    // without MinSpec validation ever running.
+    const py = WORKFLOW.indexOf('python3 .minspec/hooks/validate.py');
+    const npm = WORKFLOW.indexOf("running 'npm run validate'");
+    expect(py).toBeGreaterThan(-1);
+    expect(npm).toBeGreaterThan(py);
+    // The validate.py guard and the npm guard are independent `if`s, not an if/elif chain.
+    const piece = WORKFLOW.slice(WORKFLOW.indexOf('if [ -f .minspec/hooks/validate.py ]'), npm);
+    expect(piece).not.toMatch(/\belif\b/);
+    // validate.py present but no python3 must fail, not fall through to the npm script.
+    expect(piece).toMatch(/python3 is not available[\s\S]*exit 1/);
+    // Fail-closed: nothing ran -> falls to the published validator / the exit 1 branch.
+    expect(WORKFLOW).toContain('if [ "$ran" = 1 ]');
+  });
+
   it('fails closed when NO validator is present (reachable red path, DR-066)', () => {
     // The no-validator branch must exit non-zero: a required check may never
     // conclude success without validating.
