@@ -1,7 +1,7 @@
 ---
 id: SPEC-233
 type: requirements
-status: specifying
+status: planning
 tier: T2
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — the spec→code ownership contract
@@ -11,9 +11,9 @@ relates_to: ["#2108", "#1317", "#1806", "#1543", DR-003, SPEC-038]
 implements: [packages/minspec/tests/validate-reports-approval-refusal.test.ts]  # NEW — regression test this spec owns
 affects: [packages/minspec/src/commands/validate.ts, packages/minspec/src/lib/spec-validator.ts]  # validate.ts gains one call; the predicate violationsIntroducedByApproval is reused, never re-implemented
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

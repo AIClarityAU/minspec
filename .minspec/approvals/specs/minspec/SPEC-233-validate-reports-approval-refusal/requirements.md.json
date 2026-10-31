@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-233-validate-reports-approval-refusal/requirements.md",
+  "specHash": "ec413f5de5a723cebae197594e7363e269a3b8fc3bcad666977b605d594151d0",
+  "approvedAt": "2026-10-31T08:49:44.154Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T2",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-b",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3181#issuecomment-6541017306"
+}
