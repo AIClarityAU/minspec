@@ -55,9 +55,9 @@ Measured on `ef84097b`:
   next-task signpost, which exists: not stale, no edit.
 - **Moved:** `explore-sidebar.md:30-36`, `example.ts:208-209`, and the comment at
   `extension.ts:943` ("the same way the status bar does").
-- **A fourth config-write site.** `src/commands/getting-started.ts:75`, added by SPEC-042's
+- **A fourth config-write site.** `packages/minspec/src/commands/getting-started.ts:75`, added by SPEC-042's
   Getting Started page: `config().update(…, ConfigurationTarget.Workspace)`, reached only from
-  `writeSetting` calls in `src/views/getting-started-webview.ts:174` and `:204`, from webview
+  `writeSetting` calls in `packages/minspec/src/views/getting-started-webview.ts:174` and `:204`, from webview
   click messages. Its call form is one `configWriteSites` as first drafted would not count.
   The contract below covers it.
 - **`StatusBarSpec` is gone.** #2218 renamed it to `SpecProgressView` under #994. The header
@@ -173,7 +173,7 @@ function badPriorityComments(src: string): string[];  // each line matching
 ```
 
 - **Helpers.** Comment ranges come from the `typescript` compiler already in the tree (root
-  `package.json:37`; imported at `src/lib/import-cycle-check.ts:49`):
+  `package.json:37`; imported at `packages/minspec/src/lib/import-cycle-check.ts:49`):
   `ts.getLeadingCommentRanges`/`getTrailingCommentRanges` at each token of
   `ts.createSourceFile(…)` (JSDoc nodes not descended). Not a regex: a `/*` inside a `//`
   comment (`extension.ts:551`, `:636`) or a string opens no block. **Meta:** for
@@ -222,7 +222,7 @@ function badPriorityComments(src: string): string[];  // each line matching
   1 for `const c = () => vscode.workspace.getConfiguration('x'); c().update('k', 1)`, and 3 for
   the three joined. **The `.vscode` half of AC-4:** over the same files and stripping,
   non-comment lines matching `/\.vscode[\\/'"]/` are pinned to the one on `ef84097b`,
-  `lib/onboarding-settings.ts:73`, a description string that writes nothing. Its meta test feeds
+  `packages/minspec/src/lib/onboarding-settings.ts:73`, a description string that writes nothing. Its meta test feeds
   `path.join(root, '.vscode', 'settings.json')`. The existing Global scan is unchanged; its
   blindness to a boolean `true` target is #1944, not this spec.
 
@@ -300,7 +300,7 @@ The options as first posed, on `d43f235a`. PQ2, PQ3 and PQ4 are answered under
   has none on `d43f235a`), so any use fails until a reviewed diff updates the test. *Cost:* a
   permitted non-text use also goes red, which AC-3's wording does not ask for. **(b)** No scan;
   the behavioural test alone. *Cost:* that test cannot see inside the status-bar classes,
-  because `tests/extension.test.ts:233-238` mocks all three, so a focus-keyed `text` set inside
+  because `packages/minspec/tests/extension.test.ts:233-238` mocks all three, so a focus-keyed `text` set inside
   a class passes it. **Answered under [Decisions](#decisions).**
 
 ## What this design does NOT do
