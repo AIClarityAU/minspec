@@ -3,10 +3,16 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { specHash } from '@aiclarity/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { approveSpec } from '../../minspec/src/lib/approval';
+import { approveSpec, getApprovalStatus } from '../../minspec/src/lib/approval';
+import { buildArtifactGraph } from '../../minspec/src/lib/artifact-graph';
+import { deriveStatus, explicitTerminalOf } from '../../minspec/src/lib/lifecycle';
+import { parseSpec } from '../../minspec/src/lib/spec';
+import { listSpecs } from '../../minspec/src/lib/spec-catalog';
+import { formatNextTaskLabel, resolveNextTask } from '../../shared/src/next-task';
 import { buildBundle, runCore } from './helpers';
 
 const SPEC = '---\nid: SPEC-900\nstatus: specifying\n---\n\n# Parity\n\nBody text.\n';
@@ -92,5 +98,55 @@ describe('failures are loud (FR-9)', () => {
     const r = runCore(bundle, ['--list']);
     expect(r.status).toBe(0);
     expect(r.stdout).toMatch(/^hash\t\S/m);
+  });
+});
+
+describe('status and next parity (FR-5, FR-2)', () => {
+  it('status equals the library derivation for every spec', () => {
+    const r = runCore(bundle, ['status', '--root', project]);
+    expect(r.status).toBe(0);
+    const expected = listSpecs(project).map((s) => {
+      const fm = parseSpec(readFileSync(s.filePath, 'utf8')).frontmatter;
+      const approval = getApprovalStatus(project, s.filePath);
+      return deriveStatus(fm.phases, approval, explicitTerminalOf(fm.status));
+    });
+    expect(expected.length).toBeGreaterThan(0);
+    expect(r.json.data.specs.map((s: any) => s.status)).toEqual(expected);
+    expect(r.json.data.specs.map((s: any) => s.id)).toEqual(listSpecs(project).map((s) => s.id));
+  });
+
+  it('control: an approved spec reads differently from an unapproved one', () => {
+    const file = join(project, 'specs', 'd.md');
+    writeFileSync(file, SPEC.replace('SPEC-900', 'SPEC-901'));
+    approveSpec(project, file, 'T2', 'dev@example.com');
+    const r = runCore(bundle, ['status', '--root', project]);
+    const byId = (id: string) => r.json.data.specs.find((s: any) => s.id === id);
+    expect(byId('SPEC-900').approval).toBe('unapproved');
+    expect(byId('SPEC-901').approval).toBe('approved');
+  });
+
+  it('next equals resolveNextTask and its label, and matches scripts/next-task.ts', () => {
+    const task = resolveNextTask(buildArtifactGraph(project));
+    const r = runCore(bundle, ['next', '--root', project]);
+    expect(r.status).toBe(0);
+    expect(r.json.data.task).toEqual(JSON.parse(JSON.stringify(task)));
+    expect(r.json.data.label).toBe(formatNextTaskLabel(task));
+    const script = execFileSync('npx', ['tsx', join(__dirname, '../../../scripts/next-task.ts'), project], {
+      encoding: 'utf8',
+    });
+    const answer = JSON.parse(script);
+    const first = Array.isArray(answer) ? answer[0] : (answer.results?.[0] ?? answer);
+    expect(first.task).toEqual(r.json.data.task);
+    expect(first.label).toBe(r.json.data.label);
+  }, 60_000);
+
+  it('a folder without .minspec/ is refused for status and next', () => {
+    const bare = join(work, 'bare');
+    mkdirSync(bare, { recursive: true });
+    for (const op of ['status', 'next']) {
+      const r = runCore(bundle, [op, '--root', bare]);
+      expect(r.status).toBe(2);
+      expect(r.json.refusal.code).toBe('not-a-minspec-project');
+    }
   });
 });
