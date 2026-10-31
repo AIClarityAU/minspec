@@ -10,6 +10,7 @@ bear on a near-term decision, file it as an issue and strike it here with the is
 
 Newest first.
 
+- 2026-10-31 - constitution invariants are numbered, so `CON/INV-<slug>` has no target until they are named, which is an edit to the constitution (source: DR-053 §9, #3439)
 - 2026-10-30 - a normal build dispatch whose only deliverable is a spec or decision record, with a legitimate `Closes #N`, is refused by the delegated spec merge with `spec-pr-closes-build-issue`; fails closed, code left as it is (source: #3351)
 - 2026-10-28 - CLAUDE.md "never write, suggest, or attempt a `minspec` shell command" needs a carve-out for agents calling the headless core's `minspec-core.cjs` once SPEC-136 ships; person-facing half stays (source: DR-116)
 - 2026-10-18 - `parseVoterRecords` greedy base64 group over-consumes if two voter records are ever concatenated without a separator; fails safe (digest mismatch drops the record) (source: #2371)
