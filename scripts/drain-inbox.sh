@@ -3726,6 +3726,22 @@ wait_interval() {
 # unreadable parent — is "not paused", so a drain nobody paused behaves as before.
 drain_paused() { [[ -e "$PAUSE_FILE" ]]; }
 
+# lock_held: exit 0 iff the singleton lock file holds THIS loop's own PID (#2241).
+# BASHPID, not $$: the loop is a backgrounded subshell (see the acquire block below).
+lock_held() { [[ "$(cat "$LOCK" 2>/dev/null || true)" == "$BASHPID" ]]; }  # swallow-ok: an unreadable lock reads as empty, which is "not ours"
+
+# lock_release: remove the lock only if it still names this loop (#2241). The EXIT trap and
+# the SIGTERM handler used to `rm -f "$LOCK"` unconditionally, so a loop that had lost its
+# lock (or never held it) deleted the file a DIFFERENT live loop held, and the next
+# --auto start saw no lock and launched a second concurrent loop.
+lock_release() {
+  if lock_held; then
+    rm -f "$LOCK"
+  else
+    echo "[drain] not releasing $LOCK — it no longer names this loop (pid $BASHPID); leaving the current holder's lock alone."
+  fi
+}
+
 # _drain_on_signal <SIGNAL> <exit-code>: the loop's SIGTERM handler (#1187).
 # Says why it stopped, TERMs the children it started (a dispatch's own EXIT trap then
 # releases its lease), drops the lock, and exits. Idempotent: a second SIGTERM while
@@ -3737,7 +3753,7 @@ _drain_on_signal() {
   kids="$(jobs -p 2>/dev/null || true)"  # swallow-ok: no jobs is the common case
   # shellcheck disable=SC2086
   [[ -z "$kids" ]] || kill -TERM $kids 2>/dev/null || true
-  rm -f "$LOCK"
+  lock_release
   exit "$2"
 }
 
@@ -3776,6 +3792,11 @@ run_loop() {
   while :; do
     if ! session_alive "$SESSION_PID"; then
       echo "[drain] session $SESSION_PID ended — stopping loop (drain dies with the session)."; break
+    fi
+    # Singleton check (#2241): a loop that no longer holds the lock must not keep
+    # dispatching beside the loop that does. Exit rather than race it on one queue.
+    if ! lock_held; then
+      echo "[drain] lock $LOCK no longer names this loop (pid $BASHPID; holder: $(cat "$LOCK" 2>/dev/null || echo none)) — stopping loop so two loops never dispatch from one queue (#2241)."; break
     fi
     if (( $(date +%s) >= deadline )); then
       echo "[drain] max lifetime (${MAX_LIFETIME}s) reached — stopping loop (backstop cap)."; break
@@ -4111,8 +4132,16 @@ fi
   # session and spawn a second concurrent loop (double-dispatch / quota abuse).
   # $BASHPID is this subshell's own PID (== $DRAIN_PID), i.e. the long-lived loop
   # the reclaim's `kill -0` must actually probe. (ai-review #676: BLOCKING/HIGH.)
-  echo "$BASHPID" > "$LOCK"
-  trap 'rm -f "$LOCK"' EXIT
+  # Atomic acquire (#2241): noclobber makes the create fail if another loop won the
+  # check-then-write window above, instead of overwriting its lock. The EXIT trap is
+  # installed only AFTER acquiring, and releases only a lock that still names us.
+  set -C
+  if ! echo "$BASHPID" > "$LOCK" 2>/dev/null; then
+    echo "[drain] lost the lock race — $LOCK is held by PID $(cat "$LOCK" 2>/dev/null || echo '?'); exiting without dispatching."
+    exit 0
+  fi
+  set +C
+  trap lock_release EXIT
   trap '_drain_on_signal SIGTERM 143' TERM
 
   if $CONTINUOUS; then
