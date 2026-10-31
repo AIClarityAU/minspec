@@ -105,18 +105,35 @@ async function recoverOnProtectedBranch(
   if (mode === 'prompt') {
     // Non-modal (project preference: never steal focus from the artifact being
     // approved). Names the destination, so the click is informed consent.
+    //
+    // #2258 / SPEC-050 FR-8 parity: the FIRST time only, the standing-consent option
+    // rides along, same label, same project-local store (`enableAlwaysPush`), same
+    // show-once memory as `pushApprovalIfEnabled`. Approving on the default branch
+    // (the DR-051 norm) never reaches that function, so without this the offer was
+    // unreachable for exactly those users. The lead action stays the one-shot
+    // (DR-071 condition 1): escaping the prompt is a deliberate second choice.
+    const alreadyOffered = await pushAlwaysOfferAlreadyMade(rootDir);
+    const actions = alreadyOffered
+      ? [RECOVER_ACTION, 'Not now']
+      : [RECOVER_ACTION, ALWAYS_PUSH_ACTION, 'Not now'];
     const choice = await vscode.window.showWarningMessage(
       `Approval written but NOT committed: '${current}' is the default branch. ` +
         `Save it on a branch and push, so the sign-off is not stranded here?`,
-      RECOVER_ACTION,
-      'Not now',
+      ...actions,
     );
-    // 'declined', NOT undefined: the caller must not then show its own
-    // near-identical "NOT committed / default branch" warning. The user has just
-    // read that sentence and answered it — repeating it is the nagging the
-    // constitution warns about, and it makes a deliberate choice look like an
-    // error. The suffix still reports the honest state (#1255 review nit).
-    if (choice !== RECOVER_ACTION) return 'declined';
+    // Record on every resolution, dismiss included (#883) — show-once.
+    if (!alreadyOffered) await recordPushAlwaysOfferMade(rootDir);
+    if (choice === ALWAYS_PUSH_ACTION) {
+      // Persist the consent, then fall through and recover: the user just said yes.
+      await enableAlwaysPush(rootDir);
+    } else if (choice !== RECOVER_ACTION) {
+      // 'declined', NOT undefined: the caller must not then show its own
+      // near-identical "NOT committed / default branch" warning. The user has just
+      // read that sentence and answered it — repeating it is the nagging the
+      // constitution warns about, and it makes a deliberate choice look like an
+      // error. The suffix still reports the honest state (#1255 review nit).
+      return 'declined';
+    }
   }
 
   const slug = (absPaths[0] ?? message).split(/[\\/]/).slice(-2).join('-').replace(/\.[a-z]+$/i, '');
