@@ -82,6 +82,9 @@ while (( $# )); do
   esac
   shift
 done
+if [[ -n "${'$'}{FAKE_GH_REQUIRE_TOKEN:-}" && "${'$'}{GH_TOKEN:-}" != "$FAKE_GH_REQUIRE_TOKEN" ]]; then
+  echo "gh: Bad credentials (HTTP 401)" >&2; exit 1
+fi
 comments="repos/${'$'}{FAKE_GH_REPO}/issues/${'$'}{FAKE_GH_ITEM}/comments"
 one="repos/${'$'}{FAKE_GH_REPO}/issues/comments/"
 exists() { jq -e --argjson id "$1" 'any(.[]; .id == $id)' "$FAKE_GH_STATE" >/dev/null; }
@@ -422,5 +425,76 @@ describe('lease renew ticker: a failed renewal is reported, never swallowed (con
     expect(fs.existsSync(path.join(dir, 'scratch')), 'precondition: a renewal was in flight').toBe(true);
     expect(r.stdout).toContain('ticker=survived-the-reap');
     expect(err).not.toMatch(/FAILED/);
+  });
+});
+
+describe('lease renew survives a token that died under the ticker (#3501)', () => {
+  // The ticker inherits GH_TOKEN and dates it from first sight, so a token the broker
+  // cached can be dead long before the age re-mint. The renewal must re-mint on the
+  // failed read and retry, not repeat the failure until the age check fires.
+  const LIVE = 'ghs_live_after_remint';
+  const DEAD = 'ghs_dead_token';
+  const FAILED = /^lease: renewal of the claim on #2221 FAILED/gm;
+
+  function mintScript(): string {
+    const f = path.join(dir, 'mint.sh');
+    fs.writeFileSync(f, `#!/usr/bin/env bash\necho ${LIVE}\n`, { mode: 0o755 });
+    return f;
+  }
+  // Hold DEAD as a token this shell minted (owned), as a drain-minted token inherited by
+  // a ticker is, so the failed-read re-mint is allowed to replace it.
+  const holdDead = '_gh_bot_adopt ' + DEAD + ' >/dev/null';
+
+  it('lease_read_claims reports gh\'s own stderr instead of a guess', () => {
+    const r = run(`export GH_TOKEN=${DEAD}; lease_read_claims ${ITEM}; echo rc=$?`, {
+      FAKE_GH_REQUIRE_TOKEN: LIVE,
+    });
+    expect(r.stdout).toContain('rc=1');
+    expect(r.stderr).toContain('Bad credentials (HTTP 401)');
+  });
+
+  it('lease_renew re-mints on a failed read, retries once, and the PATCH lands', () => {
+    const r = run(`${holdDead}\nlease_renew ${ITEM}; echo renew=$?`, {
+      FAKE_GH_REQUIRE_TOKEN: LIVE,
+      MINSPEC_GH_APP_TOKEN_SCRIPT: mintScript(),
+    });
+    expect(r.stdout, r.stderr).toContain('renew=0');
+    expect(r.stderr).toContain('HTTP 401');
+    expect(writes()).toEqual([['PATCH', `repos/${REPO}/issues/comments/${IDS.own}`]]);
+  });
+
+  it('when the broker returns the same dead token, renew fails loudly with the reason and does not retry', () => {
+    const same = path.join(dir, 'same.sh');
+    fs.writeFileSync(same, `#!/usr/bin/env bash\necho ${DEAD}\n`, { mode: 0o755 });
+    const r = run(`${holdDead}\nlease_renew ${ITEM}; echo renew=$?`, {
+      FAKE_GH_REQUIRE_TOKEN: LIVE,
+      MINSPEC_GH_APP_TOKEN_SCRIPT: same,
+    });
+    expect(r.stdout).toContain('renew=1');
+    expect(r.stderr).toContain('Bad credentials (HTTP 401)');
+    expect(r.stderr).not.toContain('network or auth');
+    expect(writes()).toEqual([]);
+    expect(calls().filter((a) => !a.includes('-X'))).toHaveLength(1);
+  });
+
+  it('a ticker forked with a token that starts returning 401 renews after a re-mint', () => {
+    const errFile = path.join(dir, 'ticker.err');
+    const r = run(
+      [
+        'ERR="$1"',
+        'LEASE_RENEW_SECS=0.1',
+        holdDead,
+        `lease_start_renew_ticker ${ITEM} >/dev/null 2>"$ERR"`,
+        `for _ in $(seq 1 100); do grep -q PATCH "$FAKE_GH_LOG" 2>/dev/null && break; sleep 0.1; done`,
+        'lease_stop_renew_ticker',
+        'sleep 0.3',
+      ].join('\n'),
+      { FAKE_GH_REQUIRE_TOKEN: LIVE, MINSPEC_GH_APP_TOKEN_SCRIPT: mintScript() },
+      [errFile],
+    );
+    const err = fs.existsSync(errFile) ? fs.readFileSync(errFile, 'utf-8') : '';
+    expect(writes().length, `${r.stderr}\n${err}`).toBeGreaterThanOrEqual(1);
+    expect(writes()[0]).toEqual(['PATCH', `repos/${REPO}/issues/comments/${IDS.own}`]);
+    expect(err).not.toMatch(FAILED);
   });
 });

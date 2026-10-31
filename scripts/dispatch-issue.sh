@@ -2312,7 +2312,7 @@ shepherd_own_pr() {
       stop-merged)
         echo "  PR #$pr_num merged — creator-shepherd done."; return 0 ;;
       stand-down)
-        echo "  Claim on #$ISSUE was reclaimed by another session — standing down WITHOUT publishing (D3/INV-5)."; return 0 ;;
+        echo "  Claim on #$ISSUE is no longer held by this session (lapsed, unreadable, or taken by another — see the lease: lines above) — standing down WITHOUT publishing (D3/INV-5)."; return 0 ;;
       stop-timeout)
         shepherd_hand_off "$pr_num" "the creator-shepherd reached its ${SHEPHERD_MAX_SECS}s ceiling"; return 0 ;;
       stop-capped)
