@@ -323,7 +323,7 @@ Written down so no reader takes this control to be stronger than it is (the same
 
 ## Decisions needed (Clarify)
 
-All 5 decisions are answered by a pre-recorded selection, not approved: an agent session
+Each of the 5 decisions below carries a pre-recorded selection, not an approval: an agent session
 recorded each option this document already recommended. No human chose them. Nothing here is
 ratified, and this note does not claim a DLG-001 (DR-108) delegated approval: no independent
 verdict or repeat-fix figure is cited. The frontmatter stays `status: specifying` and

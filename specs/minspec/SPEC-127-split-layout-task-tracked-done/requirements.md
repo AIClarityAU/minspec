@@ -242,7 +242,7 @@ scope-expansion ("extend to X" is a new work item, not a detection), it is named
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are answered by a pre-recorded selection, not approved: an agent session
+Each of the 3 decisions below carries a pre-recorded selection, not an approval: an agent session
 recorded each option this document already recommended. No human chose them. Nothing here is
 ratified, and this note does not claim a DLG-001 (DR-108) delegated approval: no independent
 verdict or repeat-fix figure is cited. The frontmatter stays `status: specifying` and
