@@ -73,6 +73,8 @@ export function baseSpecDirs(repo: string, base: string, specsDir: string): stri
       if (r.type === 'dir') dirs.push(`${String(r.path ?? '')}/`);
     }
   }
+  // SPEC-227 FR-12: a listing that succeeds with nothing in it is not "nothing is claimed".
+  if (dirs.length === 0) throw new SpecIdGateError(`the listing of ${specsDir} on ${base} came back empty.`);
   // listings give directories, not files — a trailing slash + sentinel lets the path
   // matcher (which needs a file under the directory) recognise them.
   return specDirsFromPaths(dirs.map((d) => `${d}x`));

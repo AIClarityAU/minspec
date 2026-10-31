@@ -15,7 +15,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 import {
   claimedSpecDirsFromPrFiles,
@@ -127,16 +127,17 @@ esac
     throw new Error(`could not find node_modules/.bin/tsx at or above ${REPO_ROOT}`);
   }
 
-  /** The caller's env minus every MINSPEC_* var, so a live drain's settings cannot leak in. */
+  /** The caller's env minus MINSPEC_* and GIT_*, so a live drain or a git hook cannot leak in. */
   function scrubbedEnv(): NodeJS.ProcessEnv {
-    return Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('MINSPEC_')));
+    return Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(MINSPEC|GIT)_/.test(k)));
   }
 
   function run(script: string, args: string[], stub: string): { status: number; stdout: string; stderr: string } {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-id-cli-'));
     const bin = path.join(tmp, 'gh');
     fs.writeFileSync(bin, stub, { mode: 0o755 });
-    // cwd is an empty dir so the allocator's working-tree read is empty and deterministic
+    // cwd is an empty repo so the allocator's local reads are empty and deterministic
+    execFileSync('git', ['init', '-q'], { cwd: tmp, env: scrubbedEnv() });
     try {
       const out = execFileSync(tsxBin(), [path.join(REPO_ROOT, 'scripts', script), ...args], {
         cwd: tmp,
@@ -166,6 +167,28 @@ esac
     expect(r.stderr).toContain('FAILED CLOSED');
   });
 
+  // SPEC-227 FR-12 (gate fails closed): a listing that succeeds with nothing in it is not
+  // "nothing is claimed". It would hand out SPEC-001 with exit 0.
+  const EMPTY_BASE = WORLD.replace(
+    `'[[{"type":"dir","path":"specs/minspec/SPEC-231-a"},{"type":"dir","path":"specs/minspec/SPEC-232-b"}]]'`,
+    `'[[]]'`,
+  );
+  const NO_PRODUCTS = WORLD.replace(`'[[{"type":"dir","path":"specs/minspec"}]]'`, `'[[]]'`);
+
+  it.each([
+    ['a product directory with no specs', EMPTY_BASE],
+    ['a specs directory with no products', NO_PRODUCTS],
+  ])('allocator and check fail closed on an empty base listing: %s', (_name, stub) => {
+    expect(stub).not.toBe(WORLD);
+    const alloc = run('next-spec-id.ts', REPO_ARGS, stub);
+    expect(alloc.status).toBe(1);
+    expect(alloc.stdout.trim()).toBe('');
+    expect(alloc.stderr).toContain('FAILED CLOSED');
+    const check = run('check-spec-id-collision.ts', [...REPO_ARGS, '--pr', '3153'], stub);
+    expect(check.status).toBe(1);
+    expect(check.stderr).toContain('FAILED CLOSED');
+  });
+
   it('check names the clash with main and the next free id', () => {
     const r = run('check-spec-id-collision.ts', [...REPO_ARGS, '--pr', '3153'], WORLD);
     expect(r.status).toBe(1);
@@ -177,5 +200,86 @@ esac
     const r = run('check-spec-id-collision.ts', [...REPO_ARGS, '--pr', '3153'], '#!/bin/sh\nexit 1\n');
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('FAILED CLOSED');
+  });
+});
+
+/**
+ * SPEC-227 AC-6 (dispatch prompt carries the literal id). The real span of
+ * dispatch-issue.sh, from the allocator block to the end of the Specify prompt, run with a
+ * stub tsx under the dispatcher's own root. Deleting the block fails these.
+ */
+describe('dispatch-issue.sh — the Specify prompt carries the allocated id', () => {
+  const source = fs.readFileSync(path.join(REPO_ROOT, 'scripts', 'dispatch-issue.sh'), 'utf-8');
+  const SCRIPTS = path.join(REPO_ROOT, 'scripts');
+
+  function allocatorSpan(): string {
+    const from = source.indexOf('SPEC_ID_TEXT="the next unused number"');
+    const end = '\nPROMPT\n)';
+    const to = source.indexOf(end, from);
+    expect(from, 'allocator block is gone from dispatch-issue.sh').toBeGreaterThan(-1);
+    expect(to).toBeGreaterThan(from);
+    return `${source.slice(from, to + end.length)}\nfi\nprintf '%s' "\${PROMPT:-}"`;
+  }
+
+  function dispatch(tsxBody: string, specifyOnly = '1') {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-id-dispatch-'));
+    const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-id-caller-'));
+    try {
+      const log = path.join(root, 'calls.log');
+      fs.mkdirSync(path.join(root, 'node_modules', '.bin'), { recursive: true });
+      fs.writeFileSync(
+        path.join(root, 'node_modules', '.bin', 'tsx'),
+        `#!/bin/sh\nprintf '%s|%s\\n' "$(pwd -P)" "$*" >> ${JSON.stringify(log)}\n${tsxBody}\n`,
+        { mode: 0o755 },
+      );
+      const vars = Object.entries({
+        SPECIFY_ONLY: specifyOnly, ISSUE: '42', ROLE: 'dev', REPO: 'o/r', ISSUE_BODY: '',
+        ROLE_SECTION: '', BRANCH: 'b', WORKTREE: 'w', REPO_ROOT: root, SCRIPT_DIR: SCRIPTS,
+      }).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join('\n');
+      const r = spawnSync('bash', ['-c', `set -euo pipefail\n${vars}\n${allocatorSpan()}`], {
+        cwd: elsewhere,
+        encoding: 'utf-8',
+      });
+      return {
+        status: r.status,
+        prompt: r.stdout,
+        stderr: r.stderr,
+        root: fs.realpathSync(root),
+        calls: fs.existsSync(log) ? fs.readFileSync(log, 'utf-8').trim().split('\n') : [],
+      };
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+      fs.rmSync(elsewhere, { recursive: true, force: true });
+    }
+  }
+
+  it('writes the allocated id into the prompt, in place of "the next unused number"', () => {
+    const r = dispatch('echo SPEC-777');
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.prompt).toContain('`id: SPEC-NNN` (exactly SPEC-777');
+    expect(r.prompt).not.toContain('the next unused number');
+    expect(r.stderr).toBe('');
+  });
+
+  it('runs the allocator from the dispatcher\'s checkout, whatever the caller\'s directory', () => {
+    const r = dispatch('echo SPEC-777');
+    expect(r.calls).toEqual([`${r.root}|${SCRIPTS}/next-spec-id.ts --repo o/r --base main`]);
+  });
+
+  it.each([
+    ['the allocator fails', 'echo "FAILED CLOSED" >&2; exit 1'],
+    ['the allocator prints something that is not an id', 'echo banana'],
+  ])('when %s the dispatch goes on, warns visibly and keeps the old wording', (_name, body) => {
+    const r = dispatch(body);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('WARNING: open-PR-aware spec id lookup failed for #42');
+    expect(r.prompt).toContain('`id: SPEC-NNN` (the next unused number)');
+    expect(r.prompt).not.toContain('banana');
+  });
+
+  it('a build dispatch never allocates', () => {
+    const r = dispatch('echo SPEC-777', '0');
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.calls).toEqual([]);
   });
 });
