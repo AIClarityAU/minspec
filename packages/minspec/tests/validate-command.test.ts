@@ -57,6 +57,10 @@ vi.mock('../src/lib/spec-layout', () => ({
   readShardIdFiles: vi.fn(() => []),
 }));
 
+vi.mock('../src/lib/artifact-graph', () => ({
+  readSpecTaskTally: vi.fn(() => ({ total: 0, remaining: 0 })),
+}));
+
 // ─── Imports ──────────────────────────────────────────────────────────────────
 
 import * as vscode from 'vscode';
@@ -435,6 +439,7 @@ describe('validateSpecCommand', () => {
       explicitTerminal: undefined,
       siblingShardFiles: [],
       pathExists: expect.any(Function),
+      taskTally: { total: 0, remaining: 0 },
     });
   });
 

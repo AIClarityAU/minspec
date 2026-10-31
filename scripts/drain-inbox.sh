@@ -1503,6 +1503,51 @@ record_delegated_approvals() {
   return 0
 }
 
+# close_finished_specs: Step 0d of a cycle (#1595). Nothing wrote `phases.implement: done`
+# when a spec's build landed, so the implementing -> done lane never moved without a human.
+# This runs scripts/lib/close-finished-specs.ts, which owns every decision: on a fresh
+# worktree of origin/main it closes each spec the `implement.finished-not-closed` gate calls
+# finished (approved, every task ticked, every implements: path on disk), cites the merged
+# commit that ticked its list, and opens ONE pull request as minspec-sdd[bot]. It never
+# merges, never arms auto-merge, never ticks a task, and spends no Claude quota.
+#
+# Not a gate, so it never fails the cycle: a refused or errored run is printed LOUDLY with
+# the producer's JSON report above it, and the cycle goes on.
+# Off: MINSPEC_DRAIN_CLOSEOUT=0. Per-cycle cap: MINSPEC_DRAIN_CLOSEOUT_MAX (default 10).
+CLOSEOUT_CMD="${MINSPEC_DRAIN_CLOSEOUT_CMD:-}"
+close_finished_specs() {
+  if [[ "${MINSPEC_DRAIN_CLOSEOUT:-1}" == "0" ]]; then
+    echo "[drain] spec close-out: off (MINSPEC_DRAIN_CLOSEOUT=0)."
+    return 0
+  fi
+  local max="${MINSPEC_DRAIN_CLOSEOUT_MAX:-10}"
+  if [[ ! "$max" =~ ^[1-9][0-9]*$ ]]; then
+    echo "[drain] WARNING: spec close-out NOT run: MINSPEC_DRAIN_CLOSEOUT_MAX='${max}' is not a positive integer." >&2
+    return 0
+  fi
+  local scripts_dir root rc=0
+  scripts_dir="$(dirname "$REMEDIATE")"
+  root="$(cd "${scripts_dir}/.." && pwd)"
+  local -a cmd
+  if [[ -n "$CLOSEOUT_CMD" ]]; then
+    cmd=("$CLOSEOUT_CMD")
+  else
+    if [[ ! -f "${scripts_dir}/lib/close-finished-specs.ts" ]]; then
+      echo "[drain] WARNING: spec close-out NOT run: no producer at ${scripts_dir}/lib/close-finished-specs.ts." >&2
+      return 0
+    fi
+    cmd=(npx --no-install tsx "${scripts_dir}/lib/close-finished-specs.ts")
+  fi
+  echo "[drain] spec close-out: closing finished specs (max ${max})..."
+  ( cd "$root" && "${cmd[@]}" --repo-root "$root" --repo "$REPO" --max "$max" --write ) || rc=$?
+  case "$rc" in
+    0) echo "[drain] spec close-out: done (outcomes in the report above)." ;;
+    1) echo "[drain] WARNING: spec close-out REFUSED this cycle (producer exit 1) - nothing written. The reason is in the report above; this is not an empty lane." >&2 ;;
+    *) echo "[drain] WARNING: spec close-out FAILED mid-write (producer exit ${rc}) - see the report above." >&2 ;;
+  esac
+  return 0
+}
+
 # arm_delegated_spec_merges: Step 0c of a cycle (#2981, DR-108). Spec PRs that step 6b
 # held as needs-human-review merge without the founder once delegation DLG-001 covers
 # them (queue item dlg2981, 2026-10-21: "y - my aproval is already the Alt-A"). For each
@@ -2067,6 +2112,10 @@ run_cycle() {
   # Step 0c: delegated merges of held spec PRs (#2981, DR-108). Beside 0b and for the
   # same reason: it must run every cycle, including the empty-queue ones.
   arm_delegated_spec_merges
+
+  # Step 0d: close the implement phase of finished specs (#1595). Every cycle, beside 0b,
+  # for the same reason: the lane it moves must not wait on a non-empty queue.
+  close_finished_specs
 
   # Step 1: triage inbox issues → labels T1/T2 as agent-ready
   # A failed inbox query must not read as an empty inbox (#1855). Triage is not
