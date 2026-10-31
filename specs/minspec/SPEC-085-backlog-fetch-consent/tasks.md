@@ -5,7 +5,7 @@ type: tasks
 # document is read by spec-gate.py as a second, unapproved spec. (SPEC-085 is T3.)
 # status and phases mirror requirements.md. This file has no approval record of its own:
 # only requirements.md is signed, so these two fields describe and never seal.
-status: implementing
+status: done
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain
 relates_to: [DR-004, DR-050, DR-071, DR-066, DR-074, "#2329", "#2247"]
@@ -14,7 +14,7 @@ phases:
   clarify: done
   plan: done
   tasks: done
-  implement: in-progress
+  implement: done
 ---
 
 # SPEC-085 - Tasks
