@@ -64,14 +64,19 @@ while IFS= read -r line; do
   # An untracked DIRECTORY is reported as `?? dir/`, not the files inside it
   # (#1119). Expand it to its files so the copy loop below never sees a
   # directory (`cp` without -r aborts). A first-time approval sidecar lands
-  # exactly this way. `-z` keeps odd filenames intact; a failing ls-files
-  # aborts the script (`set -euo pipefail`) rather than dropping the dir.
+  # exactly this way. `-z` keeps odd filenames intact. ls-files writes to a
+  # temp file first: a process substitution's exit status is invisible to
+  # `set -e`, so reading from one would silently drop the dir on failure.
   if [ "$code" = '??' ] && [[ "$p" == */ ]]; then
     status_lines=("${status_lines[@]:0:${#status_lines[@]}-1}")
+    ls_tmp="$(mktemp)"
+    git -C "$root" ls-files -z --others --exclude-standard -- "$p" > "$ls_tmp" \
+      || { rm -f "$ls_tmp"; echo "push-docs: git ls-files failed for $p" >&2; exit 1; }
     while IFS= read -r -d '' ef; do
       status_lines+=("?? $ef")
       path_status["$ef"]='??'
-    done < <(git -C "$root" ls-files -z --others --exclude-standard -- "$p")
+    done < "$ls_tmp"
+    rm -f "$ls_tmp"
     continue
   fi
   path_status["$p"]="$code"
