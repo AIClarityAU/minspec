@@ -345,6 +345,8 @@ describe('#1064 — destination guard on the default branch', () => {
 
     expect(res.outcome).toBe('protected-branch');
     expect(res.branch).toEqual({ current: 'main', default: 'main' });
+    // #1133: the refusal names the files it left uncommitted
+    expect(res.paths).toEqual(['decision.md']);
     // no commit
     expect(git(['rev-parse', 'HEAD'], tmp).trim()).toBe(before);
     // invariant 3 — nothing left staged in the shared index

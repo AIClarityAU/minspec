@@ -192,6 +192,24 @@ async function recoverOnProtectedBranch(
   return { suffix };
 }
 
+/** Max paths named verbatim in a refusal message before truncating (#1133). */
+const MAX_NAMED_PATHS = 3;
+
+/**
+ * Human-readable list of repo-relative paths, e.g. `DR-064.md and INDEX.md`;
+ * past {@link MAX_NAMED_PATHS} names the first few then "and N more". Basenames
+ * are used when unambiguous, otherwise the full relative path. '' when none.
+ */
+export function describePaths(paths: readonly string[] | undefined): string {
+  if (!paths || paths.length === 0) return '';
+  const bases = paths.map((p) => path.basename(p));
+  const names = paths.map((p, i) => (bases.filter((b) => b === bases[i]).length > 1 ? p : bases[i]));
+  if (names.length <= MAX_NAMED_PATHS) {
+    return names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  }
+  return `${names.slice(0, MAX_NAMED_PATHS).join(', ')} and ${names.length - MAX_NAMED_PATHS} more`;
+}
+
 /**
  * Commit the approval paths when the setting is on, returning a toast suffix.
  *
@@ -251,6 +269,7 @@ export async function commitApprovalIfEnabled(
       // §4a) — approval-recover.ts copies into a separate worktree with a separate
       // index, and this arm still stages nothing in the primary.
       const current = result.branch?.current ?? 'the default branch';
+      const named = describePaths(result.paths);
       const recovery = await recoverOnProtectedBranch(
         rootDir,
         absPaths,
@@ -272,8 +291,9 @@ export async function commitApprovalIfEnabled(
       // happened and what state the files are in; never a bare console.warn.
       void vscode.window.showWarningMessage(
         `Approval written but NOT committed: '${current}' is the default branch, ` +
-          `so a commit there could not be pushed. Your files are saved in the working ` +
-          `tree — commit them on a branch to keep them.`,
+          `so a commit there could not be pushed. ` +
+          (named ? `${named} ${result.paths && result.paths.length === 1 ? 'is' : 'are'} in your working tree, uncommitted — ` : `Your files are saved in the working tree — `) +
+          `commit ${named ? 'all of them' : 'them'} on a branch to keep them.`,
         SHOW_FILES_ACTION,
       ).then((choice) => {
         if (choice === SHOW_FILES_ACTION) void vscode.commands.executeCommand('workbench.view.scm');
@@ -1086,6 +1106,13 @@ export async function commitBornIfUntracked(
   const result = await commitApproval(rootDir, [filePath], message);
   if (result.outcome === 'failed') {
     console.warn(`MinSpec: born commit failed — ${result.error ?? 'git error'}`);
+  } else if (result.outcome === 'protected-branch') {
+    // #1133: this refusal used to fall through unreported. The born commit exists so
+    // the accept lands as a Modify (#577); on the default branch it cannot happen.
+    console.warn(
+      `MinSpec: born commit refused — '${result.branch?.current ?? 'the default branch'}' is the ` +
+        `default branch; ${describePaths(result.paths) || path.basename(filePath)} left uncommitted in your working tree`,
+    );
   }
   return result;
 }
