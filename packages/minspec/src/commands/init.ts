@@ -824,10 +824,11 @@ async function resolveWantedChecks(
  * phrase when GitHub said nothing quotable — an unexplained failure is an honest
  * report; an invented explanation is not.
  */
-function describeRulesetFailure(outcome: {
+export function describeRulesetFailure(outcome: {
   forbidden: boolean;
   planLimited: boolean;
   reason: string | null;
+  detail?: string;
 }): string {
   if (outcome.planLimited) {
     return (
@@ -837,6 +838,11 @@ function describeRulesetFailure(outcome: {
   }
   if (outcome.reason) return `GitHub said: ${outcome.reason}`;
   if (outcome.forbidden) return 'the request was refused — your gh token may lack repo-admin scope';
+  // The outcome's own `detail` is the only evidence of what happened (a local
+  // parse failure, a missing rule, a raw non-403 body) — quote it, bounded, and
+  // keep the non-committal phrase only for the genuinely empty case.
+  const detail = (outcome.detail ?? '').replace(/\s+/g, ' ').trim();
+  if (detail) return detail.length > 200 ? `${detail.slice(0, 200)}…` : detail;
   return 'the request failed';
 }
 
