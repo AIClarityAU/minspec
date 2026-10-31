@@ -91,6 +91,38 @@ function warn(message: string): void {
   warnings++;
 }
 
+// Constitution invariant 2 helpers (#2000). A rule's sweep may be silent about an ABSENT
+// corpus root and about nothing else: a listing failure or a per-file read failure is
+// reported (fail for a FATAL rule, warn otherwise) and the sweep CONTINUES, so one bad
+// file costs that file and not every file that happens to sort after it.
+function reportUnrunnable(rule: string, subject: string, err: unknown, failClosed: boolean, target: string = ROOT): void {
+  const msg = err instanceof Error ? err.message : String(err);
+  const why = `${subject} (${msg}) — ${rule} validated NOTHING for it; do not read the green as a clean corpus.`;
+  if (failClosed) fail(target, why);
+  else warn(`${rule}: ${why}`);
+}
+
+/** Files under `dir`; `[]` only for an absent root. A walk that throws is REPORTED. */
+function listCorpus(rule: string, dir: string, ext: string, failClosed: boolean, keep: (f: string) => boolean = () => true): string[] {
+  try {
+    return safeGlob(dir, ext).filter(keep);
+  } catch (err) {
+    reportUnrunnable(rule, `the corpus ${relative(ROOT, dir) || dir} could not be listed`, err, failClosed, dir);
+    return [];
+  }
+}
+
+/** Run `fn` per file; a throw is reported against that file and the sweep continues. */
+function eachFile(rule: string, files: readonly string[], failClosed: boolean, fn: (file: string) => void): void {
+  for (const file of files) {
+    try {
+      fn(file);
+    } catch (err) {
+      reportUnrunnable(rule, `${rule} could not run on this file`, err, failClosed, file);
+    }
+  }
+}
+
 // Resolve the decisions directory from .minspec/config.json (default
 // docs/decisions). Mirrors the script's own lightweight config reads — no
 // extension/vscode dependency.
@@ -112,9 +144,9 @@ function resolveDecisionsDir(): string {
 
 // Rule 1 + 3 + 4: docs/domain/*.md
 const domainDir = join(ROOT, 'docs', 'domain');
-try {
-  const domainFiles = glob(domainDir, '.md');
-  for (const file of domainFiles) {
+{
+  const domainFiles = listCorpus('Rule 1/3/4', domainDir, '.md', true);
+  eachFile('Rule 1/3/4', domainFiles, true, (file) => {
     const content = readFileSync(file, 'utf-8');
     const fm = parseFrontmatter(content);
 
@@ -127,9 +159,7 @@ try {
     if (/acceptance criteria/i.test(content)) {
       fail(file, 'acceptance criteria not allowed in domain docs');
     }
-  }
-} catch {
-  // docs/domain/ doesn't exist yet — that's fine
+  });
 }
 
 // Registry of valid epic refs (ids + slugs, lowercased) from docs/epics/EPIC-*.md,
@@ -157,10 +187,11 @@ function loadEpicRefs(): EpicRegistry {
   try {
     // EPIC-NNN*.md only: docs/epics/INDEX.md is a derived, legitimately
     // frontmatter-less index, and is not an epic (buildReferenceRegistry scopes
-    // epics the same way).
-    files = glob(epicsDir, '.md').filter((f) => /^EPIC-\d+/.test(basename(f)));
-  } catch {
-    // docs/epics/ doesn't exist — no epics registered.
+    // epics the same way). Only an ABSENT docs/epics/ means "no epics registered";
+    // a walk that throws is reported, not read as an empty registry (#2000).
+    files = safeGlob(epicsDir, '.md').filter((f) => /^EPIC-\d+/.test(basename(f)));
+  } catch (err) {
+    reportUnrunnable('Rule 5', 'the epic registry could not be listed', err, true, epicsDir);
     return { refs, fileCount: 0, unreadable };
   }
   for (const file of files) {
@@ -197,9 +228,15 @@ function buildReferenceRegistry(): ReferenceRegistry {
   const epics = new Set<string>();
 
   const specsRoot = join(ROOT, 'specs');
+  // Per-file catch (#2000): one unreadable file must not abort the registry build and
+  // take the whole of Rule 9 down with it. It is named, and its siblings still register.
   for (const file of safeGlob(specsRoot, '.md')) {
-    const id = parseFrontmatter(readFileSync(file, 'utf-8'))['id'];
-    if (id && /^SPEC-\d+$/.test(id)) specs.add(id);
+    try {
+      const id = parseFrontmatter(readFileSync(file, 'utf-8'))['id'];
+      if (id && /^SPEC-\d+$/.test(id)) specs.add(id);
+    } catch (err) {
+      reportUnrunnable('Rule 9', 'the reference registry could not read this spec', err, false, file);
+    }
   }
   // Directory names also define a spec (split-layout dirs may have no top-level
   // id-bearing file). Match SPEC-NNN at the start of any path segment.
@@ -218,8 +255,12 @@ function buildReferenceRegistry(): ReferenceRegistry {
 
   const epicsRoot = join(ROOT, 'docs', 'epics');
   for (const file of safeGlob(epicsRoot, '.md')) {
-    const fm = parseFrontmatter(readFileSync(file, 'utf-8'));
-    if (fm['id'] && /^EPIC-\d+$/.test(fm['id'])) epics.add(fm['id']);
+    try {
+      const fm = parseFrontmatter(readFileSync(file, 'utf-8'));
+      if (fm['id'] && /^EPIC-\d+$/.test(fm['id'])) epics.add(fm['id']);
+    } catch (err) {
+      reportUnrunnable('Rule 9', 'the reference registry could not read this epic', err, false, file);
+    }
     const m = relative(ROOT, file).split('/').pop()?.match(/^(EPIC-\d+)/);
     if (m) epics.add(m[1]);
   }
@@ -262,9 +303,9 @@ if (epicRegistry.fileCount > 0 && epicRefs.size === 0) {
   );
 }
 
-try {
-  const specFiles = glob(specsDir, '.md');
-  for (const file of specFiles) {
+{
+  const specFiles = listCorpus('Rule 2/5', specsDir, '.md', true);
+  eachFile('Rule 2/5', specFiles, true, (file) => {
     const content = readFileSync(file, 'utf-8');
     const fm = parseFrontmatter(content);
 
@@ -280,9 +321,7 @@ try {
         fail(file, `epic "${ref}" does not match any registered epic (docs/epics/EPIC-NNN.md)`);
       }
     }
-  }
-} catch {
-  // specs/ doesn't exist yet — fine
+  });
 }
 
 // Rule 7 (non-fatal): split-layout cross-file coverage (#111). For each spec
@@ -292,11 +331,11 @@ try {
 // the in-FILE phase-section check per split file; this is the dir-level backstop
 // it deferred. WARNS only — matches the extension's warning severity, so a
 // mid-authoring requirements-only dir surfaces but never fails the build.
-try {
-  const specFiles = glob(specsDir, '.md');
+{
+  const specFiles = listCorpus('Rule 7', specsDir, '.md', false);
   // Group by containing directory; each dir is one split-layout unit.
   const byDir = new Map<string, SplitLayoutFile[]>();
-  for (const file of specFiles) {
+  eachFile('Rule 7', specFiles, false, (file) => {
     const fm = parseFrontmatter(readFileSync(file, 'utf-8'));
     const type = (fm['type'] ?? '').toLowerCase();
     const dir = dirname(file);
@@ -307,15 +346,13 @@ try {
     const tier = /^T[1-4]$/.test(tierToken) ? (tierToken as Tier) : undefined;
     list.push({ type, ...(tier ? { tier } : {}) });
     byDir.set(dir, list);
-  }
-  for (const [dir, files] of byDir) {
-    const result = validateSplitLayoutCoverage(files, DEFAULT_CONFIG);
+  });
+  eachFile('Rule 7', [...byDir.keys()], false, (dir) => {
+    const result = validateSplitLayoutCoverage(byDir.get(dir) ?? [], DEFAULT_CONFIG);
     for (const v of result.violations) {
       warn(`split-coverage ${relative(ROOT, dir)}: ${v.message}`);
     }
-  }
-} catch {
-  // specs/ unreadable / absent — nothing to validate, stay silent.
+  });
 }
 
 // Rule 6 (non-fatal): local DR-NNN sequence health (issue #41). WARNS — never
@@ -335,8 +372,10 @@ try {
   for (const w of drWarnings) {
     warn(`DR-sequence: ${w.message}`);
   }
-} catch {
-  // Decisions dir unreadable / absent — nothing to validate, stay silent.
+} catch (err) {
+  // validateDrSequence already returns [] for an ABSENT decisions dir, so a throw here is a
+  // real read failure, never absence (#2000, invariant 2).
+  reportUnrunnable('Rule 6', 'the DR sequence check could not run', err, false);
 }
 
 // Rule 17 (FATAL, #1226): two decision files declaring one `id:`, or a file whose
@@ -460,8 +499,9 @@ try {
   for (const d of statusDrifts) {
     fail(join(resolveDecisionsDir(), 'INDEX.md'), `DR-index status drift — ${d.message}`);
   }
-} catch {
-  // Decisions dir / INDEX.md unreadable / absent — nothing to validate.
+} catch (err) {
+  // validateDrIndexStatus already returns [] for an absent dir or INDEX.md (#2000).
+  reportUnrunnable('Rule 8', 'the DR index status check could not run', err, true, join(resolveDecisionsDir(), 'INDEX.md'));
 }
 
 // Rule 16 (FATAL, #1145): an ACCEPTED DR that claims to amend or supersede
@@ -519,16 +559,26 @@ try {
 // than blocks; tightening to a hard failure is a follow-up once the corpus is
 // clean and the `@namespace` exemption is adopted. Standalone module — does not
 // touch spec-validator.ts.
-try {
-  const registry = buildReferenceRegistry();
+{
+  let registry: ReferenceRegistry = { specs: new Set(), decisions: new Set(), epics: new Set(), fileExists: () => false };
+  let registryOk = true;
+  try {
+    registry = buildReferenceRegistry();
+  } catch (err) {
+    // Without the registry every citation would read as dangling; say so once and skip.
+    registryOk = false;
+    reportUnrunnable('Rule 9', 'the reference registry could not be built', err, false);
+  }
   // Scan specs + decisions. Paths in file:line citations are resolved relative to
   // the artifact's own directory first, then the repo root — matching how authors
   // actually write `../../docs/research/…` and `src/foo.ts#L42`.
-  const artifactFiles = [
-    ...safeGlob(specsDir, '.md'),
-    ...safeGlob(resolveDecisionsDir(), '.md'),
-  ];
-  for (const file of artifactFiles) {
+  const artifactFiles = registryOk
+    ? [
+        ...listCorpus('Rule 9', specsDir, '.md', false),
+        ...listCorpus('Rule 9', resolveDecisionsDir(), '.md', false),
+      ]
+    : [];
+  eachFile('Rule 9', artifactFiles, false, (file) => {
     const content = readFileSync(file, 'utf-8');
     const artifactDir = dirname(file);
     const scopedRegistry: ReferenceRegistry = {
@@ -539,9 +589,7 @@ try {
     for (const v of checkReferences(content, scopedRegistry)) {
       warn(`ref-check ${relative(ROOT, file)}: ${v.message}`);
     }
-  }
-} catch {
-  // Corpus unreadable / absent — nothing to check, stay silent.
+  });
 }
 
 // Rule 10 (non-fatal, #630): orphaned approval sidecars. Flags a committed
@@ -556,8 +604,9 @@ try {
   for (const orphan of listOrphanedRecords(ROOT)) {
     warn(`orphaned approval sidecar for "${orphan.specPath}" (no longer an approvable spec): ${relative(ROOT, orphan.sidecarFile)}`);
   }
-} catch {
-  // .minspec/approvals/ unreadable / absent — nothing to check, stay silent.
+} catch (err) {
+  // listOrphanedRecords tolerates an absent approvals dir itself (#2000).
+  reportUnrunnable('Rule 10', 'the orphaned-approval check could not run', err, false);
 }
 
 // Rule 11 (FATAL, #626): the body status line must match frontmatter `status:`.
@@ -579,13 +628,15 @@ try {
 // failures are now counted and surfaced: still non-blocking (an unreadable line is not
 // proof of a defect, and a false FATAL would block legitimate commits), but never silent.
 // Constitution invariant #2 — no silent gate.
-try {
+{
   const parityFiles: { file: string; kind: 'spec' | 'dr' }[] = [
-    ...safeGlob(specsDir, '.md').map((file) => ({ file, kind: 'spec' as const })),
-    ...safeGlob(resolveDecisionsDir(), '.md').map((file) => ({ file, kind: 'dr' as const })),
+    ...listCorpus('Rule 11', specsDir, '.md', true).map((file) => ({ file, kind: 'spec' as const })),
+    ...listCorpus('Rule 11', resolveDecisionsDir(), '.md', true).map((file) => ({ file, kind: 'dr' as const })),
   ];
   const unreadable: string[] = [];
-  for (const { file, kind } of parityFiles) {
+  const kindOf = new Map(parityFiles.map((p) => [p.file, p.kind] as const));
+  eachFile('Rule 11', parityFiles.map((p) => p.file), true, (file) => {
+    const kind = kindOf.get(file) as 'spec' | 'dr';
     const content = readFileSync(file, 'utf-8');
     const fm = parseFrontmatter(content);
     const finding = checkStatusParity(content, fm.status, kind);
@@ -617,7 +668,7 @@ try {
     if (shape.kind === 'unparseable') {
       unreadable.push(`${relative(ROOT, file)}:${shape.line} "${shape.text}"`);
     }
-  }
+  });
   if (unreadable.length > 0) {
     const shown = unreadable.slice(0, 5).join('; ');
     const more = unreadable.length > 5 ? ` (+${unreadable.length - 5} more)` : '';
@@ -625,8 +676,6 @@ try {
       `status parity (#968) — ${unreadable.length} status line(s) exist but could not be read, so rule 11 is NOT checking them: ${shown}${more}. Either reword to lead with a status word, or teach status-parity.ts the shape.`,
     );
   }
-} catch {
-  // Corpus unreadable / absent — nothing to check.
 }
 
 // Rule 12 (FATAL, #678): every file scripts/gen-ci-templates.mjs generates —
@@ -715,17 +764,15 @@ async function checkCiReviewTemplatesFresh(): Promise<void> {
 // human opening the approve flow by hand). `checkAcceptanceCriteria` is the
 // SAME function `validateSpec` calls — not a reimplementation that could drift
 // from it again (Goal G-6: one rule, enforced identically on every surface).
-try {
-  const specFiles = glob(specsDir, '.md');
-  for (const file of specFiles) {
+{
+  const specFiles = listCorpus('Rule 13', specsDir, '.md', true);
+  eachFile('Rule 13', specFiles, true, (file) => {
     const content = readFileSync(file, 'utf-8');
     const violation = checkAcceptanceCriteria(parseSpec(content));
     if (violation) {
       fail(file, `${violation.message} ${violation.fixHint}`);
     }
-  }
-} catch {
-  // specs/ unreadable / absent — nothing to validate, stay silent.
+  });
 }
 
 // Rule 15 (#460, SPEC-038): T3/T4 specs past Clarify must declare their owned
@@ -735,17 +782,16 @@ try {
 // lesson). Ships as `warn` per `ownershipDeclaration` (FR-7 ratchet) — inert
 // until the corpus is backfilled, then a one-line flip to `error` makes it FATAL
 // here too. `ownership.implements.invalid` is always fatal (a malformed path).
-try {
+{
   const ownCfg = loadConfig(ROOT);
-  for (const file of glob(specsDir, '.md')) {
+  const ownFailsClosed = ownCfg.ownershipDeclaration === 'error';
+  eachFile('Rule 15', listCorpus('Rule 15', specsDir, '.md', ownFailsClosed), ownFailsClosed, (file) => {
     const content = readFileSync(file, 'utf-8');
     for (const v of validateOwnership(parseSpec(content), ownCfg)) {
       if (v.severity === 'error') fail(file, `${v.message} ${v.fixHint}`);
       else warn(`ownership ${relative(ROOT, file)}: ${v.message}`);
     }
-  }
-} catch {
-  // specs/ unreadable / absent — nothing to validate, stay silent.
+  });
 }
 
 // Rule 22 (#1751): a spec whose `phases.implement` is `in-progress`/`done` must
@@ -760,23 +806,23 @@ try {
 // in-extension approve gate calls (Goal G-6: one rule, every surface). Ships as
 // `warn` by default (`implementEvidence` FR-7 ratchet, mirrors Rule 15's
 // `ownershipDeclaration`) — inert until flipped to `error`.
-try {
-  for (const file of glob(specsDir, '.md')) {
+{
+  const evCfg = loadConfig(ROOT);
+  const evFailsClosed = evCfg.implementEvidence === 'error';
+  eachFile('Rule 22', listCorpus('Rule 22', specsDir, '.md', evFailsClosed), evFailsClosed, (file) => {
     const content = readFileSync(file, 'utf-8');
     // implements: paths are always repo-ROOT-relative (SPEC-038), unlike Rule 9's
     // file:line citations — an owned-code path is never resolved against the
     // spec's own directory.
     for (const v of validateImplementEvidence(
       parseSpec(content),
-      loadConfig(ROOT),
+      evCfg,
       (relPath) => existsSync(join(ROOT, relPath)),
     )) {
       if (v.severity === 'error') fail(file, `${v.message} ${v.fixHint}`);
       else warn(`implement-evidence ${relative(ROOT, file)}: ${v.message}`);
     }
-  }
-} catch {
-  // specs/ unreadable / absent — nothing to validate, stay silent.
+  });
 }
 
 // Rule 14 (harden, #760): every MANAGED_REGION_TEMPLATES output path present on
@@ -802,8 +848,9 @@ try {
       warn(`${v.outputPath}: ${v.message}`);
     }
   }
-} catch {
-  // scaffold/tool-detector unavailable — nothing to check, stay silent.
+} catch (err) {
+  // A managed file that cannot be read stops the whole marker sweep; say so (#2000).
+  reportUnrunnable('Rule 14', 'the managed-region marker check could not run', err, false);
 }
 
 // Rule 23 (#1912): the `status:` frontmatter line carries a value and nothing
@@ -999,13 +1046,13 @@ try {
 // nothing else finds or repairs. WARN only (Low severity, #2467): the damage is
 // visible in a diff, and whether any real project carries such a file is
 // unverified.
-try {
+{
   const doubledFmRoots: { dir: string; label: string }[] = [
     { dir: resolveDecisionsDir(), label: 'decision' },
     { dir: join(ROOT, 'docs', 'epics'), label: 'epic' },
   ];
   for (const { dir, label } of doubledFmRoots) {
-    for (const file of safeGlob(dir, '.md')) {
+    eachFile('Rule 20b', listCorpus('Rule 20b', dir, '.md', false), false, (file) => {
       const finding = detectDoubledFrontmatter(readFileSync(file, 'utf-8'));
       if (finding) {
         warn(
@@ -1016,10 +1063,8 @@ try {
             `into one frontmatter block (keep the correct \`status:\`) and remove the stale duplicate.`,
         );
       }
-    }
+    });
   }
-} catch {
-  // decisions/epics dir unreadable / absent — nothing to check, stay silent.
 }
 
 // Rule 21 (non-fatal, #2467): a generated harness file (CLAUDE.md, AGENTS.md,
@@ -1038,6 +1083,7 @@ try {
   for (const name of TEMPLATE_NAMES) {
     const outputPath = join(ROOT, TEMPLATE_OUTPUT_PATHS[name]);
     if (!existsSync(outputPath)) continue;
+    try {
     const templateHeadings = parseSections(renderTemplate(name, harnessContext))
       .map((s) => s.heading)
       .filter((h) => h !== PREAMBLE_HEADING);
@@ -1052,9 +1098,12 @@ try {
           `Each doubled section must be reconciled by hand: decide which copy is current and delete the other.`,
       );
     }
+    } catch (err) {
+      reportUnrunnable('Rule 21', 'the doubled-section check could not run on this file', err, false, outputPath);
+    }
   }
-} catch {
-  // Template rendering / harness files unreadable — nothing to check, stay silent.
+} catch (err) {
+  reportUnrunnable('Rule 21', 'the harness-file doubled-section check could not run', err, false);
 }
 
 // Rule 24 (FATAL, #2684): a known limit admitted in shipped product source or
