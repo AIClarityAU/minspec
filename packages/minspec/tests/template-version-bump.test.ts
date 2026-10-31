@@ -13,6 +13,9 @@ import {
   readVersion,
   VERSION_FILE,
 } from '../../../scripts/lib/template-version-bump';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+useShellTimeout();
 
 const REG = 'packages/minspec/src/lib/template-registry.ts';
 
