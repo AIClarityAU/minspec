@@ -168,6 +168,11 @@ missing a gate; a capability is missing.
 
 ## Decisions needed (Clarify)
 
+All 7 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 - **D1 Where the log lives.**
   (a) `.minspec/agent-actions.jsonl` in the primary checkout, gitignored, as
   `shadow-triage.jsonl` already is **(rec)**: survives restart on this host, zero repo churn;
@@ -178,11 +183,13 @@ missing a gate; a capability is missing.
   irreversible, so this option needs a DR.
   (c) `$XDG_STATE_HOME/minspec/` under home: survives restart only if home is persistent,
   which this container does not guarantee (only `~/code` is bind-mounted, observed above).
+  **Recorded selection: Option (a),** `.minspec/agent-actions.jsonl` in the primary checkout, gitignored. An agent session copied this document's (rec) option; no human chose this item.
 - **D2 Does a failed log write block the run?**
   (a) No - warn plus drain counter plus FR-9 cross-check **(rec)**: a full disk cannot stall
   the fleet; cost: a period of missing rows is possible, visible but not prevented.
   (b) Yes - fail the run: the log is complete by construction; cost: makes a record into a
   gate and a single disk or lock fault stops all dispatch.
+  **Recorded selection: Option (a),** a failed log write does not block the run: warn, drain counter, FR-9 cross-check. An agent session copied this document's (rec) option; no human chose this item.
 - **D3 Tamper evidence against the agent.** The agent runs as the same user and could edit
   the log (the `dispatch-issue.sh:54-68` threat).
   (a) Hash chain: each row carries the SHA-256 of the previous line; the query verifies the
@@ -192,21 +199,26 @@ missing a gate; a capability is missing.
   evidence of what an agent did not do.
   (c) Write the log as a different OS user; cost: new privilege setup on the host, outside
   this repo's blast radius.
+  **Recorded selection: Option (a),** a hash chain; each row carries the SHA-256 of the previous line. An agent session copied this document's (rec) option; no human chose this item.
 - **D4 Keep the agent's own words?** (a) Optional `agent_claim`, first 280 chars of
   `.agent-summary.md`, egress-scanned, labelled as a claim **(rec)**: answers "why" in the
   query; cost: a prompt-injected summary can put misleading text in the log (labelled, never a
   fact field). (b) Omit; cost: "why" needs the PR or issue, so the log answers "what" only.
+  **Recorded selection: Option (a),** an optional `agent_claim`, the first 280 characters of `.agent-summary.md`, egress-scanned and labelled as a claim. An agent session copied this document's (rec) option; no human chose this item.
 - **D5 Query surface.** (a) `npm run agent-log -- <filters>` repo script, like
   `npm run facts` **(rec)**: dev-time, consistent with DR-015 keeping dispatch out of MinSpec;
   cost: not in the editor. (b) A MinSpec palette command; cost: ships a dev-time dispatch
   concern inside the Tier-0 extension, contrary to DR-015.
+  **Recorded selection: Option (a),** `npm run agent-log -- <filters>`, a repo script. An agent session copied this document's (rec) option; no human chose this item.
 - **D6 Which action paths beyond the two named.** The issue names dispatch and remediation.
   (a) Those two now; the reviewer stage, triage, and delegated-merge acts as follow-ups
   **(rec)**; cost: a merge by an agent is not in the log until the follow-up lands.
   (b) All agent-write paths now; cost: roughly doubles the change surface of a T3.
+  **Recorded selection: Option (a),** dispatch and remediation now; the reviewer stage, triage and delegated-merge acts as follow-ups. An agent session copied this document's (rec) option; no human chose this item.
 - **D7 Retention.** (a) Unbounded single file, rotation deferred **(rec)**; I believe a row is
   under 1 KB, so a few hundred runs a day stays under 100 MB a year (estimate, unmeasured);
   cost: unbounded growth. (b) Monthly files; cost: the query and hash chain must span files.
+  **Recorded selection: Option (a),** an unbounded single file, rotation deferred. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Out of scope
 

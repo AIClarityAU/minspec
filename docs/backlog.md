@@ -17,3 +17,4 @@ Newest first.
 - 2026-10-18 - a voter on voip-sms-inbox #121 read a harness-refresh PR as reverting a DR from accepted to proposed; not reproduced from the three-dot diff (`scripts/review-branch.sh:75`), only from a two-dot diff against a moved base; possibly related to #2052 (source: #2371)
 - 2026-10-18 - ai-review guard exports `ROUND_RECORD_PREFIX` and `PENDING` with no reference in the shipped suite; SPEC-211's export gate covers functions only (source: SPEC-211)
 - 2026-10-27 - drain-inbox same-file serialisation and queue de-duplication still unbuilt; the drain service now runs at concurrency 8 (source: the drain-concurrency record, number 114, in docs/decisions/)
+- 2026-10-31 - the #3282 triage hold (`built-spec`) refuses planning, implementing and done as specified; specs with status `archived` or `superseded` still reach specify with the same duplicate-write risk, and an unreadable status line reads as no spec named (fails open) (source: #3376)

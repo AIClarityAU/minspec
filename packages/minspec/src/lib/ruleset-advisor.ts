@@ -293,7 +293,7 @@ interface RulesetDetail {
  * `refs/heads/*` include) AND carry a `required_status_checks` rule? Pure;
  * tolerant of partial / unexpected JSON.
  */
-function rulesetGuardsDefaultBranchChecks(detail: unknown): boolean {
+export function rulesetGuardsDefaultBranchChecks(detail: unknown): boolean {
   if (typeof detail !== 'object' || detail === null) return false;
   const d = detail as RulesetDetail;
 
@@ -648,7 +648,7 @@ export interface ExistingRequiredChecks {
 }
 
 /** Permissive view of a ruleset PUT/GET body — only the fields we read/preserve. */
-interface RulesetFull {
+export interface RulesetFull {
   name?: string;
   target?: string;
   enforcement?: string;
@@ -663,7 +663,7 @@ interface RulesetFull {
 }
 
 /** Pull the `required_status_checks` contexts out of a parsed ruleset (pure, tolerant). */
-function extractRequiredContexts(detail: RulesetFull): string[] {
+export function extractRequiredContexts(detail: RulesetFull): string[] {
   const rule = Array.isArray(detail.rules)
     ? detail.rules.find((r) => r?.type === 'required_status_checks')
     : undefined;
