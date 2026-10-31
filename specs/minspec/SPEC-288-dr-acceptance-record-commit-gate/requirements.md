@@ -13,7 +13,7 @@ implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan, after Decisions D1-D3 are answered.
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -108,13 +108,22 @@ quietly (constitution invariant 2, no silent gate).
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 - **D1 - How the hook hashes.** (a) **(rec)** call the shared `specHash` via `tsx`/node from the hook where
   available, falling back to a hard fail with a message when it cannot run - one hash definition, no drift; cost: adopter repos need the runtime
   at commit time, so a missing runtime blocks acceptance commits there. (b) re-implement canonicalization in bash -
   no runtime, but a duplicate predicate that drifts from `canonical.ts`.
+  **Recorded selection: Option (a),** call the shared `specHash` via `tsx`/node from the hook, with a hard fail and a message when it cannot run. An agent session copied this document's (rec) option; no human chose this item.
 - **D2 - Presence-only vs hash match in the hook.** Issue asks for hash match (FR-2). Presence-only (**cheaper**, no runtime) catches this incident
   but not a stale hand-copied record. Rec: keep hash match; cost: depends on D1 runtime.
+  **Recorded selection: keep hash match,** the hook checks the hash, not presence only (FR-2). An agent session copied this document's (rec) option; no human chose this item.
 - **D3 - Build-skew dismissal.** Out of scope here. Option: file a follow-up so the per-build dismissal expires (e.g. on next activation of a
   newer sha). Rec: file separately; cost: the editor-side warning stays weak until then, hook is the only hard gate.
+  **Recorded selection: file separately,** build-skew dismissal stays out of scope here. This record files no follow-up issue. An agent session copied this document's (rec) option; no human chose this item.
 - **D4 - Adopter template.** Ship the same block in the generated hook template (`template-registry.ts`) now (rec; cost: a hook-template change reaches
   every adopter on next refresh) or only in this repo's `.githooks` first.
+  **Recorded selection: ship now,** the same block goes into the generated hook template (`template-registry.ts`) in this change. An agent session copied this document's (rec) option; no human chose this item.

@@ -13,7 +13,7 @@ implements_reason: >-
   Specify phase only. Files owned are decided at Plan, after Decisions D1-D4 are answered.
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -117,23 +117,32 @@ the gate is the fix.)
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 - **D1 - How is `regressionTest` turned into a command?** (a) **(rec)** vitest only: accept
   `path/to/file.test.ts` optionally with `-t "name"`; cost: other runners (shell tests, node
   scripts under `tests/`) are `unrunnable` until added. (b) Per-runner dispatch table; cost: more
   code and more places to drift. (c) Agent supplies a literal command; cost: executes agent-chosen
   shell, widening the attack surface.
+  **Recorded selection: Option (a),** vitest only: `path/to/file.test.ts`, optionally with `-t "name"`. An agent session copied this document's (rec) option; no human chose this item.
 - **D2 - Distinguishing "failed" from "could not run".** (a) **(rec)** parse the runner's JSON
   reporter and require at least one failed assertion for the named test; cost: couples to
   vitest's output shape. (b) non-zero exit only; cost: a typo or missing import reads as a
   "proven red", the exact false-proof this spec removes.
+  **Recorded selection: Option (a),** parse the runner's JSON reporter and require at least one failed assertion for the named test. An agent session copied this document's (rec) option; no human chose this item.
 - **D3 - Flaky tests.** (a) **(rec)** run head up to 3 times, require all-pass; run base once and
   record `flaky` if base is inconsistent across 2 runs; cost: minutes per fix and extra CPU.
   (b) single run; cost: a flaky test blocks or falsely credits a real fix. Neither blocks publish
   (see Out of scope); confirm that is wanted rather than gating the PR on it.
+  **Recorded selection: Option (a),** run head up to 3 times and require all-pass; run base once and record `flaky` if base is inconsistent across 2 runs. An agent session copied this document's (rec) option; no human chose this item.
 - **D4 - Evidence check before building.** The issue says to skip if past self-reported flags
   were always right. (a) **(rec)** sample past merged fix PRs (flag vs re-run) before Plan; cost:
   a small measurement task first. (b) build now; cost: ~1M tokens (~2% of a week) possibly
   spent for little gain.
+  **Recorded selection: Option (a),** sample past merged fix PRs (flag against re-run) before Plan. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Follow-ups (tracked)
 
