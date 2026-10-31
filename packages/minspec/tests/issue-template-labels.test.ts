@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   GATE_OUTPUT_LABELS,
+  checkMarkdownTemplate,
   checkTemplate,
   extractLabels,
 } from '../../../scripts/lib/issue-template-labels';
@@ -64,5 +65,29 @@ describe('real tree', () => {
   }, 30_000);
   it('exits non-zero when the directory has no templates', () => {
     expect(() => run(mkdtempSync(join(tmpdir(), 'tpl-')))).toThrow();
+  }, 30_000);
+});
+
+describe('escapes, comments and classic .md templates (PR #3460 review)', () => {
+  it('fails closed on YAML escapes in a double-quoted label', () => {
+    expect(checkTemplate('x.yml', form('labels: ["agent-read\\x79"]'))).toHaveLength(1);
+  });
+  it('strips a trailing comment on a scalar labels value', () => {
+    expect(checkTemplate('x.yml', form('labels: agent-ready # note'))).toHaveLength(1);
+  });
+  it('flags a gate-output label in .md frontmatter', () => {
+    expect(checkMarkdownTemplate('x.md', '---\nname: n\nlabels: agent-ready\n---\nbody')).toHaveLength(1);
+    expect(checkMarkdownTemplate('x.md', '---\nlabels:\n  - bug\n  - agent-ready\n---\n')).toHaveLength(1);
+  });
+  it('passes clean .md and fails closed on unterminated frontmatter', () => {
+    expect(checkMarkdownTemplate('x.md', '---\nlabels: bug\n---\n')).toEqual([]);
+    expect(checkMarkdownTemplate('x.md', '---\nlabels: bug\n')).toHaveLength(1);
+  });
+  it('CLI exits non-zero on a violating .md template', () => {
+    const d = mkdtempSync(join(tmpdir(), 'tpl-'));
+    writeFileSync(join(d, 'x.md'), '---\nlabels: agent-ready\n---\n');
+    expect(() =>
+      execFileSync('npx', ['tsx', 'scripts/check-issue-template-labels.ts', '--dir', d], { cwd: REPO, stdio: 'pipe' }),
+    ).toThrow();
   }, 30_000);
 });

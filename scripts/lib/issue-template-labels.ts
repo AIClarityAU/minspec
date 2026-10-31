@@ -28,6 +28,8 @@ function unquote(raw: string): string | null {
   const q = s[0];
   if (q === '"' || q === "'") {
     if (s.length < 2 || s[s.length - 1] !== q) return null;
+    // YAML decodes escapes in double-quoted scalars (`"agent-read\x79"`); we don't, so fail closed.
+    if (q === '"' && s.includes('\\')) return null;
     return s.slice(1, -1);
   }
   if (/[\[\]{},"'#]/.test(s)) return null;
@@ -73,11 +75,12 @@ export function extractLabels(yaml: string): LabelsResult {
     return { ok: false, reason: 'duplicate top-level labels: key' };
   }
   if (idx === -1) return { ok: true, labels: [] };
-  const rest = lines[idx].replace(/^labels\s*:/, '').trim();
+  const rest = lines[idx].replace(/^labels\s*:/, '').replace(/(^|\s)#.*$/, '').trim();
   if (rest.startsWith('[')) return parseFlow(rest);
   if (rest !== '' && !rest.startsWith('#')) {
     // scalar (comma-separated string is valid for GitHub) - parse as list of names
     if (/^["'].*["']$/.test(rest) || !/[\[\]{}|>&*!]/.test(rest)) {
+      if (rest.includes('\\')) return { ok: false, reason: `escape sequence in labels value: ${rest}` };
       const inner = rest.replace(/^["']|["']$/g, '');
       return { ok: true, labels: inner.split(',').map((s) => s.trim()).filter(Boolean) };
     }
@@ -114,4 +117,22 @@ export function checkTemplate(
   return r.labels
     .filter((l) => deny.has(l.toLowerCase()))
     .map((l) => `${name}: grants gate-output label "${l}" - labels authorising work must come from a bot/maintainer write, never an issue form`);
+}
+
+/** Problems for a classic markdown template: `labels:` lives in the leading `---` frontmatter. */
+export function checkMarkdownTemplate(
+  name: string,
+  md: string,
+  forbidden: readonly string[] = GATE_OUTPUT_LABELS,
+): string[] {
+  const text = md.replace(/\r\n?/g, '\n');
+  if (!text.startsWith('---\n')) return [];
+  const end = text.indexOf('\n---', 4);
+  if (end === -1) return [`${name}: unterminated frontmatter`];
+  const r = extractLabels(text.slice(4, end));
+  if (!r.ok) return [`${name}: ${r.reason}`];
+  const deny = new Set(forbidden.map((f) => f.toLowerCase()));
+  return r.labels
+    .filter((l) => deny.has(l.toLowerCase()))
+    .map((l) => `${name}: grants gate-output label "${l}" - labels authorising work must come from a bot/maintainer write, never an issue template`);
 }
