@@ -219,6 +219,9 @@ export function describePaths(paths: readonly string[] | undefined): string {
  *   ' · not committed (merge/cherry-pick …)'  — git refuses a partial commit mid-operation (#1112)
  *   ' · commit failed — approval saved …'     — git/hook rejected; approval on disk, uncommitted, unstaged
  *
+ * `stranded: true` marks every outcome where the approval is on disk but in NO commit
+ * (#1163), so a caller can refuse to present it as a plain success.
+ *
  * Never rejects (delegates to `commitApproval`, which never rejects). A failed or
  * refused commit is surfaced (never-wrong: the user must know the approval is
  * uncommitted), with the full git/hook stderr logged for diagnosis.
@@ -227,7 +230,7 @@ export async function commitApprovalIfEnabled(
   rootDir: string,
   absPaths: readonly string[],
   message: string,
-): Promise<{ suffix: string; result?: CommitApprovalResult }> {
+): Promise<{ suffix: string; result?: CommitApprovalResult; stranded?: boolean }> {
   if (!commitOnApproveEnabled()) return { suffix: '' };
   const result = await commitApproval(rootDir, absPaths, message);
   switch (result.outcome) {
@@ -283,6 +286,7 @@ export async function commitApprovalIfEnabled(
         return {
           suffix: ` · NOT committed (on ${current} — files left in your working tree)`,
           result,
+          stranded: true,
         };
       }
       if (recovery) return { ...recovery, result };
@@ -301,11 +305,12 @@ export async function commitApprovalIfEnabled(
       return {
         suffix: ` · NOT committed (on ${current} — files left in your working tree)`,
         result,
+        stranded: true,
       };
     }
     case 'detached-head':
       // A commit here would be orphaned by the next checkout — refuse and say so.
-      return { suffix: ' · not committed (detached HEAD — switch to a branch)', result };
+      return { suffix: ' · not committed (detached HEAD — switch to a branch)', result, stranded: true };
     case 'merge-in-progress': {
       // #1112: git itself refuses a PARTIAL (pathspec) commit while a merge or
       // cherry-pick is in progress — a real git constraint, not a MinSpec
@@ -318,7 +323,7 @@ export async function commitApprovalIfEnabled(
       void vscode.window.showWarningMessage(
         `Approval saved — finish the ${op} in progress, then commit it.`,
       );
-      return { suffix: ` · not committed (${op} in progress — finish it, then commit)`, result };
+      return { suffix: ` · not committed (${op} in progress — finish it, then commit)`, result, stranded: true };
     }
     case 'failed':
       // Log the detail (incl. hook stderr); keep the toast short. The approval
@@ -329,7 +334,7 @@ export async function commitApprovalIfEnabled(
       // deliberately NOT left in the index. The old wording described the
       // behaviour before that invariant existed and had become false.
       console.warn(`MinSpec: commit-on-approve failed — ${result.error ?? 'git error'}`);
-      return { suffix: ' · commit failed — approval saved in your working tree (see console)', result };
+      return { suffix: ' · commit failed — approval saved in your working tree (see console)', result, stranded: true };
     default:
       // 'not-a-repo' | 'nothing-to-commit' — no net change worth reporting.
       return { suffix: '', result };
