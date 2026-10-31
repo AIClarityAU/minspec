@@ -17,7 +17,7 @@ implements_reason: >-
 affects: [packages/minspec/src/lib/template-registry.ts, packages/minspec/src/lib/ownership-path-rules.ts]
 phases:
   specify: done
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

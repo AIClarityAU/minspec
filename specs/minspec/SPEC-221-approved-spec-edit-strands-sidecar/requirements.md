@@ -9,7 +9,7 @@ aspects: [approval, gate-integrity, no-silent-gate, never-wrong, tier-0, offline
 relates_to: [DR-081, DR-029, DR-003, SPEC-069, SPEC-136, "#2017", "#1029"]
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending
