@@ -62,7 +62,7 @@
 # stdout: one line "<label> <role> <hold>"
 #   label ∈ {agent-ready, agent-ready-specify, needs-review, needs-info}
 #   role  ∈ {dev, architect, security, reviewer}
-#   hold  ∈ {none, specify, human, tier, info, unknown} — WHY this is not fully
+#   hold  ∈ {none, specify, human, tier, info, built-spec, unknown} — WHY this is not fully
 #           auto-buildable (#1002, extended #1169)
 # exit 0 always when a block is found; exit 2 (still prints a fail-closed line) if not.
 #
@@ -101,6 +101,8 @@
 #   tier     T3/T4 the agent did NOT call            → needs-review
 #            auto-buildable — too much ceremony,
 #            a human reads it (the pre-#1169 T3/T4 outcome, now the residue)
+#   built-spec the issue names a spec already approved (planning/implementing/
+#            done, via --named-spec-status, #3282) → needs-review; never specify
 #   none     the ONLY unrestricted affirmative       → agent-ready
 #            (T1/T2, or a T3/T4 under the DR-118 pipeline-blocker exception)
 #   unknown  no usable verdict could be derived — no verdict block at all, an
@@ -119,6 +121,9 @@ set -eu
 MODE="line"
 # Fail closed by default: the exception is OFF unless the exact label is passed in.
 PIPELINE_BLOCKER="no"
+# NAMED_SPEC_STATUS — status of the spec the issue names (#3282), supplied by the
+# caller (this gate stays pure: no filesystem, no network). Empty = no spec named.
+NAMED_SPEC_STATUS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --fields) MODE="fields"; shift ;;
@@ -130,6 +135,7 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
+    --named-spec-status=*) NAMED_SPEC_STATUS="$(printf '%s' "${1#*=}" | tr '[:upper:]' '[:lower:]')"; shift ;;
     *) shift ;;   # unknown arguments were always ignored; ignoring one never widens a route
   esac
 done
@@ -217,6 +223,10 @@ esac
 # Deterministic gate — order matters, every fall-through lands on a human gate:
 # 1. human-only (any tier)                 → needs-review          (hold: human)
 # 2. agent asked for info                  → needs-info            (hold: info)
+# 2b. agent-ready AND the issue names an already-approved spec (planning/implementing/
+#     done, --named-spec-status, #3282)    → needs-review          (hold: built-spec; checked
+#                                                                   before 3a, so the pipeline-blocker
+#                                                                   exception never lifts it)
 # 3a. T3/T4 AND agent-ready AND the exact `pipeline-blocker` label
 #                                          → agent-ready           (hold: none — DR-118, the
 #                                                                   ONE exception to rule 3)
@@ -238,6 +248,16 @@ if [[ "$HUMAN_OUT" == "yes" || "$HUMAN_OUT" == "unknown" ]]; then
 fi
 if [[ "$DECISION" == "needs-info" ]]; then
   emit needs-info "$ROLE" info; exit 0
+fi
+# 2b (#3282). The issue names a spec that is ALREADY approved (planning /
+# implementing / done). A specify dispatch would write a duplicate requirements.md,
+# and a whole-spec build issue is not a per-task unit. Any affirmative decision is
+# refused to a human gate; `built-spec` is not an approvable hold, so approval
+# cannot lift it — the fix is to file per-task issues.
+if [[ "$DECISION" == "agent-ready" ]]; then
+  case "$NAMED_SPEC_STATUS" in
+    planning|implementing|done) emit needs-review "$ROLE" built-spec; exit 0 ;;
+  esac
 fi
 if [[ "$TIER" == "t3" || "$TIER" == "t4" ]]; then
   if [[ "$DECISION" == "agent-ready" ]]; then

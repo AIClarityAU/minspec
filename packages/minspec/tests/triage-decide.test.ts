@@ -477,3 +477,24 @@ describe('triage-decide.sh --fields — the projection the verdict record is bui
     await Promise.all(checks);
   });
 });
+
+// #3282 — an issue naming an already-approved spec must never reach the specify queue.
+describe('named spec already approved (#3282)', () => {
+  for (const status of ['planning', 'implementing', 'done']) {
+    for (const tier of ['T2', 'T3', 'T4']) {
+      it(`${tier} agent-ready + spec ${status} → needs-review built-spec`, () => {
+        expect(decide(verdict({ tier }), `--named-spec-status=${status}`)).toBe('needs-review dev built-spec');
+      });
+    }
+  }
+  it('spec still specifying → unchanged specify path', () => {
+    expect(decide(verdict({ tier: 'T3' }), '--named-spec-status=specifying')).toBe('agent-ready-specify dev specify');
+  });
+  it('no spec named → unchanged', () => {
+    expect(decide(verdict({ tier: 'T3' }))).toBe('agent-ready-specify dev specify');
+    expect(decide(verdict({ tier: 'T2' }), '--named-spec-status=')).toBe('agent-ready dev none');
+  });
+  it('human-only still wins', () => {
+    expect(decide(verdict({ human_only: 'yes' }), '--named-spec-status=planning')).toBe('needs-review dev human');
+  });
+});

@@ -25,8 +25,6 @@ phases:
 
 # SPEC-267: The shipped ownership check never reads a valid spec as "nothing to check"
 
-**Status:** specifying
-
 ## In plain terms
 
 SPEC-038's ownership rule says a T3/T4 spec past Clarify must name the code it owns, and
