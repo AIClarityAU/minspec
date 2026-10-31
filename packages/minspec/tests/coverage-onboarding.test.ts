@@ -101,6 +101,20 @@ describe('offerCoverageThresholdPrompt()', () => {
     expect(loadConfig(tmpDir).coverage.minimumPercentage).toBe(95);
   });
 
+  it('Custom InputBox validateInput accepts only plain whole numbers 0-100', async () => {
+    showQuickPick.mockResolvedValueOnce({ label: 'Custom…', value: 'Custom…' });
+    showInputBox.mockResolvedValueOnce(undefined);
+
+    await offerCoverageThresholdPrompt(tmpDir);
+
+    const validate = (showInputBox.mock.calls[0][0] as { validateInput: (v: string) => string | undefined })
+      .validateInput;
+    for (const ok of ['0', '50', '100', '080']) expect(validate(ok)).toBeUndefined();
+    for (const bad of ['', '  ', '0x10', '1e2', '50.5', '-1', '101', 'abc', ' 50']) {
+      expect(validate(bad), JSON.stringify(bad)).toBe('Enter a whole number 0-100');
+    }
+  });
+
   it('dismissing the Custom InputBox (undefined) makes no write', async () => {
     showQuickPick.mockResolvedValueOnce({ label: 'Custom…', value: 'Custom…' });
     showInputBox.mockResolvedValueOnce(undefined);

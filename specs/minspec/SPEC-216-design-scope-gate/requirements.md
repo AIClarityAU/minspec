@@ -375,8 +375,11 @@ independent second witness invariant 2 asks for.
 
 ## Decisions needed (Clarify)
 
+All 6 decisions are answered, not ratified: an agent session selected on 2026-10-25, for each, the option this document already recommended. No human chose them, and no delegation covers authoring Clarify answers. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted it. It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and that approval may overturn it.
+
 - **Q1 - How many passing runs a design needs.** The issue's interim process requires two
   independent passing runs before a PR returns to ready.
+  **Recorded selection: (a),** one run per head with FR-8's deterministic coverage and agreement checks, since two runs double tokens, wall-clock and quota `blocked` exposure on every design push.
   `a` **(rec)** one run per head, with FR-8's deterministic coverage and agreement checks.
   *Cost:* a single model run has variance, so a design that a second run would fail can pass.
   The coverage check limits but does not remove this.
@@ -384,6 +387,7 @@ independent second witness invariant 2 asks for.
   design push, and twice the exposure to quota `blocked`.
 - **Q2 - Whether `tasks.md` is covered too.** DR-057 also routes generated `tasks.md` through a
   PR, and a task list can also invent scope.
+  **Recorded selection: (a),** `design.md` only, as the founder's condition and #1938 state; a `tasks.md` check would need a second rubric and widen scope beyond the issue.
   `a` **(rec)** `design.md` only, as the founder's condition and #1938 state. *Cost:* a
   generated `tasks.md` that adds work no FR asks for is still caught only by the existing
   panel, which is the same channel that missed these two designs.
@@ -392,6 +396,7 @@ independent second witness invariant 2 asks for.
   than the issue asks for.
 - **Q3 - Whether the check ships to adopters.** The guard, `review-branch.sh` and
   `ready-to-merge.yml` are shipped templates, so some shipped bytes change either way (FR-12a).
+  **Recorded selection: (a),** this repo only, since shipping the workflow armed by default would give adopters an uncalibrated required model-backed check and red design PRs.
   `a` **(rec)** this repo only: the shipped files carry the reads dormant, armed by
   `design-scope.yml` existing in the base tree, and that workflow and its role are not
   shipped. *Cost:* adopters receive code they do not run, and an adopter running Plan-phase
@@ -403,6 +408,7 @@ independent second witness invariant 2 asks for.
   ruling (no human approval for a T3/T4 `design.md`, conditional on this check) exists only as
   an issue comment. This spec enforces its condition but does not restate the ruling
   authoritatively.
+  **Recorded selection: (a),** a separate DR quoting the founder's comment verbatim, so a later reader cannot remove this gate without knowing it was the price of that ruling.
   `a` **(rec)** yes, in a separate DR whose text quotes the founder's comment verbatim and
   cites this spec as the gate enforcing its condition. *Cost:* one more record for the founder
   to accept, and until it lands this gate enforces a condition the register does not show.
@@ -410,6 +416,7 @@ independent second witness invariant 2 asks for.
   design PRs skip human approval, so a later reader can remove this gate without knowing it
   was the price of that ruling.
 - **Q5 - What happens when the requirements are not approved and fresh at the merge base.**
+  **Recorded selection: (a),** `cannot-conclude` is red, because under (b) the PR controls both sides of the comparison and could widen the requirements to fit an invented design.
   `a` **(rec)** `cannot-conclude` → red. A design can only be checked against approved
   requirements. *Cost:* a PR that bundles a requirements edit with its design, or a design
   edit to a spec whose approval went stale, is red until it is split or re-approved, or a
@@ -418,6 +425,7 @@ independent second witness invariant 2 asks for.
   *Cost:* the PR controls both sides of the comparison, so it can widen the requirements to
   fit an invented design and pass.
 - **Q6 - How a false `changes` is overridden.**
+  **Recorded selection: (a),** no override except fixing the design or a human `--admin` merge, since a label override adds a forgeable surface and becomes the default response to a red check.
   `a` **(rec)** only by fixing the design or a human `--admin` merge. No label or comment
   overrides it. *Cost:* a check that is wrong costs the founder a keystroke each time, and a
   run of false `changes` early on is friction until the rubric is calibrated.
