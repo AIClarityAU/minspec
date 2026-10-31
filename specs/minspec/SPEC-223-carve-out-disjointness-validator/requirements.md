@@ -1,7 +1,7 @@
 ---
 id: SPEC-223
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - DR-066's domain (no silent gate); the carve-out filter sits in front of the invariant-2 second witness
@@ -15,9 +15,9 @@ implements_reason: >-
   machinery set for every other change to it.
 affects: [packages/minspec/src/lib/machinery-paths.ts, packages/minspec/tests/machinery-carve-outs.test.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
