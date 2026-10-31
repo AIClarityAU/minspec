@@ -20,7 +20,7 @@ affects:
   - packages/minspec/src/commands/next-task.ts
 phases:
   specify: done
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

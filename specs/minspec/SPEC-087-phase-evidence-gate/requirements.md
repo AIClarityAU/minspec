@@ -21,7 +21,7 @@ affects:
   - scripts/validate-frontmatter.ts
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

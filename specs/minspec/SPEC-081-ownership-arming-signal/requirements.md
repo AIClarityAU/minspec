@@ -16,7 +16,7 @@ implements: [packages/minspec/tests/ownership-arming-signal.test.ts]
 affects: [packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/template-registry.ts, scripts/hooks/spec-gate.py, scripts/validate-frontmatter.ts]
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

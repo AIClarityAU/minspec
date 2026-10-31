@@ -16,7 +16,7 @@ implements_reason: >-
 affects: [packages/minspec/src/lib/machinery-paths.ts, packages/minspec/tests/machinery-carve-outs.test.ts]
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

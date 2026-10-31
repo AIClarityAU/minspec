@@ -20,7 +20,7 @@ implements: [scripts/roles/design-scope.md, .github/workflows/design-scope.yml, 
 affects: [scripts/review-branch.sh, .github/scripts/ai-review-guard.js, .github/scripts/ai-review-guard.test.js, .github/workflows/ready-to-merge.yml, .github/workflows/ci.yml, packages/minspec/src/lib/ci-review-templates.ts]
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

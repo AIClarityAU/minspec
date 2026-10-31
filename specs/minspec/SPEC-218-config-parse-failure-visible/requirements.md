@@ -17,7 +17,7 @@ implements: [packages/minspec/tests/config-load-diagnostics.test.ts]  # NEW
 affects: [packages/minspec/src/lib/config.ts, scripts/validate-frontmatter.ts, packages/minspec/src/extension.ts, packages/minspec/tests/config.test.ts]
 phases:
   specify: done
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

@@ -21,7 +21,7 @@ implements_reason: >-
 affects: [scripts/hooks/session-identity.sh, packages/minspec/tests/session-identity.test.ts]
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

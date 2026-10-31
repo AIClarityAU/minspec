@@ -16,7 +16,7 @@ implements_reason: >-
 affects: [.github/workflows/ready-to-merge.yml, .github/scripts/ai-review-guard.js, packages/minspec/src/lib/ci-review-templates.ts]
 phases:
   specify: done
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending
