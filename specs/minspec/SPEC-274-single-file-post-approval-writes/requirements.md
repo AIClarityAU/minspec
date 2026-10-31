@@ -154,10 +154,9 @@ outside the approved file, and make the gate name the cause when such a spec doe
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are recorded: an agent session selected, for each, the option this document
-already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001 covers spec approval and engineering-DR acceptance only). They are ratified only
-when a human or a covered delegation approves this spec.
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
 
 - **D1 - Recorded selection: Option A,** an Implement-phase note goes in the commit message and
   pull request body; the implement command and example spec stop asking for an in-file note.
