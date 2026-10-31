@@ -33,10 +33,12 @@ Each test is written red first and made green in the same run, and the run's pul
 quotes the red. Tests key on content, never on line numbers: the line numbers in design.md are
 from its revision and have since moved in places (`listAdrs`, for one).
 
-No FOUNDER item blocks any task. Groups 1 and 2 can be built now. Group 3 waits on SPEC-014's
-renderer, group 4 on #679 (`project-prefix` v2 grammar), and group 5 on group 3.
+No group starts until the pause in the approved requirements.md is lifted ("queued, not now",
+"ships when that work resumes", PQ9 in design.md). Only the founder can lift it. When it is
+lifted, group 1 goes first; group 3 then waits on SPEC-014's renderer, group 4 on #679
+(`project-prefix` v2 grammar), and group 5 on group 3.
 
-## 1 - Slice A (detect, resolve, card model): no host needed
+## 1 - Slice A (detect, resolve, card model): no host needed, starts when the pause lifts
 
 - [ ] **1.1** (FR1 v1 forms, INV-tier0-detection, AC1 deny-list, AC6) Prerequisites: none.
   `packages/shared/src/ref-detect.ts` (new, owned) - `Grammar`, `DetectedRef`, `SkipRange`,
@@ -79,7 +81,7 @@ renderer, group 4 on #679 (`project-prefix` v2 grammar), and group 5 on group 3.
   DR block via `extractExistingSummary`, epic `## Goal`; collapse whitespace to one line; no match
   leaves it undefined.
   Test, same file: each kind and the no-match case; the **Summary cannot void an approval** T0 row.
-  *Done when:* green, with `computeSpecHash` and approval validity unchanged in the T0 fixture.
+  *Done when:* green, with `specHash` and approval validity unchanged in the T0 fixture.
 - [ ] **1.7** (INV-graceful-degrade, INV-tier0-detection, AC6, D2) Prerequisites: 1.4, 1.5, 1.6.
   `packages/minspec/tests/ref-cards.test.ts` - the corpus zero-throw run, the status property over
   `specs/` and `docs/`, the zero-writes tree comparison, and the no-`vscode` assertion on `ref-cards.ts`.

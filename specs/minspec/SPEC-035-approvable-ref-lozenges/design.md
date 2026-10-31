@@ -47,8 +47,8 @@ Split the feature at the Tier-0 / Tier-1 line the requirements already draw
 (INV-tier0-detection, FR1, AC6), and make the Tier-0 half **host-independent**, so it can be
 built and tested without a renderer. The requirements record the build as "queued, not now",
 paused with the SPEC-018 webview work pending the token economy (requirements.md:37-39, and
-the `implements_reason` at :15). Slice A and the host-free half of Slice B go ahead of that
-work; only the host-mounting tasks wait for it (PQ9, under Decisions).
+the `implements_reason` at :15). The build stays queued as the approved requirements state: no slice
+starts until that work resumes, and Slice A then goes first within it (PQ9, under Decisions).
 
 - **Tier-0 (pure, no host):** detect reference tokens in a span of prose, resolve each one,
   and assemble the card *model* - label, title, status, summary, navigation target.
@@ -91,10 +91,10 @@ in "Detection contract, measured", unless stated.
   (adr-manager.ts; 115 blocks for 115 DR files). An epic's is the first paragraph under
   `## Goal` (9 of 11). No match: the card omits the line. *Why:* it needs zero hand-written
   summaries and cannot go stale against its source (R2). **Why a regenerated summary cannot
-  void an approval:** the hash covers `requirements.md` (`computeSpecHash`, canonical.ts), and
+  void an approval:** the hash covers `requirements.md` (`specHash` over `stripLifecycle`, canonical.ts), and
   this writes nothing to that file or any other: the derivation runs on each render and the
-  auto block lives in `INDEX.md`, which no approval covers (`.minspec/approvals/` holds a
-  `specs/` subtree only). The scope paragraph is itself hashed, so editing it stales the
+  auto block lives in `INDEX.md`, which no approval covers (`.minspec/approvals/` holds `specs/` and `docs/decisions/`
+  subtrees; `INDEX.md` has no sidecar in either). The scope paragraph is itself hashed, so editing it stales the
   approval as any body edit does, which is correct. A T0 test pins this, and `canonical.ts`
   and its Python twin stay unchanged. If a stored `summary:` is ever added, FR4's branch rule
   applies first. *Rejected: a `summary:` field stripped from the hash.* Cost: edits to
@@ -171,13 +171,17 @@ in "Detection contract, measured", unless stated.
   *Rejected: (a).* Cost: breaks SPEC-035's FR1 and edits a live gate to serve a view.
 - **PQ8 - bounding a sibling read. Does not arise,** since OQ2 reads no sibling. The options
   stay recorded for whoever adds that read later.
-- **PQ9 - build Slice A before the webview resumes. Chosen: option (b), against the earlier
-  rec, for Slice A and the host-free half of Slice B; the host-mounting tasks wait for SPEC-014's renderer.** *Why:* the recorded
-  pause was "pending the token economy", and the quota position changed: the 2026-10-28 queue
-  item in72 says to spend the week's tokens. Slice A also pins Costly-to-Refactor #1 and has no
-  technical predecessor. *Cost:* it departs from the "queued, not now" timing in the requirements, and leaves a merged,
-  tested module nobody can see until a host mounts it (Risks). *Rejected: keep waiting.* Cost: the contract stays on paper and the plan stays
-  unbuildable.
+- **PQ9 - build Slice A before the webview resumes. Chosen: option (a), the earlier rec: the
+  build stays queued as requirements.md states, and starts only when the paused webview work
+  resumes; Slice A then goes first within it.** Chosen by the planning agent on its
+  recommendation; not a founder decision. *Why:* the pause is written into the approved,
+  hash-locked requirements ("queued, not now", requirements.md:37-39; "ships when that work
+  resumes", :219-220; `implements_reason` at :15), so only the founder can lift it, and a
+  planning agent cannot. *Cost:* the Costly-to-Refactor #1 contract stays pinned on paper only
+  until the resume, and the plan stays unbuilt until then. *Rejected: build Slice A (and the
+  host-free half of Slice B) now.* Cost: it would reverse a timing decision recorded in
+  hash-locked requirements without the founder; the earlier pass chose it on the strength of
+  queue item in72, which is not a lift of that pause.
 - **PQ10 - DR and epic status. Chosen: option (a), the file's own `status:` value; when absent
   or outside the kind's vocabulary, the card says the file records no recognised status.**
   *Why:* about 63% of cards need a status and this one is true to the file. *Cost:* it is a
@@ -284,8 +288,9 @@ practice: `scripts/facts.ts` ships a `facts status <spec>` subcommand whose stat
 is exposing that drift (the #886 drift). So the adapter uses `listSpecs()` for **id to file
 path and title only**, and computes status itself.
 
-*DRs and epics.* They have no `phases:` and no approval sidecar: `.minspec/approvals/` holds
-a `specs/` subtree only (61 sidecars at this revision). `deriveStatus` therefore has no
+*DRs and epics.* They have no `phases:` and no spec-shaped approval record: `.minspec/approvals/` holds
+`specs/` sidecars and a small `docs/decisions/` set (10 DR sidecars at this revision), but
+neither carries `phases:`. `deriveStatus` therefore has no spec-shaped
 inputs for them, and running it anyway is the #1067 bug: `parseSpec` coerces every DR status
 to `new` and the derivation then agrees with that invented default (scripts/facts.ts:327-339).
 The repo's per-kind precedent is `artifact-graph.ts`, which derives specs (:533-535) and
@@ -751,7 +756,7 @@ Five things this measurement settles, that prose alone would not have:
 | **INV-tier0-detection** | Already enforced for the tree by `packages/minspec/tests/tier0-import-ban.test.ts` (scans the `minspec` and `shared` `src/` trees since #1511). Add a **direction** assertion: `ref-detect.ts` imports nothing from `packages/minspec`, no `vscode`, no `fs`. Add a file-scoped assertion that `ref-cards.ts` imports no `vscode`: AC6 covers resolution modules too, and `lib/`'s vscode rule is only `warn` until #830 (eslint.config.mjs:250-262), so the lint alone would not fail it. | `packages/minspec/tests/import-boundaries.test.ts` (existing), `packages/minspec/tests/ref-cards.test.ts` (new) |
 | **INV-keyboard** | One `createLozengeRenderer()` instance renders a `full` DR-053 card three times and a `degraded` card once. The test supplies no counter. It asserts that every emitted id is distinct (`ms-card-0` to `ms-card-3`), every lozenge is `<button type="button">` with no `tabindex="-1"`, and every `aria-describedby` names exactly one element in the concatenated output. The host-level property - one instance per document render - has no seam until SPEC-014 extracts the renderer; it is asserted by the T2 host test below (AC2) over a rendered fixture document that cites DR-053 three times, written in Slice B once that path exists. | `packages/minspec/tests/ref-lozenge-html.test.ts` (new, Slice B) |
 | **AC1 false-positive budget** | Two parts. (1) *Deny-list*, at `detectRefs` level: `src/foo/bar`; `https://example.com/specs/SPEC-014-x/requirements.md` with its URL range passed as a skip range; `M1`, `R1`, `G7`, `IS500`, a lone `SEA`, `[[just-enough-human]]`, `AIClarityAU/minspec#460`, `scroogellm#121`, `SPEC-100@scroogellm` - `invariant #2`, `Costly to Refactor #1`, `#12` - none yields a `DetectedRef`, while `#13` and `#500` do (PQ1). Slice C adds `Windows SP1` (PQ2). The wrong-register class (`their DR-021`) goes in a separate *counted* fixture: the test records its current outcome and fails when it changes. (2) *Corpus pin*: the harness and exact assertions in the pin above. | (1) `packages/shared/tests/ref-detect.test.ts`; (2) `scripts/ref-ac1-pin.ts` (PQ12), which imports `lookupApprovable` because `L` needs it |
-| **Summary cannot void an approval** (OQ1, FR4) | Fixture root with an approved spec. Record `computeSpecHash` of its `requirements.md` and the approval validity; run `lookupApprovable` on it (which derives the summary), and rewrite the DR auto block in the fixture's `INDEX.md`; assert both records are unchanged. Plus a source assertion that `canonical.ts` and `scripts/hooks/canonical.py` name no `summary` key. | `packages/minspec/tests/ref-cards.test.ts` (new) |
+| **Summary cannot void an approval** (OQ1, FR4) | Fixture root with an approved spec. Record `specHash` of its `requirements.md` and the approval validity; run `lookupApprovable` on it (which derives the summary), and rewrite the DR auto block in the fixture's `INDEX.md`; assert both records are unchanged. Plus a source assertion that `canonical.ts` and `scripts/hooks/canonical.py` name no `summary` key. | `packages/minspec/tests/ref-cards.test.ts` (new) |
 | **Zero writes** (D2, and "What this design does NOT do") | Copy a fixture root - a spec with an approval sidecar, a DR, an epic, and a doc citing all three plus an unknown id - into `fs.mkdtempSync`. Record every file under it as relative path to sha256 of content, size and `mtimeMs`, plus the full path list. Run `detectRefs`, `lookupApprovable` and `buildRefCard` over every ref in every fixture doc (Slice B adds `createLozengeRenderer().render` on each card). Re-walk and assert the record is identical, with no path added or removed. It is behavioural on purpose: `vi.spyOn(fs, …)` cannot redefine the ESM `fs` namespace (packages/minspec/tests/merge-refresh-890.test.ts:40), and a tree comparison catches a write through any API. | `packages/minspec/tests/ref-cards.test.ts` (new) |
 
 Test tiers beyond T0: **T1** - `detectRefs` truth table over each grammar and each skip-range
@@ -940,8 +945,8 @@ founder. "Rec" below marks the option recommended before that choice was made.
   a merged, tested module no human can see (the second risk below).
 - **PQ10 - FR5 names a status source that DRs and epics do not have.** FR5 defines the card's status source as "the per-approvable sidecar
   under `.minspec/approvals/` + frontmatter `status`/phase - i.e. `deriveStatus`'s inputs"
-  (requirements.md:106-108). That source exists only for specs. `.minspec/approvals/` holds a
-  `specs/` subtree only, DR and epic files carry no `phases:`, and running the spec derivation
+  (requirements.md:106-108). That source exists only for specs. `.minspec/approvals/` holds
+  `specs/` sidecars and a small `docs/decisions/` set, but DR and epic files carry no `phases:`, and running the spec derivation
   on a DR is the #1067 bug (scripts/facts.ts:327-339). INV-live-status-deterministic names
   "the `.minspec/approvals/` sidecar / frontmatter" (requirements.md:191-192), which admits
   frontmatter alone, and the contract records a DR's or epic's own `status:` value on that
@@ -1069,7 +1074,7 @@ changes; none is load-bearing on the rest of this design.
 - **Does not write to any approvable.** No `WorkspaceEdit`, no frontmatter write, no summary
   generation in Slices A-C. The zero-writes T0 row is the cheapest guard against the
   rejected alternative in D2 and against FR4 quietly acquiring a writer.
-- **Does not build SPEC-014's renderer** to get a host; the mounting tasks wait for it (PQ9).
+- **Does not build SPEC-014's renderer** to get a host; the build waits for the paused webview work (PQ9).
 
 ## Risks
 
@@ -1080,7 +1085,7 @@ Inherits requirements R1-R4. Added at Plan:
   after that commit, so a wrong-target class that appears later goes unmeasured until someone
   re-pins against a newer commit. Re-pinning is a deliberate diff to the commit and the
   numbers, never a loosened comparison.
-- **Slice A will merge and then sit unrendered** until SPEC-014's renderer exists (PQ9). A merged, tested,
+- **Slice A will merge and then sit unrendered** until SPEC-014's renderer exists (PQ9); the build itself waits for the pause to lift. A merged, tested,
   invisible module is easy to mistake for a shipped feature. This design sets no rule about
   the spec's `status:` for that case: status is derived by `deriveStatus` from phases and
   approval (lifecycle.ts:133-145) and reads `implementing` once the implement phase starts
