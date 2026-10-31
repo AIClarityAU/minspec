@@ -15,7 +15,7 @@ implements_reason: >-
   claimed yet.
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -289,6 +289,11 @@ one caller only must turn the test red.
 
 ## Decisions needed (Clarify)
 
+All 2 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 **D1 - How does the validator run in a review job with no `node_modules`?**
 
 - **(a) Native Node type stripping** **(rec)**. Make the entry point and its import closure
@@ -310,6 +315,8 @@ one caller only must turn the test red.
 - **(d) A committed, dependency-free bundle** of the entry point. **Cost:** a generated file in
   the tree whose diff no reviewer can read, plus a drift gate to keep it equal to its source.
 
+**Recorded selection: Option (a),** native Node type stripping; the entry point and its import closure load under plain `node`. An agent session copied this document's (rec) option; no human chose this item.
+
 **D2 - Should the gates honour the five-field record while DR-012's amendment says "PROPOSED,
 not accepted"?**
 
@@ -325,6 +332,8 @@ Amendment 2026-10-17, whose heading still reads `PROPOSED, not accepted` (`DR-01
   acceptance act from the founder before any delegated approval can clear the panel, and a
   second status witness the validator does not read today (which would change the rules this
   spec says it consumes as-is).
+
+**Recorded selection: Option (a),** yes, the gates honour the five-field record on DR-108's authority, and the provenance block adds one fact line giving the amendment's current heading state. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Alternatives considered and rejected
 

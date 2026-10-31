@@ -13,7 +13,7 @@ implements_reason: >-
   Specify phase only. The files this spec will own are decided at Plan, after Decisions D1-D5.
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -168,6 +168,11 @@ cost", and tenet 2's "measure both sides" has no producer for its cost side at a
 
 ## Decisions needed (Clarify)
 
+All 5 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 - **D1 - Where the producer reads a PR's tier from.**
   - (a) **(rec)** Make tier local going forward: triage or the PR flow writes the triaged
     tier into the squash commit body as a trailer (`Tier: T2`), and the producer reads git
@@ -179,6 +184,7 @@ cost", and tenet 2's "measure both sides" has no producer for its cost side at a
     has six known failure modes), and the reading cannot be reproduced offline.
   - (c) Spec frontmatter only. *Cost:* no T1 data at all and roughly a third of issues
     linked; the T1-vs-T3 contrast the issue asks for cannot be read.
+  **Recorded selection: Option (a),** tier is made local: a `Tier: T2` trailer in the squash commit body, with a one-off opt-in backfill script. An agent session copied this document's (rec) option; no human chose this item.
 - **D2 - What counts as a repeat fix.**
   - (a) **(rec)** Same origin issue cited by a later `fix` PR, OR the later fix's RCDD
     `Root cause:` line cites the earlier PR/issue/SHA. *Cost:* the second arm depends on
@@ -188,12 +194,14 @@ cost", and tenet 2's "measure both sides" has no producer for its cost side at a
     regressions, which are filed as new issues; reads low, more so than (a).
   - (c) File-overlap: a later fix touching lines the PR introduced (blame-based). *Cost:*
     much higher compute and false positives from refactors; harder to explain.
+  **Recorded selection: Option (a),** a repeat fix is the same origin issue cited by a later `fix` PR, or a later fix whose RCDD `Root cause:` line cites the earlier PR, issue or SHA. An agent session copied this document's (rec) option; no human chose this item.
 - **D3 - Window and follow-up horizon.**
   - (a) **(rec)** PRs merged in a 60-day window (matches the existing producer), each
     followed for 30 days after merge, so the window ends 30 days before today. *Cost:* the
     reading lags a month; the newest work is not in it.
   - (b) 90-day window, 30-day horizon. *Cost:* larger samples, but folds in older process
     rules that have since changed.
+  **Recorded selection: Option (a),** a 60-day window of merged PRs, each followed for 30 days. An agent session copied this document's (rec) option; no human chose this item.
 - **D4 - Floors.** Classified-coverage floor per tier and minimum PRs per tier before a
   share is reported.
   - (a) **(rec)** 80% coverage (same as `MIN_ATTRIBUTION`) and n >= 20. *Cost:* T1 or T4 may
@@ -201,6 +209,7 @@ cost", and tenet 2's "measure both sides" has no producer for its cost side at a
     some gates, which is an honest answer but not a decision.
   - (b) 60% and n >= 10. *Cost:* produces numbers sooner, noisier; a gate could be removed
     on a few PRs.
+  **Recorded selection: Option (a),** 80% classified coverage and n >= 20. An agent session copied this document's (rec) option; no human chose this item.
 - **D5 - Where cost records live and which runs write them.**
   - (a) **(rec)** An append-only JSONL under the repo (gitignored, e.g. `.minspec/state/`)
     written by review, dispatch (spec and implement) and fix-round runs, plus a CI artifact
@@ -211,6 +220,7 @@ cost", and tenet 2's "measure both sides" has no producer for its cost side at a
   - (c) Cost side read from a measurement instrument in the scroogellm repo (tee-proxy).
     *Cost:* a cross-repo dependency on a shelved product; the instrument is live but its
     output is outside this repo's blast radius.
+  **Recorded selection: Option (a),** an append-only gitignored JSONL under `.minspec/state/`, plus a CI artifact copy for CI-side runs. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Out of scope
 

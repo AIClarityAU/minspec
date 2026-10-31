@@ -13,7 +13,7 @@ implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan, after Decisions D1-D3.
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -110,14 +110,22 @@ write gate.
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 - **D1 — Where the strip lives.** (a) **(rec)** In SPEC-095's shared text-read helper, one copy.
   Cost: couples this spec's delivery to SPEC-095's landing (it is `implementing`) and widens that
   helper's contract from "line endings" to "line endings and mark". (b) A separate JSON-read helper
   now. Cost: a second read path beside SPEC-095's that can drift.
+  **Recorded selection: Option (a),** the strip lives in SPEC-095's shared text-read helper, one copy. An agent session copied this document's (rec) option; no human chose this item.
 - **D2 — Does a rewritten config keep its mark?** (a) **(rec)** Keep it, since the author's tool
   produced it and a rewrite should change only the `coverage` key. Cost: the file stays
   non-portable for tools that choke on a mark. (b) Drop it on write. Cost: an unrequested byte
   change to the user's file.
+  **Recorded selection: Option (a),** a rewritten config keeps its mark. An agent session copied this document's (rec) option; no human chose this item.
 - **D3 — Breadth.** (a) **(rec)** Every JSON reader of on-disk state in this one spec (an
   uncounted estimate of about a dozen sites; the Plan inventory replaces it with a count). Cost: larger diff to review. (b) Config only now, others as follow-ups. Cost:
   approval and hook-registration readers keep the silent failure; each follow-up needs its own issue.
+  **Recorded selection: Option (a),** every JSON reader of on-disk state, in this one spec. An agent session copied this document's (rec) option; no human chose this item.

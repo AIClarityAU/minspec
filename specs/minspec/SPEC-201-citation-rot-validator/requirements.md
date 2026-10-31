@@ -13,7 +13,7 @@ relates_to: [SPEC-054, SPEC-038, SPEC-029, SPEC-033, SPEC-024, "#1252", "#161", 
 implements: [packages/minspec/src/lib/citation-rot.ts, packages/minspec/tests/citation-rot.test.ts]
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -194,6 +194,11 @@ the in-extension spec validator later wants it, it imports the same function. No
 
 ## Decisions needed (Clarify)
 
+All 5 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 **D-1 - Severity of the range-mismatch (FR-2/FR-3) once the corpus is clean.**
 - *Option A (rec)*: FR-3 stays `warn` forever; only FR-4 and FR-6 ratchet to `error`. Matches
   the issue's own framing ("mismatch = warning ... since prose parsing is heuristic").
@@ -202,12 +207,16 @@ the in-extension spec validator later wants it, it imports the same function. No
 - *Option B*: all of FR-2/FR-3/FR-4/FR-6 follow the dial. **Cost:** a heuristic false positive
   then blocks a merge, and the only escape is the exemption marker (D-2).
 
+**Recorded selection: Option A,** FR-3 stays `warn` forever; only FR-4 and FR-6 ratchet to `error`. An agent session copied this document's (rec) option; no human chose this item.
+
 **D-2 - Should the `<!-- cite-rot: historical -->` exemption exist?**
 - *Option A (rec)*: yes, counted in the summary. **Cost:** an author can mark a genuinely rotted
   citation exempt; the count only makes that visible, it does not stop it.
 - *Option B*: no marker; historical references must be written without `path:line` (e.g. name
   the file and symbol only). **Cost:** forces rewording of legitimate history, and a future
   author hitting a false positive has no escape hatch except rewording.
+
+**Recorded selection: Option A,** the `<!-- cite-rot: historical -->` exemption exists, counted in the summary. An agent session copied this document's (rec) option; no human chose this item.
 
 **D-3 - How to fix the existing rot (four artifacts).** The issue says the validator is the
 deliverable; the artifacts themselves are specs/DRs that may be `approved` (editing an
@@ -218,12 +227,16 @@ approved spec stales its hash).
 - *Option B*: fix them in the implementing PR. **Cost:** couples a gate change to approval
   churn on three unrelated specs, enlarging the review and blast radius.
 
+**Recorded selection: Option A,** fix the four rotted artifacts in separate follow-up PRs, each re-approved through the normal gate. An agent session copied this document's (rec) option; no human chose this item.
+
 **D-4 - Pin-to-commit citations.** A line number is only meaningful against a revision.
 - *Option A (rec)*: out of scope; the check is against the working tree, and authors are told
   (in the warning text) to prefer a symbol over a bare line. **Cost:** a spec legitimately
   describing an earlier commit gets a false positive (handled by D-2).
 - *Option B*: accept `path@<sha>:line` and check against `git show`. **Cost:** needs git
   history in the validator, breaks on shallow clones, a larger design.
+
+**Recorded selection: Option A,** pin-to-commit citations are out of scope; the check runs against the working tree. An agent session copied this document's (rec) option; no human chose this item.
 
 **D-5 - Where "symbol exists" searches.** *Option A (rec)*: tracked files under `packages/`,
 `scripts/`, `tests/`, `.github/`, `docs/`, `specs/` (the repo's own corpus), excluding the
@@ -232,6 +245,8 @@ existing. **Cost:** a symbol that lives only in an untracked or generated file i
 missing. *Option B*: all tracked files. **Cost:** the old name surviving in other prose
 (SPEC-024 notes six occurrences of `withProverAuthority`, all in the spec itself) hides the
 very rot being detected.
+
+**Recorded selection: Option A,** search tracked files under `packages/`, `scripts/`, `tests/`, `.github/`, `docs/` and `specs/`, excluding the artifact itself and other specs/DRs. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Out of Scope
 
