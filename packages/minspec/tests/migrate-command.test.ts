@@ -8,6 +8,7 @@ vi.mock('vscode', () => ({
   window: {
     showErrorMessage: vi.fn(),
     showInformationMessage: vi.fn(),
+    showWarningMessage: vi.fn(),
     showQuickPick: vi.fn(),
   },
   workspace: {

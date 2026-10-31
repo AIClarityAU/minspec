@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Tier, Phase, SpecsLayout } from './config';
-import { hashLockReminder } from './approval-store';
+import { hashLockReminder, readRecord, writeRecord, removeRecord } from './approval-store';
+import { specRelPath, canonicalSpecHash, resolveStatus } from './approval';
 import { ensureDirectory } from './opt-in';
 import { loadConfig, PHASES, resolveAndValidate, DEFAULT_CONFIG } from './config';
 import type { SpecFrontmatter, ParsedSpec } from './spec';
@@ -654,6 +655,8 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
   const summaries = listSpecsShallow(rootDir);
   let migrated = 0;
   const toDelete: SpecEntry[] = [];
+  // Approval sidecars are keyed by the spec file's repo-relative path, so each moves with its spec (#3441).
+  const sidecarMoves: { from: string; to: string }[] = [];
 
   for (const summary of summaries) {
     const entry = findSpecEntry(specsDir, summary.id);
@@ -675,6 +678,7 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
         };
       }
       writeSpecKitDir(dirPath, parsed);
+      sidecarMoves.push({ from: entryDisplayPath(entry), to: path.join(dirPath, 'spec.md') });
     } else {
       const fileName = `${parsed.frontmatter.id}-${slug}.md`;
       const filePath = path.join(specsDir, fileName);
@@ -695,6 +699,7 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
               .map((p) => fs.readFileSync(p, 'utf-8'))
           : [parsed.source ?? ''];
       fs.writeFileSync(filePath, restoreLineEndings(writeSpec(parsed), sources), 'utf-8');
+      sidecarMoves.push({ from: entryDisplayPath(entry), to: filePath });
     }
 
     toDelete.push(entry);
@@ -710,5 +715,29 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
     }
   }
 
+  // Re-key each sidecar to the new path. The recorded hash is carried over UNCHANGED —
+  // never re-minted: approval is a human act on specific content, and re-hashing here
+  // would approve bytes nobody reviewed. When the new representation canonicalises to a
+  // different hash (flat and spec-kit hold different bytes), the spec honestly reads
+  // stale, and the result says so rather than reporting a clean success.
+  let stale = 0;
+  for (const mv of sidecarMoves) {
+    const fromRel = specRelPath(rootDir, mv.from);
+    const toRel = specRelPath(rootDir, mv.to);
+    const rec = readRecord(rootDir, fromRel);
+    if (!rec) continue;
+    writeRecord(rootDir, { ...rec, specPath: toRel });
+    removeRecord(rootDir, fromRel);
+    if (resolveStatus(rec, canonicalSpecHash(mv.to)) !== 'approved') stale++;
+  }
+
+  if (stale > 0) {
+    return {
+      success: true,
+      migrated,
+      target,
+      warning: `${stale} approval${stale === 1 ? '' : 's'} moved with the spec but now read stale (the ${target} representation hashes differently) — re-run "MinSpec: Approve Spec" after review.`,
+    };
+  }
   return { success: true, migrated, target };
 }

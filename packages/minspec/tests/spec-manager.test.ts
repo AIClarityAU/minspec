@@ -16,6 +16,7 @@ import {
 import { parseSpec } from '../src/lib/spec';
 import type { MinspecConfig, SpecsLayout } from '../src/lib/config';
 import { DEFAULT_CONFIG } from '../src/lib/config';
+import { readRecord, writeRecord, sidecarPath } from '../src/lib/approval-store';
 
 /** Create a temporary project directory with .minspec/config.json */
 function makeTmpProject(layout: SpecsLayout = 'flat'): string {
@@ -1025,5 +1026,47 @@ describe('createSpec — hash-lock reminder (#1510)', () => {
     const once = fs.readFileSync(p, 'utf-8');
     const count = (s: string) => s.split('# 🔒 Approval is recorded').length - 1;
     expect(count(once)).toBe(1);
+  });
+});
+
+describe('migrateLayout() approval sidecars (#3441)', () => {
+  let rootDir: string;
+
+  afterEach(() => {
+    if (rootDir) fs.rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it('moves the sidecar with its spec, re-keyed, and leaves none orphaned', () => {
+    rootDir = makeTmpProject('flat');
+    const s = createSpec(rootDir, 'Feature one', 'T3');
+    const oldRel = path.relative(rootDir, s.filePath).split(path.sep).join('/');
+    writeRecord(rootDir, {
+      specPath: oldRel,
+      specHash: 'a'.repeat(64),
+      approvedAt: '2026-01-01T00:00:00.000Z',
+      approvedBy: 'h@example.com',
+      tier: 'T3',
+      migrated: false,
+      baselineBlob: '',
+    });
+
+    const result = migrateLayout(rootDir, 'spec-kit');
+    expect(result.success).toBe(true);
+
+    expect(readRecord(rootDir, oldRel)).toBeUndefined();
+    expect(fs.existsSync(sidecarPath(rootDir, oldRel))).toBe(false);
+    const newRel = path.relative(rootDir, path.join(rootDir, DEFAULT_CONFIG.specsDir, '001-feature-one', 'spec.md'))
+      .split(path.sep).join('/');
+    const moved = readRecord(rootDir, newRel);
+    expect(moved?.specPath).toBe(newRel);
+    expect(moved?.specHash).toBe('a'.repeat(64));
+    // hash is carried, not re-minted: stale is reported, not hidden
+    expect(result.warning).toMatch(/1 approval/);
+  });
+
+  it('adds no warning when no approvals exist', () => {
+    rootDir = makeTmpProject('flat');
+    createSpec(rootDir, 'Feature one', 'T3');
+    expect(migrateLayout(rootDir, 'spec-kit').warning).toBeUndefined();
   });
 });
