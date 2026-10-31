@@ -1057,11 +1057,12 @@ export function renderManagedFile(tpl: ManagedRegionTemplate): string {
  * present, letting its exit code gate the job:
  *   1. `npm run validate` — the full Node validator, when the repo defines it
  *      (minspec's own tree, and any JS repo that wires it up);
- *   2. `python3 .minspec/hooks/validate.py` — the portable DR-037 validator,
- *      scaffolded into every MinSpec-inited repo (stock python3, no install);
- *   3. `@aiclarity/minspec-validator` — the published portable validator, once it
- *      exists and is resolvable (`--no-install` NEVER network-fetches, so an
- *      unclaimed scope can't be dependency-confusion-hijacked into CI).
+ *   2. `node .minspec/bin/minspec-core.cjs validate` — the headless core bundle
+ *      (SPEC-136 FR-15), when that file exists in the repo; no install, no network;
+ *   3. `python3 .minspec/hooks/validate.py` — the portable DR-037 validator,
+ *      scaffolded into every MinSpec-inited repo (stock python3, no install).
+ *   The unpublished `@aiclarity/minspec-validator` branch was removed: it could
+ *   never resolve under `--no-install` (#248).
  * If NONE is present the job FAILS — the one thing a required check may never do
  * is pass without validating. There is deliberately no branch that exits 0
  * without a validator having run (that was the #811 always-green bug).
@@ -1111,15 +1112,15 @@ jobs:
             echo "MinSpec SDD validation: running 'npm run validate' (Node validator)."
             npm ci
             npm run validate
+          elif [ -f .minspec/bin/minspec-core.cjs ]; then
+            echo "MinSpec SDD validation: running 'node .minspec/bin/minspec-core.cjs validate' (headless core)."
+            node .minspec/bin/minspec-core.cjs validate
           elif [ -f .minspec/hooks/validate.py ] && command -v python3 >/dev/null 2>&1; then
             echo "MinSpec SDD validation: running 'python3 .minspec/hooks/validate.py' (portable validator)."
             python3 .minspec/hooks/validate.py
-          elif npx --no-install @aiclarity/minspec-validator --version >/dev/null 2>&1; then
-            echo "MinSpec SDD validation: running '@aiclarity/minspec-validator'."
-            npx --no-install @aiclarity/minspec-validator
           else
             echo "MinSpec SDD validation: no validator found." >&2
-            echo "Looked for an npm 'validate' script, .minspec/hooks/validate.py, or @aiclarity/minspec-validator." >&2
+            echo "Looked for an npm 'validate' script, .minspec/bin/minspec-core.cjs, or .minspec/hooks/validate.py." >&2
             echo "A required check must fail closed (DR-066); it may never pass without validating." >&2
             exit 1
           fi`;
