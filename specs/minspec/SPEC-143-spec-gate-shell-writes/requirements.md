@@ -18,7 +18,7 @@ implements: [scripts/hooks/spec_gate_bash.py, scripts/hooks/spec-gate-post.py, s
 affects: [scripts/hooks/spec-gate.py, scripts/hooks/spec-gate.sh, .claude/settings.json]
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

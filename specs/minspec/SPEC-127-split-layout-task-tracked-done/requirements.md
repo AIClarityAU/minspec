@@ -10,7 +10,7 @@ implements: none
 implements_reason: Specify phase only (T3 dispatch gate, DR-076/#1169) — no code is built by this document. The file:line citations in Context are evidence of today's behaviour, not a claim of ownership; Plan assigns `implements:`/`affects:` once the exact call sites are chosen (see Decisions needed).
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending
