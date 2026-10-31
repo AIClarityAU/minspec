@@ -22,6 +22,18 @@
 
 set -uo pipefail
 
+# Template edit => version bump (#1989). Runs first, before the workflow guard's early exits.
+# Blocks (exit 1 from the check) only on a real violation; "could not determine" (2) warns.
+# Bypass: TEMPLATE_VERSION_GATE_OFF=1 git push ...
+if [ "${TEMPLATE_VERSION_GATE_OFF:-0}" != "1" ]; then
+  repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+  if [ -f "$repo_root/scripts/check-template-version-bump.ts" ]; then
+    (cd "$repo_root" && npx --no-install tsx scripts/check-template-version-bump.ts </dev/null)
+    rc=$?
+    [ "$rc" = "1" ] && exit 1
+  fi
+fi
+
 hook_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 lib="$hook_dir/../scripts/lib/workflow-paths.sh"
 
