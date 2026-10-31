@@ -86,8 +86,20 @@ SHIPPED_MARKER='<!-- minspec-shipped -->'
 lease_self_sid() {
   if [[ -n "${MINSPEC_LEASE_SID:-}" ]]; then printf '%s' "$MINSPEC_LEASE_SID"; return 0; fi
   if [[ -n "${MINSPEC_SESSION_ID:-}" ]]; then printf '%s' "$MINSPEC_SESSION_ID"; return 0; fi
-  local pid="$$" starttime
-  starttime="$(stat -c '%Y' "/proc/$pid" 2>/dev/null)" || starttime=""
+  # starttime = field 22 of /proc/PID/stat (clock ticks since boot, fixed for the
+  # process's life). NOT `stat -c %Y /proc/PID`: that is the mtime of the procfs inode,
+  # stamped when the kernel instantiates it on first access, so it equals "first time
+  # anyone looked" and is re-minted if the inode is evicted under memory pressure —
+  # the sid then changes mid-life and the session stops matching its own claim (#3502).
+  # `comm` (field 2) may contain spaces/parens, so strip through the LAST ')' first;
+  # field 22 is then the 20th remaining field.
+  local pid="$$" starttime="" statline rest
+  if statline="$(cat "/proc/$pid/stat" 2>/dev/null)"; then
+    rest="${statline##*) }"
+    # shellcheck disable=SC2086
+    set -- $rest
+    starttime="${20:-}"
+  fi
   printf 'sid-%s-%s' "$pid" "${starttime:-0}"
 }
 
