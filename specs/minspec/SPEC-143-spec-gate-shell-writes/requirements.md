@@ -18,7 +18,7 @@ implements: [scripts/hooks/spec_gate_bash.py, scripts/hooks/spec-gate-post.py, s
 affects: [scripts/hooks/spec-gate.py, scripts/hooks/spec-gate.sh, .claude/settings.json]
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -323,9 +323,12 @@ Written down so no reader takes this control to be stronger than it is (the same
 
 ## Decisions needed (Clarify)
 
-All 5 decisions are resolved: an agent session recorded each option this document already
-recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
-chose them; they are ratified only by approval of this spec.
+All 5 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and
+engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted
+it. It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and
+that approval may overturn it.
 
 ### OQ-1 - What happens when the extractor itself crashes?
 
