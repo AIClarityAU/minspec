@@ -106,6 +106,15 @@ describe('#1285 shell-driving suites raise their testTimeout', () => {
     ).toEqual([]);
   });
 
+  // #1385 — the call-count threshold above misses suites that shell out only a few times
+  // per file but through slow real subprocesses (npx tsx, the drain loop). Those named
+  // suites flaked on the 5s default and must always declare the raise, whatever their count.
+  const ALWAYS_RAISE = ['facts-cli.test.ts', 'triage-decide.test.ts', 'drain-concurrency.test.ts'];
+  it.each(ALWAYS_RAISE)('%s raises its timeout regardless of shell-call count (#1385)', (base) => {
+    const src = fs.readFileSync(path.join(TESTS_ROOTS[0], base), 'utf8');
+    expect(raisesTimeout(src), `${base} must call useShellTimeout() at module scope`).toBe(true);
+  });
+
   it('every exemption names a reason', () => {
     const unreasoned = Object.entries(EXEMPT).filter(([, why]) => !why || why.trim().length < 15);
     expect(unreasoned, 'exemptions must carry a checkable reason, not a bare filename').toEqual([]);

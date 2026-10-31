@@ -112,8 +112,10 @@ describe('the scaffolded hook scripts actually enforce the SDD gates', () => {
     // Opt-in config key + the documented bypass.
     expect(c).toContain('minspec.allowedCommitEmails');
     expect(c).toContain('EMAIL_GATE_OFF');
-    // Reads the live identity, not a cached/assumed one.
-    expect(c).toContain('git config --get user.email');
+    // The VERDICT reads git's own resolved identity (git var GIT_AUTHOR_IDENT),
+    // not the user.email proxy. `git config --get user.email` still appears in
+    // the advisory message builder, so asserting on it would pass on the wrong line.
+    expect(c).toContain('git var GIT_AUTHOR_IDENT');
     // Names the actual symptom this gate exists to prevent, so the refusal is
     // self-explanatory rather than a bare "not allowed".
     expect(c).toMatch(/ghost/i);
@@ -127,7 +129,11 @@ describe('the scaffolded hook scripts actually enforce the SDD gates', () => {
     expect(c).toContain('not installed');
     // The gitleaks-absent branch (between `else` and its closing `fi`) warns and
     // does NOT exit non-zero — a missing optional tool degrades, never blocks.
-    const m = c.match(/\belse\b([\s\S]*?)\bfi\b/);
+    // Anchored to the block that starts at `command -v gitleaks`, and to a
+    // column-0 `else`/`fi` (the outer if), so an earlier stage's `else` or a
+    // comment containing the word cannot be inspected instead.
+    const fromGitleaks = c.slice(c.indexOf('command -v gitleaks'));
+    const m = fromGitleaks.match(/^else[ \t]*\n([\s\S]*?)^fi\b/m);
     expect(m, 'expected an else…fi block for the gitleaks-absent path').not.toBeNull();
     const elseBranch = m![1];
     expect(elseBranch).toContain('SKIPPED');
