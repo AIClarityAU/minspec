@@ -49,6 +49,7 @@ import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold'
 import { drsMissingPlainTerms } from './lib/dr-required-sections';
 import { walkFilesByExt as glob, walkOptionalRoot as safeGlob } from './lib/corpus-walk';
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
+import { checkDrFrontmatterClosedSet } from './lib/dr-closed-set';
 import { checkDeclaredSpecIds } from './lib/spec-id-collision';
 import {
   SELF_HOSTED_TEMPLATE_NAMES,
@@ -446,6 +447,29 @@ try {
   warn(
     `Spec-id uniqueness check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
       'Rule 18 validated NOTHING this run; do not read the green as a collision-free corpus.',
+  );
+}
+
+// Rule 25 (FATAL, #1641): decision-record frontmatter closed set. The spec side has
+// CLOSED_SET_FIELDS; a DR `status:` was only compared to INDEX.md (Rule 8), never to a
+// legal value set. Asserts `status` is present and legal, and rejects retired field
+// spellings (append-only alias table in scripts/lib/dr-closed-set.ts). Not a silent
+// catch (invariant 2): an unreadable register says so, and a zero-file scan is flagged.
+try {
+  const drs = safeGlob(resolveDecisionsDir(), '.md').map((file) => ({
+    file: relative(ROOT, file),
+    content: readFileSync(file, 'utf-8'),
+  }));
+  if (drs.length === 0) {
+    warn('Rule 25 scanned 0 DR files; do not read the green as a clean register.');
+  }
+  for (const d of checkDrFrontmatterClosedSet(drs)) {
+    fail(join(ROOT, d.file), `DR frontmatter — ${d.message}`);
+  }
+} catch (err) {
+  warn(
+    `DR frontmatter closed-set check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
+      'Rule 25 validated NOTHING this run; do not read the green as a clean register.',
   );
 }
 
