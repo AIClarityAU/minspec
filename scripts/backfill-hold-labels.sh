@@ -40,7 +40,7 @@ APPLY=0
 # The hold vocabulary is DERIVED from the gate that emits it, never restated here. A
 # hardcoded list silently stops covering a new hold the moment one is added — and this
 # corpus already grew `specify` (#1169) after the vocabulary was first written down.
-mapfile -t HOLDS < <(grep -oE 'emit [a-z-]+ "\$ROLE" [a-z]+' "$DECIDE" | awk '{print $NF}' | sort -u)
+mapfile -t HOLDS < <(grep -oE 'emit [a-z-]+ "\$ROLE" [a-z-]+' "$DECIDE" | awk '{print $NF}' | sort -u)
 if [[ "${#HOLDS[@]}" -lt 3 ]]; then
   echo "ERROR: could not derive the hold vocabulary from ${DECIDE} (got ${#HOLDS[*]}) — refusing to run a bulk label sweep on a guess." >&2
   exit 1

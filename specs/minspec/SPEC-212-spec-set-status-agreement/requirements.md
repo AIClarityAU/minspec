@@ -8,6 +8,12 @@ epic: EPIC-003  # SDD Core Methodology - a cross-file agreement check on the spe
 aspects: [validator, status, signpost, spec-set, no-silent-gate]
 depends_on: [SPEC-001]
 relates_to: [SPEC-040, SPEC-041, SPEC-042, SPEC-043, SPEC-044, SPEC-046, DR-003, SPEC-059, "#277", "#972", "#971", "#918"]
+phases:
+  specify: in-progress
+  clarify: pending
+  plan: pending
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-212: One status per spec-set - sibling docs must not lag requirements.md
@@ -109,6 +115,11 @@ phase must confirm no overlap by reading both rules, not by assumption.
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 **DQ-1 Police the field, or remove it from siblings?**
 - **Option A (rec): police agreement (FR-2).** Keeps `status` on every file. Cost: the field
   can still drift between approvals until the validator catches it; each approval needs a
@@ -124,10 +135,14 @@ The issue prefers B "if it does not break the approval sidecar lookup". Not veri
 sidecar keys on the spec id and canonical hash, but sibling-status readers were not audited.
 Recommendation is A now; B can follow as its own spec once the audit exists.
 
+**Recorded selection: Option A,** police agreement (FR-2); every file keeps `status`. An agent session copied this document's (rec) option; no human chose this item.
+
 **DQ-2 Is a sibling AHEAD of requirements a violation?** (e.g. `tasks: implementing` under
 `requirements: planning`.) Option A (rec): not flagged - it can be legitimate mid-flight and
 the issue concerns lag. Cost: a skewed set going the other way passes. Option B: require exact
 equality. Cost: any phase where a sibling is genuinely drafted ahead warns.
+
+**Recorded selection: Option A,** a sibling ahead of requirements.md is not flagged. An agent session copied this document's (rec) option; no human chose this item.
 
 **DQ-3 Severity.** The sibling #277 check is deliberately a WARNING because a transient
 mid-authoring lag is legitimate. The case here is likewise normal mid-authoring: approving
@@ -139,6 +154,8 @@ siblings are bumped, and an error would red-gate that branch.
   error is a follow-up once the approve command bumps siblings automatically (Out of scope).
 - Option B: error now. Cost: every approval, and any in-flight branch whose set lags, fails
   until the sibling is hand-bumped.
+
+**Recorded selection: Option A,** a warning, matching #277, with FR-4's backfill so `main` starts clean. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Out of scope
 
