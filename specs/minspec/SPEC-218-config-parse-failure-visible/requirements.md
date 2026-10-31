@@ -1,7 +1,7 @@
 ---
 id: SPEC-218
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a gate that runs at a severity the repo did not configure, and prints green, is a false signpost
@@ -17,8 +17,8 @@ implements: [packages/minspec/tests/config-load-diagnostics.test.ts]  # NEW
 affects: [packages/minspec/src/lib/config.ts, scripts/validate-frontmatter.ts, packages/minspec/src/extension.ts, packages/minspec/tests/config.test.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
