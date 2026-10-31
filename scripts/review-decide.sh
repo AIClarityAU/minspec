@@ -190,6 +190,18 @@ if [[ "$BEGIN_COUNT" -ne 1 ]]; then
   exit 0
 fi
 
+# Fail closed on an UNCLOSED or over-closed block (#1456). A sed range whose closing
+# address never matches runs to END OF INPUT, so a truncated block (killed / OOM'd /
+# rate-limited agent loses the tail) would otherwise be parsed as complete and could
+# green. Completeness is what makes the output a review (cf. review-branch.sh
+# has_verdict). Uses the strict END_RE — the same predicate the extractor closes on —
+# and demands exactly one, mirroring the BEGIN count.
+END_COUNT="$(printf '%s\n' "$INPUT" | grep -cE "$END_RE" || true)"  # swallow-ok: grep -c prints 0 and exits 1 on no match; empty/0 both fail closed via the -ne 1 test below
+if [[ "$END_COUNT" -ne 1 ]]; then
+  echo "review-decide: refusing — expected exactly 1 REVIEW_VERDICT_END, found ${END_COUNT} (unclosed or over-closed block, #1456)." >&2
+  echo "ai-review:changes"; exit 2
+fi
+
 # Extract a single field value, lowercased and trimmed; empty if absent.
 field() {
   printf '%s\n' "$BLOCK" \
