@@ -30,6 +30,7 @@ import {
   DRAIN_KNOB_PREFIXES,
   HOSTILE_AMBIENT_KNOBS,
   drainBaseEnv,
+  NO_QUOTA_BOOST,
   isDrainKnob,
   useHostileAmbientDrainKnobs,
 } from './helpers/drain-env';
@@ -55,7 +56,7 @@ describe('drainBaseEnv: what a drain test may inherit', () => {
     'MINSPEC_DRAIN_A_KNOB_NOBODY_HAS_WRITTEN_YET',
   ])('removes %s', (name) => {
     expect(isDrainKnob(name)).toBe(true);
-    expect(drainBaseEnv({ [name]: 'x', PATH: '/bin' })).toEqual({ PATH: '/bin' });
+    expect(drainBaseEnv({ [name]: 'x', PATH: '/bin' })).toEqual({ PATH: '/bin', ...NO_QUOTA_BOOST });
   });
 
   it.each([
@@ -72,7 +73,7 @@ describe('drainBaseEnv: what a drain test may inherit', () => {
     'minspec_quota_admit_pct',
   ])('keeps %s', (name) => {
     expect(isDrainKnob(name)).toBe(false);
-    expect(drainBaseEnv({ [name]: 'x' })).toEqual({ [name]: 'x' });
+    expect(drainBaseEnv({ [name]: 'x' })).toEqual({ [name]: 'x', ...NO_QUOTA_BOOST });
   });
 
   it('returns a copy and leaves the environment it was given alone', () => {
@@ -169,6 +170,8 @@ describe('every drain test file runs with the leak primed, or says why not', () 
       'Pure seams only (--is-quota, --session-alive, --should-continue, --resolve-session-pid). None reads a drain or quota knob.',
     'drain-reconcile.test.ts':
       'Runs the extracted reconciler block and --dispatch-alive. Neither reads a MINSPEC_DRAIN_ or MINSPEC_QUOTA_ knob.',
+    'drain-unlaned.test.ts':
+      'Pure seam only (--unlaned, jq over stdin). It reads no MINSPEC_DRAIN_ or MINSPEC_QUOTA_ knob and runs no gh call.',
   };
 
   const testsDir = __dirname;

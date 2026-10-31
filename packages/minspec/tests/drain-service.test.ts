@@ -11,8 +11,9 @@
  *   2. At most one drain: a live lock holder is adopted, never joined by a second, and a
  *      second supervisor exits 75.
  *   3. Pause survives restart: with the marker present a fresh supervisor starts nothing.
- *   4. A failure is visible: the drain's own last lines reach the journal and the exit
- *      code is non-zero.
+ *   4. A failure is visible: the drain's own last lines reach the journal, and the failure
+ *      is retried with backoff inside the same start (#3095) rather than exiting
+ *      non-zero; a normal end or SIGTERM exits 0.
  *
  * drain-service.sh reads pid 1's name from a path no environment variable can move. The
  * tests source the script and set that shell variable to a fixture, which is the only
@@ -39,9 +40,14 @@ echo "$*" >> "$STUB_CALLS"
 case "$1" in
   --paused) [[ -e "$STUB_PAUSE" ]] && exit 0; exit 1 ;;
   --continuous)
+    echo "\${MINSPEC_DRAIN_CONCURRENCY-unset}" >> "$STUB_CONC"
+    # A failed launch forks no loop: an orphan would hold the lock and be adopted
+    # by the supervisor's next pass, racing the retry assertions.
+    [[ "\${STUB_RC:-0}" != 0 ]] && exit "$STUB_RC"
     (
       echo "$BASHPID" > "$MINSPEC_DRAIN_LOCK"
-      trap 'echo "[drain] stopping on SIGTERM"; rm -f "$MINSPEC_DRAIN_LOCK"; exit 143' TERM
+      if [[ -n "\${STUB_IGNORE_TERM:-}" ]]; then trap '' TERM
+      else trap 'echo "[drain] stopping on SIGTERM"; rm -f "$MINSPEC_DRAIN_LOCK"; exit 143' TERM; fi
       sleep "\${STUB_LIFE:-1}" & wait $!
       echo "\${STUB_END:-[drain] loop exited.}"
       rm -f "$MINSPEC_DRAIN_LOCK"
@@ -113,7 +119,10 @@ beforeEach(() => {
     MINSPEC_DRAIN_SERVICE_LOCK: file('svc.lock'),
     MINSPEC_DRAIN_SERVICE_POLL: '1',
     MINSPEC_DRAIN_SERVICE_STOP_GRACE: '5',
+    MINSPEC_DRAIN_SERVICE_RETRY_BASE: '1',
+    MINSPEC_DRAIN_SERVICE_RETRY_MAX: '1',
     STUB_CALLS: file('calls'),
+    STUB_CONC: file('conc'),
     STUB_PAUSE: file('pause'),
   };
 });
@@ -218,6 +227,23 @@ describe('invariant 1: the drain never runs on the host', () => {
   });
 });
 
+describe('drain concurrency', () => {
+  const conc = () => fs.readFileSync(file('conc'), 'utf-8').trim().split('\n');
+
+  it('launches the drain at concurrency 8 when the service environment names none', async () => {
+    const sv = runBackground('docker-init');
+    expect(await sv.done).toBe(0);
+    expect(conc()).toEqual(['8']);
+  });
+
+  it('passes an explicit MINSPEC_DRAIN_CONCURRENCY through unchanged', async () => {
+    env.MINSPEC_DRAIN_CONCURRENCY = '5';
+    const sv = runBackground('docker-init');
+    expect(await sv.done).toBe(0);
+    expect(conc()).toEqual(['5']);
+  });
+});
+
 describe('invariant 2: at most one drain', () => {
   it('shares the drain lock and log defaults with drain-inbox.sh', () => {
     const svc = fs.readFileSync(SVC, 'utf-8');
@@ -238,10 +264,22 @@ describe('invariant 2: at most one drain', () => {
     await until(() => sv.out().includes('adopting'));
     expect(calls().filter((c) => c.startsWith('--continuous'))).toEqual([]);
     holder.kill('SIGKILL');
-    const code = await sv.done;
-    // The adopted drain wrote no exit line, so its end is reported as a failure.
-    expect(code).toBe(1);
-    expect(calls().filter((c) => c.startsWith('--continuous'))).toEqual([]);
+    // The adopted drain wrote no exit line, so its end is a failure: retried in this start.
+    await until(() => sv.out().includes('retrying in'));
+    // After the retry the supervisor starts its own drain, which ends normally.
+    expect(await sv.done).toBe(0);
+    expect(calls().filter((c) => c.startsWith('--continuous')).length).toBe(1);
+  });
+
+  it('logs the adopted drain start time and flags a stale concurrency (#3195)', async () => {
+    const holder = spawn('sleep', ['30'], { env: { ...env, MINSPEC_DRAIN_CONCURRENCY: '1' } });
+    children.push(holder);
+    fs.writeFileSync(file('drain.lock'), String(holder.pid));
+    const sv = runBackground('docker-init');
+    await until(() => sv.out().includes('STALE'));
+    expect(sv.out()).toContain('concurrency=1');
+    expect(sv.out()).toContain('configured for 8');
+    sv.proc.kill('SIGKILL');
   });
 
   it('a second supervisor exits 75', async () => {
@@ -276,19 +314,26 @@ describe('invariant 4: a failure is visible', () => {
     expect(r.stdout).toContain('[drain] loop exited.');
   });
 
-  it('consecutive cycle errors exit 1 with the drain line in the journal', () => {
+  it('consecutive cycle errors are reported, then retried inside the same start (#3095)', async () => {
     env.STUB_END = '[drain] 3 consecutive cycle errors — stopping loop cleanly';
-    const r = runSync('docker-init');
-    expect(r.status).toBe(1);
-    expect(r.stdout).toContain('consecutive cycle errors');
-    expect(r.stdout).toContain('FAILED');
+    const sv = runBackground('docker-init');
+    await until(() => calls().filter((c) => c.startsWith('--continuous')).length >= 2, 15_000);
+    expect(sv.out()).toContain('consecutive cycle errors');
+    expect(sv.out()).toContain('FAILED');
+    expect(sv.proc.exitCode).toBeNull();
+    sv.proc.kill('SIGTERM');
+    expect(await sv.done).toBe(0);
   });
 
-  it('a failed launch exits 1', () => {
+  it('N failed launches inside one start do not exit the supervisor (#3095)', async () => {
     env.STUB_RC = '1';
-    const r = runSync('docker-init');
-    expect(r.status).toBe(1);
-    expect(r.stdout).toContain('drain launch exited 1');
+    const sv = runBackground('docker-init');
+    await until(() => calls().filter((c) => c.startsWith('--continuous')).length >= 3, 15_000);
+    expect(sv.out()).toContain('drain launch exited 1');
+    expect(sv.out()).toContain('retrying in');
+    expect(sv.proc.exitCode).toBeNull();
+    sv.proc.kill('SIGTERM');
+    expect(await sv.done).toBe(0);
   });
 });
 
@@ -305,5 +350,19 @@ describe('deliberate stop', () => {
     await until(() => !alive(drainPid));
     expect(fs.existsSync(file('drain.lock'))).toBe(false);
     expect(fs.readFileSync(file('drain.log'), 'utf-8')).toContain('stopping on SIGTERM');
+  });
+
+  it('stop fails when the drain ignores TERM past the grace period (#3195)', async () => {
+    env.STUB_LIFE = '60';
+    env.STUB_IGNORE_TERM = '1';
+    const sv = runBackground('docker-init');
+    await until(() => fs.existsSync(file('drain.lock')) && sv.out().includes('starting the drain'));
+    const drainPid = Number(fs.readFileSync(file('drain.lock'), 'utf-8'));
+    const stop = spawnSync('bash', [SVC, 'stop'], { env, encoding: 'utf-8', timeout: 30_000 });
+    expect(stop.status).toBe(1);
+    expect(stop.stdout).toContain('still alive');
+    expect(await sv.done).toBe(1);
+    expect(sv.out()).toContain('still running after 5s');
+    expect(alive(drainPid)).toBe(true);
   });
 });

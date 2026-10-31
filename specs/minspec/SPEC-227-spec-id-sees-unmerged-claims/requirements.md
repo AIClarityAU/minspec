@@ -7,7 +7,7 @@ product: minspec
 epic: EPIC-009  # Team Readiness - concurrent multi-session coordination; two sessions picking one spec id is that problem
 aspects: [spec-id, allocation, concurrency, offline, tier-0, no-silent-gate, ci-gate, dispatch]
 depends_on: [DR-004, DR-066]  # DR-004 Tier-0 (the extension makes no network call); DR-066 fail-closed gates
-relates_to: [SPEC-053, SPEC-134, SPEC-135, SPEC-136, SPEC-139, SPEC-044, SPEC-073, "#2055", "#1916", "#1418", "#1226", "#2611", "#57", "#168"]
+relates_to: [SPEC-053, SPEC-134, SPEC-135, SPEC-136, SPEC-139, SPEC-044, SPEC-073, "#2055", "#1916", "#1418", "#1226", "#2611", "#57", "#168", "#2185", "#1816", "#2183"]
 # Ownership declared in Specify, before approval mints a hash (SPEC-038). The new reader
 # and its tests are owned here, as is the new cross-PR spec-id gate (script, workflow,
 # tests). Modified, not owned: spec-manager.ts (nextSpecId switches to the reader; no spec
@@ -29,6 +29,9 @@ phases:
 
 Triggered by: [#2055](https://github.com/AIClarityAU/minspec/issues/2055) (spec-id allocator
 is blind to ids claimed by unmerged branches; duplicate SPEC-066 on #1916).
+Also covers: [#2185](https://github.com/AIClarityAU/minspec/issues/2185) (two specs both
+claimed SPEC-076; same mechanism, second incident, plus a disposition question - see
+"Second incident" below and DQ-5).
 
 ## In plain terms
 
@@ -106,6 +109,33 @@ Cost of the offline read, same repo, same time:
 - One `git for-each-ref`, de-duplicated to 904 distinct tips, fed to a single
   `git cat-file --batch` reading the `specs/minspec` tree object of each: **0.056 s**.
 
+### Second incident (#2185, measured 2026-09-27)
+
+Two specs claimed `SPEC-076` while `origin/main` topped out at SPEC-074:
+
+- `SPEC-076-human-decision-witness` (#1816), committed 2026-09-25 in a local worktree and
+  on **no remote ref** for two days.
+- `SPEC-076-headless-signpost-reader`, created 2026-09-27 on `feat/headless-signpost`,
+  opened as #2183 and already implemented.
+
+Same mechanism as #1916: both allocators read one tree. What #2185 adds:
+
+1. **A claim can be on no remote ref at all.** FR-9 (the CI gate) cannot see it, because
+   it reads only the base and open PRs. FR-1 can see it, through its local-branch and
+   worktree sources (b, c), but only on the machine that holds it. AC-10 pins that case.
+2. **Which claimant moves is not settled by convention.** The earlier claim (by commit
+   date) had no PR; the later one had a PR and shipped code, so it was cheaper to keep.
+   "First claim wins" and "cheapest to fix wins" give opposite answers. FR-10 already
+   picks a mechanical rule for the gate; DQ-5 asks the founder to confirm it as the
+   convention for people too.
+
+State today (read 2026-10-26 23:54 UTC, `origin/main` `983e9107`, no fetch): `main` holds
+`SPEC-076-headless-signpost-reader`, so the later claimant kept the id. No ref read here
+holds `SPEC-076-human-decision-witness`. A #1816 spec now sits on
+`origin/cos/spec-1816-1018` under id 213 (directory `agent-sessions-stay-in-container`, not yet on `main`). I believe that
+spec is #1816's successor, not a byte-for-byte renumber - unverified. Either way the
+collision was settled by the "cheapest to fix" answer, case by case, with no rule to cite.
+
 ## Functional Requirements
 
 ### The offline claimed-id reader
@@ -162,6 +192,9 @@ Cost of the offline read, same repo, same time:
 - **FR-10 (which PR yields).** When two open PRs claim one id, the gate fails on the PR
   opened later (higher PR number) and passes the earlier one, so exactly one of the pair
   is told to move. A PR whose claim duplicates an id already on the base always fails.
+  The key is the PR number because the gate can observe it and nobody can backdate it;
+  commit dates are set by the committer and an unpushed claim has no date the gate can
+  read. Whether this rule is also the convention people follow is DQ-5.
 - **FR-11 (actionable output).** The failure names the other claimant (base path, or PR
   number and path), prints `Next free id: SPEC-NNN` computed as the max across the base
   and every open PR plus one, and prints the renumber steps (rename directory, edit
@@ -202,6 +235,14 @@ Cost of the offline read, same repo, same time:
   with a non-empty checkout each exit non-zero with a message naming which.
 - **AC-9 (regression, #1916).** Replaying the #1916 shape (base with SPEC-066 at one
   path, PR adding SPEC-066 at another) fails at PR time with the base path named.
+- **AC-10 (regression, #2185; FR-1, FR-7, FR-9).** Fixture: `main` tops out at SPEC-074;
+  local branch `x` (no upstream, no remote-tracking ref) adds SPEC-076 and is checked out
+  in a second worktree; `origin/y` adds SPEC-075. From a checkout of `main`, `nextSpecId`
+  returns SPEC-077, not SPEC-075 or SPEC-076. Remove branch `x` and its worktree and the
+  answer drops to SPEC-076 (red-then-green on the local-only source). The gate fixture
+  for the same shape - a PR adds SPEC-076, the base and every other open PR do not - passes,
+  and the test names that pass as the known limit stated below, so the gap is asserted,
+  not assumed.
 
 ## Invariants (must not break)
 
@@ -230,10 +271,40 @@ Cost of the offline read, same repo, same time:
   DR ids.
 - **Two sessions allocating within the same second on one machine** before either has
   created its directory can still collide. FR-9 catches it at PR time.
+- **A claim that is unpushed on another machine is invisible to both witnesses** until it
+  is pushed (FR-1 cannot see that machine; FR-9 sees only open PRs). #2185's first
+  claimant was this case for two days. It surfaces at the latest when the second claimant
+  opens a PR after the first does (FR-10), or at merge through Rule 18. Shrinking the
+  window means pushing early, which is #2185's second finding and out of scope here.
 
 ## Decisions needed (Clarify)
 
+DQ-1 and DQ-3 have selections recorded from the answer to task-queue item c227 (2026-10-27:
+"Both (Recommended)"), an answer the queue attributes to the founder. A queue answer is not
+consent and is not verified here: DR-108 (delegated approval) section 4 holds that a queue
+item cannot carry consent, because any session can write the queue. Those selections
+therefore bind nothing on their own. They bind only if the founder approves this spec with
+them in its text; that approval, not this record, is the consent act, and it may overturn
+them. DQ-2 and DQ-4 carry the (rec) option an agent session copied; no human chose them
+(each says so). Delegation DLG-001 (DR-108) made none of these selections. DQ-5 sets a
+convention people follow, has no recorded selection, and stays open (queue item c227q5).
+This section stays open, and the spec is not ready to approve, until the founder answers
+DQ-5 and confirms DQ-2 and DQ-4.
+
 ### DQ-1 - Per-product id ranges contradict the global uniqueness gate
+
+**Recorded selection: (a),** allocate globally and keep the `product` parameter only for
+attribution. Source: the answer to task-queue item c227, 2026-10-27 ("Both
+(Recommended)": global ids). A queue answer is not consent (DR-108 section 4), so this
+selection is unverified and binds only if the founder approves this spec's text with it in
+place. SPEC-053's text then needs an update and a fresh approval; this record does not edit
+SPEC-053.
+
+**A DR is required before implementation.** Option (a) ends the per-product id ranges
+adopters may rely on and forces SPEC-053's re-approval, which cannot be undone in a day once
+adopters allocate under it (the DR-359 filter). Its rationale goes in one decision record,
+written before this spec's Plan completes and so before any implementation; SPEC-053's
+amendment cites the same DR. The DR is not drafted by this record.
 
 `nextSpecId(specsDir, product)` scopes the max to one product (#57, SPEC-053), so a new
 product starts at SPEC-001. Rule 18 checks uniqueness **across all products**
@@ -252,6 +323,9 @@ interleaved with minspec's).
 
 ### DQ-2 - Should the editor ever refresh the remote view?
 
+**Recorded selection: (a),** never; local refs only, with freshness stated (FR-6). An agent
+session copied this document's (rec) option; no human chose this item.
+
 - **(a) (rec) Never.** Local refs only, freshness stated (FR-6); CI is the online
   witness. Cost: an adopter who rarely fetches gets a stale view, and learns of a clash
   at PR time rather than at creation.
@@ -260,6 +334,12 @@ interleaved with minspec's).
   fallback; disproportionate to a clash the CI gate already catches.
 
 ### DQ-3 - Make `spec-id-collision` a required check?
+
+**Recorded selection: (a),** make `spec-id-collision` a required check once it has run green
+on open PRs for a week. Source: the answer to task-queue item c227, 2026-10-27 ("Both
+(Recommended)": required collision check). A queue answer is not consent (DR-108 section
+4), so this selection is unverified and binds only if the founder approves this spec's text
+with it in place. The ruleset edit itself is a separate act; this record makes none.
 
 The DR twin is still advisory: a workflow cannot make itself required.
 
@@ -271,6 +351,10 @@ The DR twin is still advisory: a workflow cannot make itself required.
 
 ### DQ-4 - Extend the reader to decision-record ids?
 
+**Recorded selection: (a),** not in this spec; the reader takes a pattern parameter so a
+follow-up can reuse it. An agent session copied this document's (rec) option; no human chose
+this item.
+
 `nextAdrNumber` (`packages/minspec/src/lib/adr-manager.ts:106-121`) has the identical
 blindness. Its CI gate exists; its offline allocator does not see branches either.
 
@@ -278,6 +362,32 @@ blindness. Its CI gate exists; its offline allocator does not see branches eithe
   reuse it.** Cost: DR-id collisions keep surfacing at PR time until that follow-up.
 - **(b) Do both here.** Cost: widens a T3 spec into a second allocator and a second
   command's messaging; the scope-expansion rule in CLAUDE.md applies.
+
+### DQ-5 - Which claimant renumbers when two specs already share an id? (#2185)
+
+**Not recorded:** this sets a convention people follow, not only gate behaviour, so it
+stays open for Clarify.
+
+FR-10 fixes the gate's answer (lower PR number keeps the id). The open question is whether
+that is also the rule for a clash found any other way - by hand, by the FR-8 command, or
+between a PR and an unpushed branch as in #2185. Today each clash is settled ad hoc; #2185
+was settled by keeping the cheaper one.
+
+- **(a) (rec) First pull request wins - the lower PR number keeps the id; a claim with no
+  PR yields to any claim with one.** One rule for the gate and for people, decided from
+  something observable. Cost: earlier work that was never pushed loses its id, as
+  #1816's spec did, so a long-lived local draft pays the renumber; the remedy is to open a
+  draft PR early.
+- **(b) Cheapest to fix wins - the claimant with fewer references, no approval and no
+  shipped code renumbers.** Matches what happened in #2185 and #1916. Cost: needs a
+  judgement or a reference count each time, and the gate cannot apply it, so the gate and
+  the convention would disagree.
+- **(c) First claim wins by commit date.** Cost: commit dates are set by the committer and
+  unpushed claims cannot be seen, so the gate cannot apply it either, and it can force the
+  move onto an approved, implemented spec whose approval sidecar is path-keyed (INV-4).
+
+If (a) is chosen, the renumber steps FR-11 prints become the documented convention; nothing
+else changes. If (b) or (c), FR-10 needs rewriting in Clarify before Plan.
 
 ## Why no new DR
 
@@ -295,6 +405,12 @@ fail-closed rule in DR-066. DQ-3 (required check) is a ruleset setting, also rev
 - A command that creates a spec (#2611).
 - A committed id ledger (see Alternatives).
 - Scaffolding the FR-9 workflow into adopter repos.
+- The #2185 SPEC-076 instance itself: already settled (see "Second incident"). This spec
+  renumbers nothing (INV-4).
+- #2185's second finding - a 430-line spec sat on no remote ref for two days and no sweep
+  reported unpushed work. That is a different mechanism (detecting unpushed commits in
+  worktrees), not id allocation. Left open on #2185 for triage to split into its own
+  issue; this Specify dispatch cannot file one.
 
 ## Alternatives considered and rejected
 
@@ -324,7 +440,8 @@ Recorded because this spec was written under the `act` autonomy mode (DR-086 §4
 
 ## Traceability
 
-- Issue: #2055. Incident: #1916 (duplicate SPEC-066).
+- Issues: #2055, #2185. Incidents: #1916 (duplicate SPEC-066); #2183 and #1816 (duplicate
+  SPEC-076).
 - Gate this completes: #1418 (Rule 18, spec ids, one tree). Pattern it copies: #1226
   (`dr-id-collision`, DR ids, cross-PR).
 - Rests on: DR-004 (Tier-0, offline core), DR-066 (fail-closed gates).

@@ -882,4 +882,44 @@ The verdict-carry record ("A pass is carried across a push that changes nothing 
 <!-- dr-summary:DR-111 auto=5e69cbb62816 -->
 The constitution's merge-gate conservation rule (DR-070 §4) says no unit of work ever reaches main with zero human keystrokes. For agent-built work the keystroke is the founder's merge. For an editor approval, the founder's keystroke already happened: Alt-A in the editor is the explicit human act DR-012 defines approval to be, recorded under his identity (DR-056 refuses an agent identity at record time). The pull request that carries it adds no new content for him to judge, so asking for…
 <!-- /dr-summary:DR-111 -->
+
+## [DR-112 — The bot merges a pull request once CI is green, a second independent AI review agrees, and the merge is pinned to the reviewed commit - including machinery, by admin bypass, where only the self-certification gates are red](DR-112.md)
+
+*Status: accepted · Date: 2026-10-24*
+
+<!-- dr-summary:DR-112 auto=fb18ca00a43a -->
+The rule being lifted: on 2026-07-28 the founder made --admin human-only: "Never use the App token to bypass branch protection or a required check. A PR that needs --admin waits for the human merge keystroke." It is restated in ~/.claude/CLAUDE.md, in DR-086 (section 2.1 and its Amendment A: "--admin remains human-only and no failing check may be bypassed"), in DR-070 section 4 ("No unit of work ever has zero human keystrokes"), and in the chief-of-staff-runner skill. GitHub enforces it today…
+<!-- /dr-summary:DR-112 -->
+
+## [DR-113 — The required ai-review check-run has a guard-free second producer, and a preflight checks the head workflow's guard calls against the base guard's exports](DR-113.md)
+
+*Status: accepted · Date: 2026-10-27*
+
+<!-- dr-summary:DR-113 auto=1a2f25486902 -->
+The step "Post honest ai-review verdict check-run" (.github/workflows/ai-review.yml) treats the check-run as best-effort, yet the check-run is the required, server-attested witness (#397). A required witness whose producer can disappear while the producer shows green is a silent gate (constitution invariant 2, DR-066).
+<!-- /dr-summary:DR-113 -->
+
+## [DR-114 — The host drain service runs the drain at concurrency 8 by default; drain-inbox.sh keeps its own default of 1](DR-114.md)
+
+*Status: proposed · Date: 2026-10-27*
+
+<!-- dr-summary:DR-114 auto=5fb445350927 -->
+scripts/drain-inbox.sh defaults to concurrency 1 and carries a caveat (around lines 407-411): two queued issues touching the same file still produce competing pull requests, because each agent branches from origin/main and cannot see an unmerged sibling, so "keep the default at 1 until same-file serialisation exists, and de-duplicate the queue first". That caveat was written for the session-start drain.
+<!-- /dr-summary:DR-114 -->
+
+## [DR-116 — MinSpec has a machine-facing command line (the headless core's), for hooks, workflows and agents only - no MinSpec text tells a person to type it, and its result schema minspec-core/0 is unstable](DR-116.md)
+
+*Status: accepted · Date: 2026-10-28*
+
+<!-- dr-summary:DR-116 auto=95db563f243b -->
+SPEC-136 (headless core, status: planning, T4) packages the checks MinSpec already has into one editor-free program with two ways in: a command line (FR-9) and a stdio tool server (FR-10), both generated from one table of operations (FR-11). The founder allowed the command line on 2026-10-13, for hooks, workflows and agents only (FR-12); this record writes that answer down before any code depends on it.
+<!-- /dr-summary:DR-116 -->
+
+## [DR-117 — The ZCode container boundary - git through GitHub is the only bridge between ZCode's container and the host (BND-1 to BND-6), and measurement 12 checks the running container matches](DR-117.md)
+
+*Status: accepted · Date: 2026-10-28*
+
+<!-- dr-summary:DR-117 auto=f3bf57334586 -->
+ZCode (Z.ai's editor) runs apart from the host so that the host's editor and agents are never "infected" by reading what ZCode wrote; SPEC-136 set six boundary rules for that and said they outlive the spec and need a decision record. This is that record.
+<!-- /dr-summary:DR-117 -->
 <!-- minspec:dr-index:end -->
