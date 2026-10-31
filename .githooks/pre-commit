@@ -412,9 +412,11 @@ if [ "${DR_INDEX_GATE_OFF:-}" != "1" ] && \
         # that was never consulted). Still fails closed (invariant 2).
         echo "✖ validate gate: the validator COULD NOT RUN — your content was not validated." >&2
         echo "  It exited non-zero without reporting a result (the output above shows why;" >&2
-        echo "  typically MODULE_NOT_FOUND in a fresh worktree with no node_modules)." >&2
-        echo "  Fix: run \`npm install\` in this worktree, then commit again." >&2
-        echo "  Failing closed (#1483 review, #1416); there is no content problem to fix." >&2
+        echo "  usually MODULE_NOT_FOUND in a fresh worktree with no node_modules, but a" >&2
+        echo "  crash or syntax error introduced by this commit can look the same)." >&2
+        echo "  If the output above shows MODULE_NOT_FOUND, run \`npm install\` in this" >&2
+        echo "  worktree and commit again; otherwise fix the error it names." >&2
+        echo "  Failing closed (#1483 review, #1416); the validator never reported on your content." >&2
         fail=1
         exit $fail
         ;;
