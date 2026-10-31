@@ -589,6 +589,34 @@ describe('python validate.py mirrors the Node validator core checks (#246)', () 
     expect(py.stderr).toContain('specs/spec-x/spec.md');
   });
 
+  it.skipIf(!hasPy)('a spec with a leading UTF-8 BOM passes (full scan) (#2477)', () => {
+    writeSpec('specs/spec-001/spec.md', '\uFEFF---\nid: SPEC-001\nstatus: specifying\n---\n# ok\n');
+    expect(runValidatePy().code).toBe(0);
+  });
+
+  it.skipIf(!hasPy)('a staged spec with a leading UTF-8 BOM passes (--pre-commit) (#2477)', () => {
+    writeSpec('specs/spec-001/spec.md', '\uFEFF---\nid: SPEC-001\nstatus: specifying\n---\n# ok\n');
+    const git = (...args: string[]) =>
+      execFileSync('git', args, { cwd: tmpDir, stdio: 'pipe', encoding: 'utf-8' });
+    git('init', '-q');
+    git('add', 'specs/spec-001/spec.md');
+    let code = 0;
+    let stderr = '';
+    try {
+      execFileSync('python3', [path.join(tmpDir, VALIDATE_PY), '--pre-commit'], {
+        cwd: tmpDir,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (e: unknown) {
+      const err = e as { status?: number; stderr?: string };
+      code = err.status ?? 1;
+      stderr = err.stderr ?? '';
+    }
+    expect(stderr).toBe('');
+    expect(code).toBe(0);
+  });
+
   it.skipIf(!hasPy)('python parses an inline comment on id (id: SPEC-001 # note)', () => {
     writeSpec('specs/spec-001/spec.md', '---\nid: SPEC-001  # primary\n---\n# ok\n');
 

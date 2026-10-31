@@ -515,7 +515,9 @@ def main():
     by_id = {}         # sid -> list of per-doc candidate dicts
     for sp in glob.glob(os.path.join(cwd, "specs", "**", "*.md"), recursive=True):
         try:
-            with open(sp, "r", encoding="utf-8") as fh:
+            # utf-8-sig drops one leading BOM; otherwise the ^--- match below
+            # fails and the spec is silently skipped, never gated (#2477).
+            with open(sp, "r", encoding="utf-8-sig") as fh:
                 head = fh.read(8000)
         except Exception:
             continue
