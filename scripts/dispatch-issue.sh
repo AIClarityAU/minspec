@@ -2998,7 +2998,18 @@ else
   # comment between `\` and its continuation silently neutralises the whole call.
   gh issue edit "$ISSUE" --repo "$REPO" \
     --remove-label "agent-running,agent-ready" --add-label "agent-escalated,needs-human-review" 2>/dev/null || true
-  echo "Agent CRASHED on issue #$ISSUE (role: $ROLE) — held for a human (needs-human-review). Review: $LOG"
+  echo "Agent CRASHED on issue #$ISSUE (role: $ROLE) — held for a human (needs-human-review), labelled agent-crashed. Review: $LOG"
+  # #1202 — a crash is not a reasoned escalation. `agent-escalated` alone cannot tell
+  # "the agent asked for a human" from "the harness killed the run and it never made a
+  # real attempt", so a systemic outage rendered as a growing human-review backlog.
+  # `agent-crashed` makes the two separable by label query, and the comment carries the
+  # crash signature so the reason outlives the /tmp-scoped, rotating drain log.
+  gh label create "agent-crashed" --repo "$REPO" --color d93f0b \
+    --description "Harness crash - agent never made a real attempt; retry candidate" 2>/dev/null || true  # swallow-ok: label may already exist; the edit below fails visibly in the comment path
+  gh issue edit "$ISSUE" --repo "$REPO" --add-label "agent-crashed" 2>/dev/null || true  # swallow-ok: needs-human-review above is the load-bearing gate; this label is a discriminator
+  CRASH_SIGNATURE=$(tail -n 15 "$LOG" 2>/dev/null | cut -c1-300 || true)  # swallow-ok: log may be missing; the comment still names the crash
+  CRASH_BODY=$(printf '**Agent crashed (harness failure, not an escalation)** - role `%s`, model `%s`. The run never emitted an `ESCALATE:` reason, so this is a retry candidate once the underlying cause is fixed, not a hard problem awaiting judgement. Filter with label `agent-crashed`.\n\nLast log lines (the drain log is /tmp-scoped and rotates):\n\n```\n%s\n```\n' "$ROLE" "${RUN_MODEL:-unknown}" "$CRASH_SIGNATURE")
+  gh issue comment "$ISSUE" --repo "$REPO" --body "$CRASH_BODY" 2>/dev/null || echo "WARNING: could not post crash signature comment on #$ISSUE" >&2
 fi
 
 # Every non-retry path (clean publish, final escalation, crash) falls through to
