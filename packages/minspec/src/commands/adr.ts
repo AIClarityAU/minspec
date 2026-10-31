@@ -24,6 +24,7 @@ import {
   type ApprovalRecord,
 } from '../lib/approval';
 import { sidecarPath, writeRecord } from '../lib/approval-store';
+import { scopeIndexToDr } from '../lib/dr-index-scope';
 
 function decisionsDirOverride(): { decisionsDir: string } | undefined {
   const decisionsDir = vscode.workspace
@@ -331,6 +332,9 @@ async function applyStatus(
     let suffix = '';
     if (opts.commit && folder) {
       const indexPath = path.join(path.dirname(filePath), 'INDEX.md');
+      // #2021: the regen above rewrote EVERY row from disk; keep only this DR's so an
+      // unrelated DR's uncommitted status change cannot ride into this approval commit.
+      scopeIndexToDr(folder, indexPath, id);
       suffix = (
         await commitApprovalIfEnabled(
           folder,
