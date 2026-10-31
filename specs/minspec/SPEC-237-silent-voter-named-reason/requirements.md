@@ -17,7 +17,7 @@ implements_reason: >-
 affects: [scripts/review-branch.sh, .github/workflows/ai-review.yml, .github/scripts/ai-review-guard.js, scripts/review-pr.sh, scripts/gen-ci-templates.mjs, packages/minspec/src/lib/ci-review-templates.ts]
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -238,9 +238,12 @@ Each AC is red on today's code and green after the change.
 
 ## Decisions needed (Clarify)
 
-All 5 decisions (D1 to D5) are resolved: an agent session recorded each option this document
-already recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No
-human chose them; they are ratified only by approval of this spec. D6 is not a choice.
+All 5 decisions (D1 to D5) are answered, not ratified: an agent session selected, for each, the
+option this document already recommended. No human chose them, and no delegation covers
+authoring Clarify answers. Delegation DLG-001 (DR-108) made none of these selections and covers
+spec approval and engineering-DR acceptance only. An agent-recorded selection carries no
+consent, whoever prompted it. It is ratified only by approval of this spec, the founder's or the
+bot's under DLG-001, and that approval may overturn it. D6 is not a choice.
 
 - **D1 - Reason channel.**
   - **(a) Sidecar file (rec).** The runner writes `<vote>.reason` next to its stdout,

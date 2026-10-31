@@ -12,7 +12,7 @@ implements: [packages/minspec/tests/validate-reports-approval-refusal.test.ts]  
 affects: [packages/minspec/src/commands/validate.ts, packages/minspec/src/lib/spec-validator.ts]  # validate.ts gains one call; the predicate violationsIntroducedByApproval is reused, never re-implemented
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -100,9 +100,12 @@ In: the `MinSpec: Validate` result surface, and a test pinning it. Out:
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are resolved: an agent session recorded each option this document already
-recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
-chose them; they are ratified only by approval of this spec.
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and
+engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted
+it. It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and
+that approval may overturn it.
 
 - **D1 — Should the same check also run for the Validate-all / tree decoration / CI path?**
   Options: (A) command only **(rec)** — smallest, fixes the reported surface; cost: other
