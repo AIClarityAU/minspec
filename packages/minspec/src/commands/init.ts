@@ -1245,8 +1245,8 @@ export async function offerCoverageThresholdPrompt(folder: string): Promise<void
         prompt: 'Minimum coverage percentage (whole number, 0-100)',
         value: String(recommended),
         validateInput: (v) => {
-          const n = Number(v);
-          return Number.isInteger(n) && n >= 0 && n <= 100 ? undefined : 'Enter a whole number 0-100';
+          // Validate the TEXT: Number() coerces '', whitespace, hex and exponent forms.
+          return /^\d{1,3}$/.test(v) && Number(v) <= 100 ? undefined : 'Enter a whole number 0-100';
         },
       });
       if (input === undefined) return; // dismissed
