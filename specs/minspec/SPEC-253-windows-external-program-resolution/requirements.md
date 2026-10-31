@@ -117,21 +117,32 @@ non-git VCS; installing git for the user.
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 - **D1 Where git's path comes from.** (a) **bare name plus VS Code git extension path (rec)** -
   agrees with the editor; cost: the lib must stay vscode-free, so the path is injected by the
   extension host and CLI-side/test callers fall back to the bare name. (b) also read the
   `git.path` setting - covers users with the extension disabled; cost: one more source that can
   disagree. (c) bare name only - smallest; cost: leaves the GitHub Desktop case broken.
+  **Recorded selection: Option (a),** bare name plus the VS Code git extension path, injected
+  by the extension host, with CLI-side and test callers falling back to the bare name.
 - **D2 How loudly to report missing git.** (a) **one warning toast per session (rec)** - visible
   without nagging; cost: a user who dismisses it has no persistent reminder. (b) status-bar
   item until fixed - persistent; cost: new UI surface. (c) block Initialize - strictest;
   cost: stops users who want the files without hooks.
+  **Recorded selection: Option (a),** one warning toast per session.
 - **D3 Windows `claude.cmd` via shell.** (a) **shell fallback with cmd.exe quoting, args only
   (rec)** - works for npm installs; cost: shell quoting is a classic injection edge, so it is
   safe only because no user text is in argv (FR-5). (b) resolve the `.cmd` to the underlying
   `node cli.js` and spawn node directly - no shell; cost: depends on npm's shim layout, which
   can change. (c) document "use the native installer" and only improve the message - least
   code; cost: the feature stays unavailable for npm users.
+  **Recorded selection: Option (a),** shell fallback with cmd.exe quoting, args only, safe
+  because no user text is in argv (FR-5).
 - **D4 Verification gap.** No Windows runner is known to exist in CI. Accept simulated-platform
   tests alone (rec, cost: a Windows-only quirk can still ship), or add a `windows-latest` CI
   job (cost: CI config change, outside this role's remit, needs a human).
+  **Recorded selection: Option (simulated-platform tests),** accept simulated-platform tests
+  alone, with no `windows-latest` CI job.
