@@ -61,6 +61,19 @@ while IFS= read -r line; do
   code="${line:0:2}"
   p="${line:3}"
   p="${p##*-> }"
+  # An untracked DIRECTORY is reported as `?? dir/`, not the files inside it
+  # (#1119). Expand it to its files so the copy loop below never sees a
+  # directory (`cp` without -r aborts). A first-time approval sidecar lands
+  # exactly this way. `-z` keeps odd filenames intact; a failing ls-files
+  # aborts the script (`set -euo pipefail`) rather than dropping the dir.
+  if [ "$code" = '??' ] && [[ "$p" == */ ]]; then
+    status_lines=("${status_lines[@]:0:${#status_lines[@]}-1}")
+    while IFS= read -r -d '' ef; do
+      status_lines+=("?? $ef")
+      path_status["$ef"]='??'
+    done < <(git -C "$root" ls-files -z --others --exclude-standard -- "$p")
+    continue
+  fi
   path_status["$p"]="$code"
 done < <(git -C "$root" status --porcelain)
 
