@@ -253,7 +253,18 @@ history or on the network.
 
 ## Decisions needed (Clarify)
 
+All 6 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and
+engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted
+it. It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and
+that approval may overturn it.
+
 **DQ-1 - Is the probe the verdict, with the inventory diff only as explanation?**
+
+**Recorded selection: Option (a),** yes: the probe decides `GREEN/RED/UNVERIFIED`, and the
+FR-6 inventory is printed beside it.
+
 - `a` **(rec)** Yes: probe decides `GREEN/RED/UNVERIFIED`; FR-6 inventory is printed beside
   it. Cost: a probe costs one more full suite run (on #1955's branch, ~6.2k tests) each time
   a behind branch wants to be called green - minutes of wall-clock, little token spend.
@@ -262,6 +273,10 @@ history or on the network.
   semantic conflicts (AC-3) and on any gate kind the inventory does not model.
 
 **DQ-2 - Where does the always-on advisory (FR-7) attach?**
+
+**Recorded selection: Option (a),** `.githooks/pre-push` (warning only) and `npm run facts`
+(on demand).
+
 - `a` **(rec)** `.githooks/pre-push` (warning only) **and** `npm run facts` (on demand). Fires
   exactly when work is about to leave the machine. Cost: one more message in a hook whose
   header promises "never a new obstacle" - it must stay non-blocking and fast, and a reader
@@ -271,12 +286,20 @@ history or on the network.
 - `c` Both. Cost: duplicate noise.
 
 **DQ-3 - Dev-time tool for this repo, or a shipped MinSpec feature?**
+
+**Recorded selection: Option (a),** dev-time only (`scripts/` + `.githooks/`), like
+`check-dr-id-collision.ts`.
+
 - `a` **(rec)** Dev-time only (`scripts/` + `.githooks/`), like `check-dr-id-collision.ts`.
   Cost: adopters keep the blind spot until a later spec productizes it.
 - `b` Ship in the extension / adopter hooks. Cost: new adopter surface, Tier-0 constraints
   on spawning a suite run, invariant-3 review; larger than this issue.
 
 **DQ-4 - Which gates does the probe run?**
+
+**Recorded selection: Option (a),** `npx vitest run` only, with the report stating plainly
+which gates it does not run.
+
 - `a` **(rec)** `npx vitest run` only, with the report stating plainly "covers vitest; lint,
   validate, typecheck, check:cycles not run". Cost: a branch behind on a non-vitest CI step
   still reads `GREEN` from the probe (the label says so, but it is a narrower green).
@@ -285,12 +308,20 @@ history or on the network.
   SPEC-228 fixes elsewhere - unless Plan derives it from the workflow file.
 
 **DQ-5 - Offer `--fetch`?**
+
+**Recorded selection: Option (a),** yes, an opt-in `--fetch` flag that runs
+`git fetch origin main` first; the default stays offline.
+
 - `a` **(rec)** Yes, opt-in flag that runs `git fetch origin main` first; default stays
   offline. Cost: one network path in a dev script, needs the credential the session has.
 - `b` No; the report's ref-age line (FR-4) is enough. Cost: a stale `origin/main` gives a
   stale green, visible only if the reader reads the age.
 
 **DQ-6 - Do agent dispatches record and run the probe (FR-10)?**
+
+**Recorded selection: Option (b),** not in this spec; dispatch worktrees are cut from
+`origin/main` at start, so they lag only by their own run time.
+
 - `a` Yes, now. Cost: every behind agent completion pays a second suite run; touches
   `dispatch-issue.sh` and `review-signals.ts`, owned by other specs.
 - `b` **(rec)** Not in this spec; dispatch worktrees are cut from `origin/main` at start

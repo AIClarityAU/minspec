@@ -10,7 +10,9 @@ depends_on: []
 relates_to: ["#2682", "#2675", "#1522"]
 implements: none
 implements_reason: >-
-  Specify phase only. Which files this spec will own is decided at Plan, after Decisions D1-D3 are answered.
+  Clarify is partly recorded, not ratified (D1 option (a), D3 per-file; D2 is open, with no
+  recommendation). Which files this spec will own is still decided at Plan, so implements stays
+  none.
 phases:
   specify: in-progress
   clarify: pending
@@ -69,12 +71,31 @@ Read from the code, not inferred:
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered, not ratified. For D1 and D3 an agent session selected the option this document
+already recommended; no human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). D2 made no recommendation and
+asked for the packaging manifest to be read; it is answered from the code, with the evidence given under D2,
+and is not a human's choice either. This spec is unapproved, so these answers bind nothing until a human
+or a covered delegation approves it.
+
+- **D1 - Recorded selection: Option (a),** thread config into the shim builders, so the exact
+  configured folder names appear in the shipped text.
+- **D3 - Recorded selection: per-file reason,** each FR-4 allow-list entry carries its own reason,
+  per file.
+
 **D1 - How to make the text true for any config.**
 - **(a) Thread config into the shim builders** `(rec)`: exact folder names appear, agents need no lookup. Cost: managed regions become config-dependent, so FR-3's refresh/drift rule is mandatory and the pinned-byte contract changes.
 - **(b) Name folders by role** ("the specs directory in `.minspec/config.json`"): no contract change, never stale. Cost: one extra lookup by the agent, vaguer text, and an agent that skips the lookup falls back to guessing `specs/`.
 - **(c) Both**: exact names plus a pointer to config. Cost: longest text, more tokens per command (tenet 2).
 
-**D2 - Do `scripts/roles/*.md` ship to adopters?** If yes, FR-5 applies and the layout/script assumptions must go generic or config-sourced. If no (dev-time only for this monorepo, per CLAUDE.md "Agent Dispatch"), the fix is to mark them this-repo-only and exclude them from shipping, and `architect.md:18,30-32,39,53` are correct as written. Recommendation: confirm from the packaging manifest before choosing; cost of guessing wrong is either needless rewriting or a shipped false signpost. Which is true was not verified here.
+**D2 - Do `scripts/roles/*.md` ship to adopters?** If yes, FR-5 applies and the layout/script assumptions must go generic or config-sourced. If no (dev-time only for this monorepo, per CLAUDE.md "Agent Dispatch"), the fix is to mark them this-repo-only and exclude them from shipping, and `architect.md:18,30-32,39,53` are correct as written. Recommendation: confirm from the packaging manifest before choosing; cost of guessing wrong is either needless rewriting or a shipped false signpost. Resolved below, from the code.
+
+**D2 - Recorded answer: yes, four role files ship, so FR-5 applies.** Read from the code on `main` at
+`964c7075`, not chosen: `packages/minspec/src/lib/template-registry.ts` scaffolds
+`scripts/roles/reviewer.md` (line 2691), `security.md` (2697), `architect.md` (2703) and `skeptic.md` (2709)
+into adopter repos. `architect.md` therefore ships, and its layout and script claims
+(`architect.md:18,30-32,39,53`) must go generic or config-sourced per FR-5. `approvable-reviewer.md` is drift-gated
+only and not scaffolded (`ci-review-templates.ts:3451`); `dev.md`, `tasks.md` and `triage.md` have no scaffold entry.
 
 **D3 - Allow-list granularity for the FR-4 sweep.** Per-file reason (rec, auditable, cost: churn when text moves) versus per-pattern (cheap, cost: hides new unintended hits).
 

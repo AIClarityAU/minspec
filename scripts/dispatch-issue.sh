@@ -592,6 +592,126 @@ fi
 # Never arms anything itself; the `--delegated-spec-merge ... --arm` seam below does, and
 # only on a proceed. The judge's command can be replaced for tests
 # (MINSPEC_DELEGATED_MERGE_JUDGE_CMD); the decision downstream of it cannot.
+
+# SPECIFY_SCOPE_RE (#1169) — the ONLY paths a SPECIFY-ONLY dispatch may touch.
+#
+# A specify-only dispatch replaces the human's pre-build read of the raw issue, so
+# the property that has to hold in its place is "this dispatch cannot implement
+# anything". Prose in the agent prompt is not that property — it is an instruction
+# the model must remember, which the constitution's "enforce, don't trust the model"
+# says is not a gate. This regex is the gate: the branch is not pushed and no PR is
+# opened if the committed diff leaves this corpus.
+#
+# Arms, and why only these two:
+#   ^specs/           the deliverable itself.
+#   ^docs/decisions/  a T3/T4 design frequently needs a DR-NNN + the INDEX row, and
+#                     DR-359's ADR filter makes that part of specifying, not of
+#                     building. Both are approvable docs, so the resulting PR is
+#                     withheld from native auto-merge by paths_have_approvable_doc
+#                     above and lands as a human-reviewed proposal — which is
+#                     exactly the one HITL moment DR-076 funds.
+# Notably NOT here: `.github/` (the architect role's allowlist includes it, but CI
+# config is machinery, never a spec) and `packages/` / `scripts/` / `tests/` (that is
+# implementation by any name — "just the test first" included).
+SPECIFY_SCOPE_RE='^specs/|^docs/decisions/'
+
+# specify_scope_stray: changed paths on stdin → prints the reason this diff must NOT
+# be published (every out-of-corpus path, or the fact that there is nothing at all).
+# Exit 0 when a reason was printed (i.e. a VIOLATION), 1 when the set is clean — the
+# same "exit 0 = the notable case" convention as paths_have_approvable_doc above, so
+# the two classifiers read alike at their call sites.
+#
+# An EMPTY set is a violation, not a pass. "Could not tell" and "produced nothing"
+# both have to fail closed here: an empty changed-set means either the agent wrote no
+# spec or the enumeration failed, and publishing on either would put an empty PR in
+# front of the human as though the spec had been written — a false signpost, which in
+# a never-wrong product is worse than the refusal.
+specify_scope_stray() {
+  local changed stray
+  changed="$(grep -v '^[[:space:]]*$' || true)"  # swallow-ok: grep -v exits 1 when every line was blank, which is the answer (nothing changed); the next line branches on empty
+  if [[ -z "$changed" ]]; then
+    echo "(no changed files at all — a specify-only dispatch must produce a spec)"
+    return 0
+  fi
+  stray="$(printf '%s\n' "$changed" | grep -vE "$SPECIFY_SCOPE_RE" || true)"  # swallow-ok: grep -v exits 1 when nothing falls outside the allowed scope, which is the answer
+  [[ -z "$stray" ]] && return 1
+  printf '%s\n' "$stray"
+  return 0
+}
+
+# CLOSING_KEYWORD_ERE (#3348) - GitHub's closing-keyword grammar, for `grep -iE`:
+# close/closes/closed, fix/fixes/fixed, resolve/resolves/resolved, an optional colon,
+# then `#N`, `owner/repo#N` or an issue URL. The preceding-character arm keeps
+# "Discloses #5" from counting. The same grammar is written in jq (Oniguruma) inside
+# delegated_merge_human_claims below; dispatch-specify-keeps-build-issue.test.ts extracts
+# and runs both over one table of bodies, so a change to either shows up there.
+CLOSING_KEYWORD_ERE="(^|[^a-z])(close[sd]?|fix(e[sd])?|resolve[sd]?)[: "$'\t'"]*([a-z0-9._-]+/[a-z0-9._-]+)?(#|https?://)"
+
+# specify_pr_body <issue>: PR body on stdin -> the same body with every closing keyword
+# turned into a plain `Refs` reference, ending with exactly one `Refs #<issue>`.
+#
+# #3348: a specify-only dispatch publishes the SPEC for issue N, not its build. Every PR
+# body got `Closes #N` (#1322) with no specify guard, so merging the spec closed the
+# issue that was meant to carry the build: 120 `hold:specify` issues closed COMPLETED
+# with their build never started. The trailer site below now writes `Refs`, but the
+# agent's own summary and the rendered review block are free text that can say "Fixes
+# #N" too, so the whole assembled body passes through here last. Exit 1 (with a safe,
+# summary-free body on stdout) if a keyword somehow survives the rewrite, so the caller
+# can say so; exit 2 on a non-numeric issue, printing nothing.
+specify_pr_body() {
+  local issue="${1-}" body
+  [[ "$issue" =~ ^[1-9][0-9]*$ ]] || { echo "specify_pr_body: issue number required" >&2; return 2; }
+  body="$(cat)"
+  body="$(printf '%s\n' "$body" \
+    | sed -E 's~(^|[^a-zA-Z])(close[sd]?|fix(e[sd])?|resolve[sd]?)[: \t]*(([a-z0-9._-]+/[a-z0-9._-]+)?(#|https?://))~\1Refs \4~Ig')"
+  if ! grep -qE "(^|[^a-zA-Z])Refs #${issue}([^0-9]|$)" <<<"$body"; then
+    body="$(printf '%s\n\nRefs #%s' "$body" "$issue")"
+  fi
+  if grep -qiE "$CLOSING_KEYWORD_ERE" <<<"$body"; then
+    printf 'Specify-only dispatch: the spec for this issue is drafted. The summary was withheld because a closing keyword survived the rewrite (#3348); a spec PR must not close its build issue.\n\nRefs #%s\n' "$issue"
+    return 1
+  fi
+  printf '%s\n' "$body"
+}
+
+# Pure seam: prove the rewrite without gh/dispatch. Body on stdin, issue as $2.
+if [[ "${ISSUE:-}" == "--specify-pr-body" ]]; then
+  specify_pr_body "${2-}"
+  exit $?
+fi
+
+# Pure seam: the one definition of a spec-only diff, for the drain's reconciler. Changed
+# paths on stdin; exit 0 (with the reason) if any fall outside the corpus, 1 if none do.
+if [[ "${ISSUE:-}" == "--specify-scope-stray" ]]; then
+  specify_scope_stray
+  exit $?
+fi
+
+# delegated_merge_handoffs_spent <pr> <marker> (#3120)
+#
+# Exit 0 only when EVERY handoff comment predates the PR's newest commit. A handoff is a
+# claim about the head it was posted against: shepherd_hand_off writes it when automation
+# gives up (the ceiling, the attempt cap, a fix that produced nothing), and a commit
+# pushed after it means automation took the PR back, so the old handoff no longer speaks
+# for the founder. Without this, #2799, #2830 and #2945 stayed refused for good after
+# being remediated and green for a week. A handoff at or after the newest commit, or any
+# unreadable commit list, comment or timestamp, exits 1 and the handoff stays live.
+delegated_merge_handoffs_spent() {
+  local pr="$1" marker="$2" live=""
+  if ! live=$(gh pr view "$pr" --repo "$REPO" --json commits,comments 2>/dev/null \
+       | jq -r --arg m "$marker" '
+           (.commits | if type == "array" and length > 0
+                       then [.[] | .committedDate | fromdateiso8601] | max
+                       else error("no commits") end) as $head
+           | .comments | if type == "array" then . else error("no list") end
+           | [.[] | select((.body // "") | contains($m))
+                  | select((.createdAt | fromdateiso8601) >= $head)]
+           | length' 2>/dev/null); then
+    return 1
+  fi
+  [[ "$live" == "0" ]]
+}
+
 # delegated_merge_human_claims <pr> (#3050)
 #
 # Two reasons the bot must not merge a held spec PR, whatever the delegation says. Both
@@ -599,33 +719,67 @@ fi
 #   1. an unconfirmed closing link. A drain PR is dispatched for issue N (branch
 #      `agent/issue-N`); merging it closes whatever GitHub says it closes
 #      (`closingIssuesReferences`), so that list must contain N. A branch that is not a
-#      drain branch names no issue, so it needs at least one confirmed link.
+#      drain branch names no issue, so it needs at least one confirmed link, EXCEPT (#3115)
+#      a PR authored by the App identity (`app/minspec-sdd` or `minspec-sdd[bot]`) whose
+#      body has no closing keyword: it claims to close nothing, so no link is expected.
+#      The opposite holds for a SPEC-ONLY drain PR (#3348; every changed path is in
+#      SPECIFY_SCOPE_RE, so pass the changed paths as $2): it is the specify run for
+#      issue N, N carries the build, so it must close nothing - no confirmed link and no
+#      closing keyword in its body (`spec-pr-closes-build-issue` otherwise).
 #   2. a creator-shepherd handoff. `shepherd_hand_off` stamps SHEPHERD_HANDOFF_MARKER on a
 #      comment when the creating session gives the PR to the founder; a bot merge would
 #      take that decision from him.
 # Prints the denial reason and detail (tab-separated) and returns 1 on a claim OR on any
-# unreadable input; returns 0 only when both are positively clear.
+# unreadable input; returns 0 only when both are positively clear (reason 1 satisfied
+# either by the confirmed link or by the App-authored no-closing-keyword exception above).
 delegated_merge_human_claims() {
-  local pr="$1" view="" head="" refs="" handoffs="" issue=""
+  local pr="$1" changed="${2-}" view="" head="" refs="" handoffs="" issue=""
   local marker="<!-- minspec-shepherd-handoff -->"
-  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments 2>/dev/null) \
+  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments,author,body 2>/dev/null) \
      || ! head=$(printf '%s' "$view" | jq -r '.headRefName' 2>/dev/null) \
      || ! refs=$(printf '%s' "$view" | jq -r '.closingIssuesReferences | if type == "array" then .[].number else error("no list") end' 2>/dev/null) \
      || ! handoffs=$(printf '%s' "$view" | jq -r --arg m "$marker" '.comments | if type == "array" then [.[] | select((.body // "") | contains($m))] | length else error("no list") end' 2>/dev/null); then
     printf 'pr-claims-unreadable\tcould not read PR #%s closing links and comments; failing closed\n' "$pr"
     return 1
   fi
-  if [[ "$handoffs" != "0" ]]; then
+  if [[ "$handoffs" != "0" ]] && ! delegated_merge_handoffs_spent "$pr" "$marker"; then
     printf 'handed-to-human\tPR #%s was handed to the founder by its creator (shepherd handoff comment); a bot merge would take his decision\n' "$pr"
     return 1
   fi
-  if [[ "$head" =~ ^agent/issue-([0-9]+)$ ]]; then
+  if [[ "$head" =~ ^agent/issue-([0-9]+)$ ]] && [[ -n "${changed//[$'\n\r\t ']/}" ]] \
+     && ! specify_scope_stray <<<"$changed" >/dev/null; then
+    # #3348: a drain PR whose diff is all spec corpus is a specify-only PR. It must
+    # close NOTHING: its issue carries the build that follows sign-off, and merging a
+    # spec that closes it is how 120 approved specs lost their builds. Both witnesses
+    # must agree: GitHub's parse (refs) and the body's own text, because an unlinked
+    # `Closes` trailer (#2228) can still link later. An unreadable body fails closed.
+    local spec_body_closes=""
+    issue="${BASH_REMATCH[1]}"
+    if [[ -n "${refs//[$'\n\r\t ']/}" ]] \
+       || ! spec_body_closes=$(printf '%s' "$view" | jq -r '.body | if type == "string" then (test("(^|[^a-z])(close[sd]?|fix(e[sd])?|resolve[sd]?)[: \\t]*([a-z0-9._-]+/[a-z0-9._-]+)?(#|https?://)"; "i")) else error("no body") end' 2>/dev/null) \
+       || [[ "$spec_body_closes" != "false" ]]; then
+      printf 'spec-pr-closes-build-issue\tPR #%s is a specify-only PR for issue #%s but closes an issue (links: %s) or carries a closing keyword; merging would close the build issue. Rewrite the body to `Refs #%s` (#3348)\n' "$pr" "$issue" "$(printf '%s' "$refs" | tr '\n' ' ')" "$issue"
+      return 1
+    fi
+  elif [[ "$head" =~ ^agent/issue-([0-9]+)$ ]]; then
     issue="${BASH_REMATCH[1]}"
     if ! grep -qxF "$issue" <<<"$refs"; then
       printf 'closes-link-unconfirmed\tPR #%s was dispatched for issue #%s but GitHub does not confirm that it closes it (#2228); merging would close the wrong issue or none\n' "$pr" "$issue"
       return 1
     fi
   elif [[ -z "${refs//[$'\n\r\t ']/}" ]]; then
+    # No confirmed link on a non-drain branch (#3115). Two cases look identical here: a
+    # `Closes #N` trailer GitHub failed to link (#2228), and a PR that claims to close nothing
+    # (a bot Clarify-selections PR). Admit only the latter: authored by the App identity AND
+    # no closing keyword in the body. The login must be `app/minspec-sdd` or `minspec-sdd[bot]`:
+    # the `[bot]`/`app/` forms cannot be registered by a person, whereas a bare `minspec-sdd`
+    # is an ordinary user login anyone could hold. An unreadable author/body fails closed.
+    local author="" body_closes=""
+    if author=$(printf '%s' "$view" | jq -r '.author.login | if type == "string" then . else error("no author") end' 2>/dev/null) \
+       && body_closes=$(printf '%s' "$view" | jq -r '.body | if type == "string" then (test("(^|[^a-z])(close[sd]?|fix(e[sd])?|resolve[sd]?)[: \\t]*([a-z0-9._-]+/[a-z0-9._-]+)?(#|https?://)"; "i")) else error("no body") end' 2>/dev/null) \
+       && [[ "$author" =~ ^(app/minspec-sdd|minspec-sdd\[bot\])$ && "$body_closes" == "false" ]]; then
+      return 0
+    fi
     printf 'closes-link-unconfirmed\tPR #%s has no confirmed closing link; merging would close no issue\n' "$pr"
     return 1
   fi
@@ -649,7 +803,7 @@ autonomy_may_merge_delegated() {
     return 1
   fi
   local claim=""
-  if ! claim=$(delegated_merge_human_claims "$pr"); then
+  if ! claim=$(delegated_merge_human_claims "$pr" "$changed"); then
     printf "$deny_fmt" "${claim%%$'\t'*}" "${claim#*$'\t'}"
     return 1
   fi
@@ -747,52 +901,6 @@ if [[ "${ISSUE:-}" == "--delegated-spec-merge" ]]; then
   printf '%s\n' "$_dsm_verdict" | jq -c '. + {armed:true}'
   exit 0
 fi
-
-# SPECIFY_SCOPE_RE (#1169) — the ONLY paths a SPECIFY-ONLY dispatch may touch.
-#
-# A specify-only dispatch replaces the human's pre-build read of the raw issue, so
-# the property that has to hold in its place is "this dispatch cannot implement
-# anything". Prose in the agent prompt is not that property — it is an instruction
-# the model must remember, which the constitution's "enforce, don't trust the model"
-# says is not a gate. This regex is the gate: the branch is not pushed and no PR is
-# opened if the committed diff leaves this corpus.
-#
-# Arms, and why only these two:
-#   ^specs/           the deliverable itself.
-#   ^docs/decisions/  a T3/T4 design frequently needs a DR-NNN + the INDEX row, and
-#                     DR-359's ADR filter makes that part of specifying, not of
-#                     building. Both are approvable docs, so the resulting PR is
-#                     withheld from native auto-merge by paths_have_approvable_doc
-#                     above and lands as a human-reviewed proposal — which is
-#                     exactly the one HITL moment DR-076 funds.
-# Notably NOT here: `.github/` (the architect role's allowlist includes it, but CI
-# config is machinery, never a spec) and `packages/` / `scripts/` / `tests/` (that is
-# implementation by any name — "just the test first" included).
-SPECIFY_SCOPE_RE='^specs/|^docs/decisions/'
-
-# specify_scope_stray: changed paths on stdin → prints the reason this diff must NOT
-# be published (every out-of-corpus path, or the fact that there is nothing at all).
-# Exit 0 when a reason was printed (i.e. a VIOLATION), 1 when the set is clean — the
-# same "exit 0 = the notable case" convention as paths_have_approvable_doc above, so
-# the two classifiers read alike at their call sites.
-#
-# An EMPTY set is a violation, not a pass. "Could not tell" and "produced nothing"
-# both have to fail closed here: an empty changed-set means either the agent wrote no
-# spec or the enumeration failed, and publishing on either would put an empty PR in
-# front of the human as though the spec had been written — a false signpost, which in
-# a never-wrong product is worse than the refusal.
-specify_scope_stray() {
-  local changed stray
-  changed="$(grep -v '^[[:space:]]*$' || true)"  # swallow-ok: grep -v exits 1 when every line was blank, which is the answer (nothing changed); the next line branches on empty
-  if [[ -z "$changed" ]]; then
-    echo "(no changed files at all — a specify-only dispatch must produce a spec)"
-    return 0
-  fi
-  stray="$(printf '%s\n' "$changed" | grep -vE "$SPECIFY_SCOPE_RE" || true)"  # swallow-ok: grep -v exits 1 when nothing falls outside the allowed scope, which is the answer
-  [[ -z "$stray" ]] && return 1
-  printf '%s\n' "$stray"
-  return 0
-}
 
 # Pure seam: prove the specify-scope classifier without gh/dispatch. Paths on stdin;
 # strays (if any) on stdout. Exists so the guard is testable as BEHAVIOUR — a guard
@@ -1324,6 +1432,23 @@ echo "Launching $ROLE agent for: $ISSUE_TITLE"
 # None of this prose is the CONTROL. The control is specify_scope_stray below, which
 # refuses to publish a diff that left the spec corpus. The prompt exists so the agent
 # succeeds at the task; the guard exists so a failure cannot become an implementation.
+# Spec id (#3164): computed over the base, every open PR, every local and remote-tracking
+# ref and every worktree, and CLAIMED so a dispatch running alongside this one gets another
+# id, because a Specify agent's own checkout cannot see any of them (11 PRs all took
+# SPEC-232 that way). Fails closed to the old wording WITH a visible warning, never to a
+# silently narrower number.
+SPEC_ID_TEXT="the next unused number"
+if [[ "$SPECIFY_ONLY" == "1" ]]; then
+  # The dispatcher's own tsx by absolute path, run from the dispatcher's checkout - never
+  # `npx` or a cd into the agent's worktree (agent-launch-sites.test.ts).
+  if _next_spec_id=$(cd "$REPO_ROOT" && "${REPO_ROOT}/node_modules/.bin/tsx" "${SCRIPT_DIR}/next-spec-id.ts" --repo "$REPO" --base main) \
+     && [[ "$_next_spec_id" =~ ^SPEC-[0-9]+$ ]]; then
+    SPEC_ID_TEXT="exactly ${_next_spec_id} - already the max over main, every open PR and every local claim, plus one, and reserved for this dispatch; do not recompute it. If a spec for this issue already exists, keep ITS id"
+  else
+    echo "WARNING: open-PR-aware spec id lookup failed for #$ISSUE - the agent falls back to a blind worktree read and may collide with an open PR (#3164)." >&2
+  fi
+fi
+
 if [[ "$SPECIFY_ONLY" == "1" ]]; then
 PROMPT=$(cat <<PROMPT
 # Agent Task: Issue #${ISSUE} — SPECIFY PHASE ONLY (Role: ${ROLE})
@@ -1381,8 +1506,7 @@ recent ones and follow their shape rather than inventing a format.
 Write, or refresh, the spec for this issue at
 \`specs/<product>/SPEC-NNN-<slug>/requirements.md\`:
 
-- Frontmatter matching the neighbouring specs: \`id: SPEC-NNN\` (the next unused
-  number), \`type: requirements\`, \`status: specifying\`, \`tier:\`, \`product:\`,
+- Frontmatter matching the neighbouring specs: \`id: SPEC-NNN\` (${SPEC_ID_TEXT}), \`type: requirements\`, \`status: specifying\`, \`tier:\`, \`product:\`,
   \`epic:\`, \`relates_to:\`.
 - A link back to this issue, and to any DR the design rests on.
 - Numbered functional requirements, acceptance criteria, and the invariants the
@@ -1666,14 +1790,30 @@ run_reviewer_stage() {
   #     only on a positive match: the needs-human-review label alone holds no
   #     merge, so an unconfirmed link has to withhold the --auto arm itself.
   local closing_refs closing_link_confirmed=0
-  closing_refs=$(gh pr view "$pr_num" --repo "$REPO" --json closingIssuesReferences \
-    --jq '.closingIssuesReferences[].number' 2>/dev/null || true)  # swallow-ok: an API error and a genuinely empty list both fall through to the "not linked" branch below — a read failure is never treated as confirmation
-  if ! issue_linked_in_closing_refs "$ISSUE" <<<"$closing_refs"; then
-    gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
-    gh pr comment "$pr_num" --repo "$REPO" --body "$(printf '## Closing-issue link not confirmed (#2228)\n\nThis PR carries a `Closes #%s` trailer, but GitHub currently reports `closingIssuesReferences` WITHOUT #%s in it — merging this PR may NOT auto-close the issue. Labeled `needs-human-review` and native auto-merge withheld: a human should confirm the link (re-saving the PR body with no text change sometimes re-triggers the parse) before merging, or close #%s manually once this merges.' "$ISSUE" "$ISSUE" "$ISSUE")" 2>/dev/null || true
-    echo "WARNING: PR #$pr_num does not show #$ISSUE in closingIssuesReferences — the Closes trailer did not link (#2228). Labeled needs-human-review; native auto-merge withheld." >&2
+  if [[ "${SPECIFY_ONLY:-0}" != "1" ]]; then
+    closing_refs=$(gh pr view "$pr_num" --repo "$REPO" --json closingIssuesReferences \
+      --jq '.closingIssuesReferences[].number' 2>/dev/null || true)  # swallow-ok: an API error and a genuinely empty list both fall through to the "not linked" branch below — a read failure is never treated as confirmation
+    if ! issue_linked_in_closing_refs "$ISSUE" <<<"$closing_refs"; then
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      gh pr comment "$pr_num" --repo "$REPO" --body "$(printf '## Closing-issue link not confirmed (#2228)\n\nThis PR carries a `Closes #%s` trailer, but GitHub currently reports `closingIssuesReferences` WITHOUT #%s in it — merging this PR may NOT auto-close the issue. Labeled `needs-human-review` and native auto-merge withheld: a human should confirm the link (re-saving the PR body with no text change sometimes re-triggers the parse) before merging, or close #%s manually once this merges.' "$ISSUE" "$ISSUE" "$ISSUE")" 2>/dev/null || true
+      echo "WARNING: PR #$pr_num does not show #$ISSUE in closingIssuesReferences — the Closes trailer did not link (#2228). Labeled needs-human-review; native auto-merge withheld." >&2
+    else
+      closing_link_confirmed=1
+    fi
   else
-    closing_link_confirmed=1
+    # #3348: the same witness, inverted. A spec PR must close NOTHING (its issue carries
+    # the build that follows sign-off), so "confirmed" means the list was READ and is
+    # empty. Here an API error must not look like an empty list, so the read's own exit
+    # status decides; unreadable or non-empty withholds the arm and raises the label.
+    if closing_refs=$(gh pr view "$pr_num" --repo "$REPO" --json closingIssuesReferences \
+         --jq '.closingIssuesReferences[].number' 2>/dev/null) \
+       && [[ -z "${closing_refs//[$'\n\r\t ']/}" ]]; then
+      closing_link_confirmed=1
+    else
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      gh pr comment "$pr_num" --repo "$REPO" --body "$(printf '## A spec PR closes an issue (#3348)\n\nThis is a specify-only PR for #%s: merging it must leave #%s open for the build that follows spec sign-off. GitHub reports closing links `%s` (empty means the read failed). Labeled `needs-human-review` and native auto-merge withheld: edit the body so it carries `Refs #%s` and no closing keyword before merging.' "$ISSUE" "$ISSUE" "$(printf '%s' "$closing_refs" | tr '\n' ' ')" "$ISSUE")" 2>/dev/null || true
+      echo "WARNING: specify-only PR #$pr_num: spec PR closes an issue, or its closing links could not be read (#3348). Labeled needs-human-review; native auto-merge withheld." >&2
+    fi
   fi
 
   # 6b. Native auto-merge (DR-061): if the project opted in, mark the PR --auto so
@@ -1735,8 +1875,13 @@ run_reviewer_stage() {
       # Arming here would let GitHub merge the moment ready-to-merge goes green and
       # leave the issue open, with the only witness a label beside an already-armed
       # merge (constitution invariant 2). So an unconfirmed link withholds the arm.
+      # #3348: in specify-only mode the unconfirmed fact is the opposite one (the
+      # spec PR closes something, or its links were unreadable), so say that.
       gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
-      echo "  → native auto-merge WITHHELD on PR #$pr_num — its Closes #$ISSUE trailer is not confirmed linked (closingIssuesReferences lacks #$ISSUE), so merging could leave the issue open (#2228). A human owns this merge. Labeled needs-human-review."
+      [[ "${SPECIFY_ONLY:-0}" == "1" ]] \
+        && echo "  → native auto-merge WITHHELD on PR #$pr_num — this spec PR is not confirmed to close nothing, so merging could close build issue #$ISSUE (#3348). A human owns this merge. Labeled needs-human-review."
+      [[ "${SPECIFY_ONLY:-0}" == "1" ]] \
+        || echo "  → native auto-merge WITHHELD on PR #$pr_num — its Closes #$ISSUE trailer is not confirmed linked (closingIssuesReferences lacks #$ISSUE), so merging could leave the issue open (#2228). A human owns this merge. Labeled needs-human-review."
     elif gh pr merge "$pr_num" --repo "$REPO" --squash --auto 2>/dev/null; then
       echo "  → native auto-merge armed on PR #$pr_num (merges on ai-review:pass)"
     else
@@ -2407,7 +2552,14 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude
       #
       # Idempotent: if the agent's summary already carries a closing keyword for THIS
       # issue, adding a second is harmless to GitHub but noisy to a reader, so skip.
-      if ! grep -qiE "(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed))[[:space:]]+#${ISSUE}\b" <<<"$BODY"; then
+      #
+      # #3348: a SPECIFY-ONLY dispatch publishes the spec, not the build, so its PR
+      # must NOT close the issue - the issue carries the build that follows sign-off.
+      # It gets a plain reference here, and specify_pr_body rewrites any keyword the
+      # agent wrote once the whole body is assembled (below, before the PR exists).
+      if [[ "$SPECIFY_ONLY" == "1" ]]; then
+        BODY=$(printf '%s\n\nRefs #%s' "$BODY" "$ISSUE")
+      elif ! grep -qiE "(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed))[[:space:]]+#${ISSUE}\b" <<<"$BODY"; then
         BODY=$(printf '%s\n\nCloses #%s' "$BODY" "$ISSUE")
       fi
 
@@ -2582,6 +2734,14 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude
       else
         echo "WARNING: could not fence the agent summary — posting a SAFE PLACEHOLDER instead of unfenced text." >&2
         BODY=$(printf 'Agent completed, but its summary could not be safely fenced for republication (#1243), so it is withheld rather than posted unchecked.\n\n— branch `%s` @ %s (auto-dispatched)' "$BRANCH" "$SHA")
+      fi
+      # #3348: last rewrite before the PR is created (run_reviewer_stage creates it from
+      # $BODY). The review block and the fenced summary are agent text and can carry
+      # "Fixes #N"; on a spec PR any closing keyword closes the build issue on merge.
+      # A non-zero return already put a safe body on stdout, so only the warning differs.
+      if [[ "$SPECIFY_ONLY" == "1" ]]; then
+        BODY=$(specify_pr_body "$ISSUE" <<<"$BODY") \
+          || echo "WARNING: a closing keyword survived the specify-only body rewrite; posting a summary-free body that only references #$ISSUE (#3348)." >&2
       fi
       gh issue comment "$ISSUE" --repo "$REPO" --body "$BODY" 2>/dev/null || true
 
@@ -2779,8 +2939,32 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude
     # REST OF THE COMMAND. `bash -n` still passes, the orphaned `--remove-label …`
     # line becomes a "command not found" swallowed by `|| true`, and the whole fix is
     # silently inert. That is exactly how the first draft of this change shipped.
-    gh issue edit "$ISSUE" --repo "$REPO" \
-      --remove-label "agent-running,agent-ready" --add-label "agent-done" 2>/dev/null || true
+    #
+    # #3348: a SPECIFY-ONLY completion leaves the issue OPEN (its PR only references
+    # it) because the issue carries the build that follows spec sign-off.
+    # `agent-done` still countermands a second specify run; `awaiting-spec-signoff`
+    # names the state so the step that routes it to a build after sign-off can find
+    # it. The label is created first: a label name the repo does not have fails the whole
+    # call, which would also drop the `agent-running` removal.
+    #
+    # This stamp is written on every path to here, including a failed push or `gh pr
+    # create`, so the label does not prove a spec PR exists: reconcile_done_issues
+    # checks that and surfaces the issue if there is none (#3351 review).
+    #
+    # A BUILD completion removes the label in the same call that adds `agent-done`. Spec
+    # and build share `agent/issue-N`, so a label surviving into a build would have the
+    # reconciler read a merged spec PR as a reason to leave a failed build alone, whichever
+    # route started that build (#3351 review).
+    gh label create "awaiting-spec-signoff" --repo "$REPO" --color c5def5 \
+      --description "Specify-only run finished: the spec PR references this issue, which stays open to carry the build once the spec is signed off (#3348)" \
+      2>/dev/null || true
+    if [[ "$SPECIFY_ONLY" == "1" ]]; then
+      gh issue edit "$ISSUE" --repo "$REPO" \
+        --remove-label "agent-running,agent-ready" --add-label "agent-done,awaiting-spec-signoff" 2>/dev/null || true
+    else
+      gh issue edit "$ISSUE" --repo "$REPO" \
+        --remove-label "agent-running,agent-ready,awaiting-spec-signoff" --add-label "agent-done" 2>/dev/null || true
+    fi
     echo "Agent completed issue #$ISSUE (role: $ROLE). Worktree: $WORKTREE"
 
     # ── SPEC-044 Slice 2: creator-owned PR shepherding (FR-4/D4) ──────────────
