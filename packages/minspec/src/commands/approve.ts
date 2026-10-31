@@ -385,15 +385,10 @@ export async function approveSpecCommand(
       parsed.frontmatter.status === 'new' || parsed.frontmatter.status === 'specifying';
     // mirror; phases-aware, no longer affects the hash. Returns the new derived status
     // (DR-069 / #886: 'planning' when the implement phase hasn't started, else 'implementing').
-    // #1371: unchanged content already approved (canonical hash matches the live
-    // sidecar) and no status flip pending — a second press is redundant. Say so
-    // instead of re-committing and opening a duplicate approval PR.
-    if (!wasPreImpl && getApprovalStatus(rootDir, spec.filePath) === 'approved') {
-      vscode.window.showInformationMessage(
-        `MinSpec: ${spec.id} is already approved — nothing to do.`,
-      );
-      return;
-    }
+    // #1371: no UI early-return here — a repeat press must still reach the commit
+    // step so an approval whose first commit/push never landed can be retried.
+    // recordApproval is idempotent on an unchanged live record, and the commit
+    // step reports 'nothing-to-commit' when the approval already landed.
     const newStatus = wasPreImpl ? advanceSpecToImplementing(spec.filePath) : undefined;
     recordApproval(rootDir, spec.filePath, spec.tier, email);
 

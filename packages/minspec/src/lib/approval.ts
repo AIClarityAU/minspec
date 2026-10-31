@@ -591,9 +591,17 @@ export function approveSpec(
   // return it untouched. Re-stamping `approvedAt` would write a byte-different but
   // semantically identical sidecar, minting a duplicate approval PR and a second
   // "when was this approved" answer. A changed hash (legit re-approve) or a
-  // different approver (or a migrated record, which a human re-approval upgrades) falls through to the normal write.
+  // different approver (or a migrated record, which a human re-approval upgrades)
+  // falls through to the normal write. A record with no baseline blob also falls
+  // through so re-approving repairs diffing.
   const existing = readRecord(rootDir, specPath);
-  if (existing && !existing.migrated && existing.specHash === hash && existing.approvedBy === email) {
+  if (
+    existing &&
+    !existing.migrated &&
+    existing.specHash === hash &&
+    existing.approvedBy === email &&
+    existing.baselineBlob
+  ) {
     return existing;
   }
 

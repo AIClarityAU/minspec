@@ -265,4 +265,14 @@ describe('approveSpec — idempotent re-approval (#1371)', () => {
     const other = approveSpec(tmp, specPath, 'T3', 'ann@harvest316.com', () => new Date('2026-06-01T00:00:00Z'));
     expect(other.approvedBy).toBe('ann@harvest316.com');
   });
+
+  it('a record with no baseline blob is repaired by re-approving unchanged content', () => {
+    approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com', () => new Date('2026-05-30T00:00:00Z'));
+    const sidecar = path.join(tmp, '.minspec', 'approvals', ...specRelPath(tmp, specPath).split('/')) + '.json';
+    const rec = JSON.parse(fs.readFileSync(sidecar, 'utf-8'));
+    rec.baselineBlob = '';
+    fs.writeFileSync(sidecar, JSON.stringify(rec));
+    const again = approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com', () => new Date('2026-06-01T00:00:00Z'));
+    expect(again.baselineBlob).not.toBe('');
+  });
 });
