@@ -1,0 +1,13 @@
+{
+  "name": "@aiclarity/minspec-core",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Headless MinSpec core: one editor-free bundle that runs the Tier-0 checks without VS Code (SPEC-136)",
+  "license": "MIT",
+  "main": "dist/minspec-core.cjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "cd ../.. && vitest run packages/core/tests"
+  }
+}
