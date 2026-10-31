@@ -16,7 +16,8 @@ afterAll(() => {
 // T0 invariant test for the deterministic triage gate (scripts/triage-decide.sh).
 //
 // The gate BACKS the LLM triage agent's judgment: a `human_only` or T3/T4 verdict
-// must NEVER become `agent-ready`, no matter what the (untrusted-input-reading)
+// must NEVER become `agent-ready` (save the ONE DR-118 exception, exact
+// `--label pipeline-blocker`, pinned in its own block), no matter what the (untrusted-input-reading)
 // agent emits. It must also fail CLOSED on any garbled / missing verdict.
 // Root cause it guards: triage-inbox.sh was inert in headless mode and, once fixed,
 // must not let a prompt-injected "agent-ready" reach an auto-build path.
@@ -31,7 +32,8 @@ afterAll(() => {
 // T3/T4 now resolves to `agent-ready-specify` / hold `specify` — dispatchable for the
 // SPECIFY PHASE ONLY. The safety property this file exists to pin is unchanged in
 // kind and must be read as three separate claims:
-//   1. `agent-ready` (full auto-build) is STILL reachable only from T1/T2.
+//   1. `agent-ready` (full auto-build) is STILL reachable only from T1/T2 — save the
+//      ONE DR-118 exception (exact `--label pipeline-blocker`), pinned in its own block.
 //   2. `agent-ready-specify` is reachable only from T3/T4 + an affirmative decision.
 //   3. `human_only` still overrides BOTH, at every tier.
 // The specify class is DERIVED by the gate from `tier`; the agent never asserts it
@@ -295,6 +297,100 @@ describe('triage-decide.sh — deterministic triage gate', () => {
               expect(label === 'agent-ready-specify', where).toBe(hold === 'specify');
             }),
           );
+        }
+      }
+    }
+    await Promise.all(checks);
+  });
+});
+
+// ── DR-118: the ONE exception to "a T3/T4 never becomes plain agent-ready" ──
+// Founder decision 2026-10-30 (queue item pb1030, triggered by #3282): an issue labelled
+// exactly `pipeline-blocker` skips spec-first. The exception lives HERE, in the gate, as
+// an explicit `--label` input, so the verdict record triage-inbox.sh mints is this gate's
+// real output and not a parent-side override of it. These tests pin the exception AND
+// the unchanged invariant for every other T3/T4.
+describe('triage-decide.sh --label pipeline-blocker — the single spec-first exception (DR-118)', () => {
+  it('T3/T4 + agent-ready + pipeline-blocker → agent-ready, hold none', () => {
+    for (const tier of ['T3', 'T4']) {
+      expect(decide(verdict({ tier }), '--label', 'pipeline-blocker'), tier).toBe('agent-ready dev none');
+    }
+  });
+
+  it('--fields reports the exception that fired, and prints no exception line otherwise', () => {
+    // Absent, not `exception=none`: every pre-DR-118 field set stays byte-identical,
+    // (shadow-triage.sh `shadow_agreement` compares only label, role, hold, tier and
+    // human_only, so it is unaffected either way.)
+    expect(fields(verdict({ tier: 'T3' })).exception).toBeUndefined();
+    const f: Record<string, string> = {};
+    for (const line of decide(verdict({ tier: 'T3' }), '--fields', '--label', 'pipeline-blocker').split('\n')) {
+      const m = line.match(/^([a-z_]+)=(.*)$/);
+      if (m) f[m[1]] = m[2];
+    }
+    expect(f).toEqual({
+      label: 'agent-ready',
+      role: 'dev',
+      hold: 'none',
+      tier: 'T3',
+      human_only: 'no',
+      exception: 'pipeline-blocker',
+    });
+  });
+
+  it('the flag order does not matter, and other labels alongside it are inert', () => {
+    expect(
+      decide(verdict({ tier: 'T3' }), '--label', 'inbox', '--label', 'pipeline-blocker', '--fields').split('\n')[0],
+    ).toBe('label=agent-ready');
+  });
+
+  it('only the EXACT label counts: look-alikes keep the specify route', () => {
+    for (const label of ['pipeline-blocker-candidate', 'blocker', 'Pipeline-Blocker', 'pipeline blocker', ' pipeline-blocker', '']) {
+      expect(decide(verdict({ tier: 'T3' }), '--label', label), JSON.stringify(label)).toBe(
+        'agent-ready-specify dev specify',
+      );
+    }
+  });
+
+  it('no label input at all (labels unreadable upstream) keeps the specify route — fail closed', () => {
+    expect(decide(verdict({ tier: 'T3' }))).toBe('agent-ready-specify dev specify');
+    expect(decide(verdict({ tier: 'T3' }), '--label')).toBe('agent-ready-specify dev specify');
+  });
+
+  it('pipeline-blocker never lifts a human hold, a declined T3/T4, a needs-info or an unsized tier', () => {
+    const pb = ['--label', 'pipeline-blocker'];
+    expect(decide(verdict({ tier: 'T3', human_only: 'yes' }), ...pb)).toBe('needs-review dev human');
+    expect(decide(verdict({ tier: 'T4', human_only: 'maybe' }), ...pb)).toBe('needs-review dev human');
+    expect(decide(verdict({ tier: 'T3', decision: 'needs-review' }), ...pb)).toBe('needs-review dev tier');
+    expect(decide(verdict({ tier: 'T4', decision: 'garbage' }), ...pb)).toBe('needs-review dev tier');
+    expect(decide(verdict({ tier: 'T3', decision: 'needs-info' }), ...pb)).toBe('needs-info dev info');
+    expect(decide(verdict({ tier: 'T9' }), ...pb)).toBe('needs-info dev unknown');
+    expect(decide('no block here', ...pb)).toBe('needs-review reviewer unknown');
+  });
+
+  it('T1/T2 are unchanged by the label (already a full build)', () => {
+    expect(decide(verdict({ tier: 'T2' }), '--label', 'pipeline-blocker')).toBe('agent-ready dev none');
+    expect(fields(verdict({ tier: 'T2' })).exception).toBeUndefined();
+  });
+
+  it('sweep: a T3/T4 reaches plain agent-ready ONLY with the exact label, agent-ready, human_only=no', async () => {
+    const checks: Promise<void>[] = [];
+    for (const tier of ['T3', 'T4']) {
+      for (const decision of ['agent-ready', 'agent-ready-specify', 'needs-review', 'needs-info', 'garbage']) {
+        for (const human_only of ['no', 'yes', '']) {
+          for (const labels of [[], ['pipeline-blocker'], ['Pipeline-Blocker'], ['inbox', 'blocker']]) {
+            const where = `${tier}/${decision}/${human_only}/${labels.join(',')}`;
+            const args = labels.flatMap((l) => ['--label', l]);
+            checks.push(
+              decideAsync(verdict({ tier, decision, human_only }), ...args).then((out) => {
+                const [label, , hold] = out.split(' ');
+                const allowed = decision === 'agent-ready' && human_only === 'no' && labels.includes('pipeline-blocker');
+                expect(label === 'agent-ready', where).toBe(allowed);
+                // the label/hold pairs still never cross under the exception
+                expect(label === 'agent-ready', where).toBe(hold === 'none');
+                expect(label === 'agent-ready-specify', where).toBe(hold === 'specify');
+              }),
+            );
+          }
         }
       }
     }

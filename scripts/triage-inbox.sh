@@ -191,10 +191,36 @@ CONTENT
   # (not the space-joined default line) because the RECORD must carry the gate's own
   # view of tier / human_only, and re-parsing the agent's raw text here would be a
   # second parser of the same format — the classic way a gate and its record drift.
-  local FIELDS LABEL ROLE HOLD TIER HUMAN_ONLY
+  #
+  # The issue's labels go IN to the gate as `--label` inputs, so the one exception the
+  # gate knows (`pipeline-blocker` skips spec-first, DR-118, triggered by #3282) is
+  # decided inside the gate and the record below is the gate's real output. FAIL CLOSED:
+  # if the label list cannot be read, no `--label` is passed and the gate keeps the
+  # spec-first route. Labels come from our own `gh issue view`, never from the agent.
+  #
+  # `pipeline-blocker` reaches the gate only when the account that last applied it is on
+  # the dispatch author list (dispatch_issue_label_gate). The author gate above covers who
+  # wrote the text, not who applied a label, and this label skips a human gate. A
+  # non-listed applier, a missing actor or a failed read all withhold the input, so the
+  # gate keeps the spec-first route, and the refusal is printed and put in the triage
+  # comment below.
+  local FIELDS LABEL ROLE HOLD TIER HUMAN_ONLY EXCEPTION
+  local NAMED_SPEC_STATUS=""
+  local -a LABEL_ARGS=()
+  local LABEL_NAME LABEL_REFUSED=""
+  while IFS= read -r LABEL_NAME; do
+    if [[ "$LABEL_NAME" == "pipeline-blocker" ]]; then
+      local LABEL_APPLIER
+      if ! LABEL_APPLIER="$(dispatch_issue_label_gate "$REPO" "$ISSUE" "$LABEL_NAME" </dev/null)"; then
+        LABEL_REFUSED="${LABEL_APPLIER:-who applied it could not be checked}"
+        echo "WARNING: #$ISSUE pipeline-blocker is not honoured: ${LABEL_REFUSED}. Keeping the spec-first route (DR-118)." >&2
+        continue
+      fi
+    fi
+    [[ -n "$LABEL_NAME" ]] && LABEL_ARGS+=(--label "$LABEL_NAME")
+  done < <(printf '%s' "$ISSUE_JSON" | jq -r '.labels[]?.name' 2>/dev/null || true)  # swallow-ok: an unreadable label list passes no --label, which keeps the restrictive spec-first route (DR-118)
   # #3282 — a `build: SPEC-NNN` title names a spec; hand its on-disk status to the
   # gate so an already-approved spec is never sent to the specify queue.
-  local NAMED_SPEC_STATUS=""
   if [[ "$ISSUE_TITLE" =~ ^[[:space:]]*[Bb]uild:[[:space:]]*SPEC-([0-9]+) ]]; then
     local SPEC_FILE SPEC_NUM
     SPEC_NUM=$(printf '%03d' "$((10#${BASH_REMATCH[1]}))")
@@ -203,12 +229,13 @@ CONTENT
       NAMED_SPEC_STATUS=$(awk 'NR>1 && /^---$/{exit} NR>1 && /^status:/{print $2; exit}' "$SPEC_FILE" || true)  # swallow-ok: unreadable frontmatter leaves status empty = no spec named
     fi
   fi
-  FIELDS=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" --fields "--named-spec-status=${NAMED_SPEC_STATUS}" || true)
+  FIELDS=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" --fields "--named-spec-status=${NAMED_SPEC_STATUS}" ${LABEL_ARGS[@]+"${LABEL_ARGS[@]}"} || true)
   LABEL=$(verdict_field label "$FIELDS")
   ROLE=$(verdict_field role "$FIELDS")
   HOLD=$(verdict_field hold "$FIELDS")
   TIER=$(verdict_field tier "$FIELDS")
   HUMAN_ONLY=$(verdict_field human_only "$FIELDS")
+  EXCEPTION=$(verdict_field exception "$FIELDS")
 
   if [[ -z "$LABEL" || -z "$ROLE" || -z "$HOLD" || -z "$TIER" || -z "$HUMAN_ONLY" ]]; then
     echo "WARNING: no verdict parsed for #$ISSUE — leaving in inbox" >&2
@@ -222,6 +249,18 @@ CONTENT
     | { grep -iE '^[[:space:]]*rationale[[:space:]]*:' || true; } \
     | head -1 | sed -E 's/^[^:]*:[[:space:]]*//')  # swallow-ok: grep exits 1 when the agent emitted no rationale line, and the next line substitutes an explicit placeholder
   [[ -z "$RATIONALE" ]] && RATIONALE="(no rationale emitted)"
+
+  # DR-118 (proposed): the gate itself routed this issue past spec-first. Say so in the
+  # human-readable rationale; the label/hold pair is already the gate's own output.
+  if [[ "$EXCEPTION" == "pipeline-blocker" ]]; then
+    RATIONALE="${RATIONALE} [pipeline-blocker: spec-first skipped, routed to a full build (DR-118, founder decision 2026-10-30, pb1030)]"
+  fi
+
+  # The label was there and was not believed, and that changed the route: say why, so
+  # nobody reads the spec-first outcome as the exception having silently failed.
+  if [[ -n "$LABEL_REFUSED" && "$HOLD" == "specify" ]]; then
+    RATIONALE="${RATIONALE} [pipeline-blocker not honoured: ${LABEL_REFUSED}; spec-first route kept (DR-118)]"
+  fi
 
   # Mint the machine-readable verdict record, keyed to the body we just triaged.
   # FAIL CLOSED: if the record cannot be rendered we apply NO labels at all —
