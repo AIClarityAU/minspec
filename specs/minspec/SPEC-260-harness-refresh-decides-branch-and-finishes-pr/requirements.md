@@ -140,18 +140,27 @@ decision (D4 below). Implementation must be coordinated at Plan: both touch the 
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 - **D1 - Unprotected branch: commit directly, or still branch?** (a) **Direct (rec)** matches the
   founder's "answer it on its own" and keeps feature-branch work simple; cost: it commits harness
   files onto whatever feature branch is checked out, mixing them into unrelated work. (b) Always
   branch: never mixes, but opens a PR on every refresh even for a repo that commits to its default
   branch directly; cost: more PRs.
+  **Recorded selection: Option (a),** commit directly on an unprotected branch. An agent session copied this document's (rec) option; no human chose this item.
 - **D2 - Scope: refresh only, or also the post-init scaffold offer?** (a) **Both (rec)** - one code
   path, one behaviour; cost: widens the change to a first-run flow. (b) Refresh only; cost: the same
   parked-checkout defect remains on init and the two paths diverge.
+  **Recorded selection: Option (a),** both the refresh and the post-init scaffold offer, one code path. An agent session copied this document's (rec) option; no human chose this item.
 - **D3 - Config key vs implicit memory.** (a) **Config key `auto|branch|direct|never` (rec)** -
   explicit, visible in settings; cost: one more setting. (b) Reuse only `pushOnApprove` with no new
   key; cost: no way to pin "always direct" or "never commit" for a repo.
+  **Recorded selection: Option (a),** a config key with values `auto|branch|direct|never`. An agent session copied this document's (rec) option; no human chose this item.
 - **D4 - Overlap with SPEC-058.** (a) **Sequence SPEC-260 after SPEC-058's transport (rec)** - SPEC-260
   reuses it and adds the decide-and-restore behaviour; cost: SPEC-260 waits on SPEC-058's Plan. (b) Fold
   SPEC-260 into SPEC-058; cost: a T4 spec absorbs a user-facing prompt change and slows it. (c) Keep
   both independent; cost: two implementations of one transport diverge.
+  **Recorded selection: Option (a),** sequence SPEC-260 after SPEC-058's transport. An agent session copied this document's (rec) option; no human chose this item.

@@ -74,6 +74,16 @@ Both rules ship at `warn` (FR-7 ratchet, `scripts/validate-frontmatter.ts` Rule 
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers (DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
+- **D1 - Recorded selection: Option A,** build SPEC-095 task 6.5, so the warning clears on its own.
+- **D2 - Recorded selection: Option A,** no change to the evidence rule.
+- **D3 - Recorded selection: Option A,** one short "Status note" paragraph in each body, claims
+  re-verified.
+
 **D1 — SPEC-095's `text-io-inventory.test.ts` warning.**
 - **A (rec) — Build task 6.5, warning clears on its own.** True state is "unbuilt"; the warning is accurate and clears when FR-10's test lands. Cost: the warning persists on every run until then, which is the very "skip the validator's output" habit the issue warns about; mitigated only if 6.5 is scheduled soon.
 - **B — Narrow SPEC-095's `phases.implement` back to `pending`** until 6.5 is ready. Honest if no implement work counts, but SPEC-095 has shipped `text-io.ts` and a test, so `pending` would understate real progress (a false signpost the other way).

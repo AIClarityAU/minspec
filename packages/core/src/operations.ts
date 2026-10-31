@@ -1,10 +1,15 @@
 // The operation table (SPEC-136 design: "The operation table"). One entry per operation; no
 // entry holds a rule of its own (FR-2) - each calls the library function the extension calls.
-// Only `hash` is wired so far; later SPEC-136 tasks add the rest to the same table.
+// `hash`, `status` and `next` are wired so far; later SPEC-136 tasks add the rest to the same table.
 import * as fs from 'fs';
 import * as path from 'path';
 import { specHash } from '@aiclarity/shared';
 import { getApprovalRecord, getApprovalStatus } from '../../minspec/src/lib/approval';
+import { formatNextTaskLabel, resolveNextTask } from '../../shared/src/next-task';
+import { buildArtifactGraph } from '../../minspec/src/lib/artifact-graph';
+import { deriveStatus, explicitTerminalOf } from '../../minspec/src/lib/lifecycle';
+import { parseSpec } from '../../minspec/src/lib/spec';
+import { listSpecs } from '../../minspec/src/lib/spec-catalog';
 import { hasOptInMarker, notOptedInMessage } from '../../minspec/src/lib/opt-in';
 
 declare const __MINSPEC_CORE_VERSION__: string | undefined;
@@ -125,7 +130,45 @@ const hashOperation: Operation = {
   },
 };
 
-export const OPERATIONS: readonly Operation[] = [hashOperation];
+const noArgs: JsonSchemaObject = { type: 'object', properties: {}, additionalProperties: false };
+
+const statusOperation: Operation = {
+  name: 'status',
+  summary: 'Each spec\'s derived status, with its approval state',
+  input: noArgs,
+  effect: 'read-only',
+  async run(ctx) {
+    const specs = listSpecs(ctx.root).map((s) => {
+      // Same derivation as buildArtifactGraph: the literal `status:` line is never the answer.
+      const fm = parseSpec(fs.readFileSync(s.filePath, 'utf8')).frontmatter;
+      const approval = getApprovalStatus(ctx.root, s.filePath);
+      return {
+        id: s.id,
+        title: s.title,
+        tier: s.tier,
+        status: deriveStatus(fm.phases, approval, explicitTerminalOf(fm.status)),
+        literalStatus: fm.status,
+        approval,
+        currentPhase: s.currentPhase,
+        file: path.relative(ctx.root, s.filePath).split(path.sep).join('/'),
+      };
+    });
+    return { outcome: 'pass', data: { specs } };
+  },
+};
+
+const nextOperation: Operation = {
+  name: 'next',
+  summary: 'The one next human action for this project',
+  input: noArgs,
+  effect: 'read-only',
+  async run(ctx) {
+    const task = resolveNextTask(buildArtifactGraph(ctx.root));
+    return { outcome: 'pass', data: { task, label: formatNextTaskLabel(task) } };
+  },
+};
+
+export const OPERATIONS: readonly Operation[] = [hashOperation, statusOperation, nextOperation];
 
 /** Run one operation and wrap its return in the stamped envelope. Never throws. */
 export async function runOperation(op: Operation, root: string, args: Record<string, unknown>): Promise<CoreResult> {

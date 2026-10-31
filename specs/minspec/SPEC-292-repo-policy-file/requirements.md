@@ -158,6 +158,11 @@ contains.
 
 ## Decisions needed (Clarify)
 
+All 6 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 **D1 - Which file is the policy file?**
 - **(a) (rec) A new `.minspec/policy.md`.** Sits under the opt-in marker, is already in the
   never-auto-merge set (FR-10 free), and starts empty of copied text, so FR-2 holds from day
@@ -170,12 +175,16 @@ contains.
 - (c) A new top-level `POLICY.md`. Visible at the root. Cost: outside `.minspec/`, so FR-10
   needs a new withhold entry, and the name invites confusion with a security policy.
 
+**Recorded selection: Option (a),** a new `.minspec/policy.md`. An agent session copied this document's (rec) option; no human chose this item.
+
 **D2 - Pointer-only, or pointer plus repo-local rules?**
 - **(a) (rec) Pointer index plus an optional "rules that live nowhere else" section**, with the
   rule that any one rule lives in exactly one file. Cost: it creates one more place a rule can
   live, and FR-3 then needs to check that section against the constitution too.
 - (b) Pointer-only. Strictest reading of "points, does not copy". Cost: a rule with no other
   natural home (for example a path class) has to go into the constitution or a DR first.
+
+**Recorded selection: Option (a),** a pointer index plus an optional "rules that live nowhere else" section. An agent session copied this document's (rec) option; no human chose this item.
 
 **D3 - Does the review also inline what the policy points to?**
 - **(a) (rec) Inline the policy file and the constitution; list DRs by index only.** The
@@ -187,6 +196,8 @@ contains.
   constitution reaches the voter by model choice again - the exact prose-not-load gap this spec
   closes.
 
+**Recorded selection: Option (a),** inline the policy file and the constitution; list DRs by index only. An agent session copied this document's (rec) option; no human chose this item.
+
 **D4 - Which prompts are "every agent prompt"?**
 - **(a) (rec) `dispatch-issue.sh` (all phases), `remediate-pr.sh`, `review-branch.sh` and
   `review-approvable.sh`.** These are the surfaces that produce or judge changes. Cost: four
@@ -195,6 +206,8 @@ contains.
   remediation and approvable review keep reading a different subset.
 - Triage is excluded in both: it classifies an untrusted issue and produces no change.
 
+**Recorded selection: Option (a),** `dispatch-issue.sh` (all phases), `remediate-pr.sh`, `review-branch.sh` and `review-approvable.sh`. An agent session copied this document's (rec) option; no human chose this item.
+
 **D5 - Do the existing copies in CLAUDE.md / AGENTS.md get collapsed to a pointer?**
 - **(a) (rec) Not in this spec.** Out of the issue's scope (scope-expansion rule); file it as a
   follow-up at Plan. Cost: until then the invariant lead sentences live in three files (the
@@ -202,12 +215,16 @@ contains.
   mirrors are generated, not hand-copied.
 - (b) Fold it in. Cost: widens a T3 spec into a harness-template rewrite across every adopter.
 
+**Recorded selection: Option (a),** not in this spec; the collapse of the existing copies is a follow-up at Plan. An agent session copied this document's (rec) option; no human chose this item.
+
 **D6 - Missing policy file at review time.**
 - **(a) (rec) Fail closed (`changes`) once the repo's harness manifest records the file as
   scaffolded; visible notice and proceed in a repo that predates it.** Cost: an adopter who
   deletes the file blocks their own merges until they restore it.
 - (b) Always visible notice and proceed. Cost: a deleted policy is a silently weaker review
   that only the notice line reveals.
+
+**Recorded selection: Option (a),** fail closed (`changes`) once the harness manifest records the file as scaffolded; a visible notice and proceed in a repo that predates it. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Alternatives rejected
 
