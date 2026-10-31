@@ -15,7 +15,7 @@ implements_reason: >-
   and the command registration in packages/minspec/src/extension.ts).
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

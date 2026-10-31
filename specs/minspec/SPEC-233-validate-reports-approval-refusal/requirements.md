@@ -12,7 +12,7 @@ implements: [packages/minspec/tests/validate-reports-approval-refusal.test.ts]  
 affects: [packages/minspec/src/commands/validate.ts, packages/minspec/src/lib/spec-validator.ts]  # validate.ts gains one call; the predicate violationsIntroducedByApproval is reused, never re-implemented
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

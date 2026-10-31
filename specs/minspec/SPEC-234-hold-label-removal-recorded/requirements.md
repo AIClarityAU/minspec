@@ -15,7 +15,7 @@ implements_reason: >-
   Decisions D1 to D3. Declare implements:/affects: before approval mints a hash.
 phases:
   specify: done
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

@@ -15,7 +15,7 @@ implements_reason: >-
   outside this repo; which of those files it owns is decided at Plan, after D1-D3.
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

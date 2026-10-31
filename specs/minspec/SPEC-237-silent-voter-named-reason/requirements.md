@@ -17,7 +17,7 @@ implements_reason: >-
 affects: [scripts/review-branch.sh, .github/workflows/ai-review.yml, .github/scripts/ai-review-guard.js, scripts/review-pr.sh, scripts/gen-ci-templates.mjs, packages/minspec/src/lib/ci-review-templates.ts]
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

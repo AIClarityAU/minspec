@@ -19,7 +19,7 @@ implements_reason: >-
 affects: [.githooks/pre-push, package.json, scripts/dispatch-issue.sh, packages/shared/src/review-signals.ts]
 phases:
   specify: done
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

@@ -14,7 +14,7 @@ implements_reason: >-
   (where the reader lives).
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending
