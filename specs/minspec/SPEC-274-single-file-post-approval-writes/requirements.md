@@ -14,7 +14,7 @@ implements_reason: >-
   decided at Plan; every candidate file is listed under Context.
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending
