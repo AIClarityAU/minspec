@@ -37,6 +37,7 @@
 # Testable decision seams (pure — no gh/git/claude; used by the loop + unit tests):
 #   scripts/drain-inbox.sh --session-alive <pid>            # exit 0 alive / 1 gone
 #   scripts/drain-inbox.sh --should-continue <pid> <epoch>  # exit 0 continue / 1 stop
+#   scripts/drain-inbox.sh --self-drift <start-hash>        # exit 0 script differs from <start-hash> / 1 same (#3397)
 #   scripts/drain-inbox.sh --paused                         # exit 0 paused / 1 not (#1187)
 #   scripts/drain-inbox.sh --zai-key-note                   # where the z.ai key comes from (never its value; zaikey23)
 #   scripts/drain-inbox.sh --unlaned    (<json on stdin)    # issue numbers carrying no lane label (#3355)
@@ -3762,14 +3763,39 @@ zai_key_note() {
   )
 }
 
+# self_hash: sha256 of THIS script as it is on disk now; empty when unreadable (#3397).
+# bash parses the loop's functions once at process start, so a merged fix to this file
+# stays inert in a running loop. The freshness check on the run directory covers only the
+# helpers the loop calls, not the loop's own functions. MINSPEC_DRAIN_SELF is a test seam.
+DRAIN_SELF="${MINSPEC_DRAIN_SELF:-${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")}"
+self_hash() {
+  local out
+  if out="$(sha256sum "$DRAIN_SELF" 2>/dev/null)"; then printf '%s\n' "${out%% *}"; fi
+}
+
+# self_drifted <start-hash>: exit 0 iff the script on disk is not the one this process
+# loaded. An unreadable script counts as drifted: fail closed, never silently keep running
+# code that can no longer be compared. An empty <start-hash> means the comparison was
+# never possible (the caller already warned), so it reports not drifted.
+self_drifted() {
+  local start="$1" now
+  [[ -n "$start" ]] || return 1
+  now="$(self_hash)"
+  [[ "$now" != "$start" ]]
+}
+
 # run_loop: the session-scoped continuous scheduler. Repeats run_cycle until the
 # session ends, the wall-clock cap is hit, freshness fails persistently, or too
 # many consecutive cycle errors accrue. Quota signals pause-and-retry; a single
 # cycle error never kills the loop (log + continue).
 run_loop() {
-  local deadline consec=0 rc
+  local deadline consec=0 rc start_hash
   local LOOP_PAUSED=false
   deadline=$(( $(date +%s) + MAX_LIFETIME ))
+  start_hash="$(self_hash)"
+  if [[ -z "$start_hash" ]]; then
+    echo "[drain] WARNING: cannot hash $DRAIN_SELF — a merged fix to this script will NOT end this loop; restart it by hand to pick one up (#3397)." >&2
+  fi
   echo "[drain] continuous loop started (session=$SESSION_PID$(session_anchor_note), interval=${INTERVAL}s, quota_backoff=${QUOTA_BACKOFF}s, max_lifetime=${MAX_LIFETIME}s)."
   echo "[drain] quota gate — $(quota_health)"
   zai_key_note
@@ -3779,6 +3805,13 @@ run_loop() {
     fi
     if (( $(date +%s) >= deadline )); then
       echo "[drain] max lifetime (${MAX_LIFETIME}s) reached — stopping loop (backstop cap)."; break
+    fi
+
+    # Code drift (#3397): the functions this loop runs were parsed at start. When the script
+    # on disk differs, end the loop so drain-service.sh starts the new code. Checked between
+    # cycles, so a cycle in flight finishes first.
+    if self_drifted "$start_hash"; then
+      echo "[drain] $DRAIN_SELF changed (or became unreadable) since this loop started — stopping so the supervisor starts the new code (#3397)."; break
     fi
 
     # Pause (#1187): checked HERE, between cycles, so a cycle in flight always finishes.
@@ -3918,6 +3951,11 @@ case "$1" in
     if (( $(date +%s) >= _deadline )); then echo "max-lifetime reached"; exit 1; fi
     if ! session_alive "$_pid"; then echo "session $_pid ended"; exit 1; fi
     echo "continue"; exit 0
+    ;;
+  --self-drift)
+    # Pure seam (#3397): with a hash, exit 0 iff this script differs from it; bare, print the current hash.
+    if [[ -z "${2:-}" ]]; then self_hash; exit 0; fi
+    if self_drifted "$2"; then echo "drifted"; exit 0; else echo "same"; exit 1; fi
     ;;
   --zai-key-note)
     # Pure seam (zaikey23): the startup line naming the z.ai key's SOURCE. Never its value.
