@@ -46,6 +46,7 @@
 #   scripts/drain-inbox.sh --quota-cap                      # "open|closed 7d U% vs C%; 5h U% vs C% | <gate>", 0 / 42
 #   scripts/drain-inbox.sh --quota-sleep                    # secs to wait for the window
 #   scripts/drain-inbox.sh --quota-signal-sleep [<streak>]  # "<secs> <verdict> <meter>" after a TEXT signal
+#   scripts/drain-inbox.sh --quota-gate-sleep               # "<secs> <cleared|held> <meter>" after the gate deferred (#3466)
 #
 # Env knobs (all optional):
 #   MINSPEC_DRAIN_CONTINUOUS=0     — force pure one-shot even on --auto/--continuous
@@ -3536,6 +3537,38 @@ quota_signal_backoff_sleep() {
   esac
 }
 
+# quota_gate_sleep_decision: the rest after quota_gate itself deferred (#3466). Prints
+# "<secs> <cleared|held> <the meter's own verdict>". Pure: reads QUOTA_FILE only.
+#   cleared — the gate NOW admits (another producer refreshed the reading while in-flight
+#             work drained, e.g. after a defer:stale): the hold is over, rest QUOTA_SLEEP_MIN.
+#             Sleeping to the 5h reset here would be wrong: _quota_sleep_plan reads "room on
+#             the meter" as "a text signal sent us", which is false on this path.
+#   held    — the gate still defers, stale or missing included: quota_sleep_secs, as before.
+quota_gate_sleep_decision() {
+  local meter secs
+  if meter=$(_quota_meter_admits); then
+    secs="$QUOTA_SLEEP_MIN"
+    [[ "$secs" =~ ^[0-9]+$ ]] || secs=60
+    printf '%d cleared %s\n' "$secs" "$meter"
+  else
+    printf '%d held %s\n' "$(quota_sleep_secs)" "$meter"
+  fi
+}
+
+# quota_gate_backoff_sleep: the rc=42 rest when quota_gate itself deferred. The gate is
+# asked again first, because the reading can have moved during the wait for in-flight work.
+quota_gate_backoff_sleep() {
+  local decision secs verdict meter
+  decision=$(quota_gate_sleep_decision)
+  read -r secs verdict meter <<<"$decision"
+  if [[ "$verdict" == "cleared" ]]; then
+    echo "[drain] quota hold already cleared (${meter}) — resting ${secs}s, not sleeping to the published reset (#3466)."
+    wait_interval "$secs"
+  else
+    quota_backoff_sleep
+  fi
+}
+
 # quota_health: one line, once per loop, saying whether admission control is actually
 # SEEING DATA. A STALE reading, or a MISSING one whose bootstrap allowance is
 # exhausted, correctly HOLDS the gate shut (defers every cycle, #1775) rather than
@@ -3814,7 +3847,7 @@ run_loop() {
         if [[ "$QUOTA_PAUSE_CAUSE" == "signal" ]]; then
           quota_signal_backoff_sleep
         else
-          quota_backoff_sleep
+          quota_gate_backoff_sleep
         fi
         ;;
       *)
@@ -3897,6 +3930,11 @@ case "$1" in
     # "<secs> <contradicted|overruled|confirmed> <quota_gate's verdict>". Offline,
     # reads QUOTA_FILE only, and never spends a bootstrap admit.
     quota_signal_sleep_decision "${2:-0}"; exit 0
+    ;;
+  --quota-gate-sleep)
+    # Pure seam (#3466): the rest after quota_gate itself deferred. Prints
+    # "<secs> <cleared|held> <quota_gate's verdict>". Offline, reads QUOTA_FILE only.
+    quota_gate_sleep_decision; exit 0
     ;;
   --session-alive)
     # Pure seam: is the session (or any pid) still alive?
