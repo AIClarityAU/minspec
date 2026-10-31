@@ -65,13 +65,17 @@ interface TriageRun {
 }
 
 /** Drive scripts/triage-inbox.sh for one issue with stubbed `gh` and `claude`. */
-function runTriage(verdictBlock: string, opts: { failBatchRemove?: boolean } = {}): TriageRun {
+function runTriage(
+  verdictBlock: string,
+  opts: { failBatchRemove?: boolean; title?: string; scripts?: string } = {},
+): TriageRun {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-triage-'));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
 
+  const title = opts.title ?? TITLE;
   const issueJson = JSON.stringify({
-    title: TITLE,
+    title,
     body: BODY,
     labels: [{ name: 'inbox' }],
   });
@@ -81,7 +85,7 @@ function runTriage(verdictBlock: string, opts: { failBatchRemove?: boolean } = {
   // its own, and triages only when every one of them is on the list in
   // scripts/lib/dispatch-author-gate.sh (dispatch-author-gate.test.ts covers the gate).
   // Here: opened by the founder, never edited, with the same title and body as above.
-  fs.writeFileSync(path.join(dir, 'provenance.json'), provenanceAnswer({ title: TITLE, body: BODY }));
+  fs.writeFileSync(path.join(dir, 'provenance.json'), provenanceAnswer({ title, body: BODY }));
 
   // Stub `gh`: serves the issue view, records every mutation in order, and captures
   // the comment body. Deliberately NOT a network call — the writer under test does
@@ -128,20 +132,45 @@ exit 0
   fs.chmodSync(path.join(bin, 'gh'), 0o755);
   fs.chmodSync(path.join(bin, 'claude'), 0o755);
 
+  // MINSPEC_* is dropped so a live operator setting (a shadow key, a drain log path)
+  // can never reach a run that must stay hermetic. The one exception is the stub App
+  // token script that vitest.setup.ts points MINSPEC_GH_APP_TOKEN_SCRIPT at: it is the
+  // test double for the bot-token mint, and without it a machine with no real
+  // ~/.claude/scripts/gh-app-token.sh (CI) hits gh-bot's refusal to write as the human.
+  const KEEP = new Set(['MINSPEC_GH_APP_TOKEN_SCRIPT']);
+  const inherited = Object.fromEntries(Object.entries(process.env).filter(([k]) => KEEP.has(k) || !k.startsWith('MINSPEC_')));
   const env = {
-    ...process.env,
+    ...inherited,
     PATH: `${bin}:${process.env.PATH}`,
+    MINSPEC_SHADOW_TRIAGE: '0',
     STUB_DIR: dir,
     STUB_LOG: path.join(dir, 'calls.log'),
     STUB_FAIL_BATCH_REMOVE: opts.failBatchRemove ? '1' : '0',
   };
-  const stdout = execFileSync('bash', [TRIAGE, '4242'], { encoding: 'utf-8', env });
+  const stdout = execFileSync('bash', [path.join(opts.scripts ?? path.dirname(TRIAGE), 'triage-inbox.sh'), '4242'], { encoding: 'utf-8', env });
 
   return {
     calls: fs.readFileSync(path.join(dir, 'calls.log'), 'utf-8').trim().split('\n'),
     comment: fs.readFileSync(path.join(dir, 'comment.txt'), 'utf-8'),
     stdout,
   };
+}
+
+/**
+ * A private copy of scripts/ with a fixture specs/ tree beside it. triage-inbox.sh finds
+ * specs at `<its own dir>/../specs`, so running the COPY makes it read only the fixture:
+ * the real specs/ is never reachable, and a fixture that passed by reading it is
+ * impossible (the number used is asserted absent from the real tree below).
+ */
+function fixtureScripts(specs: Record<string, string>): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-triage-repo-'));
+  fs.cpSync(path.join(ROOT, 'scripts'), path.join(root, 'scripts'), { recursive: true });
+  for (const [num, status] of Object.entries(specs)) {
+    const d = path.join(root, 'specs', 'fixture-epic', `SPEC-${num}-fixture`);
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'requirements.md'), `---\nid: SPEC-${num}\nstatus: ${status}\n---\n\n# Fixture\n`);
+  }
+  return path.join(root, 'scripts');
 }
 
 function verdict(fields: Record<string, string> = {}): string {
@@ -288,5 +317,44 @@ describe('triage-inbox.sh writes the verdict record dispatch requires (#983)', (
     const run = runTriage(verdict({ decision: 'needs-info' }));
     expect(run.calls.some((c) => c.includes('add=[role:dev,needs-info,hold:info]'))).toBe(true);
     expect(run.calls.find((c) => /remove=\[[^\]]+\]/.test(c))).toContain('agent-ready');
+  });
+});
+
+// ── #3282: a `build: SPEC-NNN` title names a spec; an already-approved one is held ──
+// The gate is proven in triage-decide.test.ts with the flag already set. THIS proves the
+// writer derives the flag: title regex → specs lookup → frontmatter status → hand-off.
+// Delete that block in triage-inbox.sh and the held cases below go red.
+describe('triage-inbox.sh holds a build issue whose named spec is already approved (#3282)', () => {
+  const NUM = '987';
+  const fixtureTitle = `build: SPEC-${NUM} the fixture spec`;
+
+  it('the fixture number does not exist in the real specs/ tree (it cannot pass by reading it)', () => {
+    const real = fs.readdirSync(path.join(ROOT, 'specs')).flatMap((e) => {
+      const d = path.join(ROOT, 'specs', e);
+      return fs.statSync(d).isDirectory() ? fs.readdirSync(d) : [];
+    });
+    expect(real.filter((n) => n.startsWith(`SPEC-${NUM}-`))).toEqual([]);
+  });
+
+  it.each(['planning', 'implementing', 'done'])('status %s: agent-ready is held as built-spec, never specify', (status) => {
+    const scripts = fixtureScripts({ [NUM]: status });
+    const run = runTriage(verdict({ tier: 'T3', decision: 'agent-ready', role: 'architect' }), { title: fixtureTitle, scripts });
+    expect(run.calls.some((c) => c.includes('add=[role:architect,needs-review,hold:built-spec]')), run.calls.join('\n')).toBe(true);
+    expect(run.calls.some((c) => /add=\[[^\]]*agent-ready/.test(c))).toBe(false);
+    expect(run.comment).toContain('hold: built-spec');
+  });
+
+  it('status specifying: the same title is NOT held, it still reaches specify', () => {
+    const scripts = fixtureScripts({ [NUM]: 'specifying' });
+    const run = runTriage(verdict({ tier: 'T3', decision: 'agent-ready', role: 'architect' }), { title: fixtureTitle, scripts });
+    expect(run.calls.some((c) => c.includes('add=[role:architect,agent-ready-specify,hold:specify]')), run.calls.join('\n')).toBe(true);
+    expect(run.comment).not.toContain('built-spec');
+  });
+
+  it('a title naming a spec that does not exist is NOT held', () => {
+    const scripts = fixtureScripts({ '986': 'implementing' });
+    const run = runTriage(verdict({ tier: 'T3', decision: 'agent-ready', role: 'architect' }), { title: fixtureTitle, scripts });
+    expect(run.calls.some((c) => c.includes('add=[role:architect,agent-ready-specify,hold:specify]')), run.calls.join('\n')).toBe(true);
+    expect(run.comment).not.toContain('built-spec');
   });
 });

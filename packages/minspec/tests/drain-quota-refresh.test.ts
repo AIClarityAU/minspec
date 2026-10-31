@@ -34,7 +34,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
 
 // Module scope: nothing in this file may depend on drain or quota knobs in the surrounding
@@ -57,27 +57,21 @@ afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
 /** Run the gate with a stubbed producer. Never invokes the real one. */
 function run(env: Record<string, string> = {}): { code: number; out: string; err: string } {
-  try {
-    const out = execFileSync('bash', [DRAIN, '--quota-gate'], {
-      encoding: 'utf-8',
-      env: {
-        ...drainBaseEnv(),
-        MINSPEC_QUOTA_FILE: quotaFile,
-        // Disable the bootstrap carve-out so these tests read the pure arms, exactly
-        // as drain-quota-deadline.test.ts does.
-        MINSPEC_QUOTA_BOOTSTRAP_ADMITS: '0',
-        MINSPEC_QUOTA_REFRESH: '1',
-        ...env,
-      },
-    });
-    return { code: 0, out: out.trim(), err: '' };
-  } catch (e: any) {
-    return {
-      code: e.status ?? 1,
-      out: ((e.stdout ?? '') as string).trim(),
-      err: ((e.stderr ?? '') as string).trim(),
-    };
-  }
+  // spawnSync, not execFileSync: stderr must be visible on exit 0 too, or a test of the
+  // success path ("no failure line") cannot fail.
+  const r = spawnSync('bash', [DRAIN, '--quota-gate'], {
+    encoding: 'utf-8',
+    env: {
+      ...drainBaseEnv(),
+      MINSPEC_QUOTA_FILE: quotaFile,
+      // Disable the bootstrap carve-out so these tests read the pure arms, exactly
+      // as drain-quota-deadline.test.ts does.
+      MINSPEC_QUOTA_BOOTSTRAP_ADMITS: '0',
+      MINSPEC_QUOTA_REFRESH: '1',
+      ...env,
+    },
+  });
+  return { code: r.status ?? 1, out: (r.stdout ?? '').trim(), err: (r.stderr ?? '').trim() };
 }
 
 function write(q: Partial<{ used_percentage: number; resets_at: number; observed_at: number }>) {
@@ -275,5 +269,132 @@ describe('the cadence relationship that caused #1859', () => {
     const r = run({ MINSPEC_QUOTA_REFRESH_CMD: producerWritesFresh() });
     expect(fs.existsSync(sentinel)).toBe(true);
     expect(r.code).toBe(0);
+  });
+});
+
+describe('#2699 — the refresh is judged by a fresher reading, not by the producer exit code', () => {
+  // cos.py reports every failure with exit 0 and a reason on stdout, so the old
+  // exit-code-only check could not see any of them. These run the gate and read the
+  // log line it leaves on stderr (a deferral exits 42, so run() returns stderr).
+  const stale = () =>
+    write({ used_percentage: 1, resets_at: nowSec() + 3600, observed_at: nowSec() - 5000 });
+
+  it('(a) exit 0 + a reason on stdout + no new reading → the log says refresh failed and quotes the reason', () => {
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: 'echo "sign-in expired, run login"' });
+    expect(r.code).toBe(42);
+    expect(r.out).toMatch(/^defer:stale/);
+    expect(r.err).toMatch(/quota refresh failed/);
+    expect(r.err).toContain('sign-in expired, run login');
+    // The reason must not leak onto the verdict channel.
+    expect(r.out).not.toContain('sign-in expired');
+  });
+
+  it('(a) a noisy producer is bounded to one line', () => {
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: 'for i in $(seq 1 500); do echo "noise line $i xxxxxxxxxxxxxxxxxxxx"; done' });
+    const lines = r.err.split('\n').filter((l) => /quota refresh failed/.test(l));
+    expect(lines).toHaveLength(1);
+    expect(r.err.length).toBeLessThan(700);
+  });
+
+  it('(b) a non-zero exit is reported with its reason', () => {
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: 'echo "boom reason"; exit 7' });
+    expect(r.err).toMatch(/quota refresh failed/);
+    expect(r.err).toContain('boom reason');
+  });
+
+  it('(b) a timeout says it timed out', () => {
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: 'sleep 30', MINSPEC_QUOTA_REFRESH_TIMEOUT: '1' });
+    expect(r.code).toBe(42);
+    expect(r.err).toMatch(/quota refresh failed.*timed out/);
+  });
+
+  it('(c) exit 0 and observed_at moves → no failure line, and it admits', () => {
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: producerWritesFresh() });
+    expect(r.code).toBe(0);
+    expect(r.err).not.toMatch(/quota refresh failed/);
+  });
+
+  it('(c) a reading that moved but is still past the staleness limit → reported as failed, and still defers', () => {
+    stale();
+    const p = path.join(tmpDir, 'older.sh');
+    fs.writeFileSync(
+      p,
+      `#!/usr/bin/env bash\nprintf '{"used_percentage":1,"resets_at":%s,"observed_at":%s}' ` +
+        `"$(( $(date +%s) + 3600 ))" "$(( $(date +%s) - 4000 ))" > "${quotaFile}"\n`,
+    );
+    fs.chmodSync(p, 0o755);
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: `bash ${p}` });
+    expect(r.code).toBe(42);
+    expect(r.out).toMatch(/^defer:stale/);
+    expect(r.err).toMatch(/quota refresh failed.*still older than the staleness limit/);
+    expect(r.out).not.toMatch(/refresh failed/);
+  });
+
+  it('(d) the producer leaves the reading absent afterwards → reported as failed, never success', () => {
+    // A reading must exist BEFORE (INV-R3: a missing one is never refreshed), so the
+    // absent-witness case is the producer removing or corrupting it.
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: `rm -f "${quotaFile}"; echo "wiped"` });
+    expect(r.code).toBe(42);
+    expect(r.err).toMatch(/quota refresh failed/);
+    expect(r.err).toMatch(/absent or unreadable/);
+  });
+
+  it('(d) the producer leaves an unreadable reading → reported as failed', () => {
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: `printf 'not json' > "${quotaFile}"` });
+    expect(r.code).toBe(42);
+    expect(r.err).toMatch(/quota refresh failed.*absent or unreadable/);
+  });
+});
+
+describe('#2699 — the failure line states only what is true of the reading afterwards', () => {
+  const stale = () =>
+    write({ used_percentage: 1, resets_at: nowSec() + 3600, observed_at: nowSec() - 5000 });
+  const failLine = (err: string) => err.split('\n').filter((l) => /quota refresh failed/.test(l));
+
+  it('reading absent afterwards → says no reading is left, not that it "stands as-is"', () => {
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: `rm -f "${quotaFile}"` });
+    const lines = failLine(r.err);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/no reading is left/);
+    expect(lines[0]).not.toMatch(/stands as-is/);
+  });
+
+  it('reading moved but still stale → does not claim it stands as-is, and says the gate fails closed', () => {
+    stale();
+    const p = path.join(tmpDir, 'older2.sh');
+    fs.writeFileSync(
+      p,
+      `#!/usr/bin/env bash\nprintf '{"used_percentage":1,"resets_at":%s,"observed_at":%s}' ` +
+        `"$(( $(date +%s) + 3600 ))" "$(( $(date +%s) - 4000 ))" > "${quotaFile}"\n`,
+    );
+    fs.chmodSync(p, 0o755);
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: `bash ${p}` });
+    const lines = failLine(r.err);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toMatch(/stands as-is/);
+    expect(lines[0]).toMatch(/past the staleness limit, so the gate fails closed on it/);
+    expect(r.code).toBe(42);
+  });
+
+  it('refresh run on a FRESH reading (weekly reset passed) that does not move → does not claim the gate fails closed', () => {
+    write({ used_percentage: 1, resets_at: nowSec() + 3600, observed_at: nowSec() });
+    const q = JSON.parse(fs.readFileSync(quotaFile, 'utf-8'));
+    q.seven_day_percentage = 1;
+    q.seven_day_resets_at = nowSec() - 10;
+    fs.writeFileSync(quotaFile, JSON.stringify(q));
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: 'echo "nothing new"' });
+    const lines = failLine(r.err);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/still within the staleness limit/);
+    expect(lines[0]).not.toMatch(/fails closed/);
+    expect(lines[0]).not.toMatch(/stands as-is/);
   });
 });

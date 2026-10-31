@@ -100,14 +100,16 @@ gate (FR-2 to FR-4) as the enforcing part. Locating every copy is a plan-phase t
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended. An
-agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
-on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
-chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
-(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
-context, not verified. No human chose any single item. Decisions 1, 2 and 5 are left open
-(adopter reach, an unverified premise, and no recommendation); this section stays open, and
-the spec is not ready to approve, until the founder answers.
+Decisions 3 and 4 record the option this document marks recommended. An agent session
+recorded them on 2026-10-27, acting on a standing instruction the founder gave on
+2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
+chief-of-staff proxy); no human chose those items. Decisions 1 and 5 record selections from
+the answers to task-queue items c225 and c225b (2026-10-28). Each queue answer is
+attributed to the founder but is unverified: DR-108 (delegated approval) section 4 holds
+that a queue item cannot carry consent, so none of these selections binds until the founder
+approves this spec's text with them in place. Decision 2 is left open (an unverified
+premise); this section stays open, and the spec is not ready to approve, until the founder
+answers it.
 
 1. **Where the commit-time gate lives.**
 
