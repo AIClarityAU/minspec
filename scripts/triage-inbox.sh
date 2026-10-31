@@ -296,8 +296,8 @@ CONTENT
     # and the issue can never be worked by any route. `agent-quarantined` is
     # deliberately NOT cleared: quarantine is a human act, and re-triage must not
     # launder it.
-    agent-ready)          SUPERSEDED="inbox,needs-review,needs-info,needs-human-review,agent-ready-specify,agent-done,agent-escalated" ;;
-    agent-ready-specify)  SUPERSEDED="inbox,needs-review,needs-info,needs-human-review,agent-ready,agent-done,agent-escalated" ;;
+    agent-ready)          SUPERSEDED="inbox,needs-review,needs-info,needs-human-review,agent-ready-specify,agent-done,agent-escalated,agent-crashed" ;;
+    agent-ready-specify)  SUPERSEDED="inbox,needs-review,needs-info,needs-human-review,agent-ready,agent-done,agent-escalated,agent-crashed" ;;
     needs-review)         SUPERSEDED="inbox,agent-ready,agent-ready-specify,needs-info" ;;
     needs-info)           SUPERSEDED="inbox,agent-ready,agent-ready-specify,needs-review" ;;
     *)                    SUPERSEDED="inbox" ;;
