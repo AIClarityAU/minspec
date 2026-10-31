@@ -14,6 +14,7 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { useHostileAmbientDrainKnobs } from './helpers/drain-env';
 import { useShellTimeout } from './helpers/shell-timeout';
+import { PLAN_ARTIFACT } from '../../../scripts/lib/delegated-merge';
 
 useHostileAmbientDrainKnobs();
 useShellTimeout();
@@ -51,6 +52,7 @@ function run(
   o: { listExit?: number; listStderr?: string; failFirst?: number; seamExit?: Record<number, number>; env?: Record<string, string> } = {},
 ) {
   const calls = path.join(tmp, 'calls');
+  fs.rmSync(calls, { force: true }); // one run's calls; the cursor file is what carries over
   const list =
     typeof rows === 'string'
       ? rows
@@ -96,7 +98,13 @@ exit $code
   ].join('\n');
   const r = spawnSync('bash', ['-c', script], {
     encoding: 'utf-8',
-    env: { PATH: process.env.PATH ?? '', MINSPEC_DRAIN_DELEGATED_MERGE_RETRY_SLEEP: '0', ...(o.env ?? {}) },
+    env: {
+      PATH: process.env.PATH ?? '',
+      MINSPEC_DRAIN_DELEGATED_MERGE_RETRY_SLEEP: '0',
+      // Never the live drain's cursor under /tmp: each test gets its own.
+      MINSPEC_DRAIN_DELEGATED_MERGE_CURSOR: path.join(tmp, 'cursor'),
+      ...(o.env ?? {}),
+    },
   });
   const all = fs.existsSync(calls) ? fs.readFileSync(calls, 'utf-8').split('\n').filter(Boolean) : [];
   return {
@@ -159,6 +167,87 @@ describe('Step 0c hands held spec-only PRs to the seam, and nothing else', () =>
     const r = run(rows, { env: { MINSPEC_DRAIN_DELEGATED_MERGE_MAX: '2' } });
     expect(r.seamCalls).toHaveLength(2);
     expect(r.stdout).toContain('per-cycle cap 2 reached');
+  });
+});
+
+describe('a plan-artifact PR takes no judgement slot (T3, 2026-10-30)', () => {
+  // Measured on that day's real list: 21 of 26 candidates carried design.md or tasks.md,
+  // which the judge denies whatever else is true (PLAN_ARTIFACT, delegated-merge.ts). They
+  // spent the cap on a certain "no": ten plan PRs filled a cycle, "0 armed of 10 judged",
+  // while #3391, the one PR that would arm, waited behind them.
+  const plan = (n: number) => `specs/minspec/SPEC-${n}-x/design.md`;
+
+  it('a PR behind ten plan PRs is armed in the same cycle', () => {
+    const rows = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => ({ number: n, files: [plan(n)] }));
+    const r = run([...rows, { number: 11, files: [spec(11)] }]);
+    expect(r.seamCalls).toEqual(['--delegated-spec-merge 11 --arm']);
+    expect(r.stdout).toContain('1 armed of 1 judged');
+  });
+
+  it('skipping is never silent: the PRs are named with the reason', () => {
+    const r = run([{ number: 7, files: [plan(7)] }, { number: 8, files: [spec(8)] }]);
+    expect(r.stdout).toContain('1 held PR(s) carry a plan artifact (#2980), not judged: #7');
+  });
+
+  it('only plan PRs held: named, then the empty-queue line, and the cycle goes on', () => {
+    const r = run([{ number: 7, files: [plan(7)] }]);
+    expect(r.seamCalls).toEqual([]);
+    expect(r.stdout).toContain('not judged: #7');
+    expect(r.stdout).toContain('no held spec-only PRs');
+    expect(r.stdout).toContain('rc=0');
+  });
+
+  it('skips exactly what the judge calls a plan artifact, so the prefilter cannot admit one or starve a spec', () => {
+    const paths = [
+      'specs/minspec/SPEC-1-x/design.md',
+      'specs/minspec/SPEC-1-x/tasks.md',
+      'specs/minspec/SPEC-1-x/requirements.md',
+      'specs/minspec/SPEC-1-design.md/requirements.md',
+      'specs/minspec/SPEC-1-x/redesign.md',
+      'specs/minspec/SPEC-1-x/subtasks.md',
+    ];
+    for (const p of paths) {
+      fs.rmSync(path.join(tmp, 'cursor'), { force: true });
+      const r = run([{ number: 5, files: [p] }]);
+      expect(r.seamCalls.length === 0, p).toBe(PLAN_ARTIFACT.test(p));
+    }
+  });
+
+  it('a mixed PR (requirements plus design) is a plan PR, as it is to the judge', () => {
+    const r = run([{ number: 5, files: [spec(5), plan(5)] }]);
+    expect(r.seamCalls).toEqual([]);
+    expect(r.stdout).toContain('not judged: #5');
+  });
+});
+
+describe('the cap rotates, so held PRs cannot starve the ones behind them', () => {
+  // 2026-10-30: seven PRs held on every cycle (handed-to-human, hold:human, plan
+  // artifact, ai-review:changes) sat oldest in the list. Judged oldest-first under a
+  // cap of 10, they took 7 slots each cycle and twelve cycles in a row ended
+  // "0 armed of 10 judged", while 36 newer spec PRs were never judged at all.
+  const rows = [1, 2, 3, 4, 5].map((n) => ({ number: n, files: [spec(n)] }));
+  const env = { MINSPEC_DRAIN_DELEGATED_MERGE_MAX: '2' };
+  const judged = (r: { seamCalls: string[] }) => r.seamCalls.map((c) => Number(c.split(' ')[1]));
+
+  it('the next cycle starts after the last PR judged, and wraps', () => {
+    const held = { 1: 1, 2: 1, 3: 1, 4: 1, 5: 1 };
+    expect(judged(run(rows, { env, seamExit: held }))).toEqual([1, 2]);
+    expect(judged(run(rows, { env, seamExit: held }))).toEqual([3, 4]);
+    expect(judged(run(rows, { env, seamExit: held }))).toEqual([5, 1]);
+  });
+
+  it('a cursor PR that has since left the list still resumes after its number', () => {
+    fs.writeFileSync(path.join(tmp, 'cursor'), '3\n');
+    expect(judged(run(rows.filter((r) => r.number !== 3), { env }))).toEqual([4, 5]);
+  });
+
+  it('an unreadable cursor starts from the oldest, and an unwritable one is not fatal', () => {
+    fs.writeFileSync(path.join(tmp, 'cursor'), 'garbage');
+    expect(judged(run(rows, { env }))).toEqual([1, 2]);
+    const r = run(rows, { env: { ...env, MINSPEC_DRAIN_DELEGATED_MERGE_CURSOR: path.join(tmp, 'no', 'such', 'dir', 'c') } });
+    expect(judged(r)).toEqual([1, 2]);
+    expect(r.stderr).toContain('could not record');
+    expect(r.stdout).toContain('rc=0');
   });
 });
 

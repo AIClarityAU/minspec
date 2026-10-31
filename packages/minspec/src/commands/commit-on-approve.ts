@@ -105,18 +105,35 @@ async function recoverOnProtectedBranch(
   if (mode === 'prompt') {
     // Non-modal (project preference: never steal focus from the artifact being
     // approved). Names the destination, so the click is informed consent.
+    //
+    // #2258 / SPEC-050 FR-8 parity: the FIRST time only, the standing-consent option
+    // rides along, same label, same project-local store (`enableAlwaysPush`), same
+    // show-once memory as `pushApprovalIfEnabled`. Approving on the default branch
+    // (the DR-051 norm) never reaches that function, so without this the offer was
+    // unreachable for exactly those users. The lead action stays the one-shot
+    // (DR-071 condition 1): escaping the prompt is a deliberate second choice.
+    const alreadyOffered = await pushAlwaysOfferAlreadyMade(rootDir);
+    const actions = alreadyOffered
+      ? [RECOVER_ACTION, 'Not now']
+      : [RECOVER_ACTION, ALWAYS_PUSH_ACTION, 'Not now'];
     const choice = await vscode.window.showWarningMessage(
       `Approval written but NOT committed: '${current}' is the default branch. ` +
         `Save it on a branch and push, so the sign-off is not stranded here?`,
-      RECOVER_ACTION,
-      'Not now',
+      ...actions,
     );
-    // 'declined', NOT undefined: the caller must not then show its own
-    // near-identical "NOT committed / default branch" warning. The user has just
-    // read that sentence and answered it — repeating it is the nagging the
-    // constitution warns about, and it makes a deliberate choice look like an
-    // error. The suffix still reports the honest state (#1255 review nit).
-    if (choice !== RECOVER_ACTION) return 'declined';
+    // Record on every resolution, dismiss included (#883) — show-once.
+    if (!alreadyOffered) await recordPushAlwaysOfferMade(rootDir);
+    if (choice === ALWAYS_PUSH_ACTION) {
+      // Persist the consent, then fall through and recover: the user just said yes.
+      await enableAlwaysPush(rootDir);
+    } else if (choice !== RECOVER_ACTION) {
+      // 'declined', NOT undefined: the caller must not then show its own
+      // near-identical "NOT committed / default branch" warning. The user has just
+      // read that sentence and answered it — repeating it is the nagging the
+      // constitution warns about, and it makes a deliberate choice look like an
+      // error. The suffix still reports the honest state (#1255 review nit).
+      return 'declined';
+    }
   }
 
   const slug = (absPaths[0] ?? message).split(/[\\/]/).slice(-2).join('-').replace(/\.[a-z]+$/i, '');
@@ -173,6 +190,24 @@ async function recoverOnProtectedBranch(
     { subject: message, paths: res.paths, sha: res.sha ?? null },
   );
   return { suffix };
+}
+
+/** Max paths named verbatim in a refusal message before truncating (#1133). */
+const MAX_NAMED_PATHS = 3;
+
+/**
+ * Human-readable list of repo-relative paths, e.g. `DR-064.md and INDEX.md`;
+ * past {@link MAX_NAMED_PATHS} names the first few then "and N more". Basenames
+ * are used when unambiguous, otherwise the full relative path. '' when none.
+ */
+export function describePaths(paths: readonly string[] | undefined): string {
+  if (!paths || paths.length === 0) return '';
+  const bases = paths.map((p) => path.basename(p));
+  const names = paths.map((p, i) => (bases.filter((b) => b === bases[i]).length > 1 ? p : bases[i]));
+  if (names.length <= MAX_NAMED_PATHS) {
+    return names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  }
+  return `${names.slice(0, MAX_NAMED_PATHS).join(', ')} and ${names.length - MAX_NAMED_PATHS} more`;
 }
 
 /**
@@ -234,6 +269,7 @@ export async function commitApprovalIfEnabled(
       // §4a) — approval-recover.ts copies into a separate worktree with a separate
       // index, and this arm still stages nothing in the primary.
       const current = result.branch?.current ?? 'the default branch';
+      const named = describePaths(result.paths);
       const recovery = await recoverOnProtectedBranch(
         rootDir,
         absPaths,
@@ -255,8 +291,9 @@ export async function commitApprovalIfEnabled(
       // happened and what state the files are in; never a bare console.warn.
       void vscode.window.showWarningMessage(
         `Approval written but NOT committed: '${current}' is the default branch, ` +
-          `so a commit there could not be pushed. Your files are saved in the working ` +
-          `tree — commit them on a branch to keep them.`,
+          `so a commit there could not be pushed. ` +
+          (named ? `${named} ${result.paths && result.paths.length === 1 ? 'is' : 'are'} in your working tree, uncommitted — ` : `Your files are saved in the working tree — `) +
+          `commit ${named ? 'all of them' : 'them'} on a branch to keep them.`,
         SHOW_FILES_ACTION,
       ).then((choice) => {
         if (choice === SHOW_FILES_ACTION) void vscode.commands.executeCommand('workbench.view.scm');
@@ -1069,6 +1106,13 @@ export async function commitBornIfUntracked(
   const result = await commitApproval(rootDir, [filePath], message);
   if (result.outcome === 'failed') {
     console.warn(`MinSpec: born commit failed — ${result.error ?? 'git error'}`);
+  } else if (result.outcome === 'protected-branch') {
+    // #1133: this refusal used to fall through unreported. The born commit exists so
+    // the accept lands as a Modify (#577); on the default branch it cannot happen.
+    console.warn(
+      `MinSpec: born commit refused — '${result.branch?.current ?? 'the default branch'}' is the ` +
+        `default branch; ${describePaths(result.paths) || path.basename(filePath)} left uncommitted in your working tree`,
+    );
   }
   return result;
 }

@@ -133,10 +133,17 @@ from the head, with no version handshake (#1834), which makes the failure reacha
 
 ## Decisions needed (Clarify)
 
-5 of 6 decisions are resolved: an agent session recorded each selection (D1-D4 the option
-this document already recommended, D6 the option to write a DR), under delegation DLG-001
-(DR-108, the delegated-approval record). No human chose them; they are ratified only by
-approval of this spec. D5 names no recommended option, so it stays open for Clarify.
+5 of 6 decisions are answered, not ratified. D6 has a selection recorded from the answer to
+task-queue item clr1027 (2026-10-26: "All rec (Recommended)"), an answer the queue attributes to the
+founder. A queue answer is not consent and is not verified here: DR-108 (delegated approval) section
+4 holds that a queue item cannot carry consent, because any session can write the queue. D1 to D4
+carry the option this document already recommended, recorded by an agent session; no human chose
+them. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and
+engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted it.
+It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and that
+approval may overturn it. D5 is not answered: it names no recommended option, and its delivery step
+is a human act (the App cannot push `.github/workflows/`), so it stays open and `phases.clarify`
+stays `pending`.
 
 - **D1 - Preflight placement.** (a) Separate early step that fails the job before the
   review runs **(rec)**: fastest, clearest signal; costs a CI step and a failed job that
@@ -170,5 +177,6 @@ approval of this spec. D5 names no recommended option, so it stays open for Clar
     preflight contract in a decision record, so the design choice outlives this spec.
   **Recorded selection: Option (write a DR),** drafted as DR-113 (`proposed`), which records
   the guard-free second witness and the preflight contract as this spec describes them.
-  Recorded by an agent session under delegation DLG-001 (DR-108, the delegated-approval
-  record); ratified only by approval of this spec, and DR-113 takes effect only on acceptance.
+  Source: the answer to task-queue item clr1027, 2026-10-26 ("All rec (Recommended)"). A queue
+  answer is not consent (DR-108 section 4), so this selection is unverified and binds only on
+  approval of this spec; DR-113 takes effect only on its acceptance.

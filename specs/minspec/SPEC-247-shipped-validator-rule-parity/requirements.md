@@ -26,8 +26,6 @@ phases:
 
 # SPEC-247: Every FATAL rule in the Node validator is either shipped in validate.py or recorded as dev-only
 
-**Status:** specifying
-
 ## In plain terms
 
 MinSpec checks its own specs and decision records with a Node script,
@@ -275,7 +273,12 @@ no match; SPEC-070 FR-11 records the same finding). An adopter has no spec-gate 
 
 ## Decisions needed (Clarify)
 
+All 5 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 - **DQ-1 - disposition of the contested rules (8, 14, 16, 22, 23).**
+  **Recorded selection: Option (A),** port rules **8, 22, 23** and mark **14, 16** dev-only.
   - **(A) (rec):** port **8, 22, 23**; mark **14, 16** dev-only. Rule 8: the extension's accept path
     regenerates `INDEX.md` (`adr-manager.ts:231`). I believe the same holds in an adopter repo
     (unverified for adopters), so adopters would have an INDEX that can drift.
@@ -291,6 +294,8 @@ no match; SPEC-070 FR-11 records the same finding). An adopter has no spec-gate 
     data table embedded in `validate.py`, a large new surface.
 
 - **DQ-2 - how the drift gate detects FATAL rules, and where the manifest lives.**
+  **Recorded selection: Option (A),** a text scan that attributes each `fail(` call site to its
+  nearest preceding `// Rule <key>` header, with the manifest a TS module beside the validator.
   - **(A) (rec):** text scan. Attribute each `fail(` call site to its nearest preceding
     `// Rule <key>` header. The manifest records `{key, disposition, reason|portRef, failSites}`,
     a TS module beside the validator (e.g. `scripts/lib/validator-rule-manifest.ts`), and a vitest
@@ -304,6 +309,8 @@ no match; SPEC-070 FR-11 records the same finding). An adopter has no spec-gate 
     proportion to this issue.
 
 - **DQ-3 - how a newly ported FATAL rule reaches adopters that already violate it.**
+  **Recorded selection: Option (A),** ship it at FATAL; the adopter's refresh PR shows any
+  existing violation red, and it is fixed in that PR.
   - **(A) (rec):** ship it at FATAL. The refresh reaches an adopter as a pull request. That PR's CI
     runs the new `validate.py`, and any existing violation shows red there and is fixed in the
     same PR. **Cost:** an adopter's refresh PR may be blocked until their corpus is cleaned. For
@@ -313,6 +320,8 @@ no match; SPEC-070 FR-11 records the same finding). An adopter has no spec-gate 
     nothing ever advanced it.
 
 - **DQ-4 - the spec-gate claim in the shipped `/minspec-specify` prose.**
+  **Recorded selection: Option (A),** correct the prose (FR-9) in this spec, and track
+  scaffolding `spec-gate.py` for adopters as a separate issue.
   - **(A) (rec):** correct the prose (FR-9) in this spec, and track scaffolding `spec-gate.py` for
     adopters as a separate issue. **Cost:** adopters still have no spec-gate. The prose becomes
     true, but the protection is still missing.
@@ -325,6 +334,8 @@ no match; SPEC-070 FR-11 records the same finding). An adopter has no spec-gate 
   criteria live only in code comments. **(B):** mint a DR stating the dev-only criteria (repo
   layout, MinSpec product policy, needs the extension runtime). **Cost:** one more record, for a
   classification that can be reversed in under a day.
+  **Recorded selection: Option (A),** no new DR; add an "applies also to `validate.py`" note to
+  DR-077 when it is next touched.
 
 ## Risks & Mitigations
 

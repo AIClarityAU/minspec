@@ -112,7 +112,15 @@ be committed and then be self-perpetuating, because the generator treats it as c
 
 ## Decisions needed (Clarify)
 
+3 of 4 decisions are answered, not ratified: an agent session selected, for D1 to D3, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). D4 is not answered: it states a
+belief ("Believed no") that the record says is unverified and defers to Plan, so it stays open. This spec is
+unapproved, so the recorded answers bind nothing until a human or a covered delegation approves it.
+
 - **D1 What counts as a placeholder?**
+  **Recorded selection: Option (a),** an `auto=` value made only of `0` characters, any length,
+  counts as a placeholder.
   - (a) **(rec)** An `auto=` value made only of `0` characters, any length. Cheap, catches all
     14 observed forms. Cost: an agent inventing `deadbeef1234` still passes.
   - (b) Any open marker whose hash is not the true fingerprint of the DR-derived auto text,
@@ -120,6 +128,9 @@ be committed and then be self-perpetuating, because the generator treats it as c
     invented hash on a curated row from a real one, because the original auto text is not
     stored. Cost: false positives or a no-op, so effectively not decidable from the INDEX alone.
 - **D2 Backfill method for the seven curated-looking rows.**
+  **Recorded selection: Option (a),** regenerate each of the seven rows with the marker deleted
+  so it takes the auto text and a real hash, then re-apply any text worth keeping by hand
+  (FR-4).
   - (a) **(rec)** For each, regenerate with the marker deleted so the row takes the auto text
     and a real hash, then re-apply any text worth keeping by hand (FR-4). Cost: overwrites the
     current visible summary where a human wrote it; reviewer must read seven diffs.
@@ -131,6 +142,8 @@ be committed and then be self-perpetuating, because the generator treats it as c
   path run it with no new workflow; cost: that file grows and rule numbering must be claimed
   against in-flight PRs. (b) Separate `check:*` script; cost: needs wiring into CI, which is a
   second place for the gate to be silently absent (invariant 2).
+  **Recorded selection: Option (a),** a new numbered rule in `scripts/validate-frontmatter.ts`
+  next to Rule 8, run by `npm run validate` and the existing CI path.
 - **D4 Is a DR needed?** Believed no: the rule and script are reversible in under a day, so
   the DR-359 ADR filter is not met. Unverified; confirm at Plan.
 
