@@ -21,7 +21,7 @@ affects:
   - scripts/validate-frontmatter.ts
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -428,9 +428,12 @@ false positive/negative from that check",
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are resolved: an agent session recorded each option this document already
-recommended, on 2026-10-25, under delegation DLG-001 (DR-108). No human chose them; they
-are ratified only by approval of this spec.
+All 3 decisions are answered, not ratified: an agent session selected on 2026-10-25, for each,
+the option this document already recommended. No human chose them, and no delegation covers
+authoring Clarify answers. Delegation DLG-001 (DR-108) made none of these selections and covers
+spec approval and engineering-DR acceptance only. An agent-recorded selection carries no
+consent, whoever prompted it. It is ratified only by approval of this spec, the founder's or the
+bot's under DLG-001, and that approval may overturn it.
 
 - **DQ-1 — When may MinSpec demand a phase?** This is the methodology change the issue
   flagged as possibly needing a decision record.

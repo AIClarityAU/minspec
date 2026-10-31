@@ -16,7 +16,7 @@ implements: [packages/minspec/src/lib/spec-frontmatter-schema.ts, packages/minsp
 affects: [packages/minspec/src/lib/spec.ts, packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/spec-manager.ts, packages/minspec/src/lib/spec-layout.ts, packages/minspec/src/lib/scaffold.ts, packages/minspec/src/views/frontmatter-completion.ts, packages/minspec/src/views/spec-panel.ts, scripts/validate-frontmatter.ts, specs/minspec/design.md]
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -400,7 +400,7 @@ Read from local remote-tracking refs on 2026-10-03; none of the three is on `mai
 
 ## Decisions needed (Clarify)
 
-All 6 decisions are resolved: an agent session recorded each option this document already recommended, on 2026-10-25, under delegation DLG-001 (DR-108). No human chose them; they are ratified only by approval of this spec.
+All 6 decisions are answered, not ratified: an agent session selected on 2026-10-25, for each, the option this document already recommended. No human chose them, and no delegation covers authoring Clarify answers. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted it. It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and that approval may overturn it.
 
 Requirements above are written under each recommended option. Choosing another option changes
 only the requirements that question names.
