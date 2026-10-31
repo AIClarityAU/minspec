@@ -3,9 +3,9 @@ id: SPEC-064
 type: tasks
 # tier lives on requirements.md, the single tier-carrying approvable. A tier on a sibling
 # document is read by spec-gate.py as a second, unapproved spec. (SPEC-064 is T3.)
-# status and phases here carry the current phase state. requirements.md stays frozen at its
-# approved hash (approval sidecar under .minspec/approvals/), so its own phases lag until
-# task 6. This file has no approval record of its own, so its status is what deriveStatus
+# status and phases here carry the current phase state. requirements.md is approved and
+# edits to it are held back (approval sidecar under .minspec/approvals/; the hash strips status
+# and phases, so the lag is not hash-driven), so its own phases lag until task 6. This file has no approval record of its own, so its status is what deriveStatus
 # computes for an unsigned file with these phases.
 status: specifying
 product: minspec
@@ -147,13 +147,15 @@ the hold, and must not be reworded to pass triage. Tasks 1 to 4 do not depend on
   Re-measure first: if either has since started its implement phase, or has gained a body
   status line, that spec is out and the task says so.
   *Done when:* `npm run facts -- hash SPEC-041` and the same for SPEC-044 report APPROVED with
-  stored and computed hashes equal, before and after, and `npm run facts -- status` reports
-  MATCH for both.
-- [ ] **5.2** packages/minspec/tests/planning-corpus-literals.test.ts (new) - walk every
-  tracked requirements.md, and fail naming the file if one has a `phases:` block, an approved
-  verdict, a literal `implementing` and implement pending. Assert the walk visited more than
-  100 files and more than 0 with a `phases:` block, so an empty walk cannot pass. Phaseless
-  files are skipped, and the test comment cites #898 and #1513 for them.
+  stored and computed hashes equal, before and after, and `npm run facts -- status SPEC-041` and
+  `npm run facts -- status SPEC-044` report MATCH.
+- [ ] **5.2** packages/minspec/tests/planning-corpus-literals.test.ts (new) - scoped to
+  SPEC-041 and SPEC-044 only, the way SPEC-059 scopes spec-059-status-corrections.test.ts to
+  the four files it corrects. For each of the two requirements.md files, fail naming the file
+  if it has a `phases:` block, an approved verdict, a literal `implementing` and implement
+  pending. Assert both files were read and both have a `phases:` block, so a missing file
+  cannot pass. It does not walk the corpus: a corpus-wide rule is SPEC-059 FR-3's WARN and
+  SPEC-022 FR-5's promotion, not this spec's, and no other spec is gated here.
   *Done when:* it fails on the tree before 5.1, naming exactly those two files, and passes
   after.
   *Prerequisites:* #898's hold resolved.
