@@ -276,7 +276,9 @@ export async function recoverProtectedBranchApproval(
       }
 
       // 7. Nothing differing from the base → the approval already landed (e.g. a
-      //    re-approve of unchanged content). Report it; never make an empty commit.
+      //    re-approve of unchanged content — reachable since #1371: `approveSpec` no
+    //      //    longer re-stamps `approvedAt` on an unchanged approval). Report it; never
+      //    make an empty commit.
       //    `diff --cached --quiet` REJECTS when there IS a delta.
       let hasDelta = false;
       try {

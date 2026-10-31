@@ -239,3 +239,30 @@ describe('#404 — dropped-ref + gc drift is distinguishable from never-recorded
     expect(classifyBaseline(tmp, record({ baselineBlob: '' }))).toBe('none');
   });
 });
+
+describe('approveSpec — idempotent re-approval (#1371)', () => {
+  it('approving unchanged content twice writes the sidecar exactly once and keeps the first approvedAt', () => {
+    const first = approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com', () => new Date('2026-05-30T00:00:00Z'));
+    const sidecar = path.join(tmp, '.minspec', 'approvals', ...specRelPath(tmp, specPath).split('/')) + '.json';
+    const bytes = fs.readFileSync(sidecar, 'utf-8');
+    const mtime = fs.statSync(sidecar).mtimeMs;
+    const second = approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com', () => new Date('2026-06-01T00:00:00Z'));
+    expect(second).toEqual(first);
+    expect(second.approvedAt).toBe('2026-05-30T00:00:00.000Z');
+    expect(fs.readFileSync(sidecar, 'utf-8')).toBe(bytes);
+    expect(fs.statSync(sidecar).mtimeMs).toBe(mtime);
+  });
+
+  it('re-approval after a content change still re-stamps', () => {
+    approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com', () => new Date('2026-05-30T00:00:00Z'));
+    fs.appendFileSync(specPath, '\nmore prose\n');
+    const again = approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com', () => new Date('2026-06-01T00:00:00Z'));
+    expect(again.approvedAt).toBe('2026-06-01T00:00:00.000Z');
+  });
+
+  it('a different approver on unchanged content still records', () => {
+    approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com', () => new Date('2026-05-30T00:00:00Z'));
+    const other = approveSpec(tmp, specPath, 'T3', 'ann@harvest316.com', () => new Date('2026-06-01T00:00:00Z'));
+    expect(other.approvedBy).toBe('ann@harvest316.com');
+  });
+});
