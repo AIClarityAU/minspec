@@ -12,7 +12,7 @@
  * This suite proves both halves of the fix:
  *   (A) behavioural — the validator the gate actually invokes has a REAL reachable
  *       red path: a spec with broken frontmatter makes it exit non-zero, a clean
- *       corpus makes it exit zero. (`.minspec/hooks/validate.py` is tier 2 of the
+ *       corpus makes it exit zero. (`.minspec/hooks/validate.py` is tier 1 of the
  *       gate's detection chain — the portable validator present in every
  *       scaffolded repo, and in minspec's own tree.)
  *   (B) wiring — the workflow template runs real validation and is fail-closed:

@@ -1110,9 +1110,10 @@ jobs:
           # Run the highest-fidelity validator that is actually present and let its
           # exit code gate the job. Do NOT add a branch that exits 0 without a
           # validator having run — that was the AIClarityAU/minspec#811 always-green bug.
-          # An npm 'validate' script is only an ADDITION, never a replacement for the portable validator
-          # (generic name, may belong to something else: see AIClarityAU/minspec#2263), so it
-          # cannot stand in for MinSpec validation.
+          # An npm 'validate' script never replaces the portable validator: when
+          # .minspec/hooks/validate.py is present it always runs, and npm runs in addition.
+          # With no validate.py, an npm 'validate' script runs ALONE and its exit code gates
+          # the job (generic name, may belong to something else: see AIClarityAU/minspec#2263).
           ran=0
           if [ -f .minspec/hooks/validate.py ]; then
             if ! command -v python3 >/dev/null 2>&1; then

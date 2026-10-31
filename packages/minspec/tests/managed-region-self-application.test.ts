@@ -18,8 +18,10 @@
  *
  *   - `minspec-validate.yml` — the dangerous half is FIXED: the template now carries
  *     `merge_group:` too, so a Refresh can no longer strip the trigger and stall a merge
- *     queue (#1394, the case in #1888's title). What remains is the surrounding COMMENT,
- *     and it differs deliberately: the live file says "see ci.yml" and cites a bare
+ *     queue (#1394, the case in #1888's title). What remains is the surrounding COMMENT
+ *     (which differs deliberately) AND, since #2263, the run-step LOGIC: the live file
+ *     still runs npm validate first as if/elif, the template runs validate.py first and
+ *     npm only in addition. The comment differs deliberately: the live file says "see ci.yml" and cites a bare
  *     `#1394`, neither of which holds downstream — `ci.yml` exists only here and a bare
  *     `#N` resolves to the ADOPTER's issue N — so the template ships adopter-true prose
  *     per DR-090. Closing the remaining gap means editing the live workflow to match, and
@@ -70,7 +72,7 @@ const APPLIED_PATH_COUNT = 13;
  */
 const KNOWN_DRIFT: Readonly<Record<string, string>> = {
   '.github/workflows/minspec-validate.yml':
-    'COMMENT WORDING ONLY: both now carry merge_group: (#1394), so Refresh no longer strips the trigger. The live comment cites ci.yml and a bare #1394, which are false downstream, so the template ships adopter-true prose (DR-090). Closing it needs a workflow write, which no agent has (DR-079) - tracked as #2105',
+    'COMMENT WORDING AND LOGIC (#2263): both carry merge_group: (#1394). The live comment cites ci.yml and a bare #1394, false downstream, so the template ships adopter-true prose (DR-090). The LOGIC differs too: the live run step still runs npm validate first as if/elif, while the template runs validate.py first and npm only in addition. Closing it needs a workflow write, which no agent has (DR-079) - tracked as #2105',
   '.minspec/hooks/validate.py':
     'bidirectional: live targets docs/domain, template adds DR-frontmatter checks — reconciliation is the #1698 design question',
   '.minspec/hooks/pre-commit':
