@@ -166,7 +166,14 @@ Each is a fixture test against a throwaway repo in a temp dir, plus one control.
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 **D1 - Which files the write witness reads.**
+
+**Recorded selection: Option (a),** tracked plus untracked-not-ignored files, newest mtime
+across them, so same-content rewrites and new files are seen.
 
 - **a (rec)** Tracked files (`git ls-files -z`) plus untracked-not-ignored files
   (`git ls-files -z --others --exclude-standard`), newest mtime across them. Sees same-content
@@ -181,6 +188,9 @@ Each is a fixture test against a throwaway repo in a temp dir, plus one control.
 
 **D2 - The window for the write witness.**
 
+**Recorded selection: Option (a),** a separate constant, default `2 x MINSPEC_DRAIN_INTERVAL`
+(2400 s), so a writer that runs every cycle is never seen as idle between cycles.
+
 - **a (rec)** A separate constant, default `2 x MINSPEC_DRAIN_INTERVAL` (2400 s with today's
   default), so a writer that runs every cycle is never seen as idle between cycles. Cost: a
   checkout edited by hand in the last 40 minutes reads busy, so the chief of staff surfaces a
@@ -191,6 +201,9 @@ Each is a fixture test against a throwaway repo in a temp dir, plus one control.
   any other periodic writer that is not the drain is missed between its runs.
 
 **D3 - Whether a known periodic actor counts as busy even while it sleeps.**
+
+**Recorded selection: Option (b),** no actor witness now; rely on D2 = a, since file-recency is
+actor-agnostic.
 
 - **a** Add FR10: a live drain lock whose target set includes the checkout means busy.
   Cost: `cos.py` takes a dependency on the drain's lock path and on a definition of its
