@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Tier, Phase, SpecsLayout } from './config';
 import { hashLockReminder, readRecord, writeRecord, removeRecord } from './approval-store';
-import { specRelPath, canonicalSpecHash, resolveStatus } from './approval';
+import { specRelPath, canonicalSpecHash, resolveStatus, refKey } from './approval';
 import { ensureDirectory } from './opt-in';
 import { loadConfig, PHASES, resolveAndValidate, DEFAULT_CONFIG } from './config';
 import type { SpecFrontmatter, ParsedSpec } from './spec';
@@ -656,7 +656,7 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
   let migrated = 0;
   const toDelete: SpecEntry[] = [];
   // Approval sidecars are keyed by the spec file's repo-relative path, so each moves with its spec (#3441).
-  const sidecarMoves: { from: string; to: string }[] = [];
+  const sidecarMoves: { from: string; to: string; fromHash: string | null }[] = [];
 
   for (const summary of summaries) {
     const entry = findSpecEntry(specsDir, summary.id);
@@ -678,7 +678,11 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
         };
       }
       writeSpecKitDir(dirPath, parsed);
-      sidecarMoves.push({ from: entryDisplayPath(entry), to: path.join(dirPath, 'spec.md') });
+      sidecarMoves.push({
+        from: entryDisplayPath(entry),
+        to: path.join(dirPath, 'spec.md'),
+        fromHash: canonicalSpecHash(entryDisplayPath(entry)),
+      });
     } else {
       const fileName = `${parsed.frontmatter.id}-${slug}.md`;
       const filePath = path.join(specsDir, fileName);
@@ -699,7 +703,11 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
               .map((p) => fs.readFileSync(p, 'utf-8'))
           : [parsed.source ?? ''];
       fs.writeFileSync(filePath, restoreLineEndings(writeSpec(parsed), sources), 'utf-8');
-      sidecarMoves.push({ from: entryDisplayPath(entry), to: filePath });
+      sidecarMoves.push({
+        from: entryDisplayPath(entry),
+        to: filePath,
+        fromHash: canonicalSpecHash(entryDisplayPath(entry)),
+      });
     }
 
     toDelete.push(entry);
@@ -726,9 +734,37 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
     const toRel = specRelPath(rootDir, mv.to);
     const rec = readRecord(rootDir, fromRel);
     if (!rec) continue;
+    // The gzip baseline snapshot is keyed by the spec path too. Copy it to the new key
+    // BEFORE the record moves and drop the old one only after, so a failure at any step
+    // leaves the snapshot (and the sidecar) in place.
+    const snapDir = path.join(rootDir, '.minspec', 'snapshots');
+    const oldSnap = path.join(snapDir, `${refKey(fromRel)}.json.gz`);
+    const newSnap = path.join(snapDir, `${refKey(toRel)}.json.gz`);
+    let snapCopied = false;
+    try {
+      if (fs.existsSync(oldSnap)) {
+        fs.copyFileSync(oldSnap, newSnap);
+        snapCopied = true;
+      }
+    } catch {
+      // Best effort: the old snapshot stays; the record's baseline then reads unrecoverable, visibly.
+    }
     writeRecord(rootDir, { ...rec, specPath: toRel });
     removeRecord(rootDir, fromRel);
-    if (resolveStatus(rec, canonicalSpecHash(mv.to)) !== 'approved') stale++;
+    if (snapCopied) {
+      try {
+        fs.unlinkSync(oldSnap);
+      } catch {
+        // Leaving the old copy behind loses nothing.
+      }
+    }
+    // Count only specs this migration made stale; one already stale did not change.
+    if (
+      resolveStatus(rec, mv.fromHash) === 'approved' &&
+      resolveStatus(rec, canonicalSpecHash(mv.to)) !== 'approved'
+    ) {
+      stale++;
+    }
   }
 
   if (stale > 0) {
@@ -736,7 +772,7 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
       success: true,
       migrated,
       target,
-      warning: `${stale} approval${stale === 1 ? '' : 's'} moved with the spec but now read stale (the ${target} representation hashes differently) — re-run "MinSpec: Approve Spec" after review.`,
+      warning: `${stale} approval${stale === 1 ? '' : 's'} moved with the spec but now read stale (the ${target} representation hashes differently) — re-run "MinSpec: Approve Spec" after review. A re-review diff may have no baseline for these records, because the new path has no git history holding the approved content.`,
     };
   }
   return { success: true, migrated, target };
