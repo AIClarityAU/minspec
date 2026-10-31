@@ -462,6 +462,7 @@ describe('drain-inbox.sh — pause marker + signal cleanup (#1187)', () => {
     expect(await waitFor(() => !alive(pid))).toBe(true);
     expect(fs.existsSync(s.lock), 'lock removed').toBe(false);
     expect(logOf(s)).toMatch(/stopping on SIGTERM/);
+    expect(logOf(s)).not.toMatch(/not releasing/); // graceful stop releases once, no phantom holder
   }, 40000);
 
   // #2241: the exit trap / SIGTERM handler removed the lock unconditionally, so a loop that

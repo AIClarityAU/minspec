@@ -3754,6 +3754,7 @@ _drain_on_signal() {
   # shellcheck disable=SC2086
   [[ -z "$kids" ]] || kill -TERM $kids 2>/dev/null || true
   lock_release
+  trap - EXIT  # the lock is already handled; a second lock_release would log a phantom holder
   exit "$2"
 }
 
