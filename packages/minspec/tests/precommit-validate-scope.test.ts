@@ -158,7 +158,14 @@ describe('pre-commit validate gate: pre-existing vs introduced (#1471)', () => {
       git(dir, 'add', '.');
       const { ok, out } = tryCommit(dir, 'docs: while the validator is broken');
       expect(ok, `a crashed validator must not read as "nothing introduced":\n${out}`).toBe(false);
-      expect(out).toMatch(/exited non-zero without reporting a result/);
+      expect(out).toMatch(/COULD NOT RUN/);
+      expect(out).toMatch(/npm install/);
+      // Review: a commit-introduced crash reaches this branch too, so never claim
+      // there is no content problem.
+      expect(out).not.toMatch(/no content problem/);
+      // #1416: nothing was validated, so no content blame and no bypass offer.
+      expect(out).not.toMatch(/DR_INDEX_GATE_OFF/);
+      expect(out).not.toMatch(/INTRODUCES/);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
