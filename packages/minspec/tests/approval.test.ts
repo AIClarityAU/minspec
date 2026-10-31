@@ -275,4 +275,28 @@ describe('approveSpec — idempotent re-approval (#1371)', () => {
     const again = approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com', () => new Date('2026-06-01T00:00:00Z'));
     expect(again.baselineBlob).not.toBe('');
   });
+
+  it('a record whose baseline blob is unrecoverable is re-minted by re-approving unchanged content', () => {
+    approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com', () => new Date('2026-05-30T00:00:00Z'));
+    const rel = specRelPath(tmp, specPath);
+    const sidecar = path.join(tmp, '.minspec', 'approvals', ...rel.split('/')) + '.json';
+    const rec = JSON.parse(fs.readFileSync(sidecar, 'utf-8'));
+    rec.baselineBlob = '0'.repeat(40); // well-formed SHA, no such object
+    fs.writeFileSync(sidecar, JSON.stringify(rec));
+    expect(classifyBaseline(tmp, readRecord(tmp, rel)!)).toBe('unrecoverable');
+    const again = approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com', () => new Date('2026-06-01T00:00:00Z'));
+    expect(again.baselineBlob).not.toBe('0'.repeat(40));
+    expect(classifyBaseline(tmp, again)).toBe('recovered');
+  });
+
+  it('a migrated record is upgraded by a human re-approval of unchanged content', () => {
+    approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com', () => new Date('2026-05-30T00:00:00Z'));
+    const sidecar = path.join(tmp, '.minspec', 'approvals', ...specRelPath(tmp, specPath).split('/')) + '.json';
+    const rec = JSON.parse(fs.readFileSync(sidecar, 'utf-8'));
+    rec.migrated = true;
+    fs.writeFileSync(sidecar, JSON.stringify(rec));
+    const again = approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com', () => new Date('2026-06-01T00:00:00Z'));
+    expect(again.migrated).toBe(false);
+    expect(again.approvedAt).toBe('2026-06-01T00:00:00.000Z');
+  });
 });
