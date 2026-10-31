@@ -335,6 +335,39 @@ describe('spec-gate.sh', () => {
     expect(out).toBe('PASS');
   });
 
+  it('#1406: sibling docs disagreeing on approval — verdict stable across input order, collision reported', () => {
+    const script = [
+      'import sys, json, importlib.util, itertools',
+      `spec = importlib.util.spec_from_file_location('spec_gate', ${JSON.stringify(HOOK.replace(/\.sh$/, '.py'))})`,
+      'mod = importlib.util.module_from_spec(spec)',
+      'spec.loader.exec_module(mod)',
+      'E = lambda r, a: {"spec_rel": r, "approval": a, "rec": ({"specHash": "x"} if a == "approved" else None), "files": set()}',
+      'es = [E("specs/S/requirements.md", "approved"), E("specs/S/tasks.md", "unapproved"), E("specs/S/design.md", "unapproved")]',
+      'outs = set()',
+      'for perm in itertools.permutations(es):',
+      '    outs.add((mod.select_verdict(list(perm))[0], mod.collision_note(list(perm))))',
+      'assert len(outs) == 1, outs',
+      'v, note = outs.pop()',
+      'assert v == "approved", v',
+      'assert note and "tasks.md=unapproved" in note and "requirements.md=approved" in note, note',
+      'assert mod.collision_note([E("specs/S/a.md", "approved"), E("specs/S/b.md", "approved")]) is None',
+      'print("PASS")',
+    ].join('\n');
+    expect(execFileSync('python3', ['-c', script], { encoding: 'utf-8' }).trim()).toBe('PASS');
+  });
+
+  it('#1406: end-to-end — requirements.md approved, tasks.md not: allow, but the collision is surfaced', () => {
+    const reqs = writeSpecAt('specs/SPEC-1406-c/requirements.md', 'SPEC-1406', 'T4', 'implementing', ['src/app.ts']);
+    approve(reqs, 'T4');
+    writeSpecAt('specs/SPEC-1406-c/tasks.md', 'SPEC-1406', 'T4', 'implementing', ['src/app.ts']);
+    const r = runGate(editEnvelope('src/app.ts'));
+    expect(r.decision).toBe('allow');
+    expect(r.raw).toContain('collision');
+    expect(r.raw).toContain('tasks.md=unapproved');
+    // an unrelated file stays silent
+    expect(runGate(editEnvelope('src/other.ts')).raw).not.toContain('collision');
+  });
+
   it('a migrated:true sidecar ALLOWS in the WARN phase but surfaces a re-approve note', () => {
     // The WARN note is scoped like the block: it surfaces when the edited file is
     // in the migrated spec's owned (declared-impl) set. SPEC-007 declares src/app.ts.
