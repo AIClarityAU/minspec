@@ -323,11 +323,9 @@ Written down so no reader takes this control to be stronger than it is (the same
 
 ## Decisions needed (Clarify)
 
-Each of the 5 decisions below carries a pre-recorded selection, not an approval: an agent session
-recorded each option this document already recommended. No human chose them. Nothing here is
-ratified, and this note does not claim a DLG-001 (DR-108) delegated approval: no independent
-verdict or repeat-fix figure is cited. The frontmatter stays `status: specifying` and
-`clarify: pending` until the normal spec-approval gate records approval.
+All 5 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
 
 ### OQ-1 - What happens when the extractor itself crashes?
 
