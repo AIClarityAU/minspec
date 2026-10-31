@@ -323,7 +323,17 @@ Written down so no reader takes this control to be stronger than it is (the same
 
 ## Decisions needed (Clarify)
 
+All 5 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and
+engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted
+it. It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and
+that approval may overturn it.
+
 ### OQ-1 - What happens when the extractor itself crashes?
+
+**Recorded selection: Option (a),** pass through, and print a visible warning that the shell
+write check did not run, plus an audit line; the after-witness still runs.
 
 - **(a) (rec)** Pass through, and print a visible warning that the shell write check did
   not run, plus an audit line. The after-witness still runs, because the snapshot is
@@ -334,6 +344,9 @@ Written down so no reader takes this control to be stronger than it is (the same
   rejects, triggered by our own bug.
 
 ### OQ-2 - Should the after-witness restore a changed protected file?
+
+**Recorded selection: Option (a),** report only (FR-10), and tell the agent the exact revert
+command.
 
 - **(a) (rec)** Report only (FR-10), and tell the agent the exact revert command. **Cost:**
   the unreviewed change stays in the working tree until the agent or a human reverts it.
@@ -346,6 +359,9 @@ Written down so no reader takes this control to be stronger than it is (the same
 
 ### OQ-3 - Do opaque segments (FR-4) also get a "this may write" note *before* running?
 
+**Recorded selection: Option (a),** no; stay silent before the command, and let the
+after-witness decide from the content.
+
 - **(a) (rec)** No. Stay silent before the command, and let the after-witness decide from
   the content. **Cost:** no warning beforehand, and the agent learns only after the write.
 - (b) Yes. Add a non-blocking `permissionDecisionReason`-style note whenever an opaque
@@ -354,6 +370,9 @@ Written down so no reader takes this control to be stronger than it is (the same
   Agents learn to ignore it, which wears down the alerts that matter.
 
 ### OQ-4 - Is a commit-time owned-set check part of this spec?
+
+**Recorded selection: Option (a),** not in this spec; file it as its own issue, so it gets
+its own spec and its own `affects: [.githooks/pre-commit]` declaration.
 
 The issue's second option. `.githooks/pre-commit` could refuse a commit that stages a file
 in a blocking spec's owned set, reading paths from `git diff --cached --name-only`, with no
@@ -368,6 +387,9 @@ command parsing. That closes the "reported but committed anyway" gap OQ-2 (a) le
   hook resolves owned sets, and its bypass), and the scope this issue asked for grows.
 
 ### OQ-5 - Performance budget for the before-check on a non-fast-path Bash call
+
+**Recorded selection: Option (a),** Plan measures the p95 time of the existing Edit path on
+this repo and sets the Bash arm's budget at no more than that value plus 20%.
 
 The corpus scan (`glob specs/**/*.md` plus a hash per T3/T4 spec) runs on every Edit today,
 and would now also run on every write-shaped Bash call. No figure is measured yet.

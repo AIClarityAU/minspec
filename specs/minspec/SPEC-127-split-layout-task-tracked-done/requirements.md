@@ -242,7 +242,18 @@ scope-expansion ("extend to X" is a new work item, not a detection), it is named
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and
+engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted
+it. It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and
+that approval may overturn it.
+
 - **D1 — Where does the task-completion signal attach to `deriveStatus`?**
+
+  **Recorded selection: Option (A),** add a new parameter to `deriveStatus` carrying the
+  split-layout task-tally outcome, so `deriveStatus` is the one place `done` is decided.
+
   - **Option A — add a new parameter to `deriveStatus`** (e.g. a third fact, alongside
     `approvalState`/`explicitTerminal`, carrying the split-layout task-tally outcome; `undefined`
     for "not a split-layout spec / no fs read available", preserving today's behaviour for every
@@ -265,6 +276,10 @@ scope-expansion ("extend to X" is a new work item, not a detection), it is named
 
 - **D2 — Does the freeze-gate twin pair need its own change, or does this spec only need to
   prove it doesn't?**
+
+  **Recorded selection: Option (A),** add the regression test that proves the freeze gate is
+  unchanged (FR-6's AC) and otherwise leave both twins untouched.
+
   Context above shows `spec-gate.py`'s freeze check treats `done` and `implementing` identically
   (`intended not in ('implementing', 'done')`), so narrowing some specs from `done` to
   `implementing` (Decision D1's effect) cannot change which specs get frozen — only the label.
@@ -285,6 +300,10 @@ scope-expansion ("extend to X" is a new work item, not a detection), it is named
 
 - **D3 — Does FR-5's new validator WARN need a migration pass (DR-034 §5 shape), or is WARN-
   only sufficient from day one?**
+
+  **Recorded selection: Option (A),** ship the WARN with no migration pass, and let whichever
+  corpus specs it flags surface on the next `npm run validate` run.
+
   Unlike DR-034 §1-3 (which replaced ground truth and so needed a backfill script for 15
   existing records), this signal is purely additive — a WARN that did not exist before. No
   existing spec's literal `status:` or `phases:` changes as a side effect of turning the WARN
