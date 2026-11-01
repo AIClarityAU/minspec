@@ -572,10 +572,11 @@ by the lower tiers — the same known limit the spec-frontmatter gate carries (#
 ### Deferred-work gate
 
 A commit message that defers work — "follow-up", "out of scope", "held back", "separate
-PR", "deferred" — must say where the deferred work went. Any of a tracked reference
-(\`#123\`), a \`Follow-ups: none\` line, or a note that nothing was deferred satisfies it. The
-check reads only the message text, so it needs no tracker and no network; \`Follow-ups: none\`
-is a complete answer for a project that keeps no issues at all.
+PR", "deferred" — must say where the deferred work went. Any of a \`Follow-ups: #123\` trailer
+(a dedicated trailer line; comma-separate several), a \`Follow-ups: none\` line, or a note that
+nothing was deferred satisfies it. A bare \`#123\` mentioned in the subject or in prose does not
+count (#1918). The check reads only the message text, so it needs no tracker and no network;
+\`Follow-ups: none\` is a complete answer for a project that keeps no issues at all.
 
 Work named in prose and nowhere else is lost the moment the commit scrolls out of view. The
 gate costs one line and turns a vanishing intention into either a tracked item or an
