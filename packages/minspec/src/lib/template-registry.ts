@@ -1914,7 +1914,8 @@ def staged_content(root, rel):
     try:
         out = subprocess.run(
             ["git", "show", ":" + rel],
-            cwd=root, capture_output=True, text=True, check=True,
+            cwd=root, capture_output=True, text=True, encoding="utf-8-sig",
+            check=True,
         )
         return out.stdout
     except Exception as exc:
@@ -2153,7 +2154,9 @@ def main():
         )
         def reader(rel):
             try:
-                with open(os.path.join(root, rel), "r", encoding="utf-8") as fh:
+                # utf-8-sig drops one leading BOM so FM_RE (anchored on "---")
+                # still sees the frontmatter of a marked spec (#2477).
+                with open(os.path.join(root, rel), "r", encoding="utf-8-sig") as fh:
                     return fh.read()
             except Exception as exc:
                 return exc
