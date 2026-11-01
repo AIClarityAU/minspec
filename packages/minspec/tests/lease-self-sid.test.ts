@@ -16,6 +16,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 import { execFileSync } from 'child_process';
 
 const SCRIPT = path.resolve(__dirname, '../../../scripts/lib/issue-lease.sh');
@@ -69,5 +71,40 @@ describe('lease_self_sid (#2132)', () => {
     // and would never look like the fixed shape (`sid-<pid>-<starttime>`).
     const out = run('echo "$(lease_self_sid)"');
     expect(out).toMatch(/^sid-\d+-\d+$/);
+  });
+
+  it('suffix is /proc/PID/stat field 22 (process start ticks), not the procfs inode mtime (#3502)', () => {
+    // The procfs inode mtime is stamped on first access and re-minted after eviction,
+    // so it can move during a process's life. Field 22 is fixed. Compare against the
+    // independently-parsed field 22 of the same shell ($$ is the sourcing bash).
+    const out = run(
+      's="$(lease_self_sid)"; l="$(cat /proc/$$/stat)"; r="${l##*) }"; set -- $r; echo "$s|$$|${20}"'
+    );
+    const [sid, pid, ticks] = out.split('|');
+    expect(ticks).toMatch(/^\d+$/);
+    expect(sid).toBe(`sid-${pid}-${ticks}`);
+  });
+
+  it('is unaffected by a comm containing spaces and parens', () => {
+    // comm comes from the executable's file name, so run bash via a symlink named
+    // like a hostile comm; a naive split on spaces would mis-index field 22.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sid-comm-'));
+    try {
+      const link = path.join(dir, 'a) (b c');
+      fs.symlinkSync(execFileSync('which', ['bash'], { encoding: 'utf-8' }).trim(), link);
+      const cleanEnv = { ...process.env };
+      delete cleanEnv.MINSPEC_SESSION_ID;
+      delete cleanEnv.MINSPEC_LEASE_SID;
+      const out = execFileSync(
+        link,
+        ['-c', `source "${SCRIPT}"; l="$(cat /proc/$$/stat)"; r="\${l##*) }"; set -- $r; echo "$(lease_self_sid)|$$|\${20}|$l"`],
+        { encoding: 'utf-8', env: cleanEnv }
+      ).trim();
+      const [sid, pid, ticks, stat] = out.split('|');
+      expect(stat).toContain('(a) (b c)');
+      expect(sid).toBe(`sid-${pid}-${ticks}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
