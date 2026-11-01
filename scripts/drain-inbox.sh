@@ -102,6 +102,14 @@
 #                                    never lowers a cap and never moves a fixed one. A file
 #                                    that cannot be read or parsed, or whose `until` is more
 #                                    than 8 days off, is ignored and the line says so.
+#                                    The same file may also hold the weekly cap AT a figure
+#                                    (in81), for a reserve the ramp would otherwise spend in
+#                                    the last hours of the week:
+#                                        ceiling_7d=95
+#                                    Until `until` a ramped or boosted weekly cap is
+#                                    min(that cap, ceiling_7d); from it on, gone like the
+#                                    boost. It never raises a cap and never moves a fixed
+#                                    one. `until` and `ceiling_7d` alone is a valid file.
 #   MINSPEC_QUOTA_STALE_SEC=900    — ignore a reading older than this (fails CLOSED — defers).
 #   MINSPEC_QUOTA_BOOTSTRAP_ADMITS=3 — admits granted while NO reading has EVER existed,
 #                                    before the gate refuses outright (#1775 bootstrap
@@ -330,10 +338,11 @@ QUOTA_RAMP_FLOOR_7D="${MINSPEC_QUOTA_RAMP_FLOOR_7D:-60}"  # weekly ramp: never b
 QUOTA_RAMP_PER_DAY_7D="${MINSPEC_QUOTA_RAMP_PER_DAY_7D:-10}"  # weekly ramp: % held back per day left
 # The boost (in72): a raise with an end date, kept outside the working tree so it never
 # dirties the primary checkout and outlives a container restart. Loaded fresh at every
-# judgment by _quota_boost_load; _quota_cap applies it.
+# judgment by _quota_boost_load; _quota_cap applies it. The file's ceiling (in81) is the
+# opposite move with the same end date.
 QUOTA_BOOST_FILE="${MINSPEC_QUOTA_BOOST_FILE:-${PREF_ROOT}/.git/minspec/drain-quota-boost}"
 QUOTA_BOOST_MAX_AHEAD=691200   # 8 days: a weekly window and a day of slack, no further
-QBOOST_5H=""; QBOOST_7D=""; QBOOST_UNTIL=""; QBOOST_NOTE=""
+QBOOST_5H=""; QBOOST_7D=""; QBOOST_CEIL_7D=""; QBOOST_UNTIL=""; QBOOST_LEFT=0; QBOOST_NOTE=""
 QUOTA_STALE_SEC="${MINSPEC_QUOTA_STALE_SEC:-900}"    # older reading proves nothing
 QUOTA_SLEEP_MAX="${MINSPEC_QUOTA_SLEEP_MAX:-21600}"  # 6 h clamp vs a corrupt epoch
 QUOTA_SLEEP_MIN="${MINSPEC_QUOTA_SLEEP_MIN:-60}"     # never spin
@@ -404,12 +413,13 @@ QUOTA_CONTRADICTED_STREAK=0
 # long a hold will last, so they set these instead of printing, which would cost a fork
 # per ask.
 QCAP_TENTHS=0      # the cap in force, in tenths of a percent
-QCAP_MODE=""       # fixed | ramped
+QCAP_MODE=""       # fixed | ramped | boosted | ceiling
 QWAIT_SECS=0       # seconds until that cap would admit the usage asked about
-QWAIT_WHY=""       # ramp (it admits before the reset) | reset (it does not)
+QWAIT_WHY=""       # ramp (it admits before the reset) | ceiling (it admits when the boost
+                   # file's ceiling ends, before the reset) | reset (it does not)
 # What the last quota_gate judged, per window, for quota_cap_line (in41). Empty means
 # that window was not judged: the gate held before reaching it, or it was not reported.
-QG_USED7=""; QG_CAP7=""; QG_MODE7=""   # weekly: used %, cap in tenths, fixed|ramped
+QG_USED7=""; QG_CAP7=""; QG_MODE7=""   # weekly: used %, cap in tenths, QCAP_MODE
 QG_USED5=""; QG_CAP5=""; QG_MODE5=""   # 5h: the same, or QG_USED5=reset when it has turned over
 
 # Dispatch fan-out (#1208). Default 1 = the historical strictly-sequential walk,
@@ -3023,7 +3033,7 @@ _quota_cap_config_problem() {
 }
 
 # _quota_cap <5h|7d> <seconds to that window's reset>: the cap in force for one window.
-# Sets QCAP_TENTHS (tenths of a percent) and QCAP_MODE (fixed|ramped). Prints nothing
+# Sets QCAP_TENTHS (tenths of a percent) and QCAP_MODE (as above it). Prints nothing
 # and forks nothing. Only call it once _quota_cap_config_problem has found no problem:
 # it does arithmetic on the knobs.
 #
@@ -3044,10 +3054,16 @@ _quota_cap_config_problem() {
 #
 # BOOSTED (in72). While a boost is loaded (_quota_boost_load) a RAMPED cap is raised to
 # the boost's figure for that window when the boost is higher; QCAP_MODE is then
-# `boosted` and QCAP_BASE_TENTHS keeps what the ramp alone gives, for the log. It is only
-# ever a raise, so _quota_admit_wait stays exact: the cap is still non-decreasing toward
-# the reset, and a usage held under a boost is at or above the boost's figure, where the
-# answer is the ramp's own. A fixed cap is never moved: whoever fixed it said so.
+# `boosted` and QCAP_BASE_TENTHS keeps what the ramp alone gives, for the log. A raise
+# leaves the cap non-decreasing toward the reset, and a usage held under a boost is at or
+# above the boost's figure, where the answer is the ramp's own. A fixed cap is never moved:
+# whoever fixed it said so.
+#
+# CEILING (in81). While the file's ceiling_7d is loaded, a ramped or boosted weekly cap
+# above it comes down to it; QCAP_MODE is then `ceiling` and QCAP_UNCEILED_TENTHS keeps what
+# it came down from, for the log. This answers for one moment and assumes the file's `until`
+# has not passed; the cap across time is NOT monotonic with a ceiling in force, because it
+# jumps back up to the ramp at `until`. _quota_admit_wait is what accounts for that.
 _quota_cap() {
   local boost="$QBOOST_5H"
   [[ "$1" == "7d" ]] && boost="$QBOOST_7D"
@@ -3056,23 +3072,33 @@ _quota_cap() {
   if [[ -n "$boost" && "$QCAP_MODE" == "ramped" ]] && (( boost * 10 > QCAP_TENTHS )); then
     QCAP_TENTHS=$(( boost * 10 )); QCAP_MODE="boosted"
   fi
+  QCAP_UNCEILED_TENTHS="$QCAP_TENTHS"
+  if [[ "$1" == "7d" && -n "$QBOOST_CEIL_7D" && "$QCAP_MODE" != "fixed" ]] && (( QBOOST_CEIL_7D * 10 < QCAP_TENTHS )); then
+    QCAP_TENTHS=$(( QBOOST_CEIL_7D * 10 )); QCAP_MODE="ceiling"
+  fi
   return 0
 }
 
-# _quota_boost_load: read QUOTA_BOOST_FILE into QBOOST_5H / QBOOST_7D (whole percents, or
-# empty for no boost on that window), QBOOST_UNTIL (its ISO end) and QBOOST_NOTE (why a
-# file that exists is not in force, empty otherwise). Call it once per judgment, before
-# any _quota_cap: it forks `date`, which _quota_cap must not.
+# _quota_boost_load: read QUOTA_BOOST_FILE into QBOOST_5H / QBOOST_7D / QBOOST_CEIL_7D (whole
+# percents, or empty when that key is not in force), QBOOST_UNTIL (its ISO end), QBOOST_LEFT
+# (seconds to that end, as of this load) and QBOOST_NOTE (why a file that exists is not in
+# force, empty otherwise). Call it once per judgment, before any _quota_cap: it forks
+# `date`, which _quota_cap must not.
 #
 # EVERY FAULT MEANS THE NORMAL CAPS. A boost raises a cap, so the cautious answer to a
 # boost nobody can read is no boost, never a guess at one. That is said, not swallowed
 # (invariant 2): QBOOST_NOTE reaches stderr here and the end of the --quota-cap line.
 # The end date is mandatory and bounded, so a boost can never become a raise that
 # somebody has to remember to take away.
+#
+# A ceiling restricts where a boost raises, and it takes the same rule on purpose: one
+# reading of the file, not one per key, so a file half understood never half applies. An
+# empty `ceiling_7d=` is a fault rather than an unset key: whoever wrote the key meant to
+# hold something back, and treating it as absent would apply the raise beside it alone.
 _quota_boost_load() {
-  QBOOST_5H=""; QBOOST_7D=""; QBOOST_UNTIL=""; QBOOST_NOTE=""
+  QBOOST_5H=""; QBOOST_7D=""; QBOOST_CEIL_7D=""; QBOOST_UNTIL=""; QBOOST_LEFT=0; QBOOST_NOTE=""
   [[ -e "$QUOTA_BOOST_FILE" || -L "$QUOTA_BOOST_FILE" ]] || return 0
-  local line key val until="" c5="" c7="" end now bad=""
+  local line key val until="" c5="" c7="" ceil="" ceil_set=0 end now bad=""
   if [[ ! -f "$QUOTA_BOOST_FILE" || ! -r "$QUOTA_BOOST_FILE" ]]; then
     bad="the file cannot be read"
   else
@@ -3085,17 +3111,20 @@ _quota_boost_load() {
         until) until="$val" ;;
         cap_5h) c5="$val" ;;
         cap_7d) c7="$val" ;;
+        ceiling_7d) ceil="$val"; ceil_set=1 ;;
         *) bad=$(printf 'unknown key %q' "$key"); break ;;
       esac
     done <"$QUOTA_BOOST_FILE" || bad="the file cannot be read"
   fi
   if [[ -z "$bad" ]]; then
-    if [[ -z "$c5" && -z "$c7" ]]; then
-      bad="it sets neither cap_5h nor cap_7d"
+    if [[ -z "$c5" && -z "$c7" ]] && (( ! ceil_set )); then
+      bad="it sets neither cap_5h nor cap_7d nor ceiling_7d"
     elif [[ -n "$c5" ]] && { [[ ! "$c5" =~ ^[0-9]{1,3}$ ]] || (( 10#$c5 > 100 )); }; then
       bad=$(printf 'cap_5h=%q is not a whole percent from 0 to 100' "$c5")
     elif [[ -n "$c7" ]] && { [[ ! "$c7" =~ ^[0-9]{1,3}$ ]] || (( 10#$c7 > 100 )); }; then
       bad=$(printf 'cap_7d=%q is not a whole percent from 0 to 100' "$c7")
+    elif (( ceil_set )) && { [[ ! "$ceil" =~ ^[0-9]{1,3}$ ]] || (( 10#$ceil > 100 )); }; then
+      bad=$(printf 'ceiling_7d=%q is not a whole percent from 0 to 100' "$ceil")
     elif [[ ! "$until" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] \
         || ! end=$(date -u -d "$until" +%s 2>/dev/null) || [[ ! "$end" =~ ^[0-9]+$ ]]; then
       bad=$(printf 'until=%q is not a UTC time like 2026-10-29T17:00:00Z' "$until")
@@ -3116,7 +3145,9 @@ _quota_boost_load() {
   fi
   [[ -n "$c5" ]] && QBOOST_5H=$(( 10#$c5 ))
   [[ -n "$c7" ]] && QBOOST_7D=$(( 10#$c7 ))
+  (( ceil_set )) && QBOOST_CEIL_7D=$(( 10#$ceil ))
   QBOOST_UNTIL="$until"
+  QBOOST_LEFT=$(( end - now ))
   return 0
 }
 
@@ -3165,14 +3196,45 @@ _quota_defers() {
 # that window's cap would admit that usage, were usage to stand still. Sets QWAIT_SECS,
 # and QWAIT_WHY to `ramp` (the ramp gets there before the reset) or `reset` (nothing
 # admits before the reset: a fixed cap does not move, and no ramp admits a spent
-# window). Ask only about a usage the cap is holding now.
+# window), or `ceiling` (the boost file's ceiling_7d is what holds it, and the moment it
+# ends is the first that admits). Ask only about a usage the cap is holding now.
+#
+# A CEILING BREAKS THE HALVING (in81), because from its `until` on the cap jumps from the
+# ceiling back up to the ramp alone. For a usage below the ceiling that changes nothing: the
+# ceiling can never hold it, so what is holding it rises steadily, and the halving below is
+# right. A usage at or above the ceiling is not admitted by anything before `until`, however
+# high the ramp is, so the halving would either call it the reset or name a ramp time that
+# will not admit. Its answer is the later of `until` and the moment the ramp ALONE (the boost
+# ends at `until` too) passes that usage, and the reset if either lies at or past it.
+# A fixed cap ignores the file, so it takes the ordinary path, which answers the reset.
+_quota_admit_wait() {
+  local win="$1" used="$2" left="$3" until_left
+  if [[ "$win" == "7d" && -n "$QBOOST_CEIL_7D" ]] && (( used >= QBOOST_CEIL_7D )); then
+    _quota_cap 7d "$left"
+    if [[ "$QCAP_MODE" != "fixed" ]]; then
+      until_left="$QBOOST_LEFT"
+      # Dynamic scope: _quota_cap, called below this, sees neither key.
+      local QBOOST_7D="" QBOOST_CEIL_7D=""
+      _quota_admit_wait_monotonic "$win" "$used" "$left"
+      if [[ "$QWAIT_WHY" == "reset" ]] || (( until_left >= left )); then
+        QWAIT_SECS="$left"; QWAIT_WHY="reset"
+      elif (( until_left >= QWAIT_SECS )); then
+        QWAIT_SECS="$until_left"; QWAIT_WHY="ceiling"
+      fi
+      return 0
+    fi
+  fi
+  _quota_admit_wait_monotonic "$win" "$used" "$left"
+}
+
+# _quota_admit_wait_monotonic: _quota_admit_wait for a cap that only rises toward the reset.
 #
 # It ASKS _quota_cap about later moments instead of inverting the ramp with a formula
 # of its own. Two formulas for one rule would have to be kept in step by hand, and the
 # one that drifted would be this one, the one nobody reads. The cap never falls as the
 # reset nears, so the first moment it admits is found by halving: about twenty asks for
 # a week of seconds, none of which forks.
-_quota_admit_wait() {
+_quota_admit_wait_monotonic() {
   local win="$1" used="$2" left="$3" lo=1 hi="$3" mid
   QWAIT_SECS="$left"; QWAIT_WHY="reset"
   # Still held with one second to go: only the reset itself will admit this.
@@ -3219,6 +3281,10 @@ _quota_cap_text() {
     printf '%d.%d%% boosted until %s by %s, the ramp alone %d.%d%%' \
       "$(( QCAP_TENTHS / 10 ))" "$(( QCAP_TENTHS % 10 ))" "$QBOOST_UNTIL" "$QUOTA_BOOST_FILE" \
       "$(( QCAP_BASE_TENTHS / 10 ))" "$(( QCAP_BASE_TENTHS % 10 ))"
+  elif [[ "$QCAP_MODE" == "ceiling" ]]; then
+    printf '%d.%d%% ceiling until %s by %s, the ramp and boost without it %d.%d%%' \
+      "$(( QCAP_TENTHS / 10 ))" "$(( QCAP_TENTHS % 10 ))" "$QBOOST_UNTIL" "$QUOTA_BOOST_FILE" \
+      "$(( QCAP_UNCEILED_TENTHS / 10 ))" "$(( QCAP_UNCEILED_TENTHS % 10 ))"
   elif (( left <= 0 )); then
     printf '%d.%d%% ramped: no reset time in the reading, so the floor' "$(( QCAP_TENTHS / 10 ))" "$(( QCAP_TENTHS % 10 ))"
   else
@@ -3284,6 +3350,7 @@ quota_gate() {
       if (( left > 0 )); then
         _quota_admit_wait 7d "$wp" "$left"
         [[ "$QWAIT_WHY" == "ramp" ]] && next="; at this usage the ramp next admits in $(_quota_span "$QWAIT_SECS")"
+        [[ "$QWAIT_WHY" == "ceiling" ]] && next="; at this usage the ceiling_7d holds until ${QBOOST_UNTIL}, when the ramp admits, in $(_quota_span "$QWAIT_SECS")"
         echo "defer:${QWAIT_SECS} (7d window ${wp}% used — the WEEKLY ceiling, resets in $(( (left + 3599) / 3600 )) h; cap ${cap7}${next})"
       else
         # No usable weekly reset: this is the "no deadline" case _quota_sleep_plan
@@ -3302,6 +3369,9 @@ quota_gate() {
     # restrict the drain, 0 to pause it, and an admit that quietly skipped it would
     # look exactly like an admit that honoured it (#2586).
     cap7="; this reading reports NO weekly window, so the weekly cap of $(( 10#$QUOTA_ADMIT_PCT_7D ))% fixed by MINSPEC_QUOTA_ADMIT_PCT_7D was not applied"
+  elif [[ -n "$QBOOST_CEIL_7D" ]]; then
+    # The same, for a ceiling: it restricts the drain just as a fixed cap does.
+    cap7="; this reading reports NO weekly window, so the ceiling_7d of ${QBOOST_CEIL_7D}% from ${QUOTA_BOOST_FILE} was not applied"
   fi
   if (( r <= now )); then
     QG_USED5="reset"
@@ -3327,6 +3397,10 @@ quota_gate() {
 #   open 7d 89% vs 92.4% ramped; 5h 29% vs 77.1% ramped | <quota_gate's own verdict>
 #   closed 7d 95% vs 92.4% ramped; 5h not judged | defer:...
 #   closed unknown | defer:stale (...)
+#
+# The word after each cap is QCAP_MODE, so `boosted` or `ceiling` as well (in72, in81).
+# Readers branch on the first word only: both copies of drain_cap (cos-runner-loop.sh and
+# cos.py) test `open ` and `closed ` and carry the rest as text.
 #
 # Exit 0 open, 42 closed, exactly as quota_gate. It IS quota_gate, so there is one cap
 # and one comparison: anything outside this script that asks "may work start?" (the
@@ -3372,7 +3446,8 @@ quota_cap_line() {
 
 # _quota_sleep_plan: how long to wait after a hold, and what set that length. Prints
 # "<secs> <why>": `reset` (to the published reset), `ramp` (to the moment a ramped cap
-# would next admit the usage as read), `fallback` (QUOTA_BACKOFF: the reading offers
+# would next admit the usage as read), `ceiling` (to the moment the boost file's ceiling
+# ends, when the ramp admits it), `fallback` (QUOTA_BACKOFF: the reading offers
 # no usable deadline) or `clamp` (any of those, cut short at QUOTA_SLEEP_MAX). Clamped
 # both ways, so a corrupt epoch can neither spin the loop nor park it for a week.
 #
@@ -3686,6 +3761,8 @@ quota_backoff_sleep() {
   case "$why" in
     ramp)
       echo "[drain] quota cap holding - sleeping ${secs}s, until the ramped cap would next admit at this usage, not on to the reset." ;;
+    ceiling)
+      echo "[drain] quota ceiling holding - sleeping ${secs}s, until the ceiling_7d in ${QUOTA_BOOST_FILE} ends and the ramp admits at this usage." ;;
     fallback)
       echo "[drain] quota window exhausted — sleeping ${secs}s, the fixed backoff: no deadline could be taken from the reading (it is missing, stale, or carries no usable reset time)." ;;
     clamp)

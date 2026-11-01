@@ -16,6 +16,7 @@
  *       pause somebody set).
  *   B4  while in force, it admits what the ramp holds and says it is a boost.
  *   B5  a boost with no end in sight (more than 8 days off) is refused.
+ * The same file's `ceiling_7d` (in81) has its own block at the end.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
@@ -215,5 +216,356 @@ describe('in72 B5: a boost must end soon', () => {
     write(HELD);
     boost(`until=${iso(nowSec() + 7 * DAY)}\ncap_7d=100\ncap_5h=100\n`);
     expect(cap().code).toBe(0);
+  });
+});
+
+/**
+ * T0 (in81) - a boost file can also hold the weekly cap AT a figure.
+ *
+ * THE ASK. The founder, 2026-11-02: "burn up the remaining quota now, up to 95%, leaving the
+ * last 5% for host-side work." A boost only raises, and the weekly ramp passes 95 twelve
+ * hours before the reset, so nothing could keep that 5%. `ceiling_7d` can, until `until`.
+ *
+ * Fixtures vary time left and usage, because the cap stops being monotonic toward the reset
+ * here, and that is where a sleep answer would go wrong.
+ */
+// The gate has always called the weekly window "the WEEKLY ceiling", so a bare /ceiling/
+// would match every weekly hold. These are the words only the boost file's key produces.
+const NAMES_FILE_CEILING = /ceiling_7d|% ceiling|ramp and boost without it/;
+
+describe('in81 C1: the ceiling beats the ramp', () => {
+  // Ramp figures: 100 - 10 x days left. 7.2 h left is 97.0, 3 h is 98.7, 11 h is 95.4.
+  it.each([
+    { left: 7.2, ramp: '97.0' },
+    { left: 3, ramp: '98.7' },
+    { left: 11, ramp: '95.4' },
+  ])('with $left h left the ramp says $ramp: holds at 95 and 96 used, admits at 94', ({ left, ramp }) => {
+    const until = iso(nowSec() + left * HOUR);
+    boost(`until=${until}\nceiling_7d=95\n`);
+
+    write({ pct: 10, resetIn: 4 * HOUR, weekPct: 94, weekResetIn: left * HOUR });
+    const open = cap();
+    expect(open.code, open.out).toBe(0);
+    expect(open.out).toMatch(/^open 7d 94% vs 95\.0% ceiling; 5h 10% vs /);
+    expect(open.out).toContain(`95.0% ceiling until ${until} by ${boostFile}`);
+    expect(open.out).toMatch(new RegExp(`the ramp and boost without it ${ramp.replace('.', '\\.')}%`));
+
+    for (const used of [95, 96]) {
+      write({ pct: 10, resetIn: 4 * HOUR, weekPct: used, weekResetIn: left * HOUR });
+      const held = cap();
+      expect(held.code, held.out).toBe(42);
+      expect(held.out).toMatch(new RegExp(`^closed 7d ${used}% vs 95\\.0% ceiling; 5h not judged \\|`));
+      expect(gate().code).toBe(42);
+    }
+  });
+
+  it('a ceiling above the ramp changes nothing, and the line does not name it', () => {
+    write(HELD); // the ramp is 85.4
+    boost(`until=${iso(nowSec() + HOUR)}\nceiling_7d=95\n`);
+    const r = cap();
+    expect(r.code, r.out).toBe(42);
+    expect(r.out).toMatch(RAMP_LINE);
+    expect(r.out).not.toMatch(NAMES_FILE_CEILING);
+  });
+
+  it('a ceiling equal to the ramp is not what decided', () => {
+    // 24 h left is a ramp of exactly 90.0.
+    write({ pct: 10, resetIn: 4 * HOUR, weekPct: 50, weekResetIn: 24 * HOUR });
+    boost(`until=${iso(nowSec() + HOUR)}\nceiling_7d=90\n`);
+    const r = cap();
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toMatch(/^open 7d 50% vs (89\.9|90\.0)% ramped;/);
+  });
+
+  it('a ceiling below the ramp lowers it, however far off the reset is', () => {
+    write({ pct: 10, resetIn: 4 * HOUR, weekPct: 82, weekResetIn: 35 * HOUR }); // ramp 85.4
+    boost(`until=${iso(nowSec() + HOUR)}\nceiling_7d=80\n`);
+    const r = cap();
+    expect(r.code, r.out).toBe(42);
+    expect(r.out).toMatch(/^closed 7d 82% vs 80\.0% ceiling; 5h not judged \|/);
+  });
+
+  it('ceiling_7d=0 is a cap like any other: it holds 0% used', () => {
+    write({ pct: 10, resetIn: 4 * HOUR, weekPct: 0, weekResetIn: 35 * HOUR });
+    boost(`until=${iso(nowSec() + HOUR)}\nceiling_7d=0\n`);
+    const r = cap();
+    expect(r.code, r.out).toBe(42);
+    expect(r.out).toMatch(/^closed 7d 0% vs 0\.0% ceiling;/);
+  });
+
+  it('only the weekly window: the 5h cap stays on its ramp', () => {
+    write({ pct: 90, resetIn: 4 * HOUR, weekPct: 10, weekResetIn: 3 * HOUR });
+    boost(`until=${iso(nowSec() + HOUR)}\nceiling_7d=50\n`);
+    const r = cap();
+    expect(r.code, r.out).toBe(42);
+    expect(r.out).toMatch(/^closed 7d 10% vs 50\.0% ceiling; 5h 90% vs 68\.0% ramped \|/);
+  });
+
+  it('quota-health names the ceiling as the cap in force', () => {
+    write({ pct: 10, resetIn: 4 * HOUR, weekPct: 50, weekResetIn: 3 * HOUR });
+    boost(`until=${iso(nowSec() + HOUR)}\nceiling_7d=95\n`);
+    expect(run(['--quota-health']).out).toMatch(/; 7d 95\.0% ceiling until /);
+  });
+
+  it('a reading with no weekly window says the ceiling was not applied', () => {
+    write({ pct: 10, resetIn: 4 * HOUR });
+    boost(`until=${iso(nowSec() + HOUR)}\nceiling_7d=95\n`);
+    const r = cap();
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toMatch(/reports NO weekly window, so the ceiling_7d of 95% .* was not applied/);
+  });
+});
+
+describe('in81 C2: cap_7d and ceiling_7d together, the file the founder asked for', () => {
+  const file = (until: string) => `until=${until}\ncap_7d=95\nceiling_7d=95\ncap_5h=100\n`;
+
+  it('days from the reset the boost lifts the cap to 95, and it stays a boost', () => {
+    const t = nowSec();
+    boost(file(iso(t + 3 * DAY)));
+    write({ pct: 10, resetIn: 4 * HOUR, weekPct: 94, weekResetIn: 3 * DAY }); // ramp 70
+    const open = cap();
+    expect(open.code, open.out).toBe(0);
+    expect(open.out).toMatch(/^open 7d 94% vs 95\.0% boosted;/);
+    write({ pct: 10, resetIn: 4 * HOUR, weekPct: 95, weekResetIn: 3 * DAY });
+    const held = cap();
+    expect(held.code, held.out).toBe(42);
+    expect(held.out).toMatch(/^closed 7d 95% vs 95\.0% boosted;/);
+  });
+
+  it('in the last 12 hours, where the ramp passes 95, the ceiling keeps it at 95', () => {
+    const t = nowSec();
+    boost(file(iso(t + 7 * HOUR)));
+    write({ pct: 10, resetIn: 4 * HOUR, weekPct: 94, weekResetIn: 7 * HOUR });
+    expect(cap().out).toMatch(/^open 7d 94% vs 95\.0% ceiling;/);
+    write({ pct: 10, resetIn: 4 * HOUR, weekPct: 95, weekResetIn: 7 * HOUR });
+    const held = cap();
+    expect(held.code, held.out).toBe(42);
+    expect(held.out).toMatch(/^closed 7d 95% vs 95\.0% ceiling;/);
+  });
+
+  it('a ceiling under the boost wins', () => {
+    boost(`until=${iso(nowSec() + 3 * DAY)}\ncap_7d=100\nceiling_7d=95\n`);
+    write({ pct: 10, resetIn: 4 * HOUR, weekPct: 95, weekResetIn: 3 * DAY });
+    const r = cap();
+    expect(r.code, r.out).toBe(42);
+    expect(r.out).toMatch(/^closed 7d 95% vs 95\.0% ceiling;/);
+    expect(r.out).toContain('the ramp and boost without it 100.0%');
+  });
+
+  it('a ceiling over the boost leaves the boost in force', () => {
+    boost(`until=${iso(nowSec() + 3 * DAY)}\ncap_7d=90\nceiling_7d=95\n`);
+    write({ pct: 10, resetIn: 4 * HOUR, weekPct: 89, weekResetIn: 3 * DAY });
+    expect(cap().out).toMatch(/^open 7d 89% vs 90\.0% boosted;/);
+  });
+});
+
+describe('in81 C3: the ceiling ends by itself', () => {
+  it('the same file, one second past its until, gives the ramp back', () => {
+    write({ pct: 10, resetIn: 4 * HOUR, weekPct: 95, weekResetIn: 7.2 * HOUR }); // ramp 97
+    boost(`until=${iso(nowSec() + HOUR)}\nceiling_7d=95\n`);
+    expect(cap().code).toBe(42);
+    boost(`until=${iso(nowSec() - 1)}\nceiling_7d=95\n`);
+    const off = cap();
+    expect(off.code, off.out).toBe(0);
+    expect(off.out).toMatch(/^open 7d 95% vs 97\.0% ramped;/);
+    expect(off.out).not.toMatch(/IGNORED/);
+    expect(off.out).not.toMatch(NAMES_FILE_CEILING);
+    expect(gate().code).toBe(0);
+  });
+});
+
+describe('in81 C4: a fixed cap is never moved', () => {
+  it('a fixed cap above the ceiling stays, and the line does not name the ceiling', () => {
+    write({ pct: 10, resetIn: 4 * HOUR, weekPct: 96, weekResetIn: 7 * HOUR });
+    boost(`until=${iso(nowSec() + HOUR)}\nceiling_7d=95\n`);
+    const r = cap({ MINSPEC_QUOTA_ADMIT_PCT_7D: '98' });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toMatch(/^open 7d 96% vs 98\.0% fixed;/);
+    expect(r.out).not.toMatch(NAMES_FILE_CEILING);
+  });
+
+  it('held by a fixed cap, the wait is the reset: until does not release a fixed cap', () => {
+    const t = nowSec();
+    fs.writeFileSync(quotaFile, readingJson({ pct: 10, resetIn: 4 * HOUR, weekPct: 96, weekResetIn: 7 * HOUR }, t));
+    boost(`until=${iso(t + HOUR)}\nceiling_7d=95\n`);
+    const g = gate({ MINSPEC_QUOTA_ADMIT_PCT_7D: '90' });
+    expect(g.code, g.out).toBe(42);
+    const secs = Number(/^defer:(\d+) /.exec(g.out)?.[1]);
+    expect(Math.abs(secs - 7 * HOUR), g.out).toBeLessThanOrEqual(5);
+    expect(g.out).not.toMatch(NAMES_FILE_CEILING);
+  });
+});
+
+describe('in81 C5: a bad ceiling means the whole file is ignored, said aloud', () => {
+  it.each([
+    { val: '101', says: /ceiling_7d=101 is not a whole percent/ },
+    { val: '9.5', says: /ceiling_7d=9\.5 is not a whole percent/ },
+    { val: '95%', says: /ceiling_7d=95% is not a whole percent/ },
+    { val: '-1', says: /ceiling_7d=-1 is not a whole percent/ },
+    { val: 'high', says: /ceiling_7d=high is not a whole percent/ },
+    { val: '', says: /ceiling_7d='' is not a whole percent/ },
+  ])('ceiling_7d=$val also drops the raise beside it', ({ val, says }) => {
+    write(HELD);
+    boost(`until=${iso(nowSec() + HOUR)}\ncap_7d=100\nceiling_7d=${val}\n`);
+    const r = cap();
+    expect(r.code, r.out).toBe(42);
+    expect(r.out).toMatch(RAMP_LINE);
+    expect(r.out).toMatch(/quota boost .* IGNORED: /);
+    expect(r.out).toMatch(says);
+    expect(r.out.trim().split('\n')).toHaveLength(1);
+  });
+
+  it('a file holding only ceiling_7d and until is valid, and sets no raise', () => {
+    write(HELD);
+    boost(`until=${iso(nowSec() + HOUR)}\nceiling_7d=95\n`);
+    const r = cap();
+    expect(r.out).not.toMatch(/IGNORED/);
+    expect(r.code, r.out).toBe(42);
+    expect(r.out).toMatch(RAMP_LINE);
+  });
+
+  it('ceiling_7d with no until is the same fault as a cap with none', () => {
+    write(HELD);
+    boost('ceiling_7d=95\n');
+    const r = cap();
+    expect(r.out).toMatch(/IGNORED: until=.* is not a UTC time/);
+  });
+
+  it('a file with no key that does anything still says so', () => {
+    write(HELD);
+    boost(`until=${iso(nowSec() + HOUR)}\n`);
+    expect(cap().out).toMatch(/sets neither cap_5h nor cap_7d nor ceiling_7d/);
+  });
+});
+
+describe('in81 C6: the wait and the sleep are true while a ceiling holds', () => {
+  // Every case judges a hold, from one instant, so the seconds can be checked to a tolerance.
+  const judged = (r: Reading, file: (t: number) => string, env: Record<string, string> = {}) => {
+    const t = nowSec();
+    fs.writeFileSync(quotaFile, readingJson(r, t));
+    boost(file(t));
+    const g = gate(env);
+    expect(g.code, g.out).toBe(42);
+    const wait = Number(/^defer:(\d+) /.exec(g.out)?.[1]);
+    const sleep = Number(run(['--quota-sleep'], env).out.trim());
+    return { text: g.out, wait, sleep };
+  };
+  const near = (got: number, want: number, within = 90) =>
+    expect(Math.abs(got - want), `${got} vs ${want}`).toBeLessThanOrEqual(within);
+  const MARGIN = 15;
+  // A hold is at or above the cap and the cap moves in tenths, so a ramp admits a usage one
+  // tenth past it: 0.1% of the 10%/day ramp is 864 seconds later than the plain crossing.
+  const TENTH = 864;
+
+  it.each([
+    { name: '3 h left', left: 3 * HOUR, used: 95, sleep: 3 * HOUR + MARGIN },
+    { name: '3 h left, more used', left: 3 * HOUR, used: 99, sleep: 3 * HOUR + MARGIN },
+    { name: '7 h left: clamped to one six-hour hop', left: 7 * HOUR, used: 95, sleep: 21600 },
+    { name: '11 h left', left: 11 * HOUR, used: 96, sleep: 21600 },
+  ])('until at the reset, $name: the wait is the reset and no ramp time is named', ({ left, used, sleep }) => {
+    const r = judged(
+      { pct: 10, resetIn: 4 * HOUR, weekPct: used, weekResetIn: left },
+      (t) => `until=${iso(t + left)}\ncap_7d=95\nceiling_7d=95\n`,
+    );
+    near(r.wait, left, 5);
+    near(r.sleep, sleep, 5);
+    expect(r.text).not.toMatch(/next admits/);
+    expect(r.text).toContain('ceiling until');
+  });
+
+  it('until past the reset: still the reset, the first moment anything can change', () => {
+    const r = judged(
+      { pct: 10, resetIn: 4 * HOUR, weekPct: 95, weekResetIn: 3 * HOUR },
+      (t) => `until=${iso(t + 9 * HOUR)}\nceiling_7d=95\n`,
+    );
+    near(r.wait, 3 * HOUR, 5);
+    near(r.sleep, 3 * HOUR + MARGIN, 5);
+    expect(r.text).not.toMatch(/next admits/);
+  });
+
+  it('until before the reset, and the ramp already past this usage: the wait is until', () => {
+    // 10 h left, ramp 95.8 now and 96.6 at until, 95 used.
+    const r = judged(
+      { pct: 10, resetIn: 4 * HOUR, weekPct: 95, weekResetIn: 10 * HOUR },
+      (t) => `until=${iso(t + 2 * HOUR)}\nceiling_7d=95\n`,
+    );
+    near(r.wait, 2 * HOUR, 5);
+    near(r.sleep, 2 * HOUR + MARGIN, 5);
+    expect(r.text).toMatch(/the ceiling_7d holds until .*, when the ramp admits, in 2\.0 h/);
+  });
+
+  it('until before the reset, and the ramp past this usage only later: the wait is the ramp', () => {
+    // 10 h left, 98 used: the ramp reaches 98.1 about 5.4 h from now, well after until.
+    const r = judged(
+      { pct: 10, resetIn: 4 * HOUR, weekPct: 98, weekResetIn: 10 * HOUR },
+      (t) => `until=${iso(t + 2 * HOUR)}\nceiling_7d=95\n`,
+    );
+    near(r.wait, 5.2 * HOUR + TENTH);
+    near(r.sleep, 5.2 * HOUR + TENTH + MARGIN);
+    expect(r.text).toMatch(/the ramp next admits in 5\.4 h/);
+  });
+
+  it('until before the reset, and 100% used: only the reset admits', () => {
+    const r = judged(
+      { pct: 10, resetIn: 4 * HOUR, weekPct: 100, weekResetIn: 5 * HOUR },
+      (t) => `until=${iso(t + 2 * HOUR)}\nceiling_7d=95\n`,
+    );
+    near(r.wait, 5 * HOUR, 5);
+    near(r.sleep, 5 * HOUR + MARGIN, 5);
+    expect(r.text).not.toMatch(/next admits|holds until/);
+  });
+
+  it('under the ceiling and over the ramp: the ramp still decides the wait', () => {
+    // 35 h left, ramp 85.4, 90 used, ceiling 95: the ramp reaches 90.1 about 11.2 h from now.
+    const r = judged(
+      { pct: 10, resetIn: 4 * HOUR, weekPct: 90, weekResetIn: 35 * HOUR },
+      (t) => `until=${iso(t + 35 * HOUR)}\nceiling_7d=95\n`,
+    );
+    near(r.wait, 11 * HOUR + TENTH);
+    near(r.sleep, 21600, 5);
+    expect(r.text).toMatch(/the ramp next admits in 11\.2 h/);
+  });
+
+  it('over the ceiling and over the ramp, the ramp the later of the two: no admit before it', () => {
+    // 5 days left, ramp 60 (the floor), 96 used, ceiling 95 for an hour: the ramp passes 96
+    // with 9.6 h left. The ceiling is not what decides now and the until is no answer.
+    const r = judged(
+      { pct: 10, resetIn: 4 * HOUR, weekPct: 96, weekResetIn: 5 * DAY },
+      (t) => `until=${iso(t + HOUR)}\nceiling_7d=95\n`,
+    );
+    near(r.wait, 5 * DAY - 9.6 * HOUR + TENTH);
+    near(r.sleep, 21600, 5);
+    expect(r.text).not.toMatch(/holds until/);
+  });
+
+  it('the boost ends at until too, so it is no reason to call that moment an admit', () => {
+    // 3 days left, 92 used, cap_7d=100 and ceiling_7d=90 for an hour. From until on only the
+    // ramp is left, and it reaches 92.1 with about 19 h to go, not at until.
+    const r = judged(
+      { pct: 10, resetIn: 4 * HOUR, weekPct: 92, weekResetIn: 3 * DAY },
+      (t) => `until=${iso(t + HOUR)}\ncap_7d=100\nceiling_7d=90\n`,
+    );
+    near(r.wait, 3 * DAY - 19.2 * HOUR + TENTH);
+    near(r.sleep, 21600, 5);
+    expect(r.text).toMatch(/the ramp next admits in /);
+    expect(r.text).not.toMatch(/holds until/);
+  });
+
+  it('a ceiling above the usage it never reaches is no reason to wait past the ramp', () => {
+    // 10 h left, 96 used, ceiling 98: the ramp 95.8 holds, and reaches 96.1 in about 38 min.
+    const r = judged(
+      { pct: 10, resetIn: 4 * HOUR, weekPct: 96, weekResetIn: 10 * HOUR },
+      (t) => `until=${iso(t + 10 * HOUR)}\nceiling_7d=98\n`,
+    );
+    near(r.wait, 24 * 60 + TENTH);
+    near(r.sleep, 24 * 60 + TENTH + MARGIN);
+  });
+
+  it('never a tight loop: at the ceiling with seconds left the sleep is the minimum', () => {
+    const r = judged(
+      { pct: 10, resetIn: 4 * HOUR, weekPct: 95, weekResetIn: 5 },
+      (t) => `until=${iso(t + 5)}\nceiling_7d=95\n`,
+    );
+    expect(r.sleep).toBe(60);
   });
 });
