@@ -2913,9 +2913,11 @@ _quota_read() {
 # would be parsed as an admission verdict. The producer's stdout and stderr are
 # captured into a variable (never printed raw), and every diagnostic goes to stderr.
 #
-# It cannot admit anything. On any failure the reading is left exactly as it was and
-# the stale / no-reading arms below still fail closed — this only ever makes a
-# reading fresher, never a verdict weaker.
+# It cannot admit anything. A failed refresh does not make the verdict weaker: the
+# producer is not guaranteed to leave the reading as it found it (it may change or
+# remove it, or leave it unreadable), and whatever is left is judged by the stale /
+# no-reading arms below, which still fail closed. This only ever makes a reading
+# fresher, never a verdict weaker.
 #
 # `_quota_try_refresh force` skips the age check, and ONLY the age check (#2233). A
 # usage-limit text signal is judged against the meter, and a reading taken BEFORE the
@@ -2968,7 +2970,9 @@ _quota_try_refresh() {
   else
     why="exit 0 but the reading did not move"
   fi
-  out=$(printf '%s' "$out" | tr -s '[:space:][:cntrl:]' ' ' | cut -c1-200)
+  # The producer's LAST non-blank line, not its first: a traceback ends with the exception
+  # line, which is the part that says what failed. Then one line, at most 200 characters.
+  out=$(printf '%s\n' "$out" | awk 'NF { last = $0 } END { print last }' | tr -s '[:space:][:cntrl:]' ' ' | cut -c1-200)
   # Say only what is true of the reading AFTER the attempt; the decision stays the gate's.
   local tail
   if [[ -z "$after" ]]; then

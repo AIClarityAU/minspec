@@ -298,6 +298,29 @@ describe('#2699 — the refresh is judged by a fresher reading, not by the produ
     expect(r.err.length).toBeLessThan(700);
   });
 
+  it('(a) an uncaught traceback shows its exception line, the producer\'s LAST line', () => {
+    stale();
+    const r = run({
+      MINSPEC_QUOTA_REFRESH_CMD:
+        'printf "Traceback (most recent call last):\\n  File \\"cos.py\\", line 1, in <module>\\n%s\\n" "$(printf \'x%.0s\' $(seq 1 300))"; echo "KeyError: needle_exception"; exit 1',
+    });
+    const line = r.err.split('\n').filter((l) => /quota refresh failed/.test(l));
+    expect(line).toHaveLength(1);
+    expect(line[0]).toContain('KeyError: needle_exception');
+    expect(line[0].split('producer said:')[1]).not.toContain('Traceback');
+  });
+
+  it('(a) the last line is capped at 200 characters and stays on one line', () => {
+    stale();
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: 'echo first-line-marker; printf "L%.0s" $(seq 1 500); echo' });
+    const line = r.err.split('\n').filter((l) => /quota refresh failed/.test(l));
+    expect(line).toHaveLength(1);
+    expect(line[0].split('producer said:')[1]).not.toContain('first-line-marker');
+    const said = /producer said: (L+)/.exec(line[0]);
+    expect(said).not.toBeNull();
+    expect(said![1].length).toBe(200);
+  });
+
   it('(b) a non-zero exit is reported with its reason', () => {
     stale();
     const r = run({ MINSPEC_QUOTA_REFRESH_CMD: 'echo "boom reason"; exit 7' });
