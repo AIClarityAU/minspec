@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-245-ranker-reads-verdict-tier/requirements.md",
+  "specHash": "949c9b43878b649bfc5b722d2852105bb813e56696aa6654958fafc075f5fc8f",
+  "approvedAt": "2026-10-30T05:55:23.233Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-c",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3182#issuecomment-6515774347"
+}
