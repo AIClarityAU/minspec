@@ -1,7 +1,7 @@
 ---
 id: SPEC-235
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute - the dev-time autonomous build/merge pipeline (the App-token broker is its only GitHub credential path; same home as DR-095)
@@ -14,9 +14,9 @@ implements_reason: >-
   configuration (/etc/nixos/home.nix and /etc/nixos/scripts/gh-app-token-mint.sh),
   outside this repo; which of those files it owns is decided at Plan, after D1-D3.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
