@@ -15,7 +15,7 @@
     "lint": "eslint .",
     "build": "npm run build --workspaces --if-present",
     "package": "npm run package --workspaces --if-present",
-    "validate": "npx tsx scripts/validate-frontmatter.ts",
+    "validate": "npx tsx scripts/validate-frontmatter.ts && npx tsx scripts/check-issue-template-labels.ts",
     "check:cycles": "npx tsx scripts/check-import-cycles.ts",
     "check:swallowed-gate": "npx tsx scripts/check-swallowed-gate-signal.ts",
     "check:orphaned-docstring": "npx tsx scripts/check-orphaned-docstring.ts",
