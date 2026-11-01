@@ -1598,7 +1598,16 @@ arm_delegated_spec_merges() {
         break
       fi
       gh_err=$(tr '\n' ' ' < "$errfile" 2>/dev/null | cut -c1-500 || true)  # swallow-ok: diagnostic text only; the failure itself is reported below
-      (( attempt == 1 )) && sleep "${MINSPEC_DRAIN_DELEGATED_MERGE_RETRY_SLEEP:-5}"
+      # A failed read is the authoritative sign of a dead credential (#3400): this step runs
+      # after an hour-long cycle's first reads, so the bot token is often stale here. Re-mint
+      # in THIS shell (the next read, every later step and every child inherit it), exactly
+      # as _read_queue does; the retry then runs at once. A broker that hands back the same
+      # token re-mints nothing, and the plain sleep-and-retry below stays as it was.
+      if gh_bot_reauth_read; then
+        echo "[drain] the delegated-merge read (label ${label}) failed and the credential was stale — re-minted, retrying." >&2
+      elif (( attempt == 1 )); then
+        sleep "${MINSPEC_DRAIN_DELEGATED_MERGE_RETRY_SLEEP:-5}"
+      fi
     done
     if (( rc != 0 )); then
       [[ "$errfile" == /dev/null ]] || rm -f "$errfile"
@@ -1715,8 +1724,14 @@ sweep_open_prs() {
     # saw half of a 61-PR pile. One row per open PR, drafts included, so the count below
     # is the count gh RETURNED and can be compared with the limit.
     local pr_limit="${MINSPEC_DRAIN_PR_SWEEP_LIMIT:-500}"
+    local open_rc=0
     open_rows=$(gh pr list --repo "$REPO" --state open --limit "$pr_limit" --json number,isDraft \
-      --jq '.[] | "\(.number) \(.isDraft)"' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
+      --jq '.[] | "\(.number) \(.isDraft)"' 2>/dev/null) || open_rc=$?
+    if (( open_rc != 0 )) && gh_bot_reauth_read; then   # dead credential: re-mint in this shell, retry once (#3400)
+      echo "[drain] the open-PR list failed and the credential was stale — re-minted, retrying once." >&2
+      open_rows=$(gh pr list --repo "$REPO" --state open --limit "$pr_limit" --json number,isDraft \
+        --jq '.[] | "\(.number) \(.isDraft)"' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
+    fi
     open_count=0
     [[ -n "$open_rows" ]] && open_count=$(printf '%s\n' "$open_rows" | wc -l | tr -d ' ')
     # Fail closed (#2975): a read that came back exactly at the limit may have been cut
@@ -1911,6 +1926,12 @@ _held_drain_prs() {
   local _held_val _held_rc=0
   _held_val=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit 1000 \
     --json headRefName --jq '[.[] | select(.headRefName | startswith("agent/issue-"))] | length') || _held_rc=$?
+  if (( _held_rc != 0 )) && gh_bot_reauth_read; then   # dead credential: re-mint in this shell, retry once (#3400)
+    echo "[drain] the held-PR count failed and the credential was stale — re-minted, retrying once." >&2
+    _held_rc=0
+    _held_val=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit 1000 \
+      --json headRefName --jq '[.[] | select(.headRefName | startswith("agent/issue-"))] | length') || _held_rc=$?
+  fi
   if (( _held_rc != 0 )); then return "$_held_rc"; fi
   [[ "$_held_val" =~ ^[0-9]+$ ]] || return 1
   _held_out="$_held_val"
@@ -1982,12 +2003,19 @@ _specify_only() {
 _pr_claims() {
   local -n _claims_out="$1"
   local _claims_val _claims_rc=0
-  _claims_val=$(gh pr list --repo "$REPO" --state open --limit 1000 \
-    --json number,body,closingIssuesReferences --jq '
+  local _claims_jq='
       .[] | .number as $pr
       | ([(.closingIssuesReferences // [])[].number]
          + [(.body // "") | match("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s*:?\\s+#([0-9]+)"; "g").captures[0].string | tonumber])
-      | unique[] | "\($pr) \(.)"') || _claims_rc=$?
+      | unique[] | "\($pr) \(.)"'
+  _claims_val=$(gh pr list --repo "$REPO" --state open --limit 1000 \
+    --json number,body,closingIssuesReferences --jq "$_claims_jq") || _claims_rc=$?
+  if (( _claims_rc != 0 )) && gh_bot_reauth_read; then   # dead credential: re-mint in this shell, retry once (#3400)
+    echo "[drain] the open-PR claims read failed and the credential was stale — re-minted, retrying once." >&2
+    _claims_rc=0
+    _claims_val=$(gh pr list --repo "$REPO" --state open --limit 1000 \
+      --json number,body,closingIssuesReferences --jq "$_claims_jq") || _claims_rc=$?
+  fi
   if (( _claims_rc != 0 )); then return "$_claims_rc"; fi
   _claims_out="$_claims_val"
 }
