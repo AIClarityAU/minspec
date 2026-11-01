@@ -1,9 +1,17 @@
 ---
 id: SPEC-022
 type: design
-status: implementing
+# No tier here: requirements.md is the single tier-carrying approvable. This file has no
+# approval record of its own, so its status is what deriveStatus computes for an unsigned
+# file with these phases (FR-4, INV-4). The earlier literal `implementing` was hand-set.
+status: specifying
 product: minspec
 epic: EPIC-002  # Signpost Integrity
+phases:
+  specify: done
+  plan: done
+  tasks: done
+  implement: in-progress
 ---
 
 # Approval Ground Truth + Derived Status — Design
@@ -84,7 +92,7 @@ vscode-bearing extension package. **Decision: `packages/shared/src/canonical.ts`
 
 ## canonicalizeSpec / specHash
 
-`canonicalizeSpec(raw: string): string` implements FR-3's five steps as a **standalone
+`canonicalizeSpec(raw: string): string` implements FR-3's six steps as a **standalone
 string transform** — it must NOT route through `parseSpec`, whose default-injection
 (`tier ?? 'T2'`, `status ?? 'new'`, line 252-278) and re-serialization would change bytes
 and break the byte contract. Algorithm:
@@ -103,9 +111,11 @@ and break the byte contract. Algorithm:
        superseded-by, created, depends_on, relates_to, aspects, comments, blanks).
 4. Rejoin: '---\n' + frontmatterMinusLifecycle + '\n---\n' + body. (When there was no
    frontmatter, the result is just the normalized body.)
-5. Normalize: split on '\n', `trimEnd()` each line (strip trailing per-line WS), join with
+5. Collapse every relative-link URL `](path)` to `](RELLINK)`, keeping external (`scheme:`),
+   anchor (`#`) and absolute (`/`) links and all link text (FR-3 step 4, #252).
+6. Normalize: split on '\n', `trimEnd()` each line (strip trailing per-line WS), join with
    '\n', then collapse a trailing-newline run to EXACTLY ONE: result.replace(/\n*$/,'') + '\n'.
-6. specHash(raw) = sha256hex(Buffer.from(canonicalizeSpec(raw), 'utf-8')).
+7. specHash(raw) = sha256hex(Buffer.from(canonicalizeSpec(raw), 'utf-8')).
 ```
 
 **Frontmatter-key removal — exact rules.** Removal is *line-oriented over the frontmatter
@@ -130,6 +140,8 @@ def canonicalize_spec(raw: str) -> str:
         fm = m.group(1); body = raw[m.end():]
         fm_clean = _strip_lifecycle(fm)              # drop status line + phases block
     joined = body if fm_clean is None else '---\n' + fm_clean + '\n---\n' + body
+    joined = re.sub(r'\]\((?![a-z][a-z0-9+.-]*:)(?!#)(?!/)[^)]*\)', '](RELLINK)', joined,
+                    flags=re.IGNORECASE)              # FR-3 step 4, same regex as Node
     lines = [ln.rstrip() for ln in joined.split('\n')]
     return re.sub(r'\n*$', '', '\n'.join(lines)) + '\n'
 
@@ -349,8 +361,8 @@ block (~line 39). The committed `.minspec/approvals/` tree is intentionally trac
    own** local approval — see dogfood below); both convert the same way.
 2. **Backfill the 7 unbacked implementing/done specs.** The specs that *derive* to
    implementing/done with no source record:
-   `specs/minspec/requirements.md` (SPEC-001), `specs/minspec/design.md` (SPEC-002),
-   `specs/minspec/tasks.md` (SPEC-003), `specs/minspec/SPEC-004-*` (requirements/design/
+   `specs/minspec/requirements.md` (SPEC-001), `specs/minspec/design.md` (SPEC-001),
+   `specs/minspec/tasks.md` (SPEC-001), `specs/minspec/SPEC-004-*` (requirements/design/
    tasks), `specs/agent-execute/SPEC-016-reality-check/requirements.md`. For each, write a
    sidecar with `specHash` = canonical hash of current content, `approvedBy` = owner,
    `approvedAt` = migration date, `tier`, and **`migrated:true`** — *honest provenance*: an
@@ -400,7 +412,7 @@ flip-then-hash assertions), `lifecycle.test.ts` (`getSpecStatus` shim + `deriveS
 
 ## Build order
 
-Thinnest end-to-end slice first (vertical slices, global DR-359), then widen:
+Thinnest end-to-end slice first (vertical slices, the global contract-driven rule), then widen:
 
 1. **Canonical contract + INV-3.** `packages/shared/src/canonical.ts` + barrel export +
    `canonical.test.ts` (INV-3, golden fixtures). No store, no status yet. Proves the hash
