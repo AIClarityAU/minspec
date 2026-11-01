@@ -236,8 +236,18 @@ lease_claim_body() {
 # ANY gh/parse error return non-zero (the caller maps that to enum_complete=0 → INV-6
 # stand-down). serverOrder = the comment's server-assigned monotonic id.
 lease_read_claims() {
-  local item="${1:?lease_read_claims needs an item}" raw
-  raw="$(gh api --paginate "repos/${MINSPEC_LEASE_REPO}/issues/${item}/comments" 2>/dev/null)" || return 1
+  local item="${1:?lease_read_claims needs an item}" raw errf err_txt rc=0
+  # Keep gh's own stderr and REPORT it on failure (#3501): it was discarded, so a dead
+  # token (HTTP 401) and a network fault printed the same guess. Stdout stays the claims
+  # JSON; the reason goes to this function's stderr, which no caller captures into data.
+  errf="$(mktemp)" || return 1
+  raw="$(gh api --paginate "repos/${MINSPEC_LEASE_REPO}/issues/${item}/comments" 2>"$errf")" || rc=$?
+  err_txt="$(cat "$errf" 2>/dev/null)"  # swallow-ok: read only to PRINT the diagnosis; rc is the verdict
+  rm -f "$errf"
+  if (( rc != 0 )); then
+    echo "lease: reading the claims on #${item} failed (gh exit ${rc}): ${err_txt:-no detail from gh}" >&2
+    return 1
+  fi
   # gh --paginate concatenates JSON arrays; jq -s . re-wraps them, then flatten.
   printf '%s' "$raw" | jq -s -c --arg m "<!-- ${CLAIM_MARKER}:" '
     [ .[][] | select(.body | contains($m))
@@ -301,9 +311,19 @@ lease_renew() {
   # Going through lease_read_claims is also what makes "the read itself failed"
   # (network/auth; gh/jq returned nonzero) distinguishable from "the read succeeded and
   # our claim just is not in it" (deleted, or never posted).
+  #
+  # A failed read is an OBSERVATION that the token may be dead (#3501): a ticker inherits
+  # GH_TOKEN at fork and the age check dates it from first sight, not from minting, so a
+  # token the broker cached can die ~35 min before the age re-mint. Re-mint on the
+  # failure and retry ONCE; gh_bot_reauth_read returns non-zero when no different
+  # credential was obtained, in which case a retry is guaranteed to fail again.
   if ! claims="$(lease_read_claims "$item")"; then
-    echo "lease: cannot renew the claim on #${item}: could not read claims (gh api error; network or auth)." >&2
-    return 1
+    if gh_bot_reauth_read && claims="$(lease_read_claims "$item")"; then
+      echo "lease: read of the claims on #${item} succeeded after a token re-mint." >&2
+    else
+      echo "lease: cannot renew the claim on #${item}: could not read claims (reason above; re-mint did not help)." >&2
+      return 1
+    fi
   fi
 
   local cid claimed
