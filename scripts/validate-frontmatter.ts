@@ -29,11 +29,14 @@ import {
   checkAcceptanceCriteria,
   validateOwnership,
   validateImplementEvidence,
+  validateImplementCloseout,
   type SplitLayoutFile,
   validateStatusAnnotation,
   validateFrontmatterProse,
 } from '../packages/minspec/src/lib/spec-validator';
 import { parseSpec } from '../packages/minspec/src/lib/spec';
+import { readSpecTaskTally } from '../packages/minspec/src/lib/artifact-graph';
+import { getApprovalStatus } from '../packages/minspec/src/lib/approval';
 import { DEFAULT_CONFIG, loadConfig } from '../packages/minspec/src/lib/config';
 import type { Tier } from '../packages/minspec/src/lib/config';
 import {
@@ -878,6 +881,50 @@ for (const file of annFiles) {
   for (const v of findings) {
     if (v.severity === 'error') fail(file, `${v.message} ${v.fixHint}`);
     else warn(`status-annotation ${relative(ROOT, file)}: ${v.message}`);
+  }
+}
+
+// Rule 24 (#1595): the terminal half of the lifecycle. Nothing wrote
+// `phases.implement: done` when a spec's build landed, and no rule noticed, so SPEC-038
+// sat at `implementing` for ~33 days with all four of its PRs merged and the signpost
+// pointing at it. `validateImplementCloseout` is the SAME function `validateSpec` calls
+// (Goal G-6): `implement.finished-not-closed` (every task ticked, code on disk) and
+// `implement.phantom-hole` (code on disk, zero ticks). The task count comes from
+// `readSpecTaskTally`, the reader the signpost's implement hole uses, so the gate and the
+// signpost cannot disagree. Ships as `warn` (`implementCloseout`, the FR-7 ratchet); the
+// drain's close-out step (scripts/lib/close-finished-specs.ts) is the writer that clears
+// the finished case. Same no-silent-skip shape as Rule 23: an unlistable corpus or a file
+// the rule could not run on is reported, never dropped.
+const closeCfg = loadConfig(ROOT);
+const closeFailsClosed = closeCfg.implementCloseout === 'error';
+let closeFiles: string[] = [];
+if (existsSync(specsDir)) {
+  try {
+    closeFiles = glob(specsDir, '.md').filter((f) => /(^|[\\/])(requirements|spec)\.md$/.test(f));
+  } catch (error) {
+    const why = `the specs corpus could not be listed (${(error as Error).message}) - Rule 24 validated NOTHING this run.`;
+    if (closeFailsClosed) fail(specsDir, why);
+    else warn(`implement-closeout: ${why}`);
+  }
+}
+for (const file of closeFiles) {
+  let findings: ReturnType<typeof validateImplementCloseout>;
+  try {
+    const parsed = parseSpec(readFileSync(file, 'utf-8'));
+    findings = validateImplementCloseout(parsed, closeCfg, {
+      taskTally: readSpecTaskTally(file, parsed),
+      pathExists: (relPath) => existsSync(join(ROOT, relPath)),
+      approvalState: getApprovalStatus(ROOT, file),
+    });
+  } catch (error) {
+    const why = `the implement close-out rules could not run on this file (${(error as Error).message})`;
+    if (closeFailsClosed) fail(file, why);
+    else warn(`implement-closeout ${relative(ROOT, file)}: ${why}`);
+    continue;
+  }
+  for (const v of findings) {
+    if (v.severity === 'error') fail(file, `${v.message} ${v.fixHint}`);
+    else warn(`implement-closeout ${relative(ROOT, file)}: ${v.rule}: ${v.message}`);
   }
 }
 
