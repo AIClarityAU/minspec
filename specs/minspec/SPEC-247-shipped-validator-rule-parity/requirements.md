@@ -26,8 +26,6 @@ phases:
 
 # SPEC-247: Every FATAL rule in the Node validator is either shipped in validate.py or recorded as dev-only
 
-**Status:** specifying
-
 ## In plain terms
 
 MinSpec checks its own specs and decision records with a Node script,

@@ -197,6 +197,10 @@ pipeline's false-success rate becomes a measured number instead of an unstateabl
 
 ## Decisions needed (Clarify)
 
+All 6 decisions are resolved: an agent session recorded each option this document
+already recommended, on 2026-10-18 (recorded earlier, not today). No human chose them; they
+are ratified only by approval of this spec.
+
 D1 to D6 each carry a **Recorded selection** line naming the option this document already
 recommended. An agent session wrote those lines on 2026-10-18, and no human chose them. This
 repository runs with `"autonomy": "act"` (`.minspec/config.json:58`), under which an agent
