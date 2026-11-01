@@ -642,6 +642,55 @@ describe('T3 regression — the weekly ceiling must outrank the 5h window-reset'
   });
 });
 
+describe('T3 regression (#3466): a gate hold that has already cleared does not sleep to the 5h reset', () => {
+  // Measured 2026-10-31. defer:stale held the queue; another producer refreshed the reading
+  // while in-flight work drained; the rc=42 arm then slept 2340s "to the published reset"
+  // against 5h 82% / 7d 48%, both under their caps. `--quota-gate-sleep` is the pure seam for
+  // the rest after quota_gate itself deferred: "<secs> <cleared|held> <meter says>".
+  const gateSleep = (env: Record<string, string> = {}) => {
+    const r = run(['--quota-gate-sleep'], env);
+    const [secs, verdict] = r.out.split(/\s+/);
+    return { code: r.code, secs: Number(secs), verdict, out: r.out };
+  };
+  const fresh = (q: Record<string, number>) =>
+    fs.writeFileSync(quotaFile, JSON.stringify({ observed_at: nowSec(), ...q }));
+
+  it('fresh reading under both caps, reset 2000s away: short rest, not the reset', () => {
+    fresh({
+      used_percentage: 50, resets_at: nowSec() + 2000,
+      seven_day_percentage: 20, seven_day_resets_at: nowSec() + 400000,
+    });
+    const r = gateSleep();
+    expect(r.code).toBe(0);
+    expect(r.verdict).toBe('cleared');
+    expect(r.secs).toBe(60);
+  });
+
+  it('CONTROL: the same reading after a TEXT signal that is overruled still sleeps to the reset', () => {
+    fresh({
+      used_percentage: 50, resets_at: nowSec() + 2000,
+      seven_day_percentage: 20, seven_day_resets_at: nowSec() + 400000,
+    });
+    const r = run(['--quota-signal-sleep', '1']);
+    const [secs, verdict] = r.out.split(/\s+/);
+    expect(verdict).toBe('overruled');
+    expect(Number(secs)).toBeGreaterThanOrEqual(2000);
+  });
+
+  it('a gate that still defers keeps the reset-bound sleep (held)', () => {
+    fresh({ used_percentage: 95, resets_at: nowSec() + 600 });
+    const r = gateSleep();
+    expect(r.verdict).toBe('held');
+    expect(r.secs).toBeGreaterThanOrEqual(600);
+    expect(r.secs).toBeLessThan(900);
+  });
+
+  it('a still-stale reading is held, never cleared (fail closed)', () => {
+    fresh({ used_percentage: 0, resets_at: nowSec() + 2000, observed_at: nowSec() - 901 });
+    expect(gateSleep({ MINSPEC_DRAIN_QUOTA_BACKOFF: '1800' }).verdict).toBe('held');
+  });
+});
+
 describe('T3 regression (#2233): a text-only signal that a fresh meter contradicts does not sleep to the reset', () => {
   // Measured 2026-09-30. A false match on the word "quota" (19:03) paused the drain; the
   // last in-flight build finished at 19:15:54, and the drain then slept 17061s "to the
