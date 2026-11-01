@@ -3,8 +3,9 @@
 
 Contract (DR-362 scoped by #426 / DR-047 §3 — doc-before-CODE): an unapproved
 T3/T4 spec in implementation blocks edits/creation ONLY of the implementation
-CODE it EXPLICITLY declares — structured `implements:`/`affects:` frontmatter
-(regardless of existence) plus fuzzy existing paths in its own tasks.md — and NOT
+CODE it EXPLICITLY declares — structured `implements:` frontmatter (regardless
+of existence) plus fuzzy existing paths in its own tasks.md; `affects:` is added
+only once the spec is STALE (approved, then edited; #3234) — and NOT
 its own doc dir, and NOT unrelated source files. A spec's own requirements/plan/
 tasks/design docs stay EDITABLE so it can be fixed and approved (the
 edit-unapproved-specs-directly workflow). Approved specs block nothing; the
@@ -248,6 +249,51 @@ class ScopedGateTests(unittest.TestCase):
             self.fx.decision("packages/core/src/undeclared_new.ts", tool="Write"),
             "allow",
             "an undeclared new sibling must NOT be blocked",
+        )
+
+    def test_unapproved_clarify_done_spec_does_not_block_affects_files(self):
+        """#3234 regression (DR-047 §3 amendment, proposed). Recording Clarify on a
+        NEVER-approved spec puts it in the implementing band; the gate then froze
+        every `affects:` file (busy shared files the spec only modifies) for every
+        session until approval. A never-approved spec now blocks only the files it
+        OWNS (`implements:`); its `affects:` files stay editable. Its own
+        `implements:` file is still denied (doc-before-code for the spec's code)."""
+        self.fx.write_spec(
+            "specs/minspec/SPEC-912-clar/requirements.md",
+            "SPEC-912", IMPLEMENTING_PHASES,  # specify+clarify done, plan pending
+            extra_fm=(
+                "implements: packages/core/src/owned_new.ts\n"
+                "affects:\n"
+                "  - packages/minspec/src/extension.ts\n"
+            ),
+        )  # no approval sidecar -> never approved
+        self.fx.write("packages/minspec/src/extension.ts", "export const e = 1;\n")
+        self.assertEqual(
+            self.fx.decision("packages/minspec/src/extension.ts"), "allow",
+            "an `affects:`-only file of a never-approved spec must NOT be blocked",
+        )
+        self.assertEqual(
+            self.fx.decision("packages/core/src/owned_new.ts", tool="Write"), "deny",
+            "the never-approved spec's own `implements:` file is still blocked",
+        )
+
+    def test_stale_spec_still_blocks_affects_files(self):
+        """#3234 scope limit: the narrowing applies only to NEVER-approved specs. A
+        spec approved and then edited (stale) had its `affects:` list approved and
+        work may be under way, so its `affects:` files stay blocked until it is
+        re-approved."""
+        spec = self.fx.write_spec(
+            "specs/minspec/SPEC-913-stale-aff/requirements.md",
+            "SPEC-913", IMPLEMENTING_PHASES,
+            extra_fm="affects: packages/minspec/src/shared.ts\n",
+        )
+        self.fx.approve(
+            "specs/minspec/SPEC-913-stale-aff/requirements.md", spec, good=False
+        )  # hash mismatch -> stale
+        self.fx.write("packages/minspec/src/shared.ts", "export const s = 1;\n")
+        self.assertEqual(
+            self.fx.decision("packages/minspec/src/shared.ts"), "deny",
+            "a stale spec's `affects:` file stays blocked",
         )
 
     def test_structured_declared_blocks_case_mismatched_target(self):
