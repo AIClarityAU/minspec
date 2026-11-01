@@ -1,7 +1,7 @@
 ---
 id: SPEC-263
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a refresh that replaces a commit gate and says nothing is a false signpost
@@ -11,9 +11,9 @@ relates_to: ["#2615", "#1698", "#2303", "#2391", "#1697", DR-037, DR-066, DR-089
 implements: [packages/minspec/tests/managed-region-edit-hold.test.ts]  # NEW - the T0 this spec owns (the #1698 regression test and its two controls)
 affects: [packages/minspec/src/lib/scaffold.ts, packages/minspec/src/lib/template-registry.ts, packages/minspec/src/lib/merge-refresh.ts, packages/minspec/src/commands/init.ts]  # scaffold.ts is OWNED by SPEC-043 (harness refresh manifest consistency, specs/minspec/SPEC-043-harness-refresh-manifest-consistency/requirements.md:12); this spec only affects it. One owner per file.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
