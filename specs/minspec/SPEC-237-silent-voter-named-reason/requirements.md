@@ -238,6 +238,13 @@ Each AC is red on today's code and green after the change.
 
 ## Decisions needed (Clarify)
 
+All 5 decisions (D1 to D5) are answered, not ratified: an agent session selected, for each, the
+option this document already recommended. No human chose them, and no delegation covers
+authoring Clarify answers. Delegation DLG-001 (DR-108) made none of these selections and covers
+spec approval and engineering-DR acceptance only. An agent-recorded selection carries no
+consent, whoever prompted it. It is ratified only by approval of this spec, the founder's or the
+bot's under DLG-001, and that approval may overturn it. D6 is not a choice.
+
 - **D1 - Reason channel.**
   - **(a) Sidecar file (rec).** The runner writes `<vote>.reason` next to its stdout,
     with the path passed by the workflow. `review-decide.sh` is untouched, and no new
@@ -247,6 +254,8 @@ Each AC is red on today's code and green after the change.
     `REVIEW_UNAVAILABLE`. One stream, and it matches the existing pattern. The cost is a
     third protocol token that every extractor, counter and `defangProtocolTokens` must
     learn, which is the #1157 / #1470 hazard surface this repo keeps paying for.
+  **Recorded selection: Option (a),** a sidecar file: the runner writes `<vote>.reason` next
+  to its stdout, with the path passed by the workflow.
 - **D2 - Label when a real objection coexists with silent voters.**
   - **(a) Keep `ai-review:changes` and add the FR-5 headline (rec).** The objection is
     real and actionable now, and the author's next push re-runs every voter anyway. The
@@ -258,6 +267,7 @@ Each AC is red on today's code and green after the change.
     of the three options.
   - **(c) Escalate to `blocked`.** Rejected in advance: it hides a real finding behind
     "could not run", which is exactly what #1234 removed.
+  **Recorded selection: Option (a),** keep `ai-review:changes` and add the FR-5 headline.
 - **D3 - Ownership of the placeholder wording versus SPEC-065.**
   - **(a) This spec owns all five placeholder copies (rec).** SPEC-065's design.md row
     at its `:753` defers to this spec at SPEC-065's next Plan edit. The cost is one
@@ -265,13 +275,18 @@ Each AC is red on today's code and green after the change.
     if both specs' `affects:` overlap is checked.
   - **(b) SPEC-065 keeps the wording and this spec only adds the reason suffix.** No
     cross-spec edit, but two specs then edit the same five lines, with a merge-order risk.
+  **Recorded selection: Option (a),** this spec owns all five placeholder copies.
 - **D4 - Are the FR-6 hints worth the text?** **(rec) yes:** the issue asks for exactly
   this ("retry the same head or change the diff"). The cost is a mapping table that can
   go stale when a reason is added. Make it total over the FR-1 set, with a test that
   fails on an unmapped reason.
+  **Recorded selection: Option (yes),** the FR-6 hints are worth the text, with a mapping
+  total over the FR-1 set and a test that fails on an unmapped reason.
 - **D5 - DR?** **(rec) no DR.** Every choice above can be reverted in under a day: no
   data migrates, and the label set is unchanged under D2(a). The cost: if D2 resolves to
   (b), that adds a label adopters will filter on, and Clarify should then require a DR.
+  **Recorded selection: Option (no DR),** no DR, since every choice above can be reverted in
+  under a day.
 - **D6 - Delivery (not a choice; stated so it is not a surprise).** Every touched path
   is machinery (`.github/**`, `scripts/**`, `ci-review-templates.ts`). The App cannot
   push `.github/workflows/` (#1120), so the implementation PR needs a founder push and a
