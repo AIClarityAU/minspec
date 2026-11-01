@@ -1,7 +1,7 @@
 ---
 id: SPEC-137
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - what may leave the machine, and one new runtime dependency
@@ -21,8 +21,8 @@ implements: [packages/minspec/src/lib/error-log.ts, packages/minspec/src/lib/err
 affects: [packages/minspec/src/extension.ts, packages/minspec/package.json, packages/minspec/README.md, packages/minspec/src/commands/adr.ts, packages/minspec/src/commands/approve-active.ts, packages/minspec/src/commands/approve.ts, packages/minspec/src/commands/backfill-epics.ts, packages/minspec/src/commands/backlog.ts, packages/minspec/src/commands/classify.ts, packages/minspec/src/commands/constitution.ts, packages/minspec/src/commands/epic.ts, packages/minspec/src/commands/example.ts, packages/minspec/src/commands/init.ts, packages/minspec/src/commands/migrate.ts, packages/minspec/src/commands/park.ts, packages/minspec/src/commands/session.ts, packages/minspec/src/commands/validate.ts, packages/minspec/src/lib/resolve-folder.ts, packages/minspec/src/views/codelens-provider.ts, packages/minspec/src/views/epic-dnd-controller.ts, packages/minspec/src/views/spec-panel.ts, packages/minspec/src/commands/commit-on-approve.ts, packages/minspec/src/commands/push-docs-lane.ts, packages/minspec/src/lib/ownership-advance-guard.ts, packages/minspec/src/lib/ownership-ratchet.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
