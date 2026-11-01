@@ -475,8 +475,8 @@ sanitize_comment_body() { printf '%s' "${1-}" | sed -e 's/<!--/<!- -/g' -e 's/--
 # comment would have counted zero for the same reason. Both are the UN-BOUNDING
 # direction — those attempts spend no budget, the cap never trips, remediation loops.
 count_markers_json() {
-  local marker="$1" json="$2" authors="${3:-}" out
-  out=$(jq --arg m "$marker" --arg authors "$authors" '
+  local marker="$1" json="$2" authors="${3:-}" prefix="${4:-}" out
+  out=$(jq --arg m "$marker" --arg authors "$authors" --arg prefix "$prefix" '
     ($authors
       | split(",")
       | map(sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "") | ascii_downcase | sub("\\[bot\\]$"; ""))
@@ -486,6 +486,7 @@ count_markers_json() {
         | select(($allow | length) == 0 or (($allow | index($login)) != null))
         | ((.body // "") | sub("[[:space:]]+$"; ""))
         | select(endswith($m))
+        | select($prefix == "" or startswith($prefix))
       ] | length' <<<"$json" 2>/dev/null) || out=""
   [[ "$out" =~ ^[0-9]+$ ]] || out=0
   printf '%s\n' "$out"
@@ -537,10 +538,19 @@ resolve_self_login() {
 # the PR over with a label and no message, the silent gate constitution invariant #2
 # forbids. So dedup is attempted ONLY when authorship is provable; otherwise this always
 # says `post`. A repeated notice is noise; a missing one is a silent gate.
+#
+# When authorship is NOT provable (an App installation token cannot `gh api user`, #3054),
+# the author filter is unavailable, so the dedup instead requires the body to OPEN with
+# the notice's own heading as well as END with the marker. A quote of the marker in a
+# review comment or diff hunk does not begin with that heading, so it cannot suppress
+# the notice; without this fallback the notice re-posted on every 20-minute sweep.
+CAP_NOTICE_HEADING="## 🛑 Auto-remediation capped"
 cap_notice_decision() {
   local authors="${1-}" json="${2-}" capped=0
   if authors_provable "$authors"; then
     capped=$(count_markers_json "$CAPPED_MARKER" "$json" "$authors")
+  else
+    capped=$(count_markers_json "$CAPPED_MARKER" "$json" "" "$CAP_NOTICE_HEADING")
   fi
   if [[ "${capped:-0}" -eq 0 ]]; then printf 'post\n'; else printf 'skip\n'; fi
 }
@@ -1008,7 +1018,7 @@ if [[ "$ACTION" == agent-* || "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "
     # constitution invariant #2 hangs on, so it lives in the pure, tested
     # cap_notice_decision() seam above rather than inline here.
     if [[ "$(cap_notice_decision "$AUTHOR_ALLOW" "$COMMENTS_JSON")" == "post" ]]; then
-      post_marked_comment "$CAPPED_MARKER" "$(printf '## 🛑 Auto-remediation capped — needs a human\n\nThis PR hit an automated-remediation cap — **%s** — without clearing its gate, so automated attempts have stopped. It is labelled `needs-human-review`; a human needs to take it from here.' "$CAP_HIT")"
+      post_marked_comment "$CAPPED_MARKER" "$(printf '%s — needs a human\n\nThis PR hit an automated-remediation cap — **%s** — without clearing its gate, so automated attempts have stopped. It is labelled `needs-human-review`; a human needs to take it from here.' "$CAP_NOTICE_HEADING" "$CAP_HIT")"
     fi
     exit 0
   fi
