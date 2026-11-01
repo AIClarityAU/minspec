@@ -190,11 +190,23 @@ describe('dispatch-issue.sh — docs-corpus auto-merge exclusion (#833)', () => 
     });
 
     it('the arm block consults the classifier before arming, via a here-string (no SIGPIPE)', () => {
-      const guardIdx = content.indexOf('if native_automerge_enabled; then');
-      const armBlock = content.slice(guardIdx);
-      expect(armBlock).toMatch(/paths_have_approvable_doc <<<"\$changed_files"/);
+      // Anchored at the ARM (the `--squash --auto` call), not the first
+      // `if native_automerge_enabled; then`, which is the pure seam near the top (#1781).
+      const armIdx = content.indexOf('--squash --auto');
+      const guardIdx = content.lastIndexOf('if native_automerge_enabled; then', armIdx);
+      expect(armIdx).toBeGreaterThan(guardIdx);
+      expect(guardIdx).toBeGreaterThan(0);
+      const armBlock = content.slice(guardIdx, armIdx);
+      // The classifier is one call away (#1614): arm -> autonomy_may_merge ->
+      // autonomy_stop_classes_for_paths -> paths_have_approvable_doc. The arm
+      // hands the changed set over as an argument, never through a pipe.
+      expect(armBlock).toMatch(/autonomy_may_merge "[^"\n]*" "\$changed_files"/);
+      expect(armBlock).not.toMatch(/\|\s*(paths_have_approvable_doc|autonomy_may_merge|autonomy_stop_classes_for_paths)/);
+      const populator = content.match(/^autonomy_stop_classes_for_paths\(\) \{\n([\s\S]*?)\n\}/m);
+      expect(populator, 'autonomy_stop_classes_for_paths() not found').not.toBeNull();
+      expect(populator![1]).toMatch(/paths_have_approvable_doc <<<"\$changed_files"/);
       // must NOT feed grep via a pipe (pipefail + SIGPIPE fail-open on large lists)
-      expect(armBlock).not.toMatch(/\|\s*paths_have_approvable_doc/);
+      expect(populator![1]).not.toMatch(/\|\s*paths_have_approvable_doc/);
     });
 
     it('fails CLOSED on both non-zero exit AND empty enumeration', () => {

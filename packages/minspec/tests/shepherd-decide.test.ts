@@ -97,6 +97,7 @@ const ALL_ACTIONS = [
   'agent-remediate-checks',
   'agent-remediate-review',
   'rebase-only',
+  'dlg-rerun',
   'skip-clean',
   'skip-awaiting-merge-turn',
   'retry-unknown',
