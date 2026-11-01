@@ -1,7 +1,7 @@
 ---
 id: SPEC-239
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - concurrent multi-session coordination; a branch measured against a gate set main has since outgrown is a many-sessions problem
@@ -19,8 +19,8 @@ implements_reason: >-
 affects: [.githooks/pre-push, package.json, scripts/dispatch-issue.sh, packages/shared/src/review-signals.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
