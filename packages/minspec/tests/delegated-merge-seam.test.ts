@@ -58,13 +58,17 @@ interface Opts {
   viewExit?: number;
 }
 
+// A specify-only drain PR as dispatch publishes it since #3348: it references its issue
+// and closes nothing, because the issue carries the build that follows sign-off.
 const VIEW_OK = {
   headRefName: 'agent/issue-3000',
-  closingIssuesReferences: [{ number: 3000 }],
+  closingIssuesReferences: [] as { number: number }[],
   comments: [{ body: 'looks good' }],
   author: { login: 'human' },
-  body: '',
+  body: 'Spec drafted.\n\nRefs #3000',
 };
+/** A code (non-spec) path: a drain PR touching it is a build, which must close its issue. */
+const CODE = 'packages/minspec/src/lib/x.ts';
 
 function run(args: string[], o: Opts = {}) {
   const ghLog = path.join(tmp, 'gh.log');
@@ -209,8 +213,14 @@ describe('fail closed: nothing is armed', () => {
 describe('human claims: a covered PR the bot must still not merge (#3050)', () => {
   const view = (v: object) => JSON.stringify({ ...VIEW_OK, ...v });
   it.each([
-    ['no closing link at all', { view: view({ closingIssuesReferences: [] }) }, 'closes-link-unconfirmed'],
-    ['a closing link to a different issue', { view: view({ closingIssuesReferences: [{ number: 1 }] }) }, 'closes-link-unconfirmed'],
+    ['a build drain PR with no closing link at all', { diff: CODE, view: view({ closingIssuesReferences: [] }) }, 'closes-link-unconfirmed'],
+    ['a build drain PR closing a different issue', { diff: CODE, view: view({ closingIssuesReferences: [{ number: 1 }] }) }, 'closes-link-unconfirmed'],
+    // #3348: a spec-only drain PR that would close anything closes the build issue on merge.
+    ['a spec drain PR that closes its own issue', { view: view({ closingIssuesReferences: [{ number: 3000 }], body: 'Closes #3000' }) }, 'spec-pr-closes-build-issue'],
+    ['a spec drain PR that closes a different issue', { view: view({ closingIssuesReferences: [{ number: 1 }] }) }, 'spec-pr-closes-build-issue'],
+    ['a spec drain PR with an unlinked Closes trailer (#2228 can link later)', { view: view({ body: 'x\n\nCloses #3000' }) }, 'spec-pr-closes-build-issue'],
+    ['a spec drain PR with an unlinked Fixes: owner/repo trailer', { view: view({ body: 'Fixes: AIClarityAU/minspec#3000' }) }, 'spec-pr-closes-build-issue'],
+    ['a spec drain PR with no readable body', { view: JSON.stringify({ ...VIEW_OK, body: undefined }) }, 'spec-pr-closes-build-issue'],
     ['a non-drain branch with no link', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [] }) }, 'closes-link-unconfirmed'],
     ['a human-authored non-drain PR with no link', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [], author: { login: 'human' }, body: 'no keyword' }) }, 'closes-link-unconfirmed'],
     ['another bot with no link', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [], author: { login: 'dependabot[bot]' }, body: '' }) }, 'closes-link-unconfirmed'],
@@ -233,6 +243,18 @@ describe('human claims: a covered PR the bot must still not merge (#3050)', () =
 
   it.each(['minspec-sdd[bot]', 'app/minspec-sdd'])('a %s PR with no link and no closing keyword proceeds (#3115)', (login) => {
     const r = run(['2966'], { view: view({ headRefName: 'cos/clarify-selections', closingIssuesReferences: [], author: { login }, body: 'Records Clarify selections. Discloses #5 only.' }) });
+    expect(r.status).toBe(0);
+    expect(r.verdict).toMatchObject({ proceed: true });
+  }, TIMEOUT);
+
+  it('a build drain PR whose closing link to its issue is confirmed still proceeds', () => {
+    const r = run(['2966'], { diff: CODE, view: view({ closingIssuesReferences: [{ number: 3000 }], body: 'Closes #3000' }) });
+    expect(r.status).toBe(0);
+    expect(r.verdict).toMatchObject({ proceed: true });
+  }, TIMEOUT);
+
+  it('a spec drain PR that references its issue and closes nothing proceeds (#3348)', () => {
+    const r = run(['2966'], { view: view({ closingIssuesReferences: [], body: 'Spec drafted.\n\nRefs #3000. Discloses #5.' }) });
     expect(r.status).toBe(0);
     expect(r.verdict).toMatchObject({ proceed: true });
   }, TIMEOUT);
@@ -321,6 +343,7 @@ describe('a shepherd handoff is scoped to the head it was posted against (#3120)
 
   it('a spent handoff still leaves the closing-link claim in force', () => {
     const r = run(['2966', '--arm'], {
+      diff: CODE,
       view: view({
         closingIssuesReferences: [],
         commits: commits('2026-10-25T10:13:30Z'),

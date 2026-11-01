@@ -20,7 +20,7 @@
     "check:swallowed-gate": "npx tsx scripts/check-swallowed-gate-signal.ts",
     "check:orphaned-docstring": "npx tsx scripts/check-orphaned-docstring.ts",
     "pretypecheck": "npm run build --workspace=@aiclarity/shared",
-    "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/minspec/tsconfig.json",
+    "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/minspec/tsconfig.json && tsc --noEmit -p packages/core/tsconfig.json",
     "check:gh-bot": "bash scripts/check-gh-bot-attribution.sh",
     "facts": "npx tsx scripts/facts.ts",
     "next-task": "npx tsx scripts/next-task.ts",

@@ -10,8 +10,8 @@ depends_on: [SPEC-130]
 relates_to: [SPEC-130, DR-102, DR-034, DR-012, DR-069, SPEC-022, SPEC-262, "#2711", "#224", "#225"]
 implements: none
 implements_reason: >-
-  Specify phase only. Which files this spec owns is decided at Plan, after Decisions D1-D3
-  are answered; every candidate file is listed under Context.
+  Clarify answers are recorded (D1-D3, all Option A). Which files this spec owns is still
+  decided at Plan; every candidate file is listed under Context.
 phases:
   specify: in-progress
   clarify: pending
@@ -154,6 +154,20 @@ outside the approved file, and make the gate name the cause when such a spec doe
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and
+engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted
+it. It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and
+that approval may overturn it.
+
+- **D1 - Recorded selection: Option A,** an Implement-phase note goes in the commit message and
+  pull request body; the implement command and example spec stop asking for an in-file note.
+- **D2 - Recorded selection: Option A,** guidance says to write Plan and Tasks before approving a
+  single-file spec; changing them after approval is a re-approval by design.
+- **D3 - Recorded selection: Option A,** no up-front notice at approval; FR-3's stale message is
+  enough.
+
 ### D1 - Where does an Implement-phase note go when the spec is an approved single file?
 
 - **Option A - the commit message and pull request body (rec).** The implement command and
@@ -198,9 +212,10 @@ outside the approved file, and make the gate name the cause when such a spec doe
 
 ## Why no decision record
 
-No choice here is made yet: D1-D3 are open. The irreversible part of #2711, the hash change,
-is already recorded in DR-102. If D1 or D2 lands on an option that moves files or adds a
-sidecar type (D1 B/C, D2 B), the Plan phase writes a decision record for it.
+D1-D3 are recorded on Option A (see Clarify above), and none of those options moves a file or
+adds a sidecar type, so nothing here needs a decision record. The irreversible part of #2711,
+the hash change, is already recorded in DR-102. Had D1 or D2 landed on an option that moves
+files or adds a sidecar type (D1 B/C, D2 B), the Plan phase would have written one.
 
 ## Follow-ups (tracked)
 
