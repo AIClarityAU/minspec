@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-238-approval-reader-flat-layout/requirements.md",
+  "specHash": "225e74df100bc29e218a06b5f2e83a0546e1e88d972a0788cd06adff982302b3",
+  "approvedAt": "2026-11-01T21:14:26.358Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T2",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-b",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3181#issuecomment-6541017306"
+}
