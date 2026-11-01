@@ -25,6 +25,7 @@ import {
   parseCliArgs,
   planDelegatedApproval,
   specNotApprovable,
+  writeLifecycleHashNeutral,
   type GhRunner,
   type PlanInput,
   type ReviewEvidence,
@@ -339,5 +340,47 @@ describe('the bot refuses what the founder\'s Approve Spec refuses', () => {
     const abs = path.join(dir, 'requirements.md');
     fs.writeFileSync(abs, '---\nid: SPEC-900\ntitle: x\nstatus: specifying\ntier: T3\n---\n\n# x\n');
     expect(specNotApprovable(root, abs)).toMatch(/not complete/);
+  });
+});
+
+describe('a delegated spec approval never changes the spec body (#3380)', () => {
+  const mk = (body: string): { root: string; abs: string } => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dlgbody-'));
+    fs.mkdirSync(path.join(root, '.minspec'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.minspec', 'config.json'), JSON.stringify({ version: '1', specsDir: 'specs' }));
+    const dir = path.join(root, 'specs', 'SPEC-900-x');
+    fs.mkdirSync(dir, { recursive: true });
+    const abs = path.join(dir, 'requirements.md');
+    fs.writeFileSync(abs, `---\nid: SPEC-900\ntitle: x\nstatus: specifying\ntier: T1\n---\n\n# x\n\n${body}\n`);
+    return { root, abs };
+  };
+  it('refuses a spec whose body status word the flip would change, naming the remedy', () => {
+    const { root, abs } = mk('**Status:** specifying');
+    expect(specNotApprovable(root, abs)).toMatch(/body status.*content pull request that removes that line/i);
+  });
+  it('does not refuse for a body status word the flip leaves alone', () => {
+    const { root, abs } = mk('**Status:** implementing');
+    expect(specNotApprovable(root, abs) ?? '').not.toMatch(/body status/i);
+  });
+  it('writeLifecycleHashNeutral restores the file and reports when the write changed the hash', () => {
+    const { root, abs } = mk('**Status:** specifying');
+    const before = fs.readFileSync(abs, 'utf-8');
+    const denied = writeLifecycleHashNeutral(root, abs, 'spec-approval');
+    expect(denied).toMatch(/hash/i);
+    expect(fs.readFileSync(abs, 'utf-8')).toBe(before);
+  });
+  it('writeLifecycleHashNeutral keeps the write when the hash is unchanged', () => {
+    const { root, abs } = mk('plain prose, no status line');
+    expect(writeLifecycleHashNeutral(root, abs, 'spec-approval')).toBeUndefined();
+    expect(fs.readFileSync(abs, 'utf-8')).not.toMatch(/status: specifying/);
+  });
+  it('writeLifecycleHashNeutral leaves a DR acceptance alone: its body status flip is inherent', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dlgdr-'));
+    fs.mkdirSync(path.join(root, '.minspec'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'docs', 'decisions'), { recursive: true });
+    const abs = path.join(root, 'docs', 'decisions', 'DR-900.md');
+    fs.writeFileSync(abs, '---\nid: DR-900\ntitle: x\nstatus: proposed\ndate: 2026-10-31\n---\n\n## Status\n\nProposed\n\n## Context\n\nx\n');
+    expect(writeLifecycleHashNeutral(root, abs, 'engineering-dr-acceptance')).toBeUndefined();
+    expect(fs.readFileSync(abs, 'utf-8')).toMatch(/status: accepted/);
   });
 });
