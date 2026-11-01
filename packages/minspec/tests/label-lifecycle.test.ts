@@ -112,7 +112,8 @@ describe('#1322 — the PR body carries a deterministic Closes trailer', () => {
   const content = fs.readFileSync(DISPATCH, 'utf-8');
 
   function trailerBlock(): string {
-    const start = content.indexOf('      if ! grep -qiE "(clos(e|es|ed)');
+    // #3348: the block now opens with the specify-only arm (`Refs`, never `Closes`).
+    const start = content.indexOf('      if [[ "$SPECIFY_ONLY" == "1" ]]; then\n        BODY=$(printf \'%s\\n\\nRefs #%s\'');
     if (start < 0) {
       throw new Error(
         'Could not find the #1322 Closes-trailer block in dispatch-issue.sh. Fix this ' +
@@ -120,12 +121,12 @@ describe('#1322 — the PR body carries a deterministic Closes trailer', () => {
           'agent PR leaves its issue open and queued.',
       );
     }
-    const end = content.indexOf('fi', content.indexOf('BODY=$(printf', start));
-    return content.slice(start, end + 2);
+    const end = content.indexOf('\n      fi\n', start);
+    return content.slice(start, end + '\n      fi'.length);
   }
 
-  function compose(agentSummary: string, issue: string): string {
-    const script = ['set -euo pipefail', `ISSUE=${issue}`, `BODY=${JSON.stringify(agentSummary)}`, trailerBlock(), 'printf "%s" "$BODY"'].join('\n');
+  function compose(agentSummary: string, issue: string, specifyOnly = false): string {
+    const script = ['set -euo pipefail', `ISSUE=${issue}`, `SPECIFY_ONLY=${specifyOnly ? 1 : 0}`, `BODY=${JSON.stringify(agentSummary)}`, trailerBlock(), 'printf "%s" "$BODY"'].join('\n');
     return execFileSync('bash', ['-c', script], { encoding: 'utf-8' });
   }
 
@@ -151,6 +152,12 @@ describe('#1322 — the PR body carries a deterministic Closes trailer', () => {
     // "Closes #999" must not be read as satisfying the trailer for #1068.
     const out = compose('Closes #999 as a side effect.', '1068');
     expect(out).toContain('Closes #1068');
+  });
+
+  it('#3348: a specify-only PR references its issue and never adds Closes', () => {
+    const out = compose('Wrote SPEC-300 for #1068.', '1068', true);
+    expect(out).toContain('Refs #1068');
+    expect(out).not.toMatch(/Closes #1068/);
   });
 });
 
