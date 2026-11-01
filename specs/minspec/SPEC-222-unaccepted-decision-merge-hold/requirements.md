@@ -1,7 +1,7 @@
 ---
 id: SPEC-222
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute - the unattended merge actors (DR-061 native arm, SPEC-024 consequence-hybrid) live here
@@ -16,8 +16,8 @@ implements_reason: >-
 affects: [.github/workflows/ready-to-merge.yml, .github/scripts/ai-review-guard.js, packages/minspec/src/lib/ci-review-templates.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
