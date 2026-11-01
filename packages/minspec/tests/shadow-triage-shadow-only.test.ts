@@ -89,7 +89,17 @@ interface Harness {
  * fixture key and silently turn every assertion below into a vacuous pass against a
  * shadow step that never ran.
  */
-function makeHarness(opts: { key?: string; legacyKey?: string; disabled?: boolean; private?: boolean } = {}): Harness {
+function makeHarness(
+  opts: {
+    key?: string;
+    legacyKey?: string;
+    disabled?: boolean;
+    private?: boolean;
+    title?: string;
+    liveVerdict?: string;
+    shadowVerdict?: string;
+  } = {},
+): Harness {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shadow-triage-'));
   const binDir = path.join(dir, 'bin');
   fs.mkdirSync(binDir);
@@ -99,8 +109,9 @@ function makeHarness(opts: { key?: string; legacyKey?: string; disabled?: boolea
   const curlCalls = path.join(dir, 'curl-calls.log');
   const shadowLog = path.join(dir, 'shadow-triage.jsonl');
 
-  fs.writeFileSync(path.join(dir, 'live-verdict.txt'), LIVE_VERDICT);
-  fs.writeFileSync(path.join(dir, 'shadow-verdict.txt'), SHADOW_VERDICT);
+  fs.writeFileSync(path.join(dir, 'live-verdict.txt'), opts.liveVerdict ?? LIVE_VERDICT);
+  fs.writeFileSync(path.join(dir, 'shadow-verdict.txt'), opts.shadowVerdict ?? SHADOW_VERDICT);
+  const title = opts.title ?? 'A fixture issue';
 
   // Only the LIVE agent is a `claude` process now. The stub still branches on
   // ANTHROPIC_BASE_URL so that a regression which reintroduced a shadow `claude` call
@@ -163,13 +174,13 @@ exit 0
   // issue served here was opened by the founder and never edited, so that read passes:
   // these cases are about what happens when both agents run.
   const provenance = path.join(dir, 'provenance.json');
-  fs.writeFileSync(provenance, provenanceAnswer({ title: 'A fixture issue', body: 'Some issue body.' }));
+  fs.writeFileSync(provenance, provenanceAnswer({ title, body: 'Some issue body.' }));
   fs.writeFileSync(
     path.join(binDir, 'gh'),
     `#!/usr/bin/env bash
 { printf '=== %s %s\\n' "\${1:-}" "\${2:-}"; for a in "\$@"; do printf 'ARG %s\\n' "\${a//$'\\n'/\\\\n}"; done; } >> "${ghLog}"
 if [[ "\${1:-}" == "issue" && "\${2:-}" == "view" ]]; then
-  echo '{"body":"Some issue body.","title":"A fixture issue","labels":[{"name":"inbox"}]}'
+  echo '{"body":"Some issue body.","title":${JSON.stringify(title)},"labels":[{"name":"inbox"}]}'
 elif [[ "\${1:-}" == "api" && "\${2:-}" == "graphql" ]]; then
   cat "${provenance}"
 elif [[ "\${1:-}" == "repo" && "\${2:-}" == "view" ]]; then
@@ -206,11 +217,11 @@ exit 0
   return { dir, binDir, ghLog, claudeCalls, curlCalls, shadowLog, env };
 }
 
-function runTriage(h: Harness, issue = '4242'): { stdout: string; stderr: string; status: number } {
+function runTriage(h: Harness, issue = '4242', triageInbox = TRIAGE_INBOX): { stdout: string; stderr: string; status: number } {
   // spawnSync, not execFileSync: the success path must still yield stderr, because
   // the "an inert instrument is visible as inert" assertion reads a note printed on
   // a run that exits 0.
-  const r = spawnSync('bash', [TRIAGE_INBOX, issue], {
+  const r = spawnSync('bash', [triageInbox, issue], {
     encoding: 'utf-8',
     env: h.env,
     cwd: h.dir,
@@ -551,5 +562,42 @@ describe('shadow-triage — verdict-block schema conformance (#1338 metric 2)', 
       .filter((l) => !l.startsWith('rationale:'))
       .join('\n');
     expect(conformant(noRationale)).toBe(true);
+  });
+});
+
+// ── #3282: the shadow side is judged with the SAME named-spec status as the live side ──
+// A `build: SPEC-NNN` issue whose spec is already approved is held `built-spec` by the
+// live gate. If the shadow call were made without that status, an agreeing agent-ready
+// shadow verdict would come out specify/agent-ready, and the log would record a
+// disagreement the PR caused rather than the model.
+describe('shadow-triage — an agreeing model scores as agreement on an already-built spec (#3282)', () => {
+  const NUM = '987';
+  const agentReady = verdict('agent-ready', 'architect', 'T3', 'no');
+
+  /** triage-inbox.sh finds specs at <its dir>/../specs, so a private copy sees only the fixture. */
+  function fixtureTriage(status: string): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shadow-triage-repo-'));
+    fs.cpSync(scriptsDir, path.join(root, 'scripts'), { recursive: true });
+    const d = path.join(root, 'specs', 'fixture-epic', `SPEC-${NUM}-fixture`);
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'requirements.md'), `---\nid: SPEC-${NUM}\nstatus: ${status}\n---\n`);
+    return path.join(root, 'scripts', 'triage-inbox.sh');
+  }
+
+  it('live built-spec and shadow agent-ready are recorded as AGREEING on label, hold and all', () => {
+    const h = makeHarness({
+      key: 'zai-test-key',
+      title: `build: SPEC-${NUM} the fixture spec`,
+      liveVerdict: agentReady,
+      shadowVerdict: agentReady,
+    });
+    runTriage(h, '4242', fixtureTriage('implementing'));
+    const rows = readRows(h);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].live.hold).toBe('built-spec');
+    expect(rows[0].shadow.hold).toBe('built-spec');
+    expect(rows[0].agree.label).toBe(true);
+    expect(rows[0].agree.hold).toBe(true);
+    expect(rows[0].agree.all).toBe(true);
   });
 });

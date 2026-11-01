@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-243-checkout-busy-sees-file-writes/requirements.md",
+  "specHash": "640cbd46a0f641efde659ad773d8c1791f5cb2a842005d9a24a45fd0bfdd756f",
+  "approvedAt": "2026-10-30T05:55:03.249Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-c",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3182#issuecomment-6515774347"
+}

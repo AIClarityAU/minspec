@@ -207,6 +207,19 @@ workflows) are the ones invariant 2 cares about most.
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers (DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
+- **D1 - Recorded selection: Option `b`,** the existing per-region entry in machine-local
+  `.minspec/template-baseline.json`; held entries are no longer re-stamped (FR-5).
+- **D2 - Recorded selection: Option `d`,** one aggregated notice listing all held files on every
+  refresh a human runs.
+- **D3 - Recorded selection: Option `f`,** this spec stops the loss; a sanctioned home for a project
+  rule config cannot express stays separate work, tracked by #1698 (harness refresh deletes a
+  project's commit gate, no sanctioned extension point), which this spec does not close.
+
 Agent recommendations below are proposals; no human has chosen any of them. Approving this
 spec with a recommendation in place accepts it.
 

@@ -1,7 +1,7 @@
 ---
 id: SPEC-243
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - concurrent multi-session coordination
@@ -14,9 +14,9 @@ implements_reason: >-
   (~/.claude/scripts/cos.py and ~/.claude/scripts/cos-runner/cos-runner-state.py, operator
   tooling on the founder's machine); which files it owns is fixed at Plan, after D1-D3.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

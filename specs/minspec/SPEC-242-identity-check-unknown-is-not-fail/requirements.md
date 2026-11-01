@@ -1,7 +1,7 @@
 ---
 id: SPEC-242
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - same credential-boundary domain as SPEC-226 and SPEC-213
@@ -19,9 +19,9 @@ implements_reason: >-
   SPEC-213 also edit; owning them from this spec would freeze them for those specs.
 affects: [scripts/hooks/session-identity.sh, packages/minspec/tests/session-identity.test.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
