@@ -1,7 +1,7 @@
 ---
 id: SPEC-237
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - a voter that never answered must not read like one that had nothing to say
@@ -16,9 +16,9 @@ implements_reason: >-
 # founder push plus a human merge (#1120), not an App push.
 affects: [scripts/review-branch.sh, .github/workflows/ai-review.yml, .github/scripts/ai-review-guard.js, scripts/review-pr.sh, scripts/gen-ci-templates.mjs, packages/minspec/src/lib/ci-review-templates.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
