@@ -42,6 +42,8 @@ _ISSUE_LEASE_REPO_ROOT="$(cd "${_ISSUE_LEASE_DIR}/../.." && pwd)"      # repo ro
 # and offline, so calling it per-writer costs nothing. (#1401 architect review.)
 # shellcheck source=scripts/lib/gh-bot.sh
 source "${_ISSUE_LEASE_DIR}/gh-bot.sh"
+# shellcheck source=scripts/lib/dispatch-author-gate.sh
+source "${_ISSUE_LEASE_DIR}/dispatch-author-gate.sh"
 : "${MINSPEC_LEASE_WORKTREE_BASE:=/tmp/minspec-agent}"
 
 # ── Work-item lease constants (SPEC-044 D10 / OQ-2) ──────────────────────────
@@ -218,7 +220,80 @@ lease_gate_open_unshipped() {
        | grep -qF "$SHIPPED_MARKER"; then
     return 1                                   # already shipped ⇒ never re-dispatch
   fi
+  # #3161: an OPEN PR that closes this issue is work in flight, whatever its branch name
+  # or author (a job or session opens `fix/N-…`, not `agent/issue-N`). Building anyway
+  # spends a build + review panel and opens a rival PR. Keyed on the PR's own
+  # closingIssuesReferences, never on our branch name or a label. Fails closed: a gh/jq
+  # error reads as "cannot prove nothing is in flight" ⇒ refuse (visibly, on stdout).
+  local closing
+  if ! closing="$(lease_open_closing_prs "$item")"; then
+    echo "Cannot list open PRs to check whether one already closes #$item — refusing (fail closed, #3161)."
+    return 1
+  fi
+  if [[ -n "$closing" ]]; then
+    echo "Skipping #$item — open PR(s) already close it: ${closing} (#3161). Not building a rival."
+    return 1
+  fi
   return 0
+}
+
+# lease_open_closing_prs <item>: print the numbers (space-separated, "#N" form) of every
+# OPEN pull request whose closingIssuesReferences contains <item>; empty when none.
+# Non-zero on any read/parse failure (the caller treats that as "unknown", never "none"),
+# and when the open-PR list is not read IN FULL (a truncated list cannot prove "none in
+# flight").
+#
+# Read with GraphQL, not `gh pr list --json`: that command has no `authorAssociation`
+# field (it exits non-zero, which this gate would turn into refusing EVERY dispatch), and
+# the association is what the trust filter below needs.
+#
+# TRUSTED PR authors only. This repo is PUBLIC and `Closes #N` in any fork PR's body fills
+# closingIssuesReferences, so an unfiltered read lets any internet user park a throwaway PR
+# and deny dispatch of #N for as long as it stays open — the same zero-permission denial
+# the shipped-marker read above filters against. Trusted = authorAssociation
+# OWNER/MEMBER/COLLABORATOR, or an account on the dispatch author list (kind + number, never
+# a login: dispatch-author-gate.sh explains why a login is a spelling anyone can register).
+lease_open_closing_prs() {
+  local item="${1:?lease_open_closing_prs needs an item}" owner name listed defs
+  local cursor="" page more pages=0 max_pages=10 acc="" hits q
+  owner="${MINSPEC_LEASE_REPO%%/*}"; name="${MINSPEC_LEASE_REPO#*/}"
+  listed="$(_dispatch_trusted_identities_json 2>/dev/null)" && [[ -n "$listed" ]] || return 1
+  defs="$(_dispatch_gate_jq_defs)"
+  q='query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100,after:$cursor){pageInfo{hasNextPage endCursor} nodes{number authorAssociation author{'"$(_dispatch_actor_fields)"'} closingIssuesReferences(first:100){pageInfo{hasNextPage} nodes{number repository{nameWithOwner}}}}}}}'
+  while :; do
+    (( pages < max_pages )) || return 1          # more than 1000 open PRs: cannot prove "none"
+    pages=$((pages + 1))
+    if [[ -n "$cursor" ]]; then
+      page="$(_dispatch_graphql_read -f query="$q" -f owner="$owner" -f name="$name" -f cursor="$cursor" 2>/dev/null)" || return 1
+    else
+      page="$(_dispatch_graphql_read -f query="$q" -f owner="$owner" -f name="$name" 2>/dev/null)" || return 1
+    fi
+    # Absent/odd shape or GraphQL errors: unknown. Then, over TRUSTED authors only, a PR whose
+    # closing list is itself truncated is unknown too; an untrusted PR's truncated list is
+    # ignored, else one fork PR naming >100 issues would deny dispatch of every issue. The page
+    # goes in on stdin and only the matching PR numbers are kept, so neither a big page nor a
+    # long accumulator rides on argv (one argument is capped at 128 KiB). jq's `error` exits
+    # non-zero, which is this function's fail-closed path.
+    hits="$(printf '%s' "$page" | jq -r --argjson n "$item" --argjson listed "$listed" --arg repo "$MINSPEC_LEASE_REPO" "$defs"'
+      if (.errors // [] | length) != 0 or (.data.repository.pullRequests.nodes | type) != "array"
+      then error("unreadable page") else . end
+      | [ .data.repository.pullRequests.nodes[]
+          | select((.authorAssociation // "") as $a
+                   | $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR"
+                     or (.author | listed)) ]
+      | if all(.[]; .closingIssuesReferences.pageInfo.hasNextPage == false) | not
+        then error("truncated closing list on a trusted PR") else . end
+      | .[]
+      | select(any(.closingIssuesReferences.nodes[]?; .number == $n and .repository.nameWithOwner == $repo))
+      | "#\(.number)"' 2>/dev/null)" || return 1
+    [[ -z "$hits" ]] || acc="${acc:+$acc }${hits//$'\n'/ }"
+    more="$(printf '%s' "$page" | jq -r '.data.repository.pullRequests.pageInfo.hasNextPage')" || return 1
+    [[ "$more" == "false" ]] && break
+    [[ "$more" == "true" ]] || return 1
+    cursor="$(printf '%s' "$page" | jq -r '.data.repository.pullRequests.pageInfo.endCursor // empty')" || return 1
+    [[ -n "$cursor" ]] || return 1
+  done
+  printf '%s' "$acc"
 }
 
 # ── Claim comment body + read/enumerate ──────────────────────────────────────
