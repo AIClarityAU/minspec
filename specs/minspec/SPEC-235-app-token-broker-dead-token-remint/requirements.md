@@ -225,7 +225,18 @@ no real network; fixtures use token-shaped dummies only).
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and
+engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted
+it. It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and
+that approval may overturn it.
+
 **D1. When does the handler probe a cached token?**
+
+**Recorded selection: Option (a),** probe on a timer, at most once per 60 s per cache, plus
+on every `--refresh`.
+
 - (a) **Probe on a timer: at most once per 60 s per cache, plus on every `--refresh`
   (rec).** Worst-case dead-token exposure is 60 s instead of up to 50 min; one extra API call
   a minute at most. Cost: up to 60 s of fleet-wide `401`s after a revoke remain, and the
@@ -239,6 +250,9 @@ no real network; fixtures use token-shaped dummies only).
 
 **D2. What does the handler serve when the probe result is unknown (GitHub 5xx, 429,
 network failure)?**
+
+**Recorded selection: Option (a),** serve the cached token and log the status code.
+
 - (a) **Serve the cached token and log the status code (rec).** The token was fresh by
   expiry; an unreachable GitHub makes a new mint fail anyway. Cost: during a partial GitHub
   outage that also invalidated the token, a dead token can be served until the next probe.
@@ -246,6 +260,10 @@ network failure)?**
   the failure this spec exists to remove.
 
 **D3. How does `--refresh` reach the handler?**
+
+**Recorded selection: Option (a),** one fixed byte on the existing socket, read with a short
+timeout; any other input or none means a normal request.
+
 - (a) **One fixed byte on the existing socket, read with a short timeout; any other input or
   none means a normal request (rec).** Smallest change, one socket. Cost: the handler stops
   being "reads nothing", which host DR-079 states; that host record needs an amendment line,
@@ -262,6 +280,9 @@ D3(a) choice amends host DR-079 in the host register, not this one. Recommendati
 here; record D1-D3 outcomes in this spec's Clarify answers. Cost: the reasoning lives in a
 spec rather than the register, so a later reader looking for "why does the broker probe"
 must find it through #2114.
+
+**Recorded selection: Option (no DR),** no DR here; the D1-D3 outcomes are recorded in this
+spec's Clarify answers.
 
 ## Out of scope
 

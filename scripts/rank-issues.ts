@@ -36,6 +36,7 @@ import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   rankIssues,
+  PIPELINE_BLOCKER_LABEL,
   blockingGraph,
   structuralOrder,
   type IssueRecord,
@@ -247,7 +248,7 @@ export function renderExplain(
 ): string {
   const lines: string[] = [];
   lines.push(
-    `Ranked ${ranked.length} candidate(s): unblocks (desc), then spec/epic structural rank, then tier, then issue number.`,
+    `Ranked ${ranked.length} candidate(s): ${PIPELINE_BLOCKER_LABEL} first, then unblocks (desc), then spec/epic structural rank, then tier, then issue number.`,
   );
   lines.push(
     `Graph: ${meta.edgeCount} declared blocking edge(s) among the open issues ` +
@@ -256,10 +257,11 @@ export function renderExplain(
       `Structural order: ${meta.orderSize} slot(s).`,
   );
   lines.push('');
-  const header = ['rank', 'issue', 'unblocks', 'spec / epic', 'tier'];
+  const header = ['rank', 'issue', 'blocker', 'unblocks', 'spec / epic', 'tier'];
   const rows = ranked.map((r, i) => [
     String(i + 1),
     `#${r.number}`,
+    r.pipelineBlocker ? 'yes' : '-',
     r.reasons.unblocks,
     r.reasons.spec,
     r.reasons.tier,
