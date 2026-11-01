@@ -71,12 +71,12 @@ Read from the code, not inferred:
 
 ## Decisions needed (Clarify)
 
-2 of 3 decisions are recorded: an agent session selected, for each, the option this document
-already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001 covers spec approval and engineering-DR acceptance only). They are ratified only when a
-human or a covered delegation approves this spec. D2 is not recorded: this document makes no
-recommendation for it (it asks for the packaging manifest to be checked first), so it stays open
-for a human.
+All 3 decisions are answered, not ratified. For D1 and D3 an agent session selected the option this document
+already recommended; no human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). D2 made no recommendation and
+asked for the packaging manifest to be read; it is answered from the code, with the evidence given under D2,
+and is not a human's choice either. This spec is unapproved, so these answers bind nothing until a human
+or a covered delegation approves it.
 
 - **D1 - Recorded selection: Option (a),** thread config into the shim builders, so the exact
   configured folder names appear in the shipped text.
@@ -88,7 +88,14 @@ for a human.
 - **(b) Name folders by role** ("the specs directory in `.minspec/config.json`"): no contract change, never stale. Cost: one extra lookup by the agent, vaguer text, and an agent that skips the lookup falls back to guessing `specs/`.
 - **(c) Both**: exact names plus a pointer to config. Cost: longest text, more tokens per command (tenet 2).
 
-**D2 - Do `scripts/roles/*.md` ship to adopters?** If yes, FR-5 applies and the layout/script assumptions must go generic or config-sourced. If no (dev-time only for this monorepo, per CLAUDE.md "Agent Dispatch"), the fix is to mark them this-repo-only and exclude them from shipping, and `architect.md:18,30-32,39,53` are correct as written. Recommendation: confirm from the packaging manifest before choosing; cost of guessing wrong is either needless rewriting or a shipped false signpost. Which is true was not verified here.
+**D2 - Do `scripts/roles/*.md` ship to adopters?** If yes, FR-5 applies and the layout/script assumptions must go generic or config-sourced. If no (dev-time only for this monorepo, per CLAUDE.md "Agent Dispatch"), the fix is to mark them this-repo-only and exclude them from shipping, and `architect.md:18,30-32,39,53` are correct as written. Recommendation: confirm from the packaging manifest before choosing; cost of guessing wrong is either needless rewriting or a shipped false signpost. Resolved below, from the code.
+
+**D2 - Recorded answer: yes, four role files ship, so FR-5 applies.** Read from the code on `main` at
+`964c7075`, not chosen: `packages/minspec/src/lib/template-registry.ts` scaffolds
+`scripts/roles/reviewer.md` (line 2691), `security.md` (2697), `architect.md` (2703) and `skeptic.md` (2709)
+into adopter repos. `architect.md` therefore ships, and its layout and script claims
+(`architect.md:18,30-32,39,53`) must go generic or config-sourced per FR-5. `approvable-reviewer.md` is drift-gated
+only and not scaffolded (`ci-review-templates.ts:3451`); `dev.md`, `tasks.md` and `triage.md` have no scaffold entry.
 
 **D3 - Allow-list granularity for the FR-4 sweep.** Per-file reason (rec, auditable, cost: churn when text moves) versus per-pattern (cheap, cost: hides new unintended hits).
 

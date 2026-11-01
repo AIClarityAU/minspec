@@ -22,7 +22,7 @@ const read = (rel: string): string => fs.readFileSync(path.join(ROOT, rel), 'utf
 /** The hold values triage-decide.sh can actually emit — the source of truth. */
 function emittedHolds(): string[] {
   const src = read('scripts/triage-decide.sh');
-  const holds = [...src.matchAll(/emit [a-z-]+ "\$ROLE" ([a-z]+)/g)].map((m) => m[1]);
+  const holds = [...src.matchAll(/emit [a-z-]+ "\$ROLE" ([a-z-]+)/g)].map((m) => m[1]);
   return [...new Set(holds)].sort();
 }
 
@@ -52,7 +52,7 @@ describe('hold:* labels (#1002)', () => {
     // to be queried. Includes the case where the new verdict is `none`: an issue that
     // became dispatchable must stop claiming it is held.
     const src = read('scripts/triage-inbox.sh');
-    expect(src).toMatch(/for h in human tier specify info unknown; do/);
+    expect(src).toMatch(/for h in human tier specify info built-spec unknown; do/);
     expect(src).toMatch(/SUPERSEDED="\$\{SUPERSEDED\},hold:\$\{h\}"/);
   });
 
@@ -71,7 +71,7 @@ describe('hold:* labels (#1002)', () => {
     // THE COUPLING TEST. If triage-decide.sh grows a hold, this fails until the
     // supersede loop learns about it — otherwise a stale label would outlive its verdict.
     const src = read('scripts/triage-inbox.sh');
-    const loop = src.match(/for h in ([a-z ]+); do\n\s*\[\[ "hold:\$\{h\}"/);
+    const loop = src.match(/for h in ([a-z -]+); do\n\s*\[\[ "hold:\$\{h\}"/);
     expect(loop, 'the hold supersede loop must exist').toBeTruthy();
     const covered = loop![1].trim().split(/\s+/).sort();
     const expected = emittedHolds().filter((h) => h !== 'none').sort();
@@ -80,7 +80,7 @@ describe('hold:* labels (#1002)', () => {
 
   it('the backfill DERIVES the vocabulary rather than restating it', () => {
     const src = read('scripts/backfill-hold-labels.sh');
-    expect(src).toMatch(/grep -oE 'emit \[a-z-\]\+ "\\\$ROLE" \[a-z\]\+' "\$DECIDE"/);
+    expect(src).toMatch(/grep -oE 'emit \[a-z-\]\+ "\\\$ROLE" \[a-z-\]\+' "\$DECIDE"/);
     // …and refuses to run a bulk sweep if that derivation looks broken.
     expect(src).toMatch(/refusing to run a bulk label sweep on a guess/);
   });

@@ -1,7 +1,7 @@
 ---
 id: SPEC-214
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - the ai-review panel and the DR id gate are both gate-signal integrity (same home as SPEC-054, SPEC-078, SPEC-211)
@@ -18,8 +18,8 @@ implements_reason: >-
 affects: [scripts/review-branch.sh, .github/workflows/ai-review.yml, scripts/lib/dr-id-collision.ts, scripts/check-dr-id-collision.ts, .github/scripts/ai-review-guard.js]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

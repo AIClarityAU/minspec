@@ -901,7 +901,7 @@ The step "Post honest ai-review verdict check-run" (.github/workflows/ai-review.
 
 ## [DR-114 — The host drain service runs the drain at concurrency 8 by default; drain-inbox.sh keeps its own default of 1](DR-114.md)
 
-*Status: proposed · Date: 2026-10-27*
+*Status: accepted · Date: 2026-10-27*
 
 <!-- dr-summary:DR-114 auto=5fb445350927 -->
 scripts/drain-inbox.sh defaults to concurrency 1 and carries a caveat (around lines 407-411): two queued issues touching the same file still produce competing pull requests, because each agent branches from origin/main and cannot see an unmerged sibling, so "keep the default at 1 until same-file serialisation exists, and de-duplicate the queue first". That caveat was written for the session-start drain.
@@ -922,4 +922,12 @@ SPEC-136 (headless core, status: planning, T4) packages the checks MinSpec alrea
 <!-- dr-summary:DR-117 auto=f3bf57334586 -->
 ZCode (Z.ai's editor) runs apart from the host so that the host's editor and agents are never "infected" by reading what ZCode wrote; SPEC-136 set six boundary rules for that and said they outlive the spec and need a decision record. This is that record.
 <!-- /dr-summary:DR-117 -->
+
+## [DR-119 — A pull request that carries only one delegated spec approval is merged from main by a fail-closed check, one at a time, with no founder keystroke, no runner turn and no admin bypass](DR-119.md)
+
+*Status: proposed · Date: 2026-10-30*
+
+<!-- dr-summary:DR-119 auto=601a0bb6ac6e -->
+The bot records delegated spec approvals, and no rule lets anything but the founder merge them, so they queue on a keystroke the delegation was meant to remove. | Count | Pull requests | Outcome under section 1 | |---|---|---| | 16 | #3154, #3155, #3244, #3356, #3358 to #3361, #3363 to #3365, #3370 to #3374 | Eligible once brought up to date | | 1 | #3357 | Refused: test failed on its head. All test files passed and…
+<!-- /dr-summary:DR-119 -->
 <!-- minspec:dr-index:end -->

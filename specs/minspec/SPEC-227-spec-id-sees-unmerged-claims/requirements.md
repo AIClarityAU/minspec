@@ -286,10 +286,12 @@ item cannot carry consent, because any session can write the queue. Those select
 therefore bind nothing on their own. They bind only if the founder approves this spec with
 them in its text; that approval, not this record, is the consent act, and it may overturn
 them. DQ-2 and DQ-4 carry the (rec) option an agent session copied; no human chose them
-(each says so). Delegation DLG-001 (DR-108) made none of these selections. DQ-5 sets a
-convention people follow, has no recorded selection, and stays open (queue item c227q5).
-This section stays open, and the spec is not ready to approve, until the founder answers
-DQ-5 and confirms DQ-2 and DQ-4.
+(each says so). Delegation DLG-001 (DR-108) made none of these selections. DQ-5 has a
+selection recorded from the answer to task-queue item c227q5 (2026-10-28: "Cheapest fix"),
+on option (b), which is NOT the (rec) option; the same unverified-queue-answer caveat
+applies, and FR-10 needs rewriting in Clarify before Plan.
+This section stays open, and the spec is not ready to approve, until the founder confirms
+DQ-2 and DQ-4 and approves the text with the DQ-5 selection in place.
 
 ### DQ-1 - Per-product id ranges contradict the global uniqueness gate
 
@@ -365,8 +367,14 @@ blindness. Its CI gate exists; its offline allocator does not see branches eithe
 
 ### DQ-5 - Which claimant renumbers when two specs already share an id? (#2185)
 
-**Not recorded:** this sets a convention people follow, not only gate behaviour, so it
-stays open for Clarify.
+**Recorded selection: (b),** cheapest to fix wins: whichever claimant is cheaper to
+renumber renumbers. Source: the answer to task-queue item c227q5, 2026-10-28 ("Cheapest
+fix"), an answer the queue attributes to the founder. It is NOT this document's (rec)
+option, which was (a). The founder accepted the stated cost: a judgement is needed each
+time and the gate cannot apply it. A queue answer is not consent (DR-108 section 4), so this
+selection is unverified and binds only if the founder approves this spec's text with it in
+place. FR-10 therefore needs rewriting in Clarify before Plan, as the closing paragraph of
+this decision says; this record does not edit FR-10.
 
 FR-10 fixes the gate's answer (lower PR number keeps the id). The open question is whether
 that is also the rule for a clash found any other way - by hand, by the FR-8 command, or
