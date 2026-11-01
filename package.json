@@ -19,6 +19,7 @@
     "check:cycles": "npx tsx scripts/check-import-cycles.ts",
     "check:swallowed-gate": "npx tsx scripts/check-swallowed-gate-signal.ts",
     "check:orphaned-docstring": "npx tsx scripts/check-orphaned-docstring.ts",
+    "check:template-version": "npx tsx scripts/check-template-version-bump.ts",
     "pretypecheck": "npm run build --workspace=@aiclarity/shared",
     "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/minspec/tsconfig.json && tsc --noEmit -p packages/core/tsconfig.json",
     "check:gh-bot": "bash scripts/check-gh-bot-attribution.sh",
