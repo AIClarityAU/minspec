@@ -1,7 +1,7 @@
 ---
 id: SPEC-246
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute - the dev-time autonomous build/merge pipeline (the issue ranker orders its dispatch queue)
@@ -14,9 +14,9 @@ implements_reason: >-
   Expected (unverified until Plan): scripts/lib/issue-rank.ts, scripts/rank-issues.ts,
   scripts/drain-inbox.sh and their tests.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
