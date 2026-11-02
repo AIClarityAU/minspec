@@ -1720,12 +1720,17 @@ run_reviewer_stage() {
   fi
 
   # 4. Render the advisory PR-review body from the raw verdict block(s).
+  #    The anchored patterns live in variables, not inline: a `[[:space:]]` written inside
+  #    the statement that reads $rev_out/$sec_out is taken by check-swallowed-gate-signal
+  #    for a `[[ ]]` test, i.e. a decision made from the swallowed capture above.
+  local VERDICT_BEGIN_RE='^[[:space:]]*REVIEW_VERDICT_BEGIN[[:space:]]*$'
+  local VERDICT_END_RE='^[[:space:]]*REVIEW_VERDICT_END[[:space:]]*$'
   local review_body
   review_body=$(printf '## Independent AI review — advisory (DR-033 §6)\n\n**Reviewer** verdict:\n```\n%s\n```' \
-    "$(printf '%s\n' "$rev_out" | sed -n '/^[[:space:]]*REVIEW_VERDICT_BEGIN[[:space:]]*$/,/^[[:space:]]*REVIEW_VERDICT_END[[:space:]]*$/p')")
+    "$(printf '%s\n' "$rev_out" | sed -n "/${VERDICT_BEGIN_RE}/,/${VERDICT_END_RE}/p")")
   if [[ "$touches_pkg" == "yes" ]]; then
     review_body=$(printf '%s\n\n**Security** verdict:\n```\n%s\n```' "$review_body" \
-      "$(printf '%s\n' "$sec_out" | sed -n '/^[[:space:]]*REVIEW_VERDICT_BEGIN[[:space:]]*$/,/^[[:space:]]*REVIEW_VERDICT_END[[:space:]]*$/p')")
+      "$(printf '%s\n' "$sec_out" | sed -n "/${VERDICT_BEGIN_RE}/,/${VERDICT_END_RE}/p")")
   fi
   review_body=$(printf '%s\n\n_Reviewer agent is read-only and credential-free; verdict enforced by the deterministic fail-closed gate (`review-decide.sh`). Advisory only — the human holds the merge keystroke (never-wrong / HITL)._' "$review_body")
 
