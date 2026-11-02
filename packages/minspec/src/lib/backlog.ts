@@ -284,6 +284,11 @@ function describeGhFailure(err: unknown): string {
   return `gh issue list failed: ${message}`;
 }
 
+/** gh pages 100 issues per request, so a large `--limit` needs more than the flat 15s (#2246). */
+function ghListTimeoutMs(limit: number): number {
+  return Math.max(15000, Math.ceil(limit / 100) * 3000);
+}
+
 /**
  * Fetch issues from GitHub using `gh` CLI.
  * Filters to open issues by default.
@@ -319,7 +324,7 @@ export async function fetchIssues(
   try {
     const { stdout } = await execFileAsync('gh', args, {
       cwd: rootDir,
-      timeout: 15000,
+      timeout: ghListTimeoutMs(limit),
       env: { ...process.env },
     });
 
