@@ -1,7 +1,7 @@
 ---
 id: SPEC-283
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - DR-051's artifact-class branch policy and DR-065's shared-checkout moves both live here
@@ -14,9 +14,9 @@ implements_reason: >-
   own is still decided at Plan; no recorded option names a new file, so implements stays none. The
   candidate producers are named in "Measured state" below.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
