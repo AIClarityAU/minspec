@@ -39,6 +39,7 @@
 #   scripts/drain-inbox.sh --should-continue <pid> <epoch>  # exit 0 continue / 1 stop
 #   scripts/drain-inbox.sh --paused                         # exit 0 paused / 1 not (#1187)
 #   scripts/drain-inbox.sh --zai-key-note                   # where the z.ai key comes from (never its value; zaikey23)
+#   scripts/drain-inbox.sh --unlaned    (<json on stdin)    # issue numbers carrying no lane label (#3355)
 #   scripts/drain-inbox.sh --is-quota   (<text on stdin)    # exit 0 iff the CLI's OWN limit line is in it
 #   scripts/drain-inbox.sh --resolve-session-pid            # print session anchor PID
 #   scripts/drain-inbox.sh --quota-gate                     # exit 0 admit / 42 defer
@@ -1092,13 +1093,36 @@ dispatch_alive_for() {
   pgrep -f "dispatch-issue\.sh[[:space:]]+$1([[:space:]]|$)" >/dev/null 2>&1
 }
 
+# #3408 — how many times an issue may be released as an orphan before it is surfaced.
+# A release leaves the issue with no lane, so the lane pass gives it `inbox` and triage
+# sends it back to a dispatch; without a cap a dispatch that dies every time loops forever,
+# spending quota each lap. Each release leaves a marker comment; the count is the markers.
+ORPHAN_RELEASE_CAP="${MINSPEC_ORPHAN_RELEASE_CAP:-3}"
+ORPHAN_RELEASE_MARKER='<!-- drain-orphan-release -->'
+
+# orphan_release_count <issue>: prints how many marker comments the issue carries.
+# Returns 1 (prints nothing) when the comments cannot be read or do not reduce to a
+# number: an unreadable count is never read as zero. Fetched raw and flattened locally,
+# like the timeline readers above, so pagination cannot split the count.
+orphan_release_count() {
+  local raw cnt
+  raw=$(gh api "repos/${REPO}/issues/$1/comments" --paginate 2>/dev/null) || return 1
+  [[ -n "$raw" ]] || return 1
+  cnt=$(printf '%s' "$raw" | jq -r -s --arg m "$ORPHAN_RELEASE_MARKER" '
+      (add // []) as $c
+      | if ($c | type) != "array" then "unknown"
+        else [$c[] | select((.body // "") | contains($m))] | length end' 2>/dev/null) || return 1
+  [[ "$cnt" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$cnt"
+}
+
 # #1306 — release `agent-running` claims that no dispatch is holding.
 # TWO independent witnesses must agree before anything is touched: the claim is older
 # than the stale threshold AND no live dispatch process exists for it. Either one alone
 # could be wrong (a long build looks old; pgrep cannot see a dispatch on another host),
 # so requiring both means the reaper fails toward leaving the claim in place.
 reconcile_stale_claims() {
-  local running n applied age
+  local running n applied age prior
   running=$(gh issue list --repo "$REPO" --state open --label "agent-running" \
     --json number --jq '.[].number' 2>/dev/null || true)  # swallow-ok: the next line returns 0 on empty, before the loop holding this function's only label edit — a failed query skips this cycle's reaping and the next retries; nothing is reaped on bad data
   [[ -n "$running" ]] || return 0
@@ -1112,7 +1136,26 @@ reconcile_stale_claims() {
     }
     age=$(( $(date -u +%s) - applied ))
     (( age >= RECONCILE_CLAIM_STALE_SECS )) || continue    # witness 1: genuinely old
-    echo "[drain] reconcile: releasing orphaned agent-running on #$n (claimed ${age}s ago, no live dispatch) — #1306."
+    prior=0; prior=$(orphan_release_count "$n") || {
+      echo "[drain] reconcile: could not read the comments of #$n, so its orphan-release count is unknown — leaving the claim as-is; the next cycle retries (#3408)."
+      continue
+    }
+    if (( prior >= ORPHAN_RELEASE_CAP )); then
+      echo "[drain] reconcile: #$n was already released as an orphan ${prior} time(s) (cap ${ORPHAN_RELEASE_CAP}) — surfacing as needs-human-review instead of re-queueing (#3408)."
+      gh issue comment "$n" --repo "$REPO" --body "The drain reconciler has released this issue's orphaned \`agent-running\` claim ${prior} times (cap ${ORPHAN_RELEASE_CAP}) and will not return it to \`inbox\` again: each lap re-triages and re-dispatches it at a cost in quota. Labelled \`needs-human-review\`; a human should find out why the dispatch keeps dying. (#3408)" >/dev/null 2>&1 \
+        || echo "[drain] reconcile: could not comment on #$n — continuing with the label change."
+      gh issue edit "$n" --repo "$REPO" --remove-label "agent-running" --add-label "needs-human-review" 2>/dev/null \
+        || echo "[drain] reconcile: could not surface #$n — it stays as-is."
+      continue
+    fi
+    echo "[drain] reconcile: releasing orphaned agent-running on #$n (claimed ${age}s ago, no live dispatch; release $((prior + 1)) of ${ORPHAN_RELEASE_CAP}) — #1306."
+    # The marker is written BEFORE the release: a release that could not be counted would
+    # make the cap unenforceable, so a failed comment leaves the claim for the next cycle.
+    gh issue comment "$n" --repo "$REPO" --body "${ORPHAN_RELEASE_MARKER}
+Drain reconciler released this issue's orphaned \`agent-running\` claim (release $((prior + 1)) of ${ORPHAN_RELEASE_CAP}; claimed ${age}s ago, no live dispatch). (#3408)" >/dev/null 2>&1 || {
+      echo "[drain] reconcile: could not record the release on #$n — leaving the claim as-is so the cap stays enforceable (#3408)."
+      continue
+    }
     gh issue edit "$n" --repo "$REPO" --remove-label "agent-running" 2>/dev/null \
       || echo "[drain] reconcile: could not release the claim on #$n — it stays as-is."
   done <<< "$running"
@@ -1367,11 +1410,94 @@ reconcile_done_issues() {
   done <<< "$done_issues"
 }
 
+# ── Lane reconciler (#3355) ──────────────────────────────────────────────────
+#
+# triage-inbox.sh reads only `--label inbox` and the drain reads only `agent-ready*`, so
+# an open issue carrying NO lane label is invisible to every producer (103 of 1029 were,
+# on 2026-10-30, including the drain bug #2699). Nothing asserted that every open issue
+# sits in a lane; triage validated what it was given and never that it was given all.
+#
+# A lane label is any label an actor reads: inbox, agent-* (ready, ready-specify, running,
+# done, escalated, ...), hold:*, needs-review, needs-human-review, needs-info, blocked-by*, parked.
+# unlaned_numbers is the pure decision (stdin: `gh issue list --json number,labels`,
+# stdout: one number per issue with no lane label). It needs jq; without it the caller
+# reports loudly instead of guessing.
+unlaned_numbers() {
+  jq -r '.[] | select(([.labels[].name | select(
+      . == "inbox" or . == "needs-review" or . == "needs-human-review" or . == "needs-info" or . == "parked"
+      or startswith("agent-") or startswith("hold:") or startswith("blocked-by")
+    )] | length) == 0) | .number'
+}
+
+# Adds `inbox` to every open issue with no lane label and ALWAYS prints the count, even
+# when zero (invariant 2: never silent). Never fatal: a failed query or edit is printed
+# loudly and the cycle goes on; an unreadable list is NOT read as "no unlaned issues".
+reconcile_unlaned_issues() {
+  local json nums n count=0 failed=0
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "[drain] lane check: jq missing — could not look for issues with no lane label (#3355)."
+    return 0
+  fi
+  if ! json=$(gh issue list --repo "$REPO" --state open --limit 5000 --json number,labels 2>/dev/null); then
+    echo "[drain] lane check: could not list open issues — NOT evidence that every issue has a lane (#3355)."
+    return 0
+  fi
+  local listed
+  listed=$(printf '%s' "$json" | jq 'length' 2>/dev/null || echo 0)
+  if [[ "$listed" -ge 5000 ]]; then
+    echo "[drain] lane check: open-issue list hit the 5000 limit — issues beyond it were NOT checked (#3355)."
+  fi
+  if ! nums=$(printf '%s' "$json" | unlaned_numbers); then
+    echo "[drain] lane check: could not parse the issue list — NOT evidence that every issue has a lane (#3355)."
+    return 0
+  fi
+  # Issues the chief-of-staff runner parked on purpose carry a comment ending "Do not
+  # re-triage" (triage reads title and body only, so it would never see that comment).
+  # A failed or unreadable search must not read as "nothing parked": edit nothing.
+  local pjson parked
+  if ! pjson=$(gh issue list --repo "$REPO" --state open --limit 5000 \
+        --search '"Do not re-triage" in:comments' --json number 2>/dev/null); then
+    echo "[drain] lane check: could not search for parked issues — NO edits this pass, NOT evidence that nothing is parked (#3355)."
+    return 0
+  fi
+  if ! parked=$(printf '%s' "$pjson" | jq -r '.[].number' 2>/dev/null); then
+    echo "[drain] lane check: could not parse the parked-issue search — NO edits this pass (#3355)."
+    return 0
+  fi
+  if [[ "$(printf '%s' "$pjson" | jq 'length' 2>/dev/null || echo 0)" -ge 5000 ]]; then
+    echo "[drain] lane check: parked-issue search hit the 5000 limit — some parked issues may be re-triaged (#3355)."
+  fi
+  # main-red reports are filed by main-red-watch for a human, and no queue reads them.
+  local red
+  red=$(printf '%s' "$json" | jq -r '.[] | select(any(.labels[]; .name == "main-red")) | .number' 2>/dev/null) || red=""
+  local skipped_parked=0 skipped_red=0
+  while read -r n; do
+    [[ -n "$n" ]] || continue
+    if grep -qxF "$n" <<< "$parked"; then
+      skipped_parked=$((skipped_parked + 1))
+      continue
+    fi
+    if grep -qxF "$n" <<< "$red"; then
+      skipped_red=$((skipped_red + 1))
+      continue
+    fi
+    if gh issue edit "$n" --repo "$REPO" --add-label inbox >/dev/null 2>&1; then
+      count=$((count + 1))
+    else
+      failed=$((failed + 1))
+      echo "[drain] lane check: could not add inbox to #$n — left as-is."
+    fi
+  done <<< "$nums"
+  echo "[drain] lane check: ${count} open issue(s) had no lane label and got inbox; ${failed} could not be labelled (#3355)."
+  echo "[drain] lane check: skipped ${skipped_parked} parked on purpose (Do not re-triage) and ${skipped_red} main-red report(s) (#3355)."
+}
+
 # Never fatal: a reconciler exists to reduce drift, and must not become a new way for
 # a cycle to die. Failures are reported, then the cycle proceeds.
 reconcile_labels() {
   reconcile_stale_claims || echo "[drain] reconcile: stale-claim pass errored — continuing."
   reconcile_done_issues  || echo "[drain] reconcile: agent-done pass errored — continuing."
+  reconcile_unlaned_issues || echo "[drain] reconcile: lane check errored — continuing."
 }
 
 # record_delegated_approvals: Step 0b of a cycle (#2981, DR-108). For content that a
@@ -1435,7 +1561,7 @@ record_delegated_approvals() {
 #
 # The cap ROTATES (MINSPEC_DRAIN_DELEGATED_MERGE_CURSOR, the last PR judged). The cap
 # counts every judgement, held or armed, and a held PR is usually held again next cycle
-# (handed to the founder, hold:human, a plan artifact). Judged oldest-first from the top
+# (handed to the founder, hold:human). Judged oldest-first from the top
 # every cycle, the oldest held PRs took the whole cap: on 2026-10-30 seven of them filled
 # seven of ten slots, twelve cycles in a row ended "0 armed of 10 judged", and 36 newer
 # spec PRs were never judged. Each cycle now resumes after the last PR judged and wraps,
@@ -1500,9 +1626,26 @@ arm_delegated_spec_merges() {
 
   # Already-armed PRs are skipped (the arm stands); so are drafts and any PR with a
   # file outside specs/. Oldest first, so the longest-held spec goes first.
+  #
+  # A PR carrying a plan artifact is skipped too, by name. The judge denies it whatever
+  # else is true (PLAN_ARTIFACT in scripts/lib/delegated-merge.ts, #2980; the parity test
+  # pins this regex to that one), so judging it only spends a slot of the cap. On
+  # 2026-10-30, 21 of 26 candidates were such PRs and a cycle ended "0 armed of 10 judged"
+  # with #3391 waiting behind them. Skipping only removes: nothing here admits a PR.
+  local plan_only
+  plan_only=$(printf '%s' "$rows" | jq -r '[.[]
+      | select(.isDraft | not) | select(.autoMergeRequest == null)
+      | select((.files | length) > 0 and all(.files[]; .path | startswith("specs/")))
+      | select(any(.files[]; .path | test("(^|/)(design|tasks)\\.md$")))
+      | .number] | sort | map("#\(.)") | (if length > 0 then "\(length) held PR(s) carry a plan artifact (#2980), not judged: \(join(" "))" else empty end)' 2>/dev/null) || {
+    echo "[drain] WARNING: delegated spec merge NOT run: could not filter the held PR list." >&2
+    return 0
+  }
+  [[ -z "$plan_only" ]] || echo "[drain] delegated spec merge: ${plan_only}"
   candidates=$(printf '%s' "$rows" | jq -r '[.[]
       | select(.isDraft | not) | select(.autoMergeRequest == null)
       | select((.files | length) > 0 and all(.files[]; .path | startswith("specs/")))
+      | select(any(.files[]; .path | test("(^|/)(design|tasks)\\.md$")) | not)
       | .number] | sort | .[]' 2>/dev/null) || {
     echo "[drain] WARNING: delegated spec merge NOT run: could not filter the held PR list." >&2
     return 0
@@ -2147,8 +2290,8 @@ run_cycle() {
     return $(( pr_claims_rc != 0 ))
   fi
 
-  # Dispatch ORDER (#2196): what each issue unblocks, then the spec it serves, then
-  # tier, then number — scripts/rank-issues.ts, run from the same scripts dir as TRIAGE
+  # Dispatch ORDER (#2196): a `pipeline-blocker` label first (prio-rcdd-1030), then what
+  # each issue unblocks, then the spec it serves, then tier, then number — scripts/rank-issues.ts, run from the same scripts dir as TRIAGE
   # (the hard-synced run dir once ensure_fresh_run_dir has verified it). `sort -un`
   # above fixes the SET; ordering is not a gate, so a ranker that fails, or returns
   # anything but exactly that set, is overruled LOUDLY and numeric order stands —
@@ -3794,6 +3937,11 @@ case "$1" in
     rm -f "$PAUSE_FILE"
     echo "▶️   Drain pause marker removed ($PAUSE_FILE). A running loop resumes within one poll."
     exit 0
+    ;;
+  --unlaned)
+    # Pure seam (#3355): stdin = `gh issue list --json number,labels`; prints numbers with no lane label.
+    unlaned_numbers
+    exit $?
     ;;
   --is-quota)
     # Pure seam: classify combined agent output (stdin) as quota/limit or not.

@@ -207,6 +207,22 @@ function loadedAtRow(loadedAt: Date): MessageNode {
   });
 }
 
+/**
+ * Most issues the pane requests. `gh issue list --limit` pages through the API itself, so this is
+ * a ceiling, not a page size; the old default of 100 hid 89% of an 893-issue backlog (#2246).
+ */
+export const BACKLOG_VIEW_ISSUE_LIMIT = 5000;
+
+/** A list that hit the ceiling is partial; say so rather than read as the whole backlog (#2246). */
+function truncatedRow(shown: number): MessageNode {
+  return new MessageNode({
+    label: `Showing the first ${shown} open issues - more exist`,
+    contextValue: BACKLOG_ROW.message,
+    icon: 'warning',
+    tooltip: `The backlog request is capped at ${shown} issues, and that cap was reached, so this list is incomplete.`,
+  });
+}
+
 function emptyRow(): MessageNode {
   return new MessageNode({
     label: 'No open issues found',
@@ -349,7 +365,7 @@ export class BacklogTreeProvider implements vscode.TreeDataProvider<BacklogNode>
 
     const load = (async (): Promise<void> => {
       try {
-        const issues = await fetchIssues(this.workspaceRoot, { state: 'open' });
+        const issues = await fetchIssues(this.workspaceRoot, { state: 'open', limit: BACKLOG_VIEW_ISSUE_LIMIT });
         // A zero-issue result is an ordinary loaded state. Treating "empty" as "absent"
         // is what made the old code run gh again on every render.
         this.state = { kind: 'loaded', issues: sortBacklog(issues), loadedAt: new Date() };
@@ -405,6 +421,7 @@ export class BacklogTreeProvider implements vscode.TreeDataProvider<BacklogNode>
       case 'loaded':
         return [
           loadedAtRow(state.loadedAt),
+          ...(state.issues.length >= BACKLOG_VIEW_ISSUE_LIMIT ? [truncatedRow(state.issues.length)] : []),
           ...(state.issues.length === 0 ? [emptyRow()] : this.buildGroups(state.issues)),
         ];
     }
