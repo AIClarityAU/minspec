@@ -232,7 +232,12 @@ its own assertion: a run that removes the behaviour under test must turn the cas
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are answered, not ratified: an agent session selected on 2026-10-25, for each, the option this document already recommended. No human chose them, and no delegation covers authoring Clarify answers. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted it. It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and that approval may overturn it.
+
 - **DQ-1: Where does the durable record of holds live?**
+  **Recorded selection: Option (a),** the spec marks a committed hold ledger under
+  `.minspec/` as its recommendation because it is reviewable in a pull request and the same
+  on every clone.
   - **(a) A committed hold ledger under `.minspec/` (rec).** It contains `outputPath`,
     `heading` and `state` only, sorted, with no hashes and no timestamps. It is
     reviewable in a pull request, it is the same on every clone, and CI could read it. It
@@ -253,17 +258,23 @@ its own assertion: a run that removes the behaviour under test must turn the cas
   ledger, gets no in-file cue. **Cost of yes:** MinSpec's bookkeeping is written into
   prose MinSpec has agreed not to touch, and the marker can be deleted along with the
   hold's own content.
+  **Recorded selection: No inline marker (rec),** because a marker writes MinSpec's
+  bookkeeping into prose MinSpec has agreed not to touch.
 - **DQ-3: Should a parity or CI check fail on a `template-moved` hold?** **No, advisory
   only (rec, INV-7).** **Cost of the recommendation:** a lagging hold in an adopter repo
   still merges. The signal is the FR-2 and FR-3 report (and the ledger diff under DQ-1
   (a)), not a red check. **Cost of yes:** an advisory becomes a merge blocker in adopter
   repos for what may be a deliberate local edit, which widens MinSpec's blast radius.
   That is a separate, opt-in follow-up if ever wanted.
+  **Recorded selection: No, advisory only (rec, INV-7),** because a blocking check would
+  widen MinSpec's blast radius in adopter repos.
 - **DQ-4: How often does a notice re-fire?** **Only on `template-moved` (rec, FR-3).**
   **Cost of the recommendation:** a `standing` hold is reported only as a count in the
   summary line, and a human who skims that line may still miss it. The alternative,
   a notice on every refresh while any hold stands, is the "notice fires on every refresh
   forever" alert fatigue DR-089 rejected.
+  **Recorded selection: Only on `template-moved` (rec, FR-3),** because a notice on every
+  refresh is the alert fatigue DR-089 rejected.
 
 ## Alternatives considered
 
