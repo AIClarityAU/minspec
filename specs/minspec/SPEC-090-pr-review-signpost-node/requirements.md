@@ -210,7 +210,17 @@ is additive to SPEC-012, not a revision of it.
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are answered, not ratified: an agent session selected on 2026-10-25, for each,
+the option this document already recommended. No human chose them, and no delegation covers
+authoring Clarify answers. Delegation DLG-001 (DR-108) made none of these selections and covers
+spec approval and engineering-DR acceptance only. An agent-recorded selection carries no
+consent, whoever prompted it. It is ratified only by approval of this spec, the founder's or the
+bot's under DLG-001, and that approval may overturn it.
+
 ### DQ-1 — Which config value is "gate = PR"?
+
+**Recorded selection: Option A,** reusing AutoMergeMode keeps one setting driving both
+auto-merge and the signpost, avoiding the drift of two overlapping settings.
 
 The issue was written before `AutoMergeMode` existed; it says "gate = PR" vs
 "gate = plan-approval + auto-merge."
@@ -231,6 +241,9 @@ The issue was written before `AutoMergeMode` existed; it says "gate = PR" vs
 
 ### DQ-2 — Does `consequence-hybrid` ever still need a `pr-review` node?
 
+**Recorded selection: Option A,** it is correct to DR-033 under both modes, which holds
+high-blast PRs for a human even under consequence-hybrid.
+
 DR-033 §3 holds **high-blast** PRs for a human even under `consequence-hybrid`; only
 **low-blast** PRs auto-merge unseen. The issue's literal text ("no-op when gate =
 plan-approval + auto-merge") reads as "never surface under hybrid," which would hide
@@ -249,6 +262,9 @@ exactly the high-blast PR DR-033 commits to showing a human.
 
 ### DQ-3 — Which PRs count as "authored by the auto-build loop"?
 
+**Recorded selection: Option A,** filtering by dispatch identity matches the issue's
+wording and keeps human-authored PRs out of v1 scope per SPEC-028 OQ-3.
+
 - **Option A — filter by the dispatch bot/agent identity only (rec, matches the
   issue's wording exactly).** A human's own PR is out of v1 scope — consistent with
   SPEC-028 OQ-3's ruling that human-authored branches get different (forever-HITL)
@@ -260,6 +276,9 @@ exactly the high-blast PR DR-033 commits to showing a human.
   human's own in-progress PR as a "task" before they're ready for review — noisy.
 
 ### DQ-4 — Where does the consent-gated PR-state harvester live, and its refresh cadence?
+
+**Recorded selection: Option A,** an explicit on-demand command matches the project's
+existing consent pattern, and a stale cache is visibly stale per FR-3.
 
 Not this spec's `implements:` (see Out of scope) but the contract (FR-2/FR-3) is
 unusable without naming an owner.
