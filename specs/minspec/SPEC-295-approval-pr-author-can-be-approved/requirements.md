@@ -14,7 +14,7 @@ implements_reason: >-
   D1-D4. Expected surface is listed under "Measured state", none of it claimed yet.
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

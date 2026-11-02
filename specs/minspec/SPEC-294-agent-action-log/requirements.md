@@ -14,7 +14,7 @@ implements_reason: >-
   Decisions needed (Clarify) below are resolved.
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

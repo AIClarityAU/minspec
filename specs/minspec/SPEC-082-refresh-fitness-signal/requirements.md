@@ -17,7 +17,7 @@ relates_to: [DR-092, SPEC-068, SPEC-060, SPEC-079, DR-003, DR-066]
 # is deferred to Plan, once DQ-1 resolves.
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

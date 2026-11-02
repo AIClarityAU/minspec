@@ -13,7 +13,7 @@ relates_to: [SPEC-054, SPEC-038, SPEC-029, SPEC-033, SPEC-024, "#1252", "#161", 
 implements: [packages/minspec/src/lib/citation-rot.ts, packages/minspec/tests/citation-rot.test.ts]
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

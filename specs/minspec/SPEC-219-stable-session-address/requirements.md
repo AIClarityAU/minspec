@@ -14,7 +14,7 @@ implements_reason: >-
   files this spec will own is decided at Plan, after Decision D1.
 phases:
   specify: done
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

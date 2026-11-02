@@ -15,7 +15,7 @@ implements_reason: >-
   claimed yet.
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

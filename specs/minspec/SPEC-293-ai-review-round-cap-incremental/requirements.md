@@ -10,7 +10,7 @@ relates_to: [SPEC-182, DR-097, DR-104, DR-110, DR-060, DR-063, DR-033]
 affects: [.github/workflows/ai-review.yml, .github/scripts/ai-review-guard.js, scripts/review-branch.sh, scripts/roles/]  # ai-review-retry.yml is named by the issue but needs no change - see FR-2
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

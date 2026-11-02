@@ -18,7 +18,7 @@ implements_reason: >-
 affects: [packages/minspec/src/lib/template-registry.ts, scripts/gen-ci-templates.mjs]
 phases:
   specify: done
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

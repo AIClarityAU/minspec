@@ -13,7 +13,7 @@ implements_reason: >-
   Specify phase only. Files owned are decided at Plan, after Decisions D1-D4 are answered.
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

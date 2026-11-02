@@ -14,7 +14,7 @@ implements_reason: >-
   single rule) is answered; D1 changes which of five places is the odd one out.
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending

@@ -10,7 +10,7 @@ depends_on: [SPEC-001]
 relates_to: [SPEC-040, SPEC-041, SPEC-042, SPEC-043, SPEC-044, SPEC-046, DR-003, SPEC-059, "#277", "#972", "#971", "#918"]
 phases:
   specify: in-progress
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending
