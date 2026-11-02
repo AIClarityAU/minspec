@@ -1,7 +1,7 @@
 ---
 id: SPEC-247
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a gate MinSpec runs on itself but does not ship to adopters blocks nothing where adopters commit
@@ -18,8 +18,8 @@ implements_reason: >-
 affects: [packages/minspec/src/lib/template-registry.ts, scripts/validate-frontmatter.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
