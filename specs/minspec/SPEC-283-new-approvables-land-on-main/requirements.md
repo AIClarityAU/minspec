@@ -256,10 +256,10 @@ for.
 
 ## Decisions needed (Clarify)
 
-All 4 decisions are recorded: an agent session selected, for each, the option this document
+All 4 decisions are answered, not ratified: an agent session selected, for each, the option this document
 already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001 covers spec approval and engineering-DR acceptance only). They are ratified only when a
-human or a covered delegation approves this spec.
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
 
 - **D1 - Recorded selection: Option A,** keep the PR as transport, a Draft PR auto-merges on
   `ai-review:pass`, and DR-051 §4b is amended; that amendment still needs founder acceptance
