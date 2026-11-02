@@ -189,7 +189,10 @@ that changes non-docs paths also adds or modifies a decision record whose `statu
 
 ## Decisions needed (Clarify)
 
+All 6 decisions are answered, not ratified: an agent session selected on 2026-10-25, for each, the option this document already recommended. No human chose them, and no delegation covers authoring Clarify answers. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted it. It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and that approval may overturn it.
+
 - **DQ-1 - Where the hold binds.**
+  **Recorded selection: Option a,** the spec's reason is that the required merge gate covers every actor, including ad-hoc auto-merge and a human keystroke on a misread review.
   - `a` **(rec)** In the required `ready-to-merge` merge gate (this spec as written). It
     covers every actor, including ad-hoc `gh pr merge --auto` and a human keystroke made on
     a misread review. **Cost:** a human who wants to merge such a PR must accept the DR
@@ -201,6 +204,7 @@ that changes non-docs paths also adds or modifies a decision record whose `statu
   - `c` Both `a` and an explicit arm-site check. **Cost:** a duplicate predicate that can
     drift (the *dup predicates drift* lesson) for no coverage beyond `a`.
 - **DQ-2 - Docs-only PRs.**
+  **Recorded selection: Option a,** the spec's reason is that proposing a DR must be able to land.
   - `a` **(rec)** Exempt them (FR-2). Proposing a DR must be able to land. **Cost:** a
     docs-only PR that *relaxes a spec criterion* plus its proposed DR (a spec AC edit with
     no code) is not held by this gate. It still relies on the existing docs/** arm withhold,
@@ -208,18 +212,21 @@ that changes non-docs paths also adds or modifies a decision record whose `statu
   - `b` Hold any PR whose diff carries a non-accepted DR. **Cost:** every DR-proposal PR
     goes red and needs `--admin`, so `--admin` becomes routine and loses its meaning.
 - **DQ-3 - A distinct label.**
+  **Recorded selection: Option a,** the spec recommends no new label; the red status description is the signal.
   - `a` **(rec)** None. The red status description is the signal and `awaiting-approval`
     simply stays off. **Cost:** the "your turn" queue does not show these PRs. They are
     found by filtering on a red `ready-to-merge`.
   - `b` Add `awaiting-decision` (the issue's third option). **Cost:** a second label owner
     and a convention that can drift from the gate.
 - **DQ-4 - Status matching.**
+  **Recorded selection: Option a,** the spec recommends exact status: accepted matching, since a second accepted spelling may not be honoured by other readers.
   - `a` **(rec)** Exact `status: accepted` on the frontmatter line. Anything else holds.
     **Cost:** a hand-typed `Accepted` holds until it is fixed, which costs one edit.
   - `b` Case- and whitespace-insensitive matching. **Cost:** a second accepted spelling
     that other readers (the validator, INDEX) may not honour.
 - **DQ-5 - DRs cited but not in the diff.** A code PR could implement a DR that is already
   on `main` as `proposed` without touching its file. FR-1 cannot see that.
+  **Recorded selection: Option a,** the spec recommends out of scope for v1 with a follow-up, since scanning prose would make prose a gate input.
   - `a` **(rec)** Out of scope for v1. File it as a follow-up. **Cost:** the gap stays open.
     No DRs are `proposed` on this tree today, so it is small, but it is real.
   - `b` Also scan the PR title and body for `DR-NNN` and hold if the base tree's copy is not
@@ -227,6 +234,7 @@ that changes non-docs paths also adds or modifies a decision record whose `statu
     prose becomes a gate input.
 - **DQ-6 - The review-side false claim.** The issue's second option makes ai-review flag a
   proposed DR as blocking, so a review summary cannot call it "human-accepted".
+  **Recorded selection: Option a,** the spec's reason is that under DQ-1 (a) a prose misstatement can no longer move a merge, so it is filed separately.
   - `a` **(rec)** Out of scope here and filed separately. **Cost:** a review can still
     misstate DR status in prose, but under `a` of DQ-1 that misstatement can no longer move
     a merge.

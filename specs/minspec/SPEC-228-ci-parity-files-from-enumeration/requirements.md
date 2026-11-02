@@ -287,24 +287,23 @@ which option it took is not established here. DQ-4 asks the human to settle it o
 
 ## Decisions needed (Clarify)
 
-DQ-1, DQ-3 and DQ-4 have selections recorded from the answer to task-queue item c228
-(2026-10-27: "All three (Recommended)"), an answer the queue attributes to the founder. A
-queue answer is not consent and is not verified here: DR-108 (delegated approval) section 4
-holds that a queue item cannot carry consent, because any session can write the queue. Those
-selections therefore bind nothing on their own. They bind only if the founder approves this
-spec with them in its text; that approval, not this record, is the consent act, and it may
-overturn them. The other selections carry the (rec) option an agent session copied; no human
-chose them (each says so). Delegation DLG-001 (DR-108) made none of these selections. This
-section stays open, and the spec is not ready to approve, until the founder answers or
-confirms the rest.
+All 5 decisions are answered, not ratified. DQ-1, DQ-3 and DQ-4 have selections recorded from the
+answer to task-queue item c228 (2026-10-27: "All three (Recommended)"), an answer the queue
+attributes to the founder. A queue answer is not consent and is not verified here: DR-108 (delegated
+approval) section 4 holds that a queue item cannot carry consent, because any session can write the
+queue. DQ-2 and DQ-5 carry the (rec) option an agent session copied; no human chose them (each says
+so). Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and
+engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted it.
+It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and that
+approval may overturn it.
 
 - **DQ-1 - How the adopter gets the derived list.**
 
   **Recorded selection: (D),** MinSpec ships `minspec-ci-parity.yml` as a managed template
   whose region is rendered from FR-1. Source: the answer to task-queue item c228,
   2026-10-27 ("All three (Recommended)"). A queue answer is not consent (DR-108 section 4),
-  so this selection is unverified and binds only if the founder approves this spec's text
-  with it in place.
+  so this selection is unverified and binds only if this spec is approved with it in place, by the
+  founder or by the bot under DLG-001.
 
   - **(D) (rec) MinSpec ships `minspec-ci-parity.yml` as a managed template** whose region
     is rendered from FR-1 (the issue's recommended option, and SPEC-079's DQ-1 (D)). One
@@ -354,8 +353,8 @@ confirms the rest.
   **Recorded selection: (a),** scaffold the parity workflow into repos with `.minspec/` that
   lack one, on the next refresh, like any other managed file. Source: the answer to task-queue item
   c228, 2026-10-27 ("All three (Recommended)"). A queue answer is not consent (DR-108
-  section 4), so this selection is unverified and binds only if the founder approves this
-  spec's text with it in place.
+  section 4), so this selection is unverified and binds only if this spec is approved with it in place, by the
+  founder or by the bot under DLG-001.
 
   - **(a) (rec) Scaffold it there too, on the next refresh**, like any other managed file.
     They opted in through `.minspec/`, so invariant 3 allows it. *Cost:* a new CI job appears
@@ -375,8 +374,8 @@ confirms the rest.
   **Recorded selection: one DR,** covering both this spec's and SPEC-079's use of the
   template, written before either spec's Plan completes. Source: the answer to task-queue
   item c228, 2026-10-27 ("All three (Recommended)"). A queue answer is not consent (DR-108
-  section 4), so this selection is unverified and binds only if the founder approves this
-  spec's text with it in place. The DR is not drafted by this record, and SPEC-079 is not edited by it.
+  section 4), so this selection is unverified and binds only if this spec is approved with it in place, by the
+  founder or by the bot under DLG-001. The DR is not drafted by this record, and SPEC-079 is not edited by it.
 
 - **DQ-5 - Sequencing.** SPEC-068 (refresh direction gate) is `status: planning`, not built.
   Under (D), a refresh from an older build could write an older parity list, which is

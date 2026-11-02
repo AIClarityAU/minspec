@@ -51,7 +51,7 @@
 # stdout: one line "<label> <role> <hold>"
 #   label ∈ {agent-ready, agent-ready-specify, needs-review, needs-info}
 #   role  ∈ {dev, architect, security, reviewer}
-#   hold  ∈ {none, specify, human, tier, info, unknown} — WHY this is not fully
+#   hold  ∈ {none, specify, human, tier, info, built-spec, unknown} — WHY this is not fully
 #           auto-buildable (#1002, extended #1169)
 # exit 0 always when a block is found; exit 2 (still prints a fail-closed line) if not.
 #
@@ -77,6 +77,8 @@
 #   tier     T3/T4 the agent did NOT call            → needs-review
 #            auto-buildable — too much ceremony,
 #            a human reads it (the pre-#1169 T3/T4 outcome, now the residue)
+#   built-spec the issue names a spec already approved (planning/implementing/
+#            done, via --named-spec-status, #3282) → needs-review; never specify
 #   none     the ONLY unrestricted affirmative       → agent-ready
 #   unknown  no usable verdict could be derived — no verdict block at all, an
 #            unsizable/garbled tier, or a decision that fell through every rule.
@@ -92,9 +94,16 @@
 set -eu
 
 MODE="line"
-if [[ "${1:-}" == "--fields" ]]; then
-  MODE="fields"
-fi
+# NAMED_SPEC_STATUS — status of the spec the issue names (#3282), supplied by the
+# caller (this gate stays pure: no filesystem, no network). Empty = no spec named.
+NAMED_SPEC_STATUS=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --fields) MODE="fields" ;;
+    --named-spec-status=*) NAMED_SPEC_STATUS="$(printf '%s' "${1#*=}" | tr '[:upper:]' '[:lower:]')" ;;
+  esac
+  shift
+done
 
 # The two normalised inputs the decision is derived FROM, carried alongside the
 # outcome so a verdict record can state them. Initialised to the fail-closed values
@@ -190,6 +199,16 @@ if [[ "$HUMAN_OUT" == "yes" || "$HUMAN_OUT" == "unknown" ]]; then
 fi
 if [[ "$DECISION" == "needs-info" ]]; then
   emit needs-info "$ROLE" info; exit 0
+fi
+# 2b (#3282). The issue names a spec that is ALREADY approved (planning /
+# implementing / done). A specify dispatch would write a duplicate requirements.md,
+# and a whole-spec build issue is not a per-task unit. Any affirmative decision is
+# refused to a human gate; `built-spec` is not an approvable hold, so approval
+# cannot lift it — the fix is to file per-task issues.
+if [[ "$DECISION" == "agent-ready" ]]; then
+  case "$NAMED_SPEC_STATUS" in
+    planning|implementing|done) emit needs-review "$ROLE" built-spec; exit 0 ;;
+  esac
 fi
 if [[ "$TIER" == "t3" || "$TIER" == "t4" ]]; then
   if [[ "$DECISION" == "agent-ready" ]]; then
