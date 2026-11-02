@@ -1,7 +1,7 @@
 ---
 id: SPEC-282
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - the pre-publish egress guard is the credential-boundary control for drain-published agent output (same domain as SPEC-213, SPEC-226)
@@ -14,9 +14,9 @@ implements_reason: >-
   own (expected: scripts/lib/agent-egress.sh and its tests, both existing) are still fixed at
   Plan, so implements stays none.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
