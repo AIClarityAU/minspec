@@ -1,7 +1,7 @@
 ---
 id: SPEC-203
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a summon that says only "you are needed" is a signpost that points nowhere
@@ -15,9 +15,9 @@ implements: [scripts/render-summon.mjs, scripts/render-summon.test.mjs]
 # Modified, not owned: every site that summons a human today (inventory in "Evidence" below).
 affects: [.github/workflows/ai-review.yml, .github/workflows/ai-review-retry.yml, .github/scripts/ai-review-guard.js, scripts/dispatch-issue.sh, scripts/remediate-pr.sh, scripts/drain-inbox.sh, scripts/roles/dev.md, scripts/roles/architect.md]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
