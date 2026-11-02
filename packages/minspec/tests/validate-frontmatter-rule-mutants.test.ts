@@ -298,6 +298,13 @@ const MUTANTS: Mutant[] = [
     expect: /admits a known limit with no tracked issue/,
     mutate: (f) => replaceOnce(f, 'packages/demo/src/limit.ts', ' (#12)', ''),
   },
+  {
+    rules: ['25'],
+    name: 'DR frontmatter with a retired field spelling',
+    severity: 'FAIL',
+    expect: /DR frontmatter — field `approved-by` is a retired spelling/,
+    mutate: (f) => replaceOnce(f, 'docs/decisions/DR-001.md', 'date: 2026-01-01\n---', 'date: 2026-01-01\napproved-by: x\n---'),
+  },
 ];
 
 // ---- Rules deliberately not mutated here ----------------------------------
