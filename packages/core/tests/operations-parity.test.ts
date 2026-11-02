@@ -11,6 +11,13 @@ import { approveSpec, getApprovalStatus } from '../../minspec/src/lib/approval';
 import { buildArtifactGraph } from '../../minspec/src/lib/artifact-graph';
 import { deriveStatus, explicitTerminalOf } from '../../minspec/src/lib/lifecycle';
 import { parseSpec } from '../../minspec/src/lib/spec';
+import { loadConfig } from '../../minspec/src/lib/config';
+import { epicRefSet } from '../../minspec/src/lib/epic-manager';
+import { readSpecFile } from '../../minspec/src/lib/spec';
+import { readShardIdFiles } from '../../minspec/src/lib/spec-layout';
+import { validateSpec } from '../../minspec/src/lib/spec-validator';
+import { existsSync } from 'node:fs';
+import { dirname } from 'node:path';
 import { listSpecs } from '../../minspec/src/lib/spec-catalog';
 import { formatNextTaskLabel, resolveNextTask } from '../../shared/src/next-task';
 import { buildBundle, runCore } from './helpers';
@@ -148,5 +155,43 @@ describe('status and next parity (FR-5, FR-2)', () => {
       expect(r.status).toBe(2);
       expect(r.json.refusal.code).toBe('not-a-minspec-project');
     }
+  });
+});
+
+describe('validate parity (FR-2, FR-9)', () => {
+  const expectedFindings = (root: string) =>
+    listSpecs(root).flatMap((sp) => {
+      const parsed = readSpecFile(sp.filePath);
+      return validateSpec(parsed, loadConfig(root), {
+        knownEpicRefs: epicRefSet(root),
+        approvalState: getApprovalStatus(root, sp.filePath),
+        explicitTerminal: explicitTerminalOf(parsed.frontmatter.status),
+        siblingShardFiles: readShardIdFiles(dirname(sp.filePath)),
+        pathExists: (rel) => existsSync(join(root, rel)),
+      }).violations.map((v) => v.rule);
+    });
+
+  it('findings equal validateSpec violations for each fixture spec', () => {
+    const r = runCore(bundle, ['validate', '--root', project]);
+    const expected = expectedFindings(project);
+    expect(expected.length).toBeGreaterThan(0);
+    expect(r.json.findings.map((f: any) => f.rule)).toEqual(expected);
+    expect(r.json.operation).toBe('validate');
+  });
+
+  it('outcome and exit code follow error-severity findings', () => {
+    const r = runCore(bundle, ['validate', '--root', project]);
+    const hasError = r.json.findings.some((f: any) => f.severity === 'error');
+    expect(r.json.outcome).toBe(hasError ? 'fail' : 'pass');
+    expect(r.status).toBe(hasError ? 1 : 0);
+  });
+
+  it('control: a project with no specs has no findings and passes', () => {
+    const empty = join(work, 'empty');
+    mkdirSync(join(empty, '.minspec'), { recursive: true });
+    const r = runCore(bundle, ['validate', '--root', empty]);
+    expect(r.json.findings).toEqual([]);
+    expect(r.json.outcome).toBe('pass');
+    expect(r.status).toBe(0);
   });
 });
