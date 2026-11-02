@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-285-dispatch-sandbox-container/requirements.md",
+  "specHash": "cc96464f06f955b5724d046aef3de550e037a3a1ef8557cc126b4d23163226d3",
+  "approvedAt": "2026-11-02T17:18:30.563Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:fix/3390-clarify-wording",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3391#issuecomment-6571380443"
+}
