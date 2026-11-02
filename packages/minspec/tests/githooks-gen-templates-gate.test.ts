@@ -67,6 +67,21 @@ describe('pre-commit generated-template gate (#3546)', () => {
     expect(r.out).toContain('node scripts/gen-ci-templates.mjs');
   });
 
+  it('still blocks when the staged list overflows the pipe buffer and the source sorts first (no SIGPIPE bypass)', () => {
+    // `git diff --cached --name-only | grep -q` under pipefail exits 141 once grep quits on
+    // an early match with output still pending, which silently skipped the gate.
+    write('STALE', '');
+    const dir = 'zz-bulk-' + 'x'.repeat(80);
+    const bulk: string[] = [];
+    for (let i = 0; i < 1500; i++) bulk.push(`${dir}/f${String(i).padStart(5, '0')}.txt`);
+    for (const f of bulk) write(f, 'a\n');
+    expect(bulk.join('\n').length).toBeGreaterThan(128 * 1024);
+    git(['add', 'scripts/copied-source.sh', 'scripts/gen-ci-templates.mjs', dir]);
+    const r = commit();
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain('node scripts/gen-ci-templates.mjs');
+  });
+
   it('allows a staged generator source when the generated file is fresh', () => {
     git(['add', 'scripts/copied-source.sh', 'scripts/gen-ci-templates.mjs']);
     expect(commit().code).toBe(0);

@@ -453,7 +453,11 @@ if [ "${GEN_CI_TEMPLATES_GATE_OFF:-}" != "1" ] && [ -f scripts/gen-ci-templates.
     const m = await import('./scripts/gen-ci-templates.mjs');
     console.log([...m.CI_TEMPLATE_SOURCE_PATHS, ...m.CI_TEMPLATE_OUTPUT_PATHS].join('\\n'));
   " 2>&1)"; then
-    if git diff --cached --name-only | grep -qxFf <(printf '%s\n' "$gen_paths"); then
+    # Capture first: `git diff | grep -q` under pipefail can SIGPIPE (141) when grep exits
+    # on its first match with output still pending, silently skipping the gate.
+    gen_paths="$(printf '%s\nscripts/gen-ci-templates.mjs' "$gen_paths")"
+    staged_list="$(git diff --cached --name-only)"
+    if grep -qxFf <(printf '%s\n' "$gen_paths") <<<"$staged_list"; then
       if ! gen_out="$(node scripts/gen-ci-templates.mjs --check 2>&1)"; then
         printf '%s\n' "$gen_out" >&2
         echo "✖ generated-template gate: a staged path is a gen-ci-templates source and the" >&2
