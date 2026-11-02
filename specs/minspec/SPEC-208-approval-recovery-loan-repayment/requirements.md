@@ -1,7 +1,7 @@
 ---
 id: SPEC-208
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - docs-lane push ergonomics; the epic DR-080, SPEC-039 and SPEC-050 belong to
@@ -24,9 +24,9 @@ relates_to: [SPEC-140, SPEC-022, SPEC-051, DR-051, DR-065, DR-078, DR-012, "#137
 implements: [packages/minspec/src/lib/worktree-transport.ts, packages/minspec/tests/worktree-transport.test.ts]
 affects: [packages/minspec/src/lib/approval-recover.ts, packages/minspec/src/lib/approval-pr.ts, packages/minspec/src/commands/push-docs-lane.ts, packages/minspec/src/commands/commit-on-approve.ts, packages/minspec/tests/approval-recover.test.ts, docs/decisions/DR-080.md]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
