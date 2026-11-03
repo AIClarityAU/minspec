@@ -58,6 +58,10 @@
 #   Bot:299695933    the pipeline's own App. REST shows it as `minspec-sdd[bot]` with
 #                    this id, and the id is the number in its commit address.
 #   User:4125483     the founder, `harvest316`.
+#   User:318474157   the founder's work account, `paulharveyf5`. Added 2026-11-04 on the
+#                    founder's decision (queue item in82, first for #3568), with the cost
+#                    he accepted: anyone controlling that account, including the
+#                    employer's admins, can start agents in this repository.
 #
 # Read with `GET /users/<login>` (id, type) and confirmed against the GraphQL fields this
 # file compares (`__typename`, `databaseId`) on 2026-10-10. A login is carried along only
@@ -166,7 +170,8 @@ _dispatch_graphql_read() {
 _dispatch_trusted_identities() {
   printf '%s\n' \
     'Bot:299695933' \
-    'User:4125483'
+    'User:4125483' \
+    'User:318474157'
 }
 
 # The list as a JSON array, for jq, which is where every comparison is made: one
