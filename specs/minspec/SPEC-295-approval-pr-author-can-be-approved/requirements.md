@@ -1,7 +1,7 @@
 ---
 id: SPEC-295
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - same epic as DR-082 (bot identity) and DR-050 (consented gh)
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan, after Decisions
   D1-D4. Expected surface is listed under "Measured state", none of it claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
