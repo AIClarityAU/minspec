@@ -1,7 +1,7 @@
 ---
 id: SPEC-270
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a founder decision about the drain must not live where the next launcher cannot see it
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan, after Decisions D1-D4.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
