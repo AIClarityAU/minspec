@@ -39,6 +39,10 @@ import {
   renderManagedBlock,
 } from '../src/lib/template-registry';
 import { splitManagedRegion } from '../src/lib/merge-refresh';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// Module scope, never a hook: vitest resolves timeouts before beforeAll runs (#1399).
+useShellTimeout();
 
 const PRE_COMMIT = `${MINSPEC_HOOKS_DIR}/pre-commit`;
 const COMMIT_MSG = `${MINSPEC_HOOKS_DIR}/commit-msg`;
