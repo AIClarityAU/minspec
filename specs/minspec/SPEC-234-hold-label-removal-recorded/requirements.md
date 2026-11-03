@@ -1,7 +1,7 @@
 ---
 id: SPEC-234
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a hold label that comes off with no record makes the signpost lie about whether a human gate stands
@@ -15,8 +15,8 @@ implements_reason: >-
   Decisions D1 to D3. Declare implements:/affects: before approval mints a hash.
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
