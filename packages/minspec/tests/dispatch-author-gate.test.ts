@@ -162,7 +162,7 @@ describe('scripts/lib/dispatch-author-gate.sh: the list is accounts, by kind and
     expect(r.stdout).toBe(`${a.login} (${a.__typename} ${String(a.databaseId)})\n`);
   });
 
-  // The founder's work account, added 2026-11-04 (first for #3568). Kept out of the shared
+  // The founder's work account, added 2026-11-04 AEDT (first for #3568). Kept out of the shared
   // TRUSTED fixture so the other suites' "every listed account" rows are unchanged.
   it("the founder's work account (paulharveyf5, User 318474157) passes, and says who", () => {
     const work = user('paulharveyf5', 318474157);
