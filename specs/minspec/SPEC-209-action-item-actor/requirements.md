@@ -9,10 +9,14 @@ epic: EPIC-009  # Team Readiness - concurrent multi-session coordination; a peer
 aspects: [hitl, action-items, cross-session, autonomy, no-silent-gate, blast-radius, tier-0, offline, determinism, never-wrong]
 depends_on: [DR-086]  # the stop list whose classes define what "human-only" means here
 relates_to: [SPEC-044, SPEC-027, SPEC-054, DR-072, DR-076, DR-003, "#1857", "#1236", "#1235", "#1816", "#2056"]
-# Ownership (SPEC-038) is deliberately NOT declared yet. Which files this spec creates
-# depends on Clarify D2 (where the parser lives) and D4 (whether any act-site refusal is
-# built here). Declare implements:/affects: in Plan, BEFORE approval mints a hash -
-# adding them afterwards voids it.
+# Ownership (SPEC-038) follows the recorded Clarify answers: D2 puts the parser and validator
+# (FR-5, FR-6) in packages/shared, D4 builds no act-site refusal, so the only other new file is
+# the FR-7 command-line entry. D3 puts the convention text (FR-8, FR-9) in this repo's CLAUDE.md.
+# Declared before approval mints a hash: adding a path afterwards voids it.
+implements: [packages/shared/src/action-items.ts, packages/shared/tests/action-items.test.ts, scripts/action-items.ts]  # all NEW
+# Files this spec MODIFIES (not owns): packages/shared/src/index.ts, CLAUDE.md - the barrel export, and the "Human action items" section (D3).
+# Listed here and not under affects:, because the spec-gate freezes every affects: file of an
+# unapproved spec past Clarify for all sessions (#3234).
 phases:
   specify: done
   clarify: pending

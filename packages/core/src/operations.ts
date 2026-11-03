@@ -1,6 +1,6 @@
 // The operation table (SPEC-136 design: "The operation table"). One entry per operation; no
 // entry holds a rule of its own (FR-2) - each calls the library function the extension calls.
-// `hash`, `status` and `next` are wired so far; later SPEC-136 tasks add the rest to the same table.
+// `validate`, `hash`, `status` and `next` are wired so far; later SPEC-136 tasks add the rest to the same table.
 import * as fs from 'fs';
 import * as path from 'path';
 import { specHash } from '@aiclarity/shared';
@@ -8,7 +8,11 @@ import { getApprovalRecord, getApprovalStatus } from '../../minspec/src/lib/appr
 import { formatNextTaskLabel, resolveNextTask } from '../../shared/src/next-task';
 import { buildArtifactGraph } from '../../minspec/src/lib/artifact-graph';
 import { deriveStatus, explicitTerminalOf } from '../../minspec/src/lib/lifecycle';
-import { parseSpec } from '../../minspec/src/lib/spec';
+import { parseSpec, readSpecFile } from '../../minspec/src/lib/spec';
+import { loadConfig } from '../../minspec/src/lib/config';
+import { epicRefSet } from '../../minspec/src/lib/epic-manager';
+import { readShardIdFiles } from '../../minspec/src/lib/spec-layout';
+import { validateSpec } from '../../minspec/src/lib/spec-validator';
 import { listSpecs } from '../../minspec/src/lib/spec-catalog';
 import { hasOptInMarker, notOptedInMessage } from '../../minspec/src/lib/opt-in';
 
@@ -168,7 +172,40 @@ const nextOperation: Operation = {
   },
 };
 
-export const OPERATIONS: readonly Operation[] = [hashOperation, statusOperation, nextOperation];
+const validateOperation: Operation = {
+  name: 'validate',
+  summary: 'Completeness findings for every spec, from the same validator the extension runs',
+  input: noArgs,
+  effect: 'read-only',
+  async run(ctx) {
+    const config = loadConfig(ctx.root);
+    const knownEpicRefs = epicRefSet(ctx.root);
+    const findings: Finding[] = [];
+    for (const s of listSpecs(ctx.root)) {
+      const file = path.relative(ctx.root, s.filePath).split(path.sep).join('/');
+      try {
+        const parsed = readSpecFile(s.filePath);
+        // Same option assembly as commands/validate.ts: the rules live in validateSpec (FR-2).
+        const result = validateSpec(parsed, config, {
+          knownEpicRefs,
+          approvalState: getApprovalStatus(ctx.root, s.filePath),
+          explicitTerminal: explicitTerminalOf(parsed.frontmatter.status),
+          siblingShardFiles: readShardIdFiles(path.dirname(s.filePath)),
+          pathExists: (relPath) => fs.existsSync(path.join(ctx.root, relPath)),
+        });
+        for (const v of result.violations) {
+          findings.push({ file, rule: v.rule, severity: v.severity, message: v.message, fixHint: v.fixHint });
+        }
+      } catch (e) {
+        findings.push({ file, rule: 'spec.unreadable', severity: 'error', message: `Cannot read ${file} - ${errorMessage(e)}` });
+      }
+    }
+    const failed = findings.some((f) => f.severity === 'error');
+    return { outcome: failed ? 'fail' : 'pass', findings };
+  },
+};
+
+export const OPERATIONS: readonly Operation[] = [validateOperation, hashOperation, statusOperation, nextOperation];
 
 /** Run one operation and wrap its return in the stamped envelope. Never throws. */
 export async function runOperation(op: Operation, root: string, args: Record<string, unknown>): Promise<CoreResult> {
