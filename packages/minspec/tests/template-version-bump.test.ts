@@ -28,6 +28,11 @@ describe('checkTemplateVersionBump', () => {
     expect(v.ok).toBe(false);
     expect(v.touched).toEqual([REG]);
   });
+  it('covers slash-command guidance and ownership-rule sources (interpolated into scaffolds)', () => {
+    for (const f of ['packages/minspec/src/lib/slash-commands.ts', 'packages/minspec/src/lib/ownership-path-rules.ts']) {
+      expect(checkTemplateVersionBump([f], '0.1.26', '0.1.26').ok).toBe(false);
+    }
+  });
   it('passes when a template changed and the version moved', () => {
     expect(checkTemplateVersionBump([REG], '0.1.26', '0.1.27').ok).toBe(true);
   });

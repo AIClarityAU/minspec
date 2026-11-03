@@ -14,6 +14,8 @@ export const TEMPLATE_CONTENT_FILES: readonly string[] = [
   'packages/minspec/src/lib/template-registry.ts',
   'packages/minspec/src/lib/ci-review-templates.ts',
   'packages/minspec/src/lib/hook-templates.ts',
+  'packages/minspec/src/lib/slash-commands.ts',
+  'packages/minspec/src/lib/ownership-path-rules.ts',
 ];
 
 export const VERSION_FILE = 'packages/minspec/package.json';
