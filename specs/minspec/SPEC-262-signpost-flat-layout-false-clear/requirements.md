@@ -140,6 +140,18 @@ voip's frontmatter alone would repeat the #2370 pattern (fix the instance, leave
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers (DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
+- **D1 - Recorded selection: Option (a),** "clear" means nothing open in the human queue AND no
+  non-terminal spec with open work; agent-only work shows "nothing for you; agent work remains".
+- **D2 - Recorded selection: Option (a),** a plan-phase task ranks in the `pending` class, below
+  approvals, above corruption-free idle.
+- **D3 - Recorded selection: Option (a),** a done spec with a stale approval never blocks "clear";
+  #2519 owns the approval repair.
+
 **D1 - What may "clear" claim?**
 - (a) **(rec)** "Clear" means nothing open in the human queue AND no non-terminal spec with
   open work; when only agent-side work remains, show "nothing for you; agent work remains:
