@@ -300,9 +300,12 @@ jobs:
         working-directory: packages/minspec
         run: npm run build
 
-      - name: Compile e2e tests
-        working-directory: packages/minspec
-        run: tsc -p tsconfig.test.json
+      # #3563 — no separate "Compile e2e tests" step. It ran a BARE `tsc`, which a
+      # workflow step resolves from the runner image's PATH, not node_modules/.bin.
+      # ubuntu-latest moving to ubuntu-26.04 (no global TypeScript) made it exit 127
+      # on every run. `npm run test:e2e` already runs `pretest:e2e` (build + tsc -p
+      # tsconfig.test.json) with the repo-pinned tsc, so the step was a duplicate.
+      # tests/ci-workflow-no-bare-repo-tools.test.ts rejects a bare repo tool here.
 
       # Clean-tree precondition for the e2e run (#900). The e2e suite drives real
       # commands against the checkout, and several of them read `git diff` — most
