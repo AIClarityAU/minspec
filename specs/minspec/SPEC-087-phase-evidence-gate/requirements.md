@@ -1,7 +1,7 @@
 ---
 id: SPEC-087
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — a "specify missing" warning on a written spec, and a phase marked done with nothing behind it, are the same lie told in opposite directions
@@ -20,9 +20,9 @@ affects:
   - packages/minspec/src/commands/validate.ts
   - scripts/validate-frontmatter.ts
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
