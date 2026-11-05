@@ -221,6 +221,8 @@ source "${SCRIPT_DIR}/lib/autonomy.sh"
 # + same-host flock, never on this soft claim (see the file header).
 # shellcheck source=scripts/lib/issue-lease.sh
 source "${SCRIPT_DIR}/lib/issue-lease.sh"
+# shellcheck source=scripts/lib/issue-branch.sh
+source "${SCRIPT_DIR}/lib/issue-branch.sh"
 
 # shellcheck source=scripts/lib/workflow-paths.sh
 source "${SCRIPT_DIR}/lib/workflow-paths.sh"
@@ -1313,6 +1315,22 @@ fi
 BRANCH="agent/issue-${ISSUE}"
 export MINSPEC_LEASE_REPO="$REPO"
 export MINSPEC_LEASE_WORKTREE_BASE="$WORKTREE_BASE"   # keep the lib's claim-unique path under this dispatcher's base
+# Earlier attempt left agent/issue-N behind (#3452)? `worktree add -b` refuses an existing
+# branch (rc=255), so the issue used to be picked again each cycle and fail. If the branch
+# holds work and an open PR already carries it, that PR is the route: stand down BEFORE the
+# claim, having started nothing. Every other state is handled at worktree creation (continue
+# from the branch / reuse it). A branch is never deleted or reset to get past this.
+git -C "$REPO_ROOT" fetch origin "$BRANCH" -q 2>/dev/null || true
+if [[ "$(issue_branch_state "$REPO_ROOT" "$BRANCH")" == "work" ]]; then
+  _pr_rc=0
+  issue_branch_open_pr "$REPO" "$BRANCH" || _pr_rc=$?
+  if (( _pr_rc == 0 )); then
+    echo "Standing down on #$ISSUE — $BRANCH already holds work and has an open PR; that PR is the route (#3452)."
+    exit_declined
+  elif (( _pr_rc == 2 )); then
+    echo "WARNING: could not ask whether $BRANCH has an open PR (#3452); continuing from the branch - a duplicate PR is caught by the PR-per-head check." >&2
+  fi
+fi
 if [[ "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
   # D11/FR-11 same-host flock — a real same-host CAS, auto-released on process death.
   # Held in THIS parent (fd 200, via the sourced lib) for the dispatch's lifetime, so a
@@ -1390,7 +1408,8 @@ WORKTREE="$(lease_worktree_path "$ISSUE")"
 if [[ -d "$WORKTREE" ]]; then
   echo "Cleaning up existing worktree at $WORKTREE"
   launcher_git -C "$REPO_ROOT" worktree remove "$WORKTREE" --force 2>/dev/null || true
-  git -C "$REPO_ROOT" branch -D "$BRANCH" 2>/dev/null || true
+  # The branch is NOT deleted (#3452): it may hold the only copy of earlier work, and
+  # issue_branch_add_worktree below continues from or reuses it.
 fi
 
 # Branch off ORIGIN/main, not local `main`. The shared checkout's local `main`
@@ -1410,7 +1429,27 @@ git -C "$REPO_ROOT" fetch origin main -q
 # genuinely human-approved spec passes the gate inside the worktree, while an
 # unapproved/stale spec correctly BLOCKS the dispatched edit (surfaced, never
 # bypassed). The bypass kill-switch is human-only; the pipeline must never use it.
-launcher_git -C "$REPO_ROOT" worktree add -b "$BRANCH" "$WORKTREE" origin/main
+# Fetch the issue branch too, so a branch only origin has is seen (#3452).
+git -C "$REPO_ROOT" fetch origin "$BRANCH" -q 2>/dev/null || true
+read -r BRANCH_MODE BRANCH_REF BRANCH_FF <<<"$(issue_branch_plan "$REPO_ROOT" "$BRANCH")"
+if [[ "$BRANCH_MODE" == "new" ]]; then
+  launcher_git -C "$REPO_ROOT" worktree add -b "$BRANCH" "$WORKTREE" origin/main
+elif [[ "$BRANCH_MODE" == "existing" ]]; then
+  # Continue from / reuse the branch an earlier attempt left; never recreate it.
+  launcher_git -C "$REPO_ROOT" worktree add "$WORKTREE" "$BRANCH"
+  if [[ "$BRANCH_REF" != "-" ]]; then
+    launcher_git -C "$WORKTREE" merge --ff-only -q "$BRANCH_REF"
+  fi
+elif [[ "$BRANCH_MODE" == "track" ]]; then
+  launcher_git -C "$REPO_ROOT" worktree add -b "$BRANCH" "$WORKTREE" "$BRANCH_REF"
+  if [[ "$BRANCH_FF" != "-" ]]; then
+    launcher_git -C "$WORKTREE" merge --ff-only -q "$BRANCH_FF"
+  fi
+else
+  echo "ERROR: no worktree plan for $BRANCH (#3452); branch left untouched." >&2
+  exit 1
+fi
+echo "Branch $BRANCH: $BRANCH_MODE (new = from origin/main, existing/track = earlier attempt's branch kept, fast-forward only)"
 # Remember which git directory is this worktree's own, now, before any agent has been in
 # it: this is the one moment its `.git` file is known to be what git itself wrote. Every
 # later git operation on the worktree names that directory (lib/agent-worktree.sh). A
