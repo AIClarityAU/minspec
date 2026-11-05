@@ -25,8 +25,6 @@ phases:
 
 # SPEC-267: The shipped ownership check never reads a valid spec as "nothing to check"
 
-**Status:** specifying
-
 ## In plain terms
 
 SPEC-038's ownership rule says a T3/T4 spec past Clarify must name the code it owns, and
@@ -154,6 +152,11 @@ Whether the TS frontmatter reader shares cases 1, 2, 4-7 is not yet read; see DQ
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 - **DQ-1: do the TypeScript validators get the same fix?**
   - **(rec) Fix both**, with one shared fixture proving agreement (FR-9). **Cost:** touches
     `ownership-path-rules.ts` and the TS frontmatter reader, widening the change and
@@ -161,20 +164,24 @@ Whether the TS frontmatter reader shares cases 1, 2, 4-7 is not yet read; see DQ
   - Python only; record TS as a follow-up issue. **Cost:** the two validators disagree on
     the same input, which DR-077 exists to prevent, and the Node gate keeps failing open on
     case 3 and 8 here.
+  **Recorded selection: Fix both,** the TypeScript validators get the same fix as `validate.py`, with one shared fixture (FR-9). An agent session copied this document's (rec) option; no human chose this item.
 - **DQ-2: how to treat an unreadable shape.**
   - **(rec) Error always** (FR-7). **Cost:** an adopter with an exotic but valid shape is
     blocked until they rewrite it.
   - Follow `ownershipDeclaration` (warn by default). **Cost:** the unparseable case then
     disarms the escape rule on default config, which is the defect.
+  **Recorded selection: Error always,** an unreadable shape is an error (FR-7). An agent session copied this document's (rec) option; no human chose this item.
 - **DQ-3: parser strategy.**
   - **(rec) Keep the hand parser, add the recognised-shape list** (FR-1). **Cost:** a
     growing list of shapes to maintain; each new valid shape is a bug until added.
   - Vendor a real YAML parser into `validate.py`. **Cost:** adopters' Python gains a
     dependency or a bundled file (breaks the zero-dependency script; needs a DR).
+  **Recorded selection: Keep the hand parser,** and add the recognised-shape list (FR-1). An agent session copied this document's (rec) option; no human chose this item.
 - **DQ-4: rollout to existing adopters.** Refresh re-ships `validate.py`; adopters with
   specs the new check flags go red. Options: **(rec)** ship as-is, since a fail-open gate is
   worse than a red one; **cost:** surprise red on refresh. Or ship `warn` for one release;
   **cost:** one release still fails open.
+  **Recorded selection: ship as-is,** a fail-open gate is worse than a red one. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Risks & Mitigations
 
