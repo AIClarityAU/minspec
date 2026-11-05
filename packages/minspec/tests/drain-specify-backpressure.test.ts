@@ -166,3 +166,57 @@ describe('#3344 P4: a pending cap that is not a whole number spends nothing', ()
     expect(lines[0]).toContain('is not a whole number');
   });
 });
+
+/**
+ * T0 (#3570) - the held count is spec drafts, not every held pull request.
+ *
+ * THE BUG. `_held_drain_prs` counted every `needs-human-review` pull request on an
+ * `agent/issue-*` head. Dispatch adds that label to every machinery build too, so 44 build
+ * PRs waiting on a merge path (not a spec decision) held spec-writing at PAUSED against a
+ * cap of 20 with only 4 real drafts open.
+ *
+ *   H1  held machinery builds do not count toward SPECIFY_MAX_HELD.
+ *   H2  held spec drafts (every file under specs/) still count.
+ *   H3  a non-drain head never counts; a draft with a stray non-specs file is a build.
+ *   H4  an unreadable file list fails the count closed.
+ */
+describe('#3570 H1-H4: only spec drafts count toward the held cap', () => {
+  const build = (n: number) => ({ head: `agent/issue-${n}`, files: ['scripts/drain-inbox.sh', 'packages/minspec/tests/x.test.ts'] });
+  const draft = (n: number) => ({ head: `agent/issue-${n}`, files: [`specs/minspec/SPEC-${n}-x/requirements.md`] });
+
+  it('H1: many held machinery builds leave spec-writing running', async () => {
+    const heldRows = Array.from({ length: 12 }, (_, i) => build(100 + i));
+    const d = await runOnce({ ready: [42], specify: [77], heldRows, reading: ROOM });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+
+  it('H2: held spec drafts at the cap still pause spec-writing', async () => {
+    const heldRows = Array.from({ length: 10 }, (_, i) => draft(200 + i));
+    const d = await runOnce({ ready: [42], specify: [77], heldRows, reading: ROOM });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('10 drain pull request(s) held for a human');
+  });
+
+  it('H3: builds beside drafts are not added to the count; non-drain heads are ignored', async () => {
+    const heldRows = [
+      ...Array.from({ length: 9 }, (_, i) => draft(300 + i)),
+      ...Array.from({ length: 5 }, (_, i) => build(400 + i)),
+      { head: 'cos/plan-1', files: ['specs/minspec/SPEC-1-x/requirements.md'] },
+      { head: 'agent/issue-500', files: ['specs/minspec/SPEC-500-x/requirements.md', 'scripts/x.sh'] },
+    ];
+    const d = await runOnce({ ready: [42], specify: [77], heldRows, reading: ROOM });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+
+  it('H4: a pull request with no readable file list fails the count closed', async () => {
+    const d = await runOnce({ ready: [42], specify: [77], heldRows: [{ head: 'agent/issue-9', files: null }], reading: ROOM });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('could not be counted');
+  });
+});
