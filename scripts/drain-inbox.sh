@@ -3021,7 +3021,10 @@ _quota_try_refresh() {
   fi
   # The producer's LAST non-blank line, not its first: a traceback ends with the exception
   # line, which is the part that says what failed. Then one line, at most 200 characters.
-  out=$(printf '%s\n' "$out" | awk 'NF { last = $0 } END { print last }' | tr -s '[:space:][:cntrl:]' ' ' | cut -c1-200)
+  out=$(printf '%s\n' "$out" | awk 'NF { last = $0 } END { printf "%s", last }' | tr -s '[:space:][:cntrl:]' ' ' | cut -c1-200)
+  # Trim the edges a squeezed run of whitespace leaves, so an empty excerpt stays empty
+  # (the producer-said clause keys on non-empty) and none ends with a stray space.
+  out="${out# }"; out="${out% }"
   # Say only what is true of the reading AFTER the attempt; the decision stays the gate's.
   local tail
   if [[ -z "$after" ]]; then
