@@ -15,9 +15,10 @@
  * no `vscode`, no network, no filesystem reads of its own (the caller supplies a
  * `fileExists` probe so the checker stays unit-testable and platform-agnostic).
  *
- * Slice-1 deliberately checks *existence* only: a `path#Lnn` citation passes when
- * the file exists; verifying the line still contains the cited symbol is the
- * Slice-2 follow-up (#147). Cross-repo refs are exempted via an explicit
+ * `checkReferences` checks *existence* only: a `path#Lnn` citation passes when
+ * the file exists. The separate `checkCitationFidelity` tier (#1643) adds a line
+ * bound and a nearby-literal echo check — see its frozen candidate set below.
+ * Cross-repo refs are exempted via an explicit
  * `@namespace` convention (e.g. `SPEC-100@scroogellm`) so legitimately-external
  * citations never trip the gate.
  */
@@ -52,6 +53,12 @@ export interface ReferenceRegistry {
   epics: Set<string>;
   /** Probe: does this repo-relative path exist? */
   fileExists: (relPath: string) => boolean;
+  /**
+   * Optional probe: the cited file's text, or undefined when it cannot be read
+   * (missing, a directory, binary). Enables the fidelity tier
+   * (`checkCitationFidelity`); without it that tier checks nothing.
+   */
+  readFile?: (relPath: string) => string | undefined;
 }
 
 /** A reference that failed to resolve. */
@@ -202,6 +209,146 @@ export function checkReferences(
   for (const ref of extractReferences(text)) {
     const v = resolve(ref, registry);
     if (v) violations.push(v);
+  }
+  return violations;
+}
+
+// ---------------------------------------------------------------------------
+// Fidelity tier (#1643) — does the cited LINE / CONTENT exist, beyond the file?
+//
+// FROZEN CANDIDATE SET. "The fidelity check passed" means exactly the following
+// and nothing more; a new prose form extends THIS list, not the regexes:
+//   1. Line bound — for every `path:NN[-MM]` / `path#LNN[-LMM]` citation whose file
+//      exists and is readable, the file has at least max(NN, MM) lines.
+//   2. Literal echo — every backticked IDENTIFIER (`[A-Za-z_$][\w$]*`, optionally
+//      dotted and/or with a trailing `()`; >= 3 characters) within +/- 1
+//      line of the citation (the same proximity window as `hasDanglingParkRef`,
+//      spec-validator.ts) appears verbatim in the cited file. Edges that are word
+//      characters carry a boundary guard, so `42K` is not found inside `142K`.
+//      A literal is NOT a candidate when it is itself a citation or contains the
+//      cited path, or when the window cites more than one distinct file (the
+//      literal's owner is then ambiguous; rule 1 still applies to each citation).
+// NOT checked: backticked commands/phrases/flags (`git push`, `status:` — prose
+// mentions, not symbols; including them measured ~1500 false positives), quoted prose, dates, numbers, multi-line literals, literals that
+// are not backticked, whether the cited line is the RIGHT line (only that the
+// literal exists somewhere in the file), unreadable/missing files (the existence
+// tier reports missing files).
+// EXEMPTIONS (deliberate, complete list): the artifact's own `id:`/`epic:`
+// frontmatter lines, and `@namespace` external refs (which are not file
+// citations). Status blocks and fenced code are scanned like any other prose —
+// corrections live there, so a checker must not look away from them.
+// Severity is the caller's call; the shipped caller reports WARNINGS.
+// ---------------------------------------------------------------------------
+
+const FIDELITY_IDENT_RE = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*$/;
+
+/** Minimum length of a backticked literal to be a fidelity candidate. */
+export const FIDELITY_MIN_LITERAL_LENGTH = 3;
+
+interface LocatedCitation {
+  path: string;
+  line: string;
+  /** 0-based index of the line holding the citation. */
+  lineIdx: number;
+  /** The exact matched citation token, e.g. `src/a.ts:42`. */
+  token: string;
+}
+
+function locateCitations(lines: string[]): LocatedCitation[] {
+  const out: LocatedCitation[] = [];
+  lines.forEach((l, lineIdx) => {
+    if (/^\s*(id|epic):\s/.test(l)) return;
+    for (const re of [FILE_HASH_RE, FILE_COLON_RE]) {
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(l)) !== null) {
+        out.push({ path: m[1], line: m[2], lineIdx, token: m[0] });
+      }
+    }
+  });
+  return out;
+}
+
+function lastLineOf(token: string): number {
+  const nums = token.match(/\d+/g) ?? [];
+  return Number(nums[nums.length - 1]);
+}
+
+function countLines(content: string): number {
+  if (content === '') return 0;
+  const n = content.split('\n').length;
+  return content.endsWith('\n') ? n - 1 : n;
+}
+
+function containsGuarded(content: string, literal: string): boolean {
+  let from = 0;
+  const first = /\w/.test(literal[0]);
+  const last = /\w/.test(literal[literal.length - 1]);
+  for (;;) {
+    const i = content.indexOf(literal, from);
+    if (i === -1) return false;
+    const before = i > 0 ? content[i - 1] : '';
+    const after = content[i + literal.length] ?? '';
+    const okBefore = !first || !/\w/.test(before);
+    const okAfter = !last || !/\w/.test(after);
+    if (okBefore && okAfter) return true;
+    from = i + 1;
+  }
+}
+
+/**
+ * Fidelity tier: verify cited lines exist and nearby backticked literals appear in
+ * the cited file. Returns violations (callers report them as warnings). See the
+ * frozen candidate set above for the exact, bounded claim.
+ */
+export function checkCitationFidelity(
+  text: string,
+  registry: ReferenceRegistry,
+): ReferenceViolation[] {
+  if (!registry.readFile) return [];
+  const lines = text.split('\n');
+  const citations = locateCitations(lines);
+  const violations: ReferenceViolation[] = [];
+  const seen = new Set<string>();
+  const add = (ref: Reference, message: string) => {
+    if (seen.has(message)) return;
+    seen.add(message);
+    violations.push({ ref, message });
+  };
+
+  for (const c of citations) {
+    if (!registry.fileExists(c.path)) continue; // existence tier owns this
+    const content = registry.readFile(c.path);
+    if (content === undefined) continue;
+    const ref: Reference = { kind: 'file', path: c.path, line: c.line };
+
+    const total = countLines(content);
+    const cited = lastLineOf(c.line);
+    if (cited > total) {
+      add(ref, `citation fidelity: ${c.path}:${c.line} cites line ${cited} but the file has only ${total} lines`);
+      continue;
+    }
+
+    const lo = Math.max(0, c.lineIdx - 1);
+    const hi = Math.min(lines.length - 1, c.lineIdx + 1);
+    const windowCites = citations.filter((o) => o.lineIdx >= lo && o.lineIdx <= hi);
+    if (new Set(windowCites.map((o) => o.path)).size > 1) continue; // ambiguous owner
+
+    for (let i = lo; i <= hi; i++) {
+      for (const lm of lines[i].matchAll(/`([^`\n]+)`/g)) {
+        const literal = lm[1].replace(/\(\)$/, '');
+        if (!FIDELITY_IDENT_RE.test(literal)) continue;
+        if (literal.length < FIDELITY_MIN_LITERAL_LENGTH) continue;
+        if (literal.includes(c.path)) continue;
+        if (windowCites.some((o) => literal.includes(o.path))) continue;
+        if (!containsGuarded(content, literal)) {
+          add(
+            ref,
+            `citation fidelity: \`${literal}\` is cited near ${c.path}:${c.line} but does not appear in ${c.path}`,
+          );
+        }
+      }
+    }
   }
   return violations;
 }

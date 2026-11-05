@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   extractReferences,
   checkReferences,
+  checkCitationFidelity,
   type ReferenceRegistry,
 } from '../src/lib/reference-checker';
 
@@ -151,5 +152,65 @@ describe('#1451 — relative file citations keep their ./ and ../ prefix', () =>
     expect(pathsOf('prefix/packages/minspec/src/foo.ts#L4')).toEqual([
       'prefix/packages/minspec/src/foo.ts',
     ]);
+  });
+});
+
+describe('checkCitationFidelity (#1643)', () => {
+  const files: Record<string, string> = {
+    'src/a.ts': 'line1\nconst fileExists = 1;\nline3\nline4\nline5 fooBar12\n',
+    'src/b.ts': 'other\n',
+  };
+  const reg: ReferenceRegistry = {
+    ...registry,
+    fileExists: (p) => p in files,
+    readFile: (p) => files[p],
+  };
+
+  it('flags a line beyond end of file', () => {
+    const v = checkCitationFidelity('See src/a.ts:99 here', reg);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain('only 5 lines');
+  });
+
+  it('checks the end of a range, and passes in-bounds citations', () => {
+    expect(checkCitationFidelity('src/a.ts:2-5', reg)).toEqual([]);
+    expect(checkCitationFidelity('src/a.ts#L3-L9', reg)).toHaveLength(1);
+  });
+
+  it('flags a nearby backticked literal absent from the file', () => {
+    const v = checkCitationFidelity('`missingSymbol` at src/a.ts:2', reg);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain('missingSymbol');
+  });
+
+  it('accepts a present literal, including on the adjacent line', () => {
+    expect(checkCitationFidelity('src/a.ts:2\nuses `fileExists`', reg)).toEqual([]);
+  });
+
+  it('ignores literals beyond +/- 1 line', () => {
+    expect(checkCitationFidelity('`nope1`\n\n\nsrc/a.ts:2', reg)).toEqual([]);
+  });
+
+  it('boundary guard: Bar12 does not match inside fooBar12', () => {
+    expect(checkCitationFidelity('`Bar12` src/a.ts:5', reg)).toHaveLength(1);
+    expect(checkCitationFidelity('`fooBar12` src/a.ts:5', reg)).toEqual([]);
+  });
+
+  it('skips literals when the window cites two different files', () => {
+    expect(checkCitationFidelity('`nope` src/a.ts:2 src/b.ts:1', reg)).toEqual([]);
+  });
+
+  it('does not treat the citation itself as a literal', () => {
+    expect(checkCitationFidelity('`src/a.ts:2`', reg)).toEqual([]);
+  });
+
+  it('scans status blocks and fences (no silent exemption)', () => {
+    const t = '**Status:** corrected\n```\nsrc/a.ts:99\n```';
+    expect(checkCitationFidelity(t, reg)).toHaveLength(1);
+  });
+
+  it('is a no-op without readFile, and skips missing files', () => {
+    expect(checkCitationFidelity('src/a.ts:99', registry)).toEqual([]);
+    expect(checkCitationFidelity('src/gone.ts:1', reg)).toEqual([]);
   });
 });

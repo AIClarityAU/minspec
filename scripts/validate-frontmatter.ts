@@ -15,7 +15,7 @@
  * quietly, per `.minspec/constitution.md` invariant 2.
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, statSync } from 'fs';
 import { join, relative, dirname, sep, basename } from 'path';
 import {
   validateDrSequence,
@@ -38,6 +38,7 @@ import { DEFAULT_CONFIG, loadConfig } from '../packages/minspec/src/lib/config';
 import type { Tier } from '../packages/minspec/src/lib/config';
 import {
   checkReferences,
+  checkCitationFidelity,
   type ReferenceRegistry,
 } from '../packages/minspec/src/lib/reference-checker';
 import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
@@ -535,8 +536,22 @@ try {
       ...registry,
       fileExists: (relPath) =>
         existsSync(join(artifactDir, relPath)) || existsSync(join(ROOT, relPath)),
+      readFile: (relPath) => {
+        for (const p of [join(artifactDir, relPath), join(ROOT, relPath)]) {
+          try {
+            if (statSync(p).isFile()) return readFileSync(p, 'utf-8');
+          } catch {
+            // try the next candidate
+          }
+        }
+        return undefined;
+      },
     };
     for (const v of checkReferences(content, scopedRegistry)) {
+      warn(`ref-check ${relative(ROOT, file)}: ${v.message}`);
+    }
+    // Fidelity tier (#1643): warning severity — line bound + nearby-literal echo.
+    for (const v of checkCitationFidelity(content, scopedRegistry)) {
       warn(`ref-check ${relative(ROOT, file)}: ${v.message}`);
     }
   }
