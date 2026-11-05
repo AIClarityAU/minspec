@@ -938,4 +938,12 @@ DR-076 (solo mode, accepted 2026-08-01) keeps "genuinely human moments", the fir
 <!-- dr-summary:DR-119 auto=601a0bb6ac6e -->
 The bot records delegated spec approvals, and no rule lets anything but the founder merge them, so they queue on a keystroke the delegation was meant to remove. | Count | Pull requests | Outcome under section 1 | |---|---|---| | 16 | #3154, #3155, #3244, #3356, #3358 to #3361, #3363 to #3365, #3370 to #3374 | Eligible once brought up to date | | 1 | #3357 | Refused: test failed on its head. All test files passed and…
 <!-- /dr-summary:DR-119 -->
+
+## [DR-121 — Plan artifacts merge on AI review once their spec is approved, through the delegated lane, under the delegated-approval merge lane's pins](DR-121.md)
+
+*Status: proposed · Date: 2026-11-06*
+
+<!-- dr-summary:DR-121 auto=a299007d3188 -->
+_No summary available._
+<!-- /dr-summary:DR-121 -->
 <!-- minspec:dr-index:end -->
