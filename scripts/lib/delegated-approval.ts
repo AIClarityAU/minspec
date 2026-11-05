@@ -37,7 +37,7 @@
  *
  * Without `--write` it prints the decision and the record it would write. With `--write`
  * it also writes the sidecar and moves the artifact's lifecycle (a spec advances to
- * implementing; a DR flips to `accepted` and the register index is regenerated), the
+ * its derived status (usually `planning`, DR-069); a DR flips to `accepted` and the register index is regenerated), the
  * same writes the founder's *Approve Spec* / *Accept ADR* make. Committing and opening the
  * approval pull request stay with the caller. Exit 0 = approved (or would be), 1 = denied.
  */
@@ -57,6 +57,7 @@ import { readRepeatFixShare, utcToday } from './repeat-fix-share';
 import { openClarifyDetail } from './clarify-open';
 import { readContentPullRequest } from './content-pr';
 import { readSpecFile, parseSpec, advanceSpecToImplementing } from '../../packages/minspec/src/lib/spec';
+import { deriveStatus, phasesForApproval } from '../../packages/minspec/src/lib/lifecycle';
 import { bodyStatusToken } from '../../packages/minspec/src/lib/status-parity';
 import { isTerminalSpecStatus } from '../../packages/minspec/src/lib/spec-vocabulary';
 import { loadConfig } from '../../packages/minspec/src/lib/config';
@@ -575,12 +576,21 @@ export function specNotApprovable(repoRoot: string, abs: string, content?: strin
   const status = parsed.frontmatter.status;
   if (isTerminalSpecStatus(status)) return `the spec is ${String(status)}, past the approval gate`;
   // The approval hash covers the body, and the lifecycle write rewrites a body status word
-  // (setBodyStatusToken). A delegated approval must leave the body untouched (DR-081 s5:
+  // (setBodyStatusToken) to the derived status. A delegated approval must leave the body untouched (DR-081 s5:
   // the exemption covers the record, never the approvable), so refuse up front.
-  const body = bodyStatusToken(content ?? fs.readFileSync(abs, 'utf-8'), 'spec');
-  if (body !== null && body.token !== 'implementing') {
+  const text = content ?? fs.readFileSync(abs, 'utf-8');
+  const body = bodyStatusToken(text, 'spec');
+  // The word the approval stamps is the approval-aware derived status (DR-069): usually
+  // `planning` for a pre-implement spec, `implementing` once implement has started - the
+  // same derivation advanceSpecToImplementing uses (spec.ts), so pre-check and write agree.
+  const target = deriveStatus(phasesForApproval(parsed.frontmatter.phases), 'approved', undefined);
+  // The writer stamps the CAPITALIZED word (setBodyStatusToken), so compare the raw word,
+  // case-sensitively: a lowercase `planning` line is still rewritten to `Planning`.
+  const written = target.charAt(0).toUpperCase() + target.slice(1);
+  const rawWord = body === null ? '' : (text.split('\n')[body.line - 1].match(/^\*\*Status:\*\*[ \t]*([A-Za-z]+)/)?.[1] ?? '');
+  if (body !== null && rawWord !== written) {
     return (
-      `the body status line (line ${body.line}, "${body.token}") would be rewritten by the approval, ` +
+      `the body status line (line ${body.line}, "${body.token}") would be rewritten to "${target}" by the approval, ` +
       `which changes the spec's hash; open a content pull request that removes that line, then retry`
     );
   }

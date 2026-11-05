@@ -359,8 +359,22 @@ describe('a delegated spec approval never changes the spec body (#3380)', () => 
     expect(specNotApprovable(root, abs)).toMatch(/body status.*content pull request that removes that line/i);
   });
   it('does not refuse for a body status word the flip leaves alone', () => {
-    const { root, abs } = mk('**Status:** implementing');
+    // The approval stamps the DR-069 derived word (`planning` for a pre-implement spec).
+    const { root, abs } = mk('**Status:** Planning');
     expect(specNotApprovable(root, abs) ?? '').not.toMatch(/body status/i);
+  });
+  it('refuses a lowercase body word the writer would capitalize', () => {
+    const { root, abs } = mk('**Status:** planning');
+    expect(specNotApprovable(root, abs)).toMatch(/body status/i);
+    expect(writeLifecycleHashNeutral(root, abs, 'spec-approval')).toMatch(/hash/i);
+  });
+  it('refuses a body word `implementing` when the approval would stamp `planning`', () => {
+    const { root, abs } = mk('**Status:** implementing');
+    expect(specNotApprovable(root, abs)).toMatch(/body status.*"planning"/i);
+  });
+  it('pre-check and write agree: a body word the pre-check allows is hash-neutral to write', () => {
+    const { root, abs } = mk('**Status:** Planning');
+    expect(writeLifecycleHashNeutral(root, abs, 'spec-approval')).toBeUndefined();
   });
   it('writeLifecycleHashNeutral restores the file and reports when the write changed the hash', () => {
     const { root, abs } = mk('**Status:** specifying');
