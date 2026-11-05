@@ -1998,6 +1998,26 @@ run_egress_guard() {
     "${WORKTREE}/.agent-summary.md" "${WORKTREE}/.review-signals.json"
 }
 
+# Crash-comment excerpt (#1202). The log is the agent's combined output and the agent
+# may have worked from untrusted issue text, so a raw tail must never be published.
+# Runs the excerpt through the SAME scanner the publish guard uses ($AGENT_EGRESS_SCAN,
+# scripts/egress-scan.sh via lib/agent-egress.sh; never a second copy) and FAILS CLOSED:
+# a hit, a scan error, a missing scanner, an empty/missing log or mktemp failure all
+# print nothing and return non-zero. Matched text is never echoed.
+crash_log_excerpt() {
+  local log="$1" excerpt tmp rc=1
+  excerpt=$(tail -n 15 "$log" 2>/dev/null | cut -c1-300) || return 1
+  [[ -n "$excerpt" ]] || return 1
+  tmp=$(mktemp 2>/dev/null) || return 1
+  if printf '%s\n' "$excerpt" > "$tmp" 2>/dev/null \
+     && "$AGENT_EGRESS_SCAN" "$tmp" >/dev/null 2>&1; then
+    printf '%s' "$excerpt"
+    rc=0
+  fi
+  rm -f "$tmp"
+  return "$rc"
+}
+
 # Quarantine path (#358): the guard tripped, so we publish NOTHING. Label the issue
 # for a human, comment briefly, and leave the worktree intact for inspection.
 quarantine_publish() {
@@ -3047,12 +3067,18 @@ else
   # "the agent asked for a human" from "the harness killed the run and it never made a
   # real attempt", so a systemic outage rendered as a growing human-review backlog.
   # `agent-crashed` makes the two separable by label query, and the comment carries the
-  # crash signature so the reason outlives the /tmp-scoped, rotating drain log.
+  # crash signature so the reason is kept on the issue, not only in the worktree log.
   gh label create "agent-crashed" --repo "$REPO" --color d93f0b \
     --description "Harness crash - agent never made a real attempt; retry candidate" 2>/dev/null || true  # swallow-ok: label may already exist; the edit below fails visibly in the comment path
   gh issue edit "$ISSUE" --repo "$REPO" --add-label "agent-crashed" 2>/dev/null || true  # swallow-ok: needs-human-review above is the load-bearing gate; this label is a discriminator
-  CRASH_SIGNATURE=$(tail -n 15 "$LOG" 2>/dev/null | cut -c1-300 || true)  # swallow-ok: log may be missing; the comment still names the crash
-  CRASH_BODY=$(printf '**Agent crashed (harness failure, not an escalation)** - role `%s`, model `%s`. The run never emitted an `ESCALATE:` reason, so this is a retry candidate once the underlying cause is fixed, not a hard problem awaiting judgement. Filter with label `agent-crashed`.\n\nLast log lines (the drain log is /tmp-scoped and rotates):\n\n```\n%s\n```\n' "$ROLE" "${RUN_MODEL:-unknown}" "$CRASH_SIGNATURE")
+  # The excerpt is published only if the shared egress scan passes it; any hit or scan
+  # failure withholds every log line (role, model and exit signature still post).
+  CRASH_HEAD=$(printf '**Agent crashed (harness failure, not an escalation)** - role `%s`, model `%s`. The run never emitted an `ESCALATE:` reason, so this is a retry candidate once the underlying cause is fixed, not a hard problem awaiting judgement. Filter with label `agent-crashed`.\n\n' "$ROLE" "${RUN_MODEL:-unknown}")
+  if CRASH_SIGNATURE=$(crash_log_excerpt "$LOG"); then
+    CRASH_BODY=$(printf '%sLast log lines (the full log is `.agent.log` in the agent worktree `%s`):\n\n```\n%s\n```\n' "$CRASH_HEAD" "$WORKTREE" "$CRASH_SIGNATURE")
+  else
+    CRASH_BODY=$(printf '%sLog lines withheld (the egress scan flagged them, could not run, or the log was empty); the full log is `.agent.log` in the agent worktree `%s` for a human to read.\n' "$CRASH_HEAD" "$WORKTREE")
+  fi
   gh issue comment "$ISSUE" --repo "$REPO" --body "$CRASH_BODY" 2>/dev/null || echo "WARNING: could not post crash signature comment on #$ISSUE" >&2
 fi
 
