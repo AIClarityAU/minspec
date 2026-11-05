@@ -145,6 +145,7 @@ function stubGh(
       `  "pr list"*)                key=pr ;;\n` +
       `  "pr diff"*)                key=files ;;\n` +
       `  "issue view"*)             key=labels ;;\n` +
+      `  "api "*"/comments"*)       key=comments ;;\n` +
       `esac\n` +
       `for f in ${JSON.stringify(failKeys.join(' '))}; do\n` +
       // `-n "$f"` guards the degenerate case: with failKeys=[] (the default), the
@@ -159,6 +160,11 @@ function stubGh(
       // the sign-off exemption need not say so.
       `if [[ "$key" == labels ]]; then\n` +
       `  node -e 'const t=require(process.argv[1]);process.stdout.write(t["labels:"+process.argv[2]]??t.labels??JSON.stringify({labels:[{name:"agent-done"}]}))' ${JSON.stringify(table)} "$3"\n` +
+      `  exit 0\n` +
+      `fi\n` +
+      // #3408: the issue's comments, as a raw page. Default: none, so no release is capped.
+      `if [[ "$key" == comments ]]; then\n` +
+      `  node -e 'const t=require(process.argv[1]);process.stdout.write(t.comments??"[]")' ${JSON.stringify(table)}\n` +
       `  exit 0\n` +
       `fi\n` +
       `if [[ "$key" == files ]]; then\n` +
@@ -242,6 +248,7 @@ function stubGhOneLinePerPage(
       `  done\n` +
       `  exit 0\n` +
       `fi\n` +
+      `if [[ "$*" == "api "*"/comments"* ]]; then echo '[]'; exit 0; fi\n` +   // #3408: no prior releases
       `key=""\n` +
       `case "$*" in\n` +
       `  *"--label agent-running"*) key=running ;;\n` +
@@ -792,5 +799,204 @@ describe('#1855 — a failed lookup is never read as proof of absence', () => {
     const out = runReconciler('reconcile_done_issues', { done: '4242\n', pr: '77\n' }, [[]]);
     expect(out).toContain('closing #4242');
     expect(ghCalls()).toContain('issue close 4242');
+  });
+});
+
+describe('#3355 — an open issue with no lane label gets inbox', () => {
+  /**
+   * A `gh` stub for the lane check. `issue list ... --json number,labels` answers `list`
+   * (or exits 4 when `listFails`); `issue edit N` exits 4 for every N in `editFails`;
+   * every other call is silent success. Every argv is logged.
+   */
+  function runLaneCheck(
+    fn: string,
+    opts: { list?: string; listFails?: boolean; editFails?: number[]; parked?: number[]; markerFails?: boolean; markerRaw?: string; running?: number; claimAt?: string; comments?: string; commentsFail?: boolean; commentFails?: boolean },
+    env: Record<string, string> = {},
+  ): string {
+    const bin = path.join(tmp, 'bin-lane');
+    fs.mkdirSync(bin, { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'lane-list.json'), opts.list ?? '[]', 'utf-8');
+    fs.writeFileSync(
+      path.join(bin, 'gh'),
+      `#!/usr/bin/env bash\n` +
+        `printf '%s\\n' "$*" >> ${JSON.stringify(path.join(tmp, 'gh-calls.log'))}\n` +
+        (opts.running
+          ? `if [[ "$*" == *"--label agent-running"* ]]; then echo ${opts.running}; exit 0; fi\n` +
+            `if [[ "$*" == *timeline* ]]; then echo ${JSON.stringify(JSON.stringify([claimEvent(opts.claimAt ?? '2020-01-01T00:00:00Z')]))}; exit 0; fi\n` +
+            `if [[ "$*" == "api "*"/comments"* ]]; then\n` +
+            (opts.commentsFail ? `  exit 4\n` : `  printf '%s' ${JSON.stringify(opts.comments ?? '[]')}; exit 0\n`) +
+            `fi\n`
+          : '') +
+        (opts.commentFails ? `[[ "$1 $2" == "issue comment" ]] && exit 4\n` : '') +
+        `if [[ "$*" == *"in:comments"* ]]; then\n` +
+        (opts.markerFails
+          ? `  exit 4\n`
+          : `  printf '%s' ${JSON.stringify(opts.markerRaw ?? JSON.stringify((opts.parked ?? []).map((number) => ({ number }))))}; exit 0\n`) +
+        `fi\n` +
+        `if [[ "$*" == *"--json number,labels"* ]]; then\n` +
+        (opts.listFails ? `  exit 4\n` : `  cat ${JSON.stringify(path.join(tmp, 'lane-list.json'))}; exit 0\n`) +
+        `fi\n` +
+        `if [[ "$1 $2" == "issue edit" ]]; then\n` +
+        `  for n in ${JSON.stringify((opts.editFails ?? []).join(' '))}; do [[ "$n" == "$3" ]] && exit 4; done\n` +
+        `fi\n` +
+        `exit 0\n`,
+      { mode: 0o755 },
+    );
+    const script = ['set -uo pipefail', 'REPO=owner/repo', `SCRIPT_DIR=${JSON.stringify(path.dirname(DRAIN))}`, reconcilerBlock(), fn].join('\n');
+    return execFileSync('bash', ['-c', script], {
+      encoding: 'utf-8',
+      env: { ...process.env, ...env, PATH: `${bin}:${process.env.PATH}` },
+    });
+  }
+  const issues = (rows: Array<[number, string[]]>): string =>
+    JSON.stringify(rows.map(([number, labels]) => ({ number, labels: labels.map((name) => ({ name })) })));
+
+  it('T0: an open issue with only role:dev gets inbox; a laned one is not touched', () => {
+    const out = runLaneCheck('reconcile_unlaned_issues', {
+      list: issues([[11, ['role:dev']], [12, ['inbox', 'role:dev']], [13, []]]),
+    });
+    const calls = ghCalls();
+    expect(calls).toContain('issue edit 11 --repo owner/repo --add-label inbox');
+    expect(calls).toContain('issue edit 13 --repo owner/repo --add-label inbox');
+    expect(calls).not.toContain('issue edit 12');
+    expect(out).toContain('2 open issue(s) had no lane label and got inbox; 0 could not be labelled');
+  });
+
+  it('prints the count even when every issue has a lane (never silent at zero)', () => {
+    const out = runLaneCheck('reconcile_unlaned_issues', { list: issues([[1, ['inbox']], [2, ['parked']]]) });
+    expect(out).toContain('0 open issue(s) had no lane label and got inbox; 0 could not be labelled');
+    expect(ghCalls()).not.toContain('issue edit');
+  });
+
+  it('a failed list is reported as unchecked, never as zero unlaned', () => {
+    const out = runLaneCheck('reconcile_unlaned_issues', { listFails: true });
+    expect(out).toContain('could not list open issues');
+    expect(out).toContain('NOT evidence that every issue has a lane');
+    expect(out).not.toContain('had no lane label');
+    expect(ghCalls()).not.toContain('issue edit');
+  });
+
+  it('an unparseable list is reported as unchecked, never as zero unlaned', () => {
+    const out = runLaneCheck('reconcile_unlaned_issues', { list: 'this is not json' });
+    expect(out).toContain('could not parse the issue list');
+    expect(out).not.toContain('had no lane label');
+    expect(ghCalls()).not.toContain('issue edit');
+  });
+
+  it('a failed edit is counted and named, and the others still get inbox', () => {
+    const out = runLaneCheck('reconcile_unlaned_issues', {
+      list: issues([[21, []], [22, []], [23, []]]),
+      editFails: [22],
+    });
+    expect(out).toContain('could not add inbox to #22');
+    expect(out).toContain('2 open issue(s) had no lane label and got inbox; 1 could not be labelled');
+    expect(ghCalls()).toContain('issue edit 23 --repo owner/repo --add-label inbox');
+  });
+
+  it('reconcile_labels runs the lane check', () => {
+    const out = runLaneCheck('reconcile_labels', { list: issues([[31, ['role:dev']]]) });
+    expect(ghCalls()).toContain('issue edit 31 --repo owner/repo --add-label inbox');
+    expect(out).toContain('1 open issue(s) had no lane label and got inbox');
+  });
+
+  it('T0: an issue the runner parked on purpose (Do not re-triage) is skipped, not given inbox', () => {
+    const out = runLaneCheck('reconcile_unlaned_issues', {
+      list: issues([[41, ['role:dev']], [42, ['role:dev']]]),
+      parked: [41],
+    });
+    expect(ghCalls()).not.toContain('issue edit 41');
+    expect(ghCalls()).toContain('issue edit 42 --repo owner/repo --add-label inbox');
+    expect(out).toContain('skipped 1 parked on purpose');
+  });
+
+  it('T0: a main-red report is skipped, not given inbox', () => {
+    const out = runLaneCheck('reconcile_unlaned_issues', {
+      list: issues([[51, ['bug', 'main-red']], [52, ['bug']]]),
+    });
+    expect(ghCalls()).not.toContain('issue edit 51');
+    expect(ghCalls()).toContain('issue edit 52 --repo owner/repo --add-label inbox');
+    expect(out).toContain('and 1 main-red report(s)');
+  });
+
+  it('prints both skip counts at zero', () => {
+    const out = runLaneCheck('reconcile_unlaned_issues', { list: issues([[1, ['inbox']]]) });
+    expect(out).toContain('skipped 0 parked on purpose (Do not re-triage) and 0 main-red report(s)');
+  });
+
+  it('a failed marker search makes NO edits and says so loudly', () => {
+    const out = runLaneCheck('reconcile_unlaned_issues', { list: issues([[61, ['role:dev']]]), markerFails: true });
+    expect(out).toContain('could not search for parked issues');
+    expect(out).toContain('NOT evidence that nothing is parked');
+    expect(ghCalls()).not.toContain('issue edit');
+  });
+
+  it('an unparseable marker search makes NO edits and says so loudly', () => {
+    const out = runLaneCheck('reconcile_unlaned_issues', { list: issues([[62, ['role:dev']]]), markerRaw: 'not json' });
+    expect(out).toContain('could not parse the parked-issue search');
+    expect(ghCalls()).not.toContain('issue edit');
+  });
+
+  it('a released orphan claim (no lane) gets inbox from the lane pass in the same cycle', () => {
+    // reconcile_stale_claims strips agent-running from an orphan and adds no lane; the
+    // lane pass that runs next in reconcile_labels then sees it unlaned (the list below is
+    // the board AFTER the release). The cap on repeats is pinned below (#3408).
+    const out = runLaneCheck('reconcile_labels', { running: 13071, list: issues([[13071, ['role:dev']]]) });
+    expect(out).toContain('releasing orphaned agent-running on #13071');
+    expect(ghCalls()).toContain('issue edit 13071 --repo owner/repo --remove-label agent-running');
+    expect(ghCalls()).toContain('issue edit 13071 --repo owner/repo --add-label inbox');
+  });
+
+  describe('#3408 — an orphaned claim is released only a few times', () => {
+    const MARK = '<!-- drain-orphan-release -->';
+    const comments = (n: number): string =>
+      JSON.stringify(Array.from({ length: n }, (_, i) => ({ body: `${MARK}\nrelease ${i + 1}` })));
+
+    it('a release records a marker comment before the label is removed', () => {
+      runLaneCheck('reconcile_stale_claims', { running: 13072, comments: comments(1) });
+      const calls = ghCalls().split('\n');
+      const c = calls.findIndex((l) => l.startsWith('issue comment 13072') && l.includes(MARK));
+      const r = calls.findIndex((l) => l.includes('issue edit 13072 --repo owner/repo --remove-label agent-running'));
+      expect(c).toBeGreaterThanOrEqual(0);
+      expect(r).toBeGreaterThan(c);
+      expect(ghCalls()).not.toContain('needs-human-review');
+    });
+
+    it('past the cap the issue is surfaced as needs-human-review, never given inbox again', () => {
+      const out = runLaneCheck('reconcile_labels', {
+        running: 13073,
+        comments: comments(3),
+        list: issues([[13073, ['needs-human-review']]]),
+      });
+      expect(out).toContain('already released as an orphan 3 time(s) (cap 3)');
+      expect(ghCalls()).toContain('issue edit 13073 --repo owner/repo --remove-label agent-running --add-label needs-human-review');
+      expect(ghCalls()).not.toContain('--add-label inbox');
+    });
+
+    it('the cap is configurable', () => {
+      const out = runLaneCheck('reconcile_stale_claims', { running: 13074, comments: comments(1) }, { MINSPEC_ORPHAN_RELEASE_CAP: '1' });
+      expect(out).toContain('cap 1');
+      expect(ghCalls()).toContain('--add-label needs-human-review');
+    });
+
+    it('comments that are not markers do not count', () => {
+      const out = runLaneCheck('reconcile_stale_claims', {
+        running: 13075,
+        comments: JSON.stringify([{ body: 'ordinary' }, { body: null }]),
+      });
+      expect(out).toContain('release 1 of 3');
+    });
+
+    it('an unreadable comment list leaves the claim, never reads as zero releases', () => {
+      const out = runLaneCheck('reconcile_stale_claims', { running: 13076, commentsFail: true });
+      expect(out).toContain('orphan-release count is unknown');
+      expect(ghCalls()).not.toContain('issue edit');
+      expect(ghCalls()).not.toContain('issue comment');
+    });
+
+    it('a failed marker comment leaves the claim so the cap stays enforceable', () => {
+      const out = runLaneCheck('reconcile_stale_claims', { running: 13077, commentFails: true });
+      expect(out).toContain('could not record the release');
+      expect(ghCalls()).not.toContain('--remove-label agent-running');
+    });
   });
 });
