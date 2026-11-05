@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-256-flat-layout-alt-a-terminal-reapprove/requirements.md",
+  "specHash": "4dc65cf398701f176d46969d75300bb86d9c476d0a42c0c356f373c15b1a86e8",
+  "approvedAt": "2026-10-30T07:07:03.886Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-d",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3183#issuecomment-6515893280"
+}
