@@ -112,6 +112,12 @@ be committed and then be self-perpetuating, because the generator treats it as c
 
 ## Decisions needed (Clarify)
 
+3 of 4 decisions are answered, not ratified: an agent session selected, for D1 to D3, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). D4 is not answered: it states a
+belief ("Believed no") that the record says is unverified and defers to Plan, so it stays open. This spec is
+unapproved, so the recorded answers bind nothing until a human or a covered delegation approves it.
+
 - **D1 What counts as a placeholder?**
   **Recorded selection: Option (a),** an `auto=` value made only of `0` characters, any length,
   counts as a placeholder.
