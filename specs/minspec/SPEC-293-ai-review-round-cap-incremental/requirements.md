@@ -236,6 +236,11 @@ has no entry on round caps or prior-finding feedback (searched: "round", "loop",
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 ### DQ-1 - Is the round cap worth building now?
 
 The automated lane is already capped at 2 fix attempts (3 reviews), so the cap only changes
@@ -248,6 +253,8 @@ behaviour for rounds driven by interactive sessions or humans.
 - **Option C - build FR-8..FR-12 only; ship FR-4 with default `0` (off).** *Cost:* the
   convergence change is the larger and riskier half, so this keeps most of the cost and drops
   the cheap part.
+
+**Recorded selection: Option A,** build it with cap 3, after AC-9's measurement shows any PR above 3. An agent session copied this document's (rec) option; no human chose this item.
 
 ### DQ-2 - What does "review only the diff since the last reviewed head" mean?
 
@@ -263,6 +270,8 @@ behaviour for rounds driven by interactive sessions or humans.
   already posted.** Cheapest. *Cost:* no convergence effect on the voters, fuzzy text
   matching (findings have no ids), and no token saving.
 
+**Recorded selection: Option A,** the full diff is still reviewed; prior findings plus the inter-round delta are added as context. An agent session copied this document's (rec) option; no human chose this item.
+
 ### DQ-3 - How is a capped PR flagged?
 
 - **Option A - a plain label outside the `ai-review:` namespace (e.g. `review-loop`), no
@@ -273,6 +282,8 @@ behaviour for rounds driven by interactive sessions or humans.
   still driving - against tenet 1.
 - **Option C - comment and check-run title only.** *Cost:* not queryable across PRs, which
   is the one thing a flag is for.
+
+**Recorded selection: Option A,** a plain label outside the `ai-review:` namespace (for example `review-loop`), no summons. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Test
 
