@@ -1,7 +1,7 @@
 ---
 id: SPEC-236
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - Alt+A is the one-keystroke approve/accept for every approvable
@@ -14,9 +14,9 @@ implements_reason: >-
   (expected: packages/minspec/package.json keybindings, packages/minspec/src/commands/approve-active.ts,
   and the command registration in packages/minspec/src/extension.ts).
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
