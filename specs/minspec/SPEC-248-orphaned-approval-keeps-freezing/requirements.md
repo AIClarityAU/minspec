@@ -1,7 +1,7 @@
 ---
 id: SPEC-248
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a signed ownership snapshot that a file deletion silently voids is a false signpost
@@ -14,9 +14,9 @@ implements_reason: >-
   D1 to D4; declaring them now would arm the spec gate on shared hook and validator files
   before the human has chosen the control surface.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
