@@ -153,11 +153,16 @@ occupancy() {
 # Compares blob ids (hash-object --no-filters vs rev-parse), so no cmp stderr leaks.
 CMP_WHY=""
 compare_with_ref() {
-  local repo="$1" ref="$2" p="$3" f rel want got rc=0 saw_unknown=0
+  local repo="$1" ref="$2" p="$3" f rel want got rc=0 saw_unknown=0 listing find_rc=0 n=0
   CMP_WHY=""
   if [ -d "$repo/$p" ]; then
+    # List to a file first so find's exit status is observable: a process
+    # substitution discards it, and an unreadable directory would list nothing
+    # and fall through to "identical" (REDUNDANT = safe to delete).
+    listing="$(mktemp)" || { CMP_WHY="cannot list $p"; return 2; }
+    find "$repo/$p" -mindepth 1 \( -type d -empty -o ! -type d \) -print0 >"$listing" 2>/dev/null || find_rc=$?
     while IFS= read -r -d '' f; do
-      rel="${f#"$repo"/}"
+      rel="${f#"$repo"/}"; n=$((n+1))
       if [ ! -f "$f" ] || [ -L "$f" ]; then
         saw_unknown=1; CMP_WHY="non-regular entry $rel"; continue
       fi
@@ -165,8 +170,11 @@ compare_with_ref() {
       got="$(git -C "$repo" hash-object --no-filters -- "$f" 2>/dev/null)" \
         || { saw_unknown=1; CMP_WHY="cannot read $rel"; continue; }
       [ "$want" = "$got" ] || rc=1
-    done < <(find "$repo/$p" -mindepth 1 \( -type d -empty -o ! -type d \) -print0 2>/dev/null)
+    done <"$listing"
+    rm -f "$listing"
     [ "$rc" = 1 ] && return 1
+    [ "$find_rc" != 0 ] && { CMP_WHY="cannot list all of $p (unreadable entry)"; return 2; }
+    [ "$n" = 0 ] && { CMP_WHY="no entries listed in $p"; return 2; }
     [ "$saw_unknown" = 1 ] && return 2
     return 0
   fi
@@ -236,6 +244,10 @@ for repo in "${REPOS[@]}"; do
   ahead="$(git -C "$repo" rev-list --count "$origin_ref..HEAD" 2>/dev/null || echo 0)"
 
   redundant=(); orphans=(); unknowns=(); unknown_whys=(); landed_paths=(); landed_refs=()
+  # git omits an untracked directory it cannot open from the listing and says so
+  # only on stderr; discarding that made an unreadable directory vanish and the
+  # checkout read "clean". Keep stderr and surface each such directory as UNKNOWN.
+  status_err="$(mktemp)" || status_err=/dev/null
   while IFS= read -r -d '' entry; do
     code="${entry:0:2}"; p="${entry:3}"
     case "$code" in R*|C*) IFS= read -r -d '' _src ;; esac
@@ -262,7 +274,16 @@ for repo in "${REPOS[@]}"; do
         redundant+=("$p")
       fi
     fi
-  done < <(git -C "$repo" status --porcelain -z 2>/dev/null)
+  done < <(git -C "$repo" status --porcelain -z 2>"$status_err")
+  while IFS= read -r line; do
+    case "$line" in
+      "warning: could not open directory '"*)
+        p="${line#"warning: could not open directory '"}"; p="${p%%\':*}"
+        unknowns+=("$p"); unknown_whys+=("git could not read this directory")
+        ;;
+    esac
+  done <"$status_err"
+  [ "$status_err" = /dev/null ] || rm -f "$status_err"
 
   if [ "${#orphans[@]}" -eq 0 ] && [ "${#unknowns[@]}" -eq 0 ] && [ "${#redundant[@]}" -eq 0 ] && [ "${#landed_paths[@]}" -eq 0 ] \
      && [ "$behind" = "0" ] && [ "$ahead" = "0" ]; then

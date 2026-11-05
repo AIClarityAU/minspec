@@ -305,4 +305,44 @@ describe('check-primaries-clean.sh: untracked DIRECTORY classification (#1650)',
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+
+  // chmod 000 is a no-op for root, so these assert only when the OS enforces it.
+  const enforcesChmod = process.getuid?.() !== 0;
+  const itPerm = enforcesChmod ? it : it.skip;
+
+  itPerm('a directory with an unreadable SUBDIRECTORY is UNKNOWN, not REDUNDANT', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'check-primaries-dir-sub-'));
+    const locked = path.join(root, 'myrepo', 'newdir', 'sub');
+    try {
+      const { origin, primary } = setupPrimary(root);
+      landOnMain(root, origin, primary, FILES);
+      writeLocal(primary, FILES);
+      fs.chmodSync(locked, 0o000);
+      const { status, out } = run(primary);
+      expect(out).toMatch(/UNKNOWN\s+newdir\/.*could not compare/);
+      expect(out).not.toContain('REDUNDANT  newdir/');
+      expect(status).toBe(1);
+    } finally {
+      fs.chmodSync(locked, 0o755);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  itPerm('an unreadable TOP-LEVEL directory is UNKNOWN, not REDUNDANT', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'check-primaries-dir-top-'));
+    const locked = path.join(root, 'myrepo', 'newdir');
+    try {
+      const { origin, primary } = setupPrimary(root);
+      landOnMain(root, origin, primary, FILES);
+      writeLocal(primary, FILES);
+      fs.chmodSync(locked, 0o000);
+      const { status, out } = run(primary);
+      expect(out).not.toContain('REDUNDANT  newdir/');
+      expect(out).toMatch(/UNKNOWN\s+newdir\/.*could not compare/);
+      expect(status).toBe(1);
+    } finally {
+      fs.chmodSync(locked, 0o755);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
