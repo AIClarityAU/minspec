@@ -155,7 +155,7 @@ function between(src: string, from: string, to: string): string {
 describe('the sign-off label cannot outlive the spec stage (#3351 review)', () => {
   const dispatchSrc = fs.readFileSync(DISPATCH, 'utf-8');
   const approveSrc = fs.readFileSync(APPROVE, 'utf-8');
-  const completion = between(dispatchSrc, 'gh label create "awaiting-spec-signoff"', 'echo "Agent completed issue #$ISSUE');
+  const completion = between(dispatchSrc, 'LABEL_ERR=$(gh label create "awaiting-spec-signoff"', 'echo "Agent completed issue #$ISSUE');
   const stampOf = (calls: string[]) => calls.filter((c) => c.startsWith('issue edit 42'));
 
   it('a finished specify run labels the open issue awaiting-spec-signoff, keeping agent-done', () => {
