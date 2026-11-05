@@ -68,6 +68,15 @@ export interface MinspecConfig {
    */
   readonly implementEvidence?: 'warn' | 'error';
   /**
+   * Severity of the two implement close-out rules (#1595):
+   * `implement.finished-not-closed` (every task ticked and every declared
+   * `implements:` path on disk, yet `phases.implement` is still `in-progress`) and
+   * `implement.phantom-hole` (code on disk, zero tasks ticked). `warn` (default)
+   * surfaces them without blocking; flip to `error` once the corpus is closed out
+   * (the SPEC-038 FR-7 ratchet). Absent -> treated as `warn`.
+   */
+  readonly implementCloseout?: 'warn' | 'error';
+  /**
    * Permitted approver identities for the `approval-integrity` gate (DR-081 §4, #1376).
    *
    * An ALLOWLIST, unlike `approval.ts`'s `BUILTIN_AGENT_IDENTITIES` denylist, and the two
@@ -162,6 +171,7 @@ export const DEFAULT_CONFIG: MinspecConfig = {
   coverage: { minimumPercentage: DEFAULT_COVERAGE_MINIMUM },
   ownershipDeclaration: 'warn',
   implementEvidence: 'warn',
+  implementCloseout: 'warn',
   autonomy: 'ask',
   statusLineAnnotation: 'warn',
 };
