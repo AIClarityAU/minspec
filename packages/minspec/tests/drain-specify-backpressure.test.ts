@@ -177,10 +177,13 @@ describe('#3344 P4: a pending cap that is not a whole number spends nothing', ()
  *
  *   H1  held machinery builds do not count toward SPECIFY_MAX_HELD.
  *   H2  held spec drafts (every file under specs/) still count.
- *   H3  a non-drain head never counts; a draft with a stray non-specs file is a build.
+ *   H3  a non-drain head never counts; specs/ plus a file outside specs/ and docs/decisions/ is a build.
  *   H4  an unreadable file list fails the count closed.
+ *   H5  a draft shipping docs/decisions/ files beside specs/ still counts (#3217).
+ *   H6  specs/ plus a scripts/ file does not count.
+ *   H7  only docs/decisions/ files (no specs/ file) does not count.
  */
-describe('#3570 H1-H4: only spec drafts count toward the held cap', () => {
+describe('#3570 H1-H7: only spec drafts count toward the held cap', () => {
   const build = (n: number) => ({ head: `agent/issue-${n}`, files: ['scripts/drain-inbox.sh', 'packages/minspec/tests/x.test.ts'] });
   const draft = (n: number) => ({ head: `agent/issue-${n}`, files: [`specs/minspec/SPEC-${n}-x/requirements.md`] });
 
@@ -218,5 +221,31 @@ describe('#3570 H1-H4: only spec drafts count toward the held cap', () => {
     const lines = pausedLines(d.log());
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain('could not be counted');
+  });
+
+  it('H5: a draft shipping a decision record and INDEX.md beside specs/ still counts', async () => {
+    const withDr = { head: 'agent/issue-600', files: ['specs/minspec/SPEC-268-x/requirements.md', 'docs/decisions/DR-115.md', 'docs/decisions/INDEX.md'] };
+    const heldRows = [...Array.from({ length: 9 }, (_, i) => draft(700 + i)), withDr];
+    const d = await runOnce({ ready: [42], specify: [77], heldRows, reading: ROOM });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('10 drain pull request(s) held for a human');
+  });
+
+  it('H6: specs/ plus a scripts/ file is a build and does not count', async () => {
+    const mixed = { head: 'agent/issue-601', files: ['specs/minspec/SPEC-1-x/requirements.md', 'scripts/x.sh'] };
+    const heldRows = [...Array.from({ length: 9 }, (_, i) => draft(800 + i)), mixed];
+    const d = await runOnce({ ready: [42], specify: [77], heldRows, reading: ROOM });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+
+  it('H7: a pull request with only docs/decisions/ files does not count', async () => {
+    const drOnly = { head: 'agent/issue-602', files: ['docs/decisions/DR-116.md', 'docs/decisions/INDEX.md'] };
+    const heldRows = [...Array.from({ length: 9 }, (_, i) => draft(900 + i)), drOnly];
+    const d = await runOnce({ ready: [42], specify: [77], heldRows, reading: ROOM });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
   });
 });
