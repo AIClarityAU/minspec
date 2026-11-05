@@ -1093,13 +1093,36 @@ dispatch_alive_for() {
   pgrep -f "dispatch-issue\.sh[[:space:]]+$1([[:space:]]|$)" >/dev/null 2>&1
 }
 
+# #3408 — how many times an issue may be released as an orphan before it is surfaced.
+# A release leaves the issue with no lane, so the lane pass gives it `inbox` and triage
+# sends it back to a dispatch; without a cap a dispatch that dies every time loops forever,
+# spending quota each lap. Each release leaves a marker comment; the count is the markers.
+ORPHAN_RELEASE_CAP="${MINSPEC_ORPHAN_RELEASE_CAP:-3}"
+ORPHAN_RELEASE_MARKER='<!-- drain-orphan-release -->'
+
+# orphan_release_count <issue>: prints how many marker comments the issue carries.
+# Returns 1 (prints nothing) when the comments cannot be read or do not reduce to a
+# number: an unreadable count is never read as zero. Fetched raw and flattened locally,
+# like the timeline readers above, so pagination cannot split the count.
+orphan_release_count() {
+  local raw cnt
+  raw=$(gh api "repos/${REPO}/issues/$1/comments" --paginate 2>/dev/null) || return 1
+  [[ -n "$raw" ]] || return 1
+  cnt=$(printf '%s' "$raw" | jq -r -s --arg m "$ORPHAN_RELEASE_MARKER" '
+      (add // []) as $c
+      | if ($c | type) != "array" then "unknown"
+        else [$c[] | select((.body // "") | contains($m))] | length end' 2>/dev/null) || return 1
+  [[ "$cnt" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$cnt"
+}
+
 # #1306 — release `agent-running` claims that no dispatch is holding.
 # TWO independent witnesses must agree before anything is touched: the claim is older
 # than the stale threshold AND no live dispatch process exists for it. Either one alone
 # could be wrong (a long build looks old; pgrep cannot see a dispatch on another host),
 # so requiring both means the reaper fails toward leaving the claim in place.
 reconcile_stale_claims() {
-  local running n applied age
+  local running n applied age prior
   running=$(gh issue list --repo "$REPO" --state open --label "agent-running" \
     --json number --jq '.[].number' 2>/dev/null || true)  # swallow-ok: the next line returns 0 on empty, before the loop holding this function's only label edit — a failed query skips this cycle's reaping and the next retries; nothing is reaped on bad data
   [[ -n "$running" ]] || return 0
@@ -1113,7 +1136,26 @@ reconcile_stale_claims() {
     }
     age=$(( $(date -u +%s) - applied ))
     (( age >= RECONCILE_CLAIM_STALE_SECS )) || continue    # witness 1: genuinely old
-    echo "[drain] reconcile: releasing orphaned agent-running on #$n (claimed ${age}s ago, no live dispatch) — #1306."
+    prior=0; prior=$(orphan_release_count "$n") || {
+      echo "[drain] reconcile: could not read the comments of #$n, so its orphan-release count is unknown — leaving the claim as-is; the next cycle retries (#3408)."
+      continue
+    }
+    if (( prior >= ORPHAN_RELEASE_CAP )); then
+      echo "[drain] reconcile: #$n was already released as an orphan ${prior} time(s) (cap ${ORPHAN_RELEASE_CAP}) — surfacing as needs-human-review instead of re-queueing (#3408)."
+      gh issue comment "$n" --repo "$REPO" --body "The drain reconciler has released this issue's orphaned \`agent-running\` claim ${prior} times (cap ${ORPHAN_RELEASE_CAP}) and will not return it to \`inbox\` again: each lap re-triages and re-dispatches it at a cost in quota. Labelled \`needs-human-review\`; a human should find out why the dispatch keeps dying. (#3408)" >/dev/null 2>&1 \
+        || echo "[drain] reconcile: could not comment on #$n — continuing with the label change."
+      gh issue edit "$n" --repo "$REPO" --remove-label "agent-running" --add-label "needs-human-review" 2>/dev/null \
+        || echo "[drain] reconcile: could not surface #$n — it stays as-is."
+      continue
+    fi
+    echo "[drain] reconcile: releasing orphaned agent-running on #$n (claimed ${age}s ago, no live dispatch; release $((prior + 1)) of ${ORPHAN_RELEASE_CAP}) — #1306."
+    # The marker is written BEFORE the release: a release that could not be counted would
+    # make the cap unenforceable, so a failed comment leaves the claim for the next cycle.
+    gh issue comment "$n" --repo "$REPO" --body "${ORPHAN_RELEASE_MARKER}
+Drain reconciler released this issue's orphaned \`agent-running\` claim (release $((prior + 1)) of ${ORPHAN_RELEASE_CAP}; claimed ${age}s ago, no live dispatch). (#3408)" >/dev/null 2>&1 || {
+      echo "[drain] reconcile: could not record the release on #$n — leaving the claim as-is so the cap stays enforceable (#3408)."
+      continue
+    }
     gh issue edit "$n" --repo "$REPO" --remove-label "agent-running" 2>/dev/null \
       || echo "[drain] reconcile: could not release the claim on #$n — it stays as-is."
   done <<< "$running"

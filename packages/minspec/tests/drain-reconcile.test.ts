@@ -145,6 +145,7 @@ function stubGh(
       `  "pr list"*)                key=pr ;;\n` +
       `  "pr diff"*)                key=files ;;\n` +
       `  "issue view"*)             key=labels ;;\n` +
+      `  "api "*"/comments"*)       key=comments ;;\n` +
       `esac\n` +
       `for f in ${JSON.stringify(failKeys.join(' '))}; do\n` +
       // `-n "$f"` guards the degenerate case: with failKeys=[] (the default), the
@@ -159,6 +160,11 @@ function stubGh(
       // the sign-off exemption need not say so.
       `if [[ "$key" == labels ]]; then\n` +
       `  node -e 'const t=require(process.argv[1]);process.stdout.write(t["labels:"+process.argv[2]]??t.labels??JSON.stringify({labels:[{name:"agent-done"}]}))' ${JSON.stringify(table)} "$3"\n` +
+      `  exit 0\n` +
+      `fi\n` +
+      // #3408: the issue's comments, as a raw page. Default: none, so no release is capped.
+      `if [[ "$key" == comments ]]; then\n` +
+      `  node -e 'const t=require(process.argv[1]);process.stdout.write(t.comments??"[]")' ${JSON.stringify(table)}\n` +
       `  exit 0\n` +
       `fi\n` +
       `if [[ "$key" == files ]]; then\n` +
@@ -242,6 +248,7 @@ function stubGhOneLinePerPage(
       `  done\n` +
       `  exit 0\n` +
       `fi\n` +
+      `if [[ "$*" == "api "*"/comments"* ]]; then echo '[]'; exit 0; fi\n` +   // #3408: no prior releases
       `key=""\n` +
       `case "$*" in\n` +
       `  *"--label agent-running"*) key=running ;;\n` +
@@ -803,7 +810,7 @@ describe('#3355 — an open issue with no lane label gets inbox', () => {
    */
   function runLaneCheck(
     fn: string,
-    opts: { list?: string; listFails?: boolean; editFails?: number[]; parked?: number[]; markerFails?: boolean; markerRaw?: string; running?: number; claimAt?: string },
+    opts: { list?: string; listFails?: boolean; editFails?: number[]; parked?: number[]; markerFails?: boolean; markerRaw?: string; running?: number; claimAt?: string; comments?: string; commentsFail?: boolean; commentFails?: boolean },
     env: Record<string, string> = {},
   ): string {
     const bin = path.join(tmp, 'bin-lane');
@@ -815,8 +822,12 @@ describe('#3355 — an open issue with no lane label gets inbox', () => {
         `printf '%s\\n' "$*" >> ${JSON.stringify(path.join(tmp, 'gh-calls.log'))}\n` +
         (opts.running
           ? `if [[ "$*" == *"--label agent-running"* ]]; then echo ${opts.running}; exit 0; fi\n` +
-            `if [[ "$*" == *timeline* ]]; then echo ${JSON.stringify(JSON.stringify([claimEvent(opts.claimAt ?? '2020-01-01T00:00:00Z')]))}; exit 0; fi\n`
+            `if [[ "$*" == *timeline* ]]; then echo ${JSON.stringify(JSON.stringify([claimEvent(opts.claimAt ?? '2020-01-01T00:00:00Z')]))}; exit 0; fi\n` +
+            `if [[ "$*" == "api "*"/comments"* ]]; then\n` +
+            (opts.commentsFail ? `  exit 4\n` : `  printf '%s' ${JSON.stringify(opts.comments ?? '[]')}; exit 0\n`) +
+            `fi\n`
           : '') +
+        (opts.commentFails ? `[[ "$1 $2" == "issue comment" ]] && exit 4\n` : '') +
         `if [[ "$*" == *"in:comments"* ]]; then\n` +
         (opts.markerFails
           ? `  exit 4\n`
@@ -928,11 +939,64 @@ describe('#3355 — an open issue with no lane label gets inbox', () => {
   it('a released orphan claim (no lane) gets inbox from the lane pass in the same cycle', () => {
     // reconcile_stale_claims strips agent-running from an orphan and adds no lane; the
     // lane pass that runs next in reconcile_labels then sees it unlaned (the list below is
-    // the board AFTER the release). Pinned as today's behaviour: there is no retry cap
-    // (tracked as its own issue).
+    // the board AFTER the release). The cap on repeats is pinned below (#3408).
     const out = runLaneCheck('reconcile_labels', { running: 13071, list: issues([[13071, ['role:dev']]]) });
     expect(out).toContain('releasing orphaned agent-running on #13071');
     expect(ghCalls()).toContain('issue edit 13071 --repo owner/repo --remove-label agent-running');
     expect(ghCalls()).toContain('issue edit 13071 --repo owner/repo --add-label inbox');
+  });
+
+  describe('#3408 — an orphaned claim is released only a few times', () => {
+    const MARK = '<!-- drain-orphan-release -->';
+    const comments = (n: number): string =>
+      JSON.stringify(Array.from({ length: n }, (_, i) => ({ body: `${MARK}\nrelease ${i + 1}` })));
+
+    it('a release records a marker comment before the label is removed', () => {
+      runLaneCheck('reconcile_stale_claims', { running: 13072, comments: comments(1) });
+      const calls = ghCalls().split('\n');
+      const c = calls.findIndex((l) => l.startsWith('issue comment 13072') && l.includes(MARK));
+      const r = calls.findIndex((l) => l.includes('issue edit 13072 --repo owner/repo --remove-label agent-running'));
+      expect(c).toBeGreaterThanOrEqual(0);
+      expect(r).toBeGreaterThan(c);
+      expect(ghCalls()).not.toContain('needs-human-review');
+    });
+
+    it('past the cap the issue is surfaced as needs-human-review, never given inbox again', () => {
+      const out = runLaneCheck('reconcile_labels', {
+        running: 13073,
+        comments: comments(3),
+        list: issues([[13073, ['needs-human-review']]]),
+      });
+      expect(out).toContain('already released as an orphan 3 time(s) (cap 3)');
+      expect(ghCalls()).toContain('issue edit 13073 --repo owner/repo --remove-label agent-running --add-label needs-human-review');
+      expect(ghCalls()).not.toContain('--add-label inbox');
+    });
+
+    it('the cap is configurable', () => {
+      const out = runLaneCheck('reconcile_stale_claims', { running: 13074, comments: comments(1) }, { MINSPEC_ORPHAN_RELEASE_CAP: '1' });
+      expect(out).toContain('cap 1');
+      expect(ghCalls()).toContain('--add-label needs-human-review');
+    });
+
+    it('comments that are not markers do not count', () => {
+      const out = runLaneCheck('reconcile_stale_claims', {
+        running: 13075,
+        comments: JSON.stringify([{ body: 'ordinary' }, { body: null }]),
+      });
+      expect(out).toContain('release 1 of 3');
+    });
+
+    it('an unreadable comment list leaves the claim, never reads as zero releases', () => {
+      const out = runLaneCheck('reconcile_stale_claims', { running: 13076, commentsFail: true });
+      expect(out).toContain('orphan-release count is unknown');
+      expect(ghCalls()).not.toContain('issue edit');
+      expect(ghCalls()).not.toContain('issue comment');
+    });
+
+    it('a failed marker comment leaves the claim so the cap stays enforceable', () => {
+      const out = runLaneCheck('reconcile_stale_claims', { running: 13077, commentFails: true });
+      expect(out).toContain('could not record the release');
+      expect(ghCalls()).not.toContain('--remove-label agent-running');
+    });
   });
 });
