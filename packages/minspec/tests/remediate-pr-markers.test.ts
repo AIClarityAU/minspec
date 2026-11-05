@@ -471,3 +471,15 @@ describe('remediate-pr.sh: a failed `gh api user` never becomes the author allow
     expect(countMarkers(ATTEMPT, bot, 'minspec-sdd')).toBe('1');
   });
 });
+
+describe('rejected push charges an attempt (#3583)', () => {
+  it('posts ATTEMPT_MARKER in the agent push-failure branch before exiting', () => {
+    const start = SRC.indexOf('Clean → push the new commits');
+    expect(start).toBeGreaterThan(-1);
+    const tail = SRC.slice(start);
+    const failIdx = tail.indexOf('WARNING: push failed for $BRANCH — worktree left at');
+    expect(failIdx).toBeGreaterThan(-1);
+    const branch = tail.slice(failIdx, tail.indexOf('exit 0', failIdx));
+    expect(branch).toContain('post_marked_comment "$ATTEMPT_MARKER"');
+  });
+});

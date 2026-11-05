@@ -1293,6 +1293,9 @@ while true; do
       echo "  Pushed remediation ($SHA) to $BRANCH — CI will re-review PR #$PR."
     else
       echo "  WARNING: push failed for $BRANCH — worktree left at $WORKTREE for inspection." >&2
+      # #3583: a rejected push still spent an agent run, so it is charged as an attempt
+      # (else MAX_ATTEMPTS never trips and e.g. a .github/workflows/ PR retries forever).
+      post_marked_comment "$ATTEMPT_MARKER" "$(printf 'Auto-remediation produced a fix but the push to `%s` was rejected (for example the App lacks the `workflows` permission for changes under `.github/workflows/`). Nothing was published; this counts as an attempt. Left for a human; the worktree `%s` is kept for inspection.' "$BRANCH" "$WORKTREE")"
       exit 0
     fi
   else
