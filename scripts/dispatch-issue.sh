@@ -3075,9 +3075,9 @@ else
   # failure withholds every log line (role, model and exit signature still post).
   CRASH_HEAD=$(printf '**Agent crashed (harness failure, not an escalation)** - role `%s`, model `%s`. The run never emitted an `ESCALATE:` reason, so this is a retry candidate once the underlying cause is fixed, not a hard problem awaiting judgement. Filter with label `agent-crashed`.\n\n' "$ROLE" "${RUN_MODEL:-unknown}")
   if CRASH_SIGNATURE=$(crash_log_excerpt "$LOG"); then
-    CRASH_BODY=$(printf '%sLast log lines (the full log is `.agent.log` in the agent worktree `%s`):\n\n```\n%s\n```\n' "$CRASH_HEAD" "$WORKTREE" "$CRASH_SIGNATURE")
+    CRASH_BODY=$(printf '%sLast log lines (the full log is `%s`):\n\n```\n%s\n```\n' "$CRASH_HEAD" "$LOG" "$CRASH_SIGNATURE")
   else
-    CRASH_BODY=$(printf '%sLog lines withheld (the egress scan flagged them, could not run, or the log was empty); the full log is `.agent.log` in the agent worktree `%s` for a human to read.\n' "$CRASH_HEAD" "$WORKTREE")
+    CRASH_BODY=$(printf '%sLog lines withheld (the egress scan flagged them, could not run, or the log was empty); the full log is `%s` for a human to read.\n' "$CRASH_HEAD" "$LOG")
   fi
   gh issue comment "$ISSUE" --repo "$REPO" --body "$CRASH_BODY" 2>/dev/null || echo "WARNING: could not post crash signature comment on #$ISSUE" >&2
 fi
