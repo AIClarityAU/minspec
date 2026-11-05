@@ -496,23 +496,23 @@ try {
 // CLOSED_SET_FIELDS; a DR `status:` was only compared to INDEX.md (Rule 8), never to a
 // legal value set. Asserts `status` is present and legal, and rejects retired field
 // spellings (append-only alias table in scripts/lib/dr-closed-set.ts). Not a silent
-// catch (invariant 2): an unreadable register says so, and a zero-file scan is flagged.
-try {
-  const drs = safeGlob(resolveDecisionsDir(), '.md').map((file) => ({
-    file: relative(ROOT, file),
-    content: readFileSync(file, 'utf-8'),
-  }));
-  if (drs.length === 0) {
+// catch (invariant 2): a listing/read/check error FAILS the gate closed (per-file isolation); a zero-file scan is flagged.
+{
+  const drFiles = listCorpus('Rule 25', resolveDecisionsDir(), '.md', true);
+  const drs: { file: string; content: string }[] = [];
+  eachFile('Rule 25', drFiles, true, (file) => {
+    drs.push({ file: relative(ROOT, file), content: readFileSync(file, 'utf-8') });
+  });
+  if (drFiles.length === 0) {
     warn('Rule 25 scanned 0 DR files; do not read the green as a clean register.');
   }
-  for (const d of checkDrFrontmatterClosedSet(drs)) {
-    fail(join(ROOT, d.file), `DR frontmatter — ${d.message}`);
+  try {
+    for (const d of checkDrFrontmatterClosedSet(drs)) {
+      fail(join(ROOT, d.file), `DR frontmatter — ${d.message}`);
+    }
+  } catch (err) {
+    reportUnrunnable('Rule 25', 'the DR frontmatter closed-set check could not run', err, true, resolveDecisionsDir());
   }
-} catch (err) {
-  warn(
-    `DR frontmatter closed-set check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
-      'Rule 25 validated NOTHING this run; do not read the green as a clean register.',
-  );
 }
 
 // Rule 8 (FATAL): INDEX.md status must match each DR's frontmatter status
