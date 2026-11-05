@@ -321,6 +321,9 @@ describe('dispatch-issue.sh: native auto-merge deny-by-default (behavioral seam)
       // same reason again. Sourcing it spawns nothing; only an arm actually asking
       // `autonomy_may_merge` runs the TypeScript, and this seam asks nothing.
       fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/autonomy.sh'), path.join(root, 'scripts', 'lib', 'autonomy.sh'));
+      // lib/issue-lease.sh sources lib/dispatch-author-gate.sh (#3161 trust filter) — same
+      // reason once more.
+      fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/dispatch-author-gate.sh'), path.join(root, 'scripts', 'lib', 'dispatch-author-gate.sh'));
       fs.writeFileSync(path.join(root, '.minspec', 'config.json'), JSON.stringify({ version: 1 })); // no autoMerge
       expect(check({}, root)).toEqual({ code: 1, out: 'off' });
     } finally {
