@@ -25,6 +25,8 @@ export type LabelsResult =
 function unquote(raw: string): string | null {
   const s = raw.trim();
   if (s === '') return null;
+  // YAML tags (`!!str x`), anchors (`&a x`) and aliases (`*a`) change what GitHub reads; we don't, so fail closed.
+  if (/^[!&*]/.test(s)) return null;
   const q = s[0];
   if (q === '"' || q === "'") {
     if (s.length < 2 || s[s.length - 1] !== q) return null;
@@ -67,15 +69,18 @@ function parseFlow(body: string): LabelsResult {
   return { ok: true, labels };
 }
 
+/** Top-level `labels` key, bare or quoted (`"labels":` is valid YAML and GitHub honours it). */
+const KEY_RE = /^(?:labels|"labels"|'labels')\s*:/;
+
 /** Extract the top-level `labels:` list. A template without the key has no labels. */
 export function extractLabels(yaml: string): LabelsResult {
   const lines = yaml.replace(/\r\n?/g, '\n').split('\n');
-  const idx = lines.findIndex((l) => /^labels\s*:/.test(l));
-  if (lines.filter((l) => /^labels\s*:/.test(l)).length > 1) {
+  const idx = lines.findIndex((l) => KEY_RE.test(l));
+  if (lines.filter((l) => KEY_RE.test(l)).length > 1) {
     return { ok: false, reason: 'duplicate top-level labels: key' };
   }
   if (idx === -1) return { ok: true, labels: [] };
-  const rest = lines[idx].replace(/^labels\s*:/, '').replace(/(^|\s)#.*$/, '').trim();
+  const rest = lines[idx].replace(KEY_RE, '').replace(/(^|\s)#.*$/, '').trim();
   if (rest.startsWith('[')) return parseFlow(rest);
   if (rest !== '' && !rest.startsWith('#')) {
     // scalar (comma-separated string is valid for GitHub) - parse as list of names

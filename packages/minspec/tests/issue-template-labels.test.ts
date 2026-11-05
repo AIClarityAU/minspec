@@ -43,6 +43,23 @@ describe('checkTemplate', () => {
     expect(checkTemplate('a.yml', form('labels: [a, {b: c}]'))).toHaveLength(1);
     expect(extractLabels('labels: [a]\nlabels: [b]').ok).toBe(false);
   });
+  it('fails closed on YAML tags, anchors and aliases in block and flow items', () => {
+    for (const item of ['!!str agent-ready', '&a agent-ready', '*a']) {
+      expect(checkTemplate('a.yml', form(`labels:\n  - ${item}`)), `block ${item}`).toHaveLength(1);
+      expect(checkTemplate('a.yml', form(`labels: [${item}]`)), `flow ${item}`).toHaveLength(1);
+      expect(checkTemplate('a.yml', form(`labels: [inbox, ${item}]`)), `flow2 ${item}`).toHaveLength(1);
+    }
+  });
+  it('reads a quoted labels key (block and flow)', () => {
+    for (const k of ['"labels"', "'labels'"]) {
+      expect(checkTemplate('a.yml', form(`${k}: [agent-ready]`)), `flow ${k}`).toHaveLength(1);
+      expect(checkTemplate('a.yml', form(`${k}:\n  - agent-ready`)), `block ${k}`).toHaveLength(1);
+      expect(checkTemplate('a.yml', form(`${k}: [inbox]`)), `clean ${k}`).toEqual([]);
+    }
+  });
+  it('treats a bare and a quoted labels key together as duplicates', () => {
+    expect(extractLabels('labels: [a]\n"labels": [b]').ok).toBe(false);
+  });
   it('honours an injected list', () => {
     expect(checkTemplate('a.yml', form('labels: [x]'), ['x'])).toHaveLength(1);
   });
