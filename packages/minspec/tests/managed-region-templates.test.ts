@@ -73,7 +73,7 @@ describe('managed-region template registry (#249)', () => {
     // It actually runs the MinSpec validator (the post-push gate, DR-037).
     expect(yaml).toMatch(/push:/);
     expect(yaml).toMatch(/pull_request:/);
-    expect(yaml).toMatch(/@aiclarity\/minspec-validator/);
+    expect(yaml).toMatch(/minspec-core\.cjs validate/);
   });
 
   it('uses the minspec: marker convention with `#` comment syntax for YAML', () => {

@@ -18,8 +18,10 @@
  *
  *   - `minspec-validate.yml` — the dangerous half is FIXED: the template now carries
  *     `merge_group:` too, so a Refresh can no longer strip the trigger and stall a merge
- *     queue (#1394, the case in #1888's title). What remains is the surrounding COMMENT,
- *     and it differs deliberately: the live file says "see ci.yml" and cites a bare
+ *     queue (#1394, the case in #1888's title). What remains is the validator
+ *     branch (the template runs the in-repo core per SPEC-136 FR-15 and dropped the
+ *     unpublished-scope npx branch; the live file keeps the old npm/python/npx chain) and
+ *     the surrounding COMMENT, which differs deliberately: the live file says "see ci.yml" and cites a bare
  *     `#1394`, neither of which holds downstream — `ci.yml` exists only here and a bare
  *     `#N` resolves to the ADOPTER's issue N — so the template ships adopter-true prose
  *     per DR-090. Closing the remaining gap means editing the live workflow to match, and
@@ -70,7 +72,7 @@ const APPLIED_PATH_COUNT = 13;
  */
 const KNOWN_DRIFT: Readonly<Record<string, string>> = {
   '.github/workflows/minspec-validate.yml':
-    'COMMENT WORDING ONLY: both now carry merge_group: (#1394), so Refresh no longer strips the trigger. The live comment cites ci.yml and a bare #1394, which are false downstream, so the template ships adopter-true prose (DR-090). Closing it needs a workflow write, which no agent has (DR-079) - tracked as #2105',
+    'VALIDATOR BRANCH + COMMENT WORDING: both carry merge_group: (#1394), but the template now runs the in-repo core (`node .minspec/bin/minspec-core.cjs validate`, SPEC-136 FR-15) and dropped the unpublished-scope npx branch, which the live file still has; the live comment also cites ci.yml and a bare #1394, false downstream (DR-090). Closing it needs a workflow write, which no agent has (DR-079) - tracked as #2105',
   '.minspec/hooks/validate.py':
     'bidirectional: live targets docs/domain, template adds DR-frontmatter checks — reconciliation is the #1698 design question',
   '.minspec/hooks/pre-commit':
