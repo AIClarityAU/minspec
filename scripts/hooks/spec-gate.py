@@ -23,6 +23,8 @@ PreToolUse deny blocks the tool call before permission rules.
       not merely edits to code that already landed. (The primary signal — specs
       across the corpus declare it; see below for the phases gap that still keeps
       some declarations inert.)
+      #3234 (DR-047 §3 amendment, proposed): `affects:` gates only a STALE spec.
+      A NEVER-approved spec blocks its `implements:` files, not its `affects:`.
     - FUZZY: backtick code-span paths in the spec's own `tasks.md`. Matched ONLY IF
       the file already exists, because a bare backtick token can be prose /
       placeholder / example; the existence filter is what keeps those from widening
@@ -323,7 +325,7 @@ def _blocker_reason(sid, verdict):
     return "%s (not approved)" % sid
 
 
-def declared_impl_files(cwd, fm, spec_dir_abs):
+def declared_impl_files(cwd, fm, spec_dir_abs, keys=("implements", "affects")):
     """Source files a spec EXPLICITLY names as its implementation targets.
 
     This IS the spec's entire owned set (doc-before-CODE): the ONLY files an
@@ -379,11 +381,15 @@ def declared_impl_files(cwd, fm, spec_dir_abs):
         files.add(p)
 
     # STRUCTURED signal: block regardless of existence (creation-blocking).
-    for key in ("implements", "affects"):
+    # `keys` lets the caller read `affects:` on its own (#3234): a NEVER-approved
+    # spec owns only its `implements:` files; see owned_file_set.
+    for key in keys:
         for tok in fm_list(fm, key):
             consider(tok, require_exists=False)
 
     # FUZZY signal: backtick paths in tasks.md, existence-filtered.
+    if "implements" not in keys:
+        return files
     try:
         with open(os.path.join(spec_dir_abs, "tasks.md"), "r", encoding="utf-8") as fh:
             tasks_text = fh.read()
@@ -398,14 +404,28 @@ def owned_file_set(cwd, sp, fm):
     """The set of files a spec OWNS — the ONLY files its unapproved state blocks.
 
     DOC-BEFORE-*CODE*, NOT doc-before-doc (DR-047 §3). The owned set is EXACTLY the
-    implementation CODE the spec declares (structured `implements:`/`affects:` +
+    implementation CODE the spec declares (structured `implements:` +
     fuzzy existing tasks.md paths) — NEVER the spec's own doc dir. An unapproved-
     and-implementing spec's own requirements/plan/tasks/design docs stay EDITABLE so
     the spec can be fixed and approved (edit-unapproved-specs-directly); freezing
     them would deadlock approval. A spec that declares NO impl files owns NOTHING
     and therefore blocks nothing. Returns a set of exact POSIX rel paths.
+
+    #3234 (DR-047 §3 amendment, proposed): this set EXCLUDES `affects:`. A
+    NEVER-approved spec blocks only what it owns (`implements:` + fuzzy tasks.md
+    paths); `affects:` lists busy shared files the spec only modifies, and gating
+    them froze those files for every session from the moment Clarify was recorded.
+    `affects:` is read separately by affects_file_set and re-joins the block set
+    only for a STALE spec (approved, then edited), whose `affects:` list a human
+    already approved.
     """
-    return declared_impl_files(cwd, fm, os.path.dirname(sp))
+    return declared_impl_files(cwd, fm, os.path.dirname(sp), keys=("implements",))
+
+
+def affects_file_set(cwd, sp, fm):
+    """Structured `affects:` paths only (#3234). Blocked for a STALE spec, never
+    for a never-approved one — see owned_file_set."""
+    return declared_impl_files(cwd, fm, os.path.dirname(sp), keys=("affects",))
 
 
 _APPROVAL_STRENGTH = {"approved": 0, "stale": 1, "unapproved": 2}
@@ -569,11 +589,18 @@ def main():
         by_id.setdefault(sid, []).append({
             "spec_rel": spec_rel, "approval": approval, "rec": rec,
             "files": owned_file_set(cwd, sp, fm),
+            "affects": affects_file_set(cwd, sp, fm),
         })
 
     for sid, entries in by_id.items():
         gated += 1
         approval, rec, files = select_verdict(entries)
+        if approval == "stale":
+            # #3234: a stale spec's `affects:` list was approved once and work may
+            # be under way, so it stays blocked until re-approval. A NEVER-approved
+            # spec blocks only its `implements:` files (DR-047 §3 amendment).
+            for e in entries:
+                files |= e.get("affects", set())
 
         if approval in ("unapproved", "stale"):
             blocking.append((sid, approval, files))
