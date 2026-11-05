@@ -94,19 +94,24 @@ unless the sender notices and reroutes it.
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended. An
-agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
-on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
-chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
-(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
-context, not verified. No human chose any single item. D1 is left open (its recommendation
-is an act outside this repo); this section stays open, and the spec is not ready to approve,
-until the founder answers.
+All 3 decisions are answered, not ratified. D1 has a selection recorded from the answer to
+task-queue item c219 (2026-10-27: "Upstream (Recommended)"), an answer the queue attributes to the
+founder. A queue answer is not consent and is not verified here: DR-108 (delegated approval) section
+4 holds that a queue item cannot carry consent, because any session can write the queue. D2 and D3
+carry the (rec) option an agent session copied; no human chose them (each says so). Delegation
+DLG-001 (DR-108) made none of these selections and covers spec approval and engineering-DR
+acceptance only. An agent-recorded selection carries no consent, whoever prompted it. It is ratified
+only by approval of this spec, the founder's or the bot's under DLG-001, and that approval may
+overturn it.
 
 **D1 - Where does this land?** (gating; blocks Plan)
 
-**Not recorded:** the recommended option routes the fix to the owner of the host messaging
-layer, outside this repo, which is an outward-facing act. Needs the founder's answer.
+**Recorded selection: (a),** route the fix upstream to the owner of the host messaging
+layer, and keep this spec as the contract plus acceptance tests for it. Source: the answer
+to task-queue item c219, 2026-10-27 ("Upstream (Recommended)"). A queue answer is not
+consent (DR-108 section 4), so this selection is unverified and binds only if this spec is approved with it in place, by the
+founder or by the bot under DLG-001. The upstream report itself is a separate
+outward-facing act; this record makes none.
 
 - (a) **(rec)** File/route upstream to the owner of the host messaging layer, and keep this
   spec as the contract plus acceptance tests for it. Cost: MinSpec cannot ship the fix

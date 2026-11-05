@@ -25,6 +25,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1385 — this suite runs the real drain loop in bash; process startup scales with machine
+// load, so the 5s default flakes (ENOENT/timeouts under a loaded box). Declared once at
+// module scope so the intent is visible, not tuned per case.
+useShellTimeout();
 
 // Module scope: nothing in this file may depend on drain or quota knobs in the surrounding
 // environment, so it runs with hostile ones planted there (#2574, helpers/drain-env.ts).
