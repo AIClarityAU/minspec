@@ -388,17 +388,21 @@ describe('lease renew ticker: a failed renewal is reported, never swallowed (con
     expect(writes(), 'the refused write never reached GitHub').toEqual([]);
   });
 
-  // The two no-false-alarm cases assert "no FAILED report", not "empty stderr": at
-  // teardown the ticker's own shell prints bash's `Terminated` for the child that
-  // lease_stop_renew_ticker kills. That line predates this change (68 of them in the
-  // drain log on 2026-10-01, one per dispatch) and is not a renewal report.
+  // The two no-false-alarm cases assert the stronger "empty stderr", not just "no FAILED
+  // report": `lease_start_renew_ticker` routes its own `exec 3>&2 2>/dev/null` over fd 2,
+  // so bash's own job-status notice for the child `lease_stop_renew_ticker` kills — a
+  // bare `Terminated` that used to land here on every teardown (68 of them in the drain
+  // log on 2026-10-01, one per dispatch) — no longer reaches this captured copy. Only the
+  // three writers routed to fd 3 explicitly (sleep's own errors, lease_renew's stderr, the
+  // FAILED report) can appear here now, so an empty file is the correct assertion, not
+  // just the absence of FAILED.
   it('a successful renewal reports nothing', () => {
     const { err } = tick(
       'lease_renew() { echo tick >> "$SCRATCH"; }',
       'n=$(wc -l < "$SCRATCH" 2>/dev/null); (( ${n:-0} >= 3 ))',
     );
     expect(fs.readFileSync(path.join(dir, 'scratch'), 'utf-8').split('\n').length).toBeGreaterThan(3);
-    expect(err).not.toMatch(/FAILED/);
+    expect(err).toBe('');
   });
 
   it('a renewal reaped by SIGTERM, as lease_stop_renew_ticker reaps one in flight, is not reported', () => {
@@ -421,6 +425,6 @@ describe('lease renew ticker: a failed renewal is reported, never swallowed (con
     );
     expect(fs.existsSync(path.join(dir, 'scratch')), 'precondition: a renewal was in flight').toBe(true);
     expect(r.stdout).toContain('ticker=survived-the-reap');
-    expect(err).not.toMatch(/FAILED/);
+    expect(err).toBe('');
   });
 });
