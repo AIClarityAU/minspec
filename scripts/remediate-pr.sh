@@ -969,20 +969,16 @@ if [[ "$ACTION" == agent-* || "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "
   # Budget counters must never count a comment whose author is unprovable (#3592): the old
   # any-author fallback charged humans' and bots' comments, so the cap tripped early and
   # green PRs got needs-human-review. Counting nothing would un-bound the loop. So:
-  #   - login resolved           → it, widened by MINSPEC_REMEDIATE_AUTHOR_LOGINS;
-  #   - unresolved (an App installation token cannot call `gh api user`, #3037) → ONLY the
-  #     operator-declared MINSPEC_REMEDIATE_AUTHOR_LOGINS, if it names a login (explicit
-  #     configuration, not a guess);
-  #   - neither                  → spend NO agent and add NO label this sweep: say so out
-  #     loud and retry next sweep (fail closed, visibly — nothing merges, nothing loops).
+  #   - login resolved → it, widened by MINSPEC_REMEDIATE_AUTHOR_LOGINS;
+  #   - unresolved (an App installation token cannot call `gh api user`, #3037) → spend NO
+  #     agent and add NO label this sweep: say so out loud and retry next sweep (fail
+  #     closed, visibly — nothing merges, nothing loops). The env var is NOT consulted
+  #     here: it can never stand in for an unresolved identity (see above).
   SELF_LOGIN=$(resolve_self_login)  # empty on any failure
   if authors_provable "$SELF_LOGIN"; then
     AUTHOR_ALLOW="${SELF_LOGIN}${MINSPEC_REMEDIATE_AUTHOR_LOGINS:+,${MINSPEC_REMEDIATE_AUTHOR_LOGINS}}"
-  elif authors_provable "${MINSPEC_REMEDIATE_AUTHOR_LOGINS:-}"; then
-    AUTHOR_ALLOW="${MINSPEC_REMEDIATE_AUTHOR_LOGINS}"
-    echo "  NOTE: could not resolve this token's login (\`gh api user\` failed) — counting marker comments from the operator-declared MINSPEC_REMEDIATE_AUTHOR_LOGINS only." >&2
   else
-    echo "  NOTE: could not resolve this token's login (\`gh api user\` failed) and MINSPEC_REMEDIATE_AUTHOR_LOGINS names no login — remediation budgets cannot be counted, so no agent runs and no label is added this sweep; retrying next sweep." >&2
+    echo "  NOTE: could not resolve this token's login (\`gh api user\` failed) — remediation budgets cannot be counted, so no agent runs and no label is added this sweep; retrying next sweep." >&2
     exit 0
   fi
   # One API read, three local counts. A comment is charged to a budget only when the

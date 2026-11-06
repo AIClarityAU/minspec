@@ -25,7 +25,7 @@
  * `--check-markers`, `--sanitize-body`, `--cap-notice-decision`) — no gh/git/claude —
  * mirroring the `--classify` convention of remediate-pr-classify.test.ts. Behaviour is
  * asserted by EXECUTING those seams; the only assertions against the source text are the
- * two structural ones at the foot of the file, which state properties (single emitter,
+ * structural ones (the unresolved-login skip, and two at the foot of the file), which state properties (single emitter,
  * no second call site) that have no runtime observable without a live `gh`.
  */
 import { describe, it, expect } from 'vitest';
@@ -209,6 +209,8 @@ describe('remediate-pr.sh --count-markers: only this automation authors a budget
     const block = SRC.slice(i, j);
     expect(block).toMatch(/else\n[^\n]*could not resolve this token's login[\s\S]*exit 0/);
     expect(block).not.toContain('AUTHOR_ALLOW=""');
+    // The env var may only WIDEN a resolved login, never replace an unresolved one.
+    expect(block).not.toMatch(/elif[^\n]*MINSPEC_REMEDIATE_AUTHOR_LOGINS/);
   });
 });
 
