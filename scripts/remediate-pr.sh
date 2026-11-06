@@ -411,11 +411,13 @@ rerun_decision() {
 #   3. AUTHORSHIP — the counter only accepts comments written by this automation's own
 #      login, so a human's or the reviewer bot's comment can never be charged.
 # Each layer alone is bypassable; together, cross-counting is unreachable. If layer 3
-# cannot be applied (no resolvable login) the counter reports 0 (#3592): it used to fall
-# back to ANY author, which charged a human's or the reviewer's comments to the budget and
-# tripped the cap early, labelling green PRs needs-human-review. Counting nothing would
-# un-bound the loop, so the caller (below) refuses to spend an agent at all while the login
-# is unresolved — a visible skip, retried next sweep. The cap-notice dedup (a phantom
+# cannot be applied (no allowlist) the counter reports 0 (#3592): it used to fall back to
+# ANY author, which charged a human's or the reviewer's comments to the budget and tripped
+# the cap early, labelling green PRs needs-human-review. Counting nothing would un-bound the
+# loop, so the caller (below) always supplies an allowlist: the token's own login, or — on an
+# App installation token, which cannot read `gh api user` — the App's bot login
+# (resolve_author_identity). When neither can be established it spends no agent and hands
+# the PR to a human with a label. The cap-notice dedup (a phantom
 # CAPPED_MARKER would suppress the "needs a human" notice — a silent gate) lives in
 # cap_notice_decision() below, which refuses to dedup unless authorship is provable.
 ATTEMPT_MARKER="<!-- minspec-auto-remediation -->"
@@ -529,6 +531,41 @@ resolve_self_login() {
   return 0
 }
 
+# Which account posts this automation's comments? Prints a login, or nothing (#3592).
+#   1. `gh api user` exits 0 with a login-shaped value → that login (a user token).
+#   2. It fails with GitHub's installation-token rejection ("Resource not accessible by
+#      integration", a 403) → this is an App installation token, which never has a user,
+#      and the drain's writes are made through scripts/lib/gh-bot.sh, which mints them
+#      from the MinSpec App (`gh-app-token.sh`). That App comments as `<slug>[bot]`, so the
+#      allowlist is that login: `minspec-sdd[bot]`, the slug the other drain scripts name
+#      (scripts/lib/delegated-approval.ts REVIEWER_APP_SLUG, review-churn-report.sh
+#      REVIEWER_SLUG). MINSPEC_REMEDIATE_APP_SLUG overrides it for a different App.
+#   3. Anything else (a 401, a network or 5xx failure, an unshaped answer) → nothing: the
+#      caller then cannot count a budget and hands the PR to a human.
+# Only the POSITIVE installation rejection is read as "this is the App". A failure that
+# merely says nothing is not evidence of who we are (the same rule gh-bot.sh applies
+# before it lets an inherited token write). resolve_self_login above is unchanged: it
+# answers only "does this token have a user login".
+resolve_author_identity() {
+  local out err rc errf app
+  errf=$(mktemp)
+  out=$(gh api user --jq '.login' 2>"$errf") && rc=0 || rc=$?
+  err=$(cat "$errf" 2>/dev/null); rm -f "$errf"
+  if (( rc == 0 )); then
+    out="${out%%$'\n'*}"
+    login_shaped "$out" && printf '%s\n' "$out"
+    return 0
+  fi
+  # A here-string, not a pipe: `grep -q` exits on the first match, and under pipefail the
+  # writer's SIGPIPE would turn a positive match into a failure.
+  if grep -qi 'not accessible by integration' <<<"${out}"$'\n'"${err}"; then
+    app="${MINSPEC_REMEDIATE_APP_SLUG:-minspec-sdd}"
+    app="${app%"[bot]"}"
+    login_shaped "$app" && printf '%s[bot]\n' "$app"
+  fi
+  return 0
+}
+
 # Should the one-shot "capped — needs a human" notice be posted this sweep?
 #   $1 — the author allowlist CSV (as passed to count_markers_json)
 #   $2 — the `gh pr view --json comments` JSON
@@ -619,6 +656,10 @@ if [[ "${1:-}" == "--count-markers" ]]; then
 fi
 if [[ "${1:-}" == "--resolve-self-login" ]]; then
   resolve_self_login
+  exit 0
+fi
+if [[ "${1:-}" == "--resolve-author-identity" ]]; then
+  resolve_author_identity
   exit 0
 fi
 if [[ "${1:-}" == "--check-markers" ]]; then
@@ -968,17 +1009,28 @@ if [[ "$ACTION" == agent-* || "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "
   #
   # Budget counters must never count a comment whose author is unprovable (#3592): the old
   # any-author fallback charged humans' and bots' comments, so the cap tripped early and
-  # green PRs got needs-human-review. Counting nothing would un-bound the loop. So:
-  #   - login resolved → it, widened by MINSPEC_REMEDIATE_AUTHOR_LOGINS;
-  #   - unresolved (an App installation token cannot call `gh api user`, #3037) → spend NO
-  #     agent and add NO label this sweep: say so out loud and retry next sweep (fail
-  #     closed, visibly — nothing merges, nothing loops). The env var is NOT consulted
-  #     here: it can never stand in for an unresolved identity (see above).
-  SELF_LOGIN=$(resolve_self_login)  # empty on any failure
+  # green PRs got needs-human-review. Counting nothing would un-bound the loop. So the
+  # allowlist is always an identity we can establish (resolve_author_identity):
+  #   - a user token → its login;
+  #   - an App installation token (the drain's normal case: `gh api user` answers 403,
+  #     #3037) → the App's bot login, `minspec-sdd[bot]`;
+  # either one widened by MINSPEC_REMEDIATE_AUTHOR_LOGINS. The env var only widens an
+  # established identity, never stands in for a missing one (see above).
+  #   - neither (a 401, a network failure) → no budget can be counted, so no agent runs,
+  #     and the PR is labelled needs-human-review so it reaches a human rather than sitting
+  #     unremediated with only a stderr line (constitution invariant 2, no silent gate).
+  SELF_LOGIN=$(resolve_author_identity)  # empty when no identity can be established
   if authors_provable "$SELF_LOGIN"; then
     AUTHOR_ALLOW="${SELF_LOGIN}${MINSPEC_REMEDIATE_AUTHOR_LOGINS:+,${MINSPEC_REMEDIATE_AUTHOR_LOGINS}}"
   else
-    echo "  NOTE: could not resolve this token's login (\`gh api user\` failed) — remediation budgets cannot be counted, so no agent runs and no label is added this sweep; retrying next sweep." >&2
+    echo "  NOTE: could not establish which account posts this automation's comments (\`gh api user\` failed, and not with an App installation token's 403) — remediation budgets cannot be counted, so no agent runs; leaving for a human." >&2
+    if [[ "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "yes" ]]; then
+      dlg_to_human "could not establish this automation's identity, so its rerun and update budgets cannot be counted"
+    else
+      gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
+        --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
+      gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+    fi
     exit 0
   fi
   # One API read, three local counts. A comment is charged to a budget only when the

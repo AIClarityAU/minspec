@@ -25,7 +25,7 @@
  * `--check-markers`, `--sanitize-body`, `--cap-notice-decision`) — no gh/git/claude —
  * mirroring the `--classify` convention of remediate-pr-classify.test.ts. Behaviour is
  * asserted by EXECUTING those seams; the only assertions against the source text are the
- * structural ones (the unresolved-login skip, and two at the foot of the file), which state properties (single emitter,
+ * two structural ones at the foot of the file, which state properties (single emitter,
  * no second call site) that have no runtime observable without a live `gh`.
  */
 import { describe, it, expect } from 'vitest';
@@ -203,15 +203,6 @@ describe('remediate-pr.sh --count-markers: only this automation authors a budget
     expect(countMarkers(ATTEMPT, human, '')).toBe('0');
   });
 
-  it('an unresolved own login skips the sweep: no agent, no label (#3592)', () => {
-    const i = SRC.indexOf('SELF_LOGIN=$(resolve_self_login)');
-    const j = SRC.indexOf('COMMENTS_READ=ok', i);
-    const block = SRC.slice(i, j);
-    expect(block).toMatch(/else\n[^\n]*could not resolve this token's login[\s\S]*exit 0/);
-    expect(block).not.toContain('AUTHOR_ALLOW=""');
-    // The env var may only WIDEN a resolved login, never replace an unresolved one.
-    expect(block).not.toMatch(/elif[^\n]*MINSPEC_REMEDIATE_AUTHOR_LOGINS/);
-  });
 });
 
 describe('remediate-pr.sh --count-markers: fail-soft (a broken read must not un-bound the loop)', () => {
@@ -469,13 +460,55 @@ describe('remediate-pr.sh: a failed `gh api user` never becomes the author allow
   });
 
   it('the 403 body used as an allowlist is not provable and counts nothing', () => {
-    // End to end: resolver yields '' -> nothing counted (the script skips the sweep).
+    // resolve_self_login yields '' for the 403; the sweep itself uses
+    // resolve_author_identity (below), which maps that 403 to the App's bot login.
     const login = resolveWith(`echo '${BODY}'; exit 1`);
     expect(countMarkers(ATTEMPT, marked, login)).toBe('0');
     // Even if the blob reaches the seam directly, it must not dedup the cap notice.
     const ours: Comment[] = [{ author: { login: 'minspec-sdd' }, body: `n\n${CAPPED}` }];
     const r = run(['--cap-notice-decision', BODY], JSON.stringify({ comments: ours }));
     expect(r.stdout.trim()).toBe('post'); // unprovable authorship never dedups
+  });
+
+  // #3592: the identity the sweep counts under. An App installation token always gets the
+  // 403, so this is the production path, not an edge case.
+  function identityWith(ghScript: string, env: Record<string, string> = {}): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ghstub-'));
+    fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env bash\n${ghScript}\n`, { mode: 0o755 });
+    const r = spawnSync('bash', [SCRIPT, '--resolve-author-identity'], {
+      encoding: 'utf-8',
+      env: { ...process.env, MINSPEC_REMEDIATE_APP_SLUG: '', ...env, PATH: `${dir}:${process.env.PATH}` },
+    });
+    return r.stdout.trim();
+  }
+  const APP_403 = `echo '${BODY}'; echo 'gh: Resource not accessible by integration (HTTP 403)' >&2; exit 1`;
+
+  it('an App installation token (the 403) resolves to the App bot login, and its markers count (#3592)', () => {
+    const who = identityWith(APP_403);
+    expect(who).toBe('minspec-sdd[bot]');
+    expect(countMarkers(ATTEMPT, marked, who)).toBe('2');
+    const foreign: Comment[] = [{ author: { login: 'some-human' }, body: `x\n${ATTEMPT}` }];
+    expect(countMarkers(ATTEMPT, foreign, who)).toBe('0');
+  });
+
+  it('the 403 recognised from stderr alone still resolves to the App', () => {
+    expect(identityWith(`echo 'gh: Resource not accessible by integration (HTTP 403)' >&2; exit 1`)).toBe('minspec-sdd[bot]');
+  });
+
+  it('MINSPEC_REMEDIATE_APP_SLUG names a different App, with or without [bot]', () => {
+    expect(identityWith(APP_403, { MINSPEC_REMEDIATE_APP_SLUG: 'other-app' })).toBe('other-app[bot]');
+    expect(identityWith(APP_403, { MINSPEC_REMEDIATE_APP_SLUG: 'other-app[bot]' })).toBe('other-app[bot]');
+    expect(identityWith(APP_403, { MINSPEC_REMEDIATE_APP_SLUG: 'not a login' })).toBe('');
+  });
+
+  it('a failure that is NOT the installation 403 establishes no identity', () => {
+    expect(identityWith(`echo 'HTTP 401: Bad credentials' >&2; exit 1`)).toBe('');
+    expect(identityWith(`echo 'dial tcp: i/o timeout' >&2; exit 1`)).toBe('');
+    expect(identityWith(`echo '${BODY}'; exit 0`)).toBe(''); // exit 0 with an unshaped answer
+  });
+
+  it('a user token still resolves to its own login', () => {
+    expect(identityWith(`echo 'fixture-operator'`)).toBe('fixture-operator');
   });
 
   it('`[bot]` is normalised on both sides', () => {
