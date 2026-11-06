@@ -462,6 +462,80 @@ describe('drain-inbox.sh — pause marker + signal cleanup (#1187)', () => {
     expect(await waitFor(() => !alive(pid))).toBe(true);
     expect(fs.existsSync(s.lock), 'lock removed').toBe(false);
     expect(logOf(s)).toMatch(/stopping on SIGTERM/);
+    expect(logOf(s)).not.toMatch(/not releasing/); // graceful stop releases once, no phantom holder
+  }, 40000);
+
+  // #2241: the exit trap / SIGTERM handler removed the lock unconditionally, so a loop that
+  // had lost its lock deleted the file a different live loop held; the next --auto start
+  // then saw no lock and ran a second concurrent loop.
+  it('SIGTERM when the lock names another live process: that lock is left alone (#2241)', async () => {
+    const s = sandbox();
+    fs.writeFileSync(s.pause, '');
+    const pid = start(s);
+    expect(await waitFor(() => /PAUSED/.test(logOf(s)))).toBe(true);
+    fs.writeFileSync(s.lock, String(process.pid)); // a different, live holder
+    process.kill(pid, 'SIGTERM');
+    expect(await waitFor(() => !alive(pid))).toBe(true);
+    expect(fs.readFileSync(s.lock, 'utf-8').trim(), 'foreign lock survives').toBe(String(process.pid));
+  }, 40000);
+
+  it('a loop whose lock was taken over stops at its next cycle check and leaves the holder\'s lock (#2241)', async () => {
+    const s = sandbox();
+    fs.writeFileSync(s.pause, '');
+    const pid = start(s);
+    expect(await waitFor(() => /PAUSED/.test(logOf(s)))).toBe(true);
+    fs.writeFileSync(s.lock, String(process.pid));
+    expect(await waitFor(() => !alive(pid))).toBe(true);
+    expect(logOf(s)).toMatch(/no longer names this loop/);
+    expect(fs.readFileSync(s.lock, 'utf-8').trim()).toBe(String(process.pid));
+  }, 40000);
+
+  it('a second start while the lock names a live process does not launch a loop (#2241)', () => {
+    const s = sandbox();
+    fs.writeFileSync(s.lock, String(process.pid));
+    const r = spawnSync('bash', [DRAIN, '--continuous'], { env: s.env, encoding: 'utf-8' });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toMatch(/already running/);
+    expect(fs.readFileSync(s.lock, 'utf-8').trim()).toBe(String(process.pid));
+  });
+
+  // T3 (#3064): the host slept for 8 h 17 m inside one 1200 s inter-cycle wait. `sleep`
+  // counts monotonic time, so the wait froze with the host and the log said nothing for
+  // 8.6 hours; it read as a stall. A `sleep` that takes 5 s whatever it is asked for
+  // stands in for the suspend: each 1 s chunk then overruns the wall clock by 4 s, past
+  // a slack of 2. The paused path idles in wait_interval without touching a cycle.
+  function slowSleepSandbox(slowSecs: number | null) {
+    const s = sandbox();
+    if (slowSecs !== null) {
+      const realSleep = execFileSync('sh', ['-c', 'command -v sleep'], { encoding: 'utf-8' }).trim();
+      fs.writeFileSync(path.join(s.dir, 'bin', 'sleep'), `#!/bin/sh\nexec ${realSleep} ${slowSecs}\n`, { mode: 0o755 });
+    }
+    s.env = { ...s.env, MINSPEC_DRAIN_WALL_JUMP_SLACK: '2' };
+    fs.writeFileSync(s.pause, '');
+    return s;
+  }
+
+  it('T3 (#3064): a wait chunk the wall clock overran (host suspend) is logged, with the jump and a UTC time', async () => {
+    const s = slowSleepSandbox(5);
+    const pid = start(s);
+    try {
+      expect(await waitFor(() => /wall clock moved/.test(logOf(s)), 20000), logOf(s)).toBe(true);
+      expect(logOf(s)).toMatch(/\[drain\] wall clock moved [0-9]+s during a 1s wait at \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ/);
+    } finally {
+      try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+    }
+  }, 40000);
+
+  it('CONTROL (#3064): an ordinary wait at the same slack logs no jump', async () => {
+    const s = slowSleepSandbox(null);
+    const pid = start(s);
+    try {
+      expect(await waitFor(() => /PAUSED/.test(logOf(s)))).toBe(true);
+      await sleepMs(4000); // several 1 s chunks
+      expect(logOf(s)).not.toMatch(/wall clock moved/);
+    } finally {
+      try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+    }
   }, 40000);
 
   it('source: pause is checked between cycles (top of the loop), never inside run_cycle', () => {

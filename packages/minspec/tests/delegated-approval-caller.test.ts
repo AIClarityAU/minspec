@@ -28,6 +28,7 @@ import {
   branchFor,
   errorDetail,
   linkDependencies,
+  resolveDependencyRoot,
   isApprovableCandidatePath,
   parseCallerArgs,
   parsePorcelainZ,
@@ -109,6 +110,7 @@ beforeEach(() => {
   commit({ [DR_ENG]: dr('DR-900', 'proposed', 'engineering') }, 'docs: DR-900 engineering record (#42)');
   sh(root, 'push', '-q', 'origin', 'main');
   sh(root, 'fetch', '-q', 'origin');
+  fs.mkdirSync(path.join(root, 'node_modules')); // installed deps (#3057 refuses without)
 });
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -168,6 +170,7 @@ function deps(rec: Recorder, over: Partial<CallerDeps> = {}): CallerDeps {
     },
     repeatFixShare: () => 0.0807,
     contentPullRequest: REAL_DEPS.contentPullRequest,
+    notApprovable: () => undefined,
     today: () => '2026-10-21',
     ...over,
   };
@@ -586,5 +589,106 @@ describe('#3020: hook-gated commit needs deps in the recording worktree', () => 
     expect(linkDependencies(primary, wt)).toBe(true);
     expect(fs.realpathSync(path.join(wt, 'node_modules'))).toBe(fs.realpathSync(path.join(primary, 'node_modules')));
     expect(linkDependencies(primary, wt)).toBe(false); // already present
+  });
+});
+
+describe('open Clarify questions (#3059)', () => {
+  it('skips a spec with an unanswered decision, by name, and never runs the CLI', () => {
+    commit(
+      {
+        'specs/minspec/SPEC-901-open/requirements.md': spec(
+          'SPEC-901',
+          'specifying',
+          '\n\n## Decisions needed (Clarify)\n\n**D1. Pick one.**\n- (a) x\n',
+        ),
+      },
+      'feat: SPEC-901 (#43)',
+    );
+    sh(root, 'push', '-q', 'origin', 'main');
+    sh(root, 'fetch', '-q', 'origin');
+    const rec = newRec();
+    const report = runCaller(opts({ write: false }), deps(rec));
+    const r = report.results.find((x) => x.artifact.includes('SPEC-901'));
+    expect(r?.outcome).toBe('skipped');
+    expect(r?.reason).toBe('clarify-open');
+    expect(r?.detail).toContain('D1');
+    expect(rec.approve.map((a) => a.artifact)).not.toContain('specs/minspec/SPEC-901-open/requirements.md');
+  });
+});
+
+describe('a spec the CLI would refuse is never selected (spec-not-approvable)', () => {
+  // Measured 2026-10-26: 304 cli-denied:spec-not-approvable denials across 7 specs, every
+  // pass. The selector never asked the CLI's own approvability check, so each refused spec
+  // stayed a candidate, took a --max slot (oldest content PR first), and was denied again.
+  it('skips it by name, never runs the CLI on it, and it takes no --max slot', () => {
+    const rec = newRec();
+    const report = runCaller(
+      opts({ max: 1 }),
+      deps(rec, { notApprovable: (_root, rel) => (rel === SPEC ? 'T3 spec past Clarify does not declare its owned code (implements:)' : undefined) }),
+    );
+    const r = report.results.find((x) => x.artifact === SPEC);
+    expect(r?.outcome).toBe('skipped');
+    expect(r?.reason).toBe('spec-not-approvable');
+    expect(r?.detail).toContain('implements:');
+    expect(rec.approve.map((a) => a.artifact)).toEqual([DR_ENG]);
+    expect(report.results.find((x) => x.artifact === DR_ENG)?.outcome).toBe('opened');
+  });
+
+  it('an approvability check that throws skips the spec visibly, never admits it', () => {
+    const rec = newRec();
+    const report = runCaller(
+      opts({ write: false }),
+      deps(rec, {
+        notApprovable: () => {
+          throw new Error('config unreadable');
+        },
+      }),
+    );
+    const r = report.results.find((x) => x.artifact === SPEC);
+    expect(r?.outcome).toBe('skipped');
+    expect(r?.reason).toBe('approvability-unknown');
+    expect(r?.detail).toContain('config unreadable');
+    expect(rec.approve.map((a) => a.artifact)).not.toContain(SPEC);
+  });
+
+  it('the real check judges the BASE bytes, not the working tree', () => {
+    // The fixture spec on the base is incomplete for T3; the working-tree copy is gone.
+    fs.rmSync(path.join(root, SPEC));
+    const content = sh(root, 'show', `origin/main:${SPEC}`);
+    const why = REAL_DEPS.notApprovable(root, SPEC, content);
+    expect(why).toContain('not complete');
+  });
+});
+
+describe('#3057: dependencies resolved from the primary worktree', () => {
+  it('uses repoRoot when it has node_modules, else the primary, else null', () => {
+    expect(resolveDependencyRoot(root, REAL_DEPS.git)).toBe(root);
+    const session = path.join(tmp, 'session');
+    sh(root, 'worktree', 'add', '-q', '-b', 'sess', session);
+    expect(fs.realpathSync(resolveDependencyRoot(session, REAL_DEPS.git)!)).toBe(fs.realpathSync(root));
+    fs.rmSync(path.join(root, 'node_modules'), { recursive: true });
+    expect(resolveDependencyRoot(session, REAL_DEPS.git)).toBeNull();
+  });
+
+  it('writes from a deps-less session worktree and links the primary deps', () => {
+    const session = path.join(tmp, 'session');
+    sh(root, 'worktree', 'add', '-q', '-b', 'sess', session);
+    const rec = newRec();
+    const report = runCaller(opts({ repoRoot: session }), deps(rec));
+    expect(report.results.filter((r) => r.outcome === 'opened').length).toBe(2);
+  });
+
+  it('refuses before creating any branch or worktree when no deps exist anywhere', () => {
+    fs.rmSync(path.join(root, 'node_modules'), { recursive: true });
+    const rec = newRec();
+    const report = runCaller(opts(), deps(rec));
+    expect(report.results.length).toBeGreaterThan(0);
+    for (const r of report.results) {
+      expect(r.outcome).toBe('error');
+      expect(r.reason).toBe('dependencies-missing');
+    }
+    expect(rec.approve).toEqual([]);
+    expect(sh(root, 'branch', '--list', 'dlg-approve/*').trim()).toBe('');
+    noWrites(rec);
   });
 });

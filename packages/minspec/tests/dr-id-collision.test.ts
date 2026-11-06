@@ -104,6 +104,23 @@ const WORKFLOW = path.join(REPO_ROOT, '.github', 'workflows', 'dr-id-collision.y
 
 const DIR = 'docs/decisions';
 
+/**
+ * The CLI lists the base's spec directories on every run (#1327), and these stubs exit 1 on
+ * any call they do not anticipate. Adds a clean spec world to a stub that dispatches on its
+ * argv; a stub with no dispatch has nothing to add to and fails before reaching the listing.
+ * A stub that serves its own spec listing keeps it: in a `case`, the first match wins.
+ */
+function withSpecListings(script: string): string {
+  if (script.includes('contents/specs?ref=main')) return script;
+  return script.replace(
+    'case "$argv" in\n',
+    `case "$argv" in
+  *"contents/specs?ref=main"*) echo '[[{"type":"dir","path":"specs/minspec"}]]' ;;
+  *"contents/specs/minspec?ref=main"*) echo '[[{"type":"dir","path":"specs/minspec/SPEC-231-a"},{"type":"dir","path":"specs/minspec/SPEC-232-b"}]]' ;;
+`,
+  );
+}
+
 /** A minimal, well-formed decision file. */
 function dr(id: string, body = 'A decision.'): string {
   return `---\nid: ${id}\nstatus: proposed\ndate: 2026-08-05\ntitle: ${id}\n---\n\n# ${id}\n\n${body}\n`;
@@ -551,13 +568,13 @@ describe('B — check-dr-id-collision.ts fails closed when its witness is missin
       bin = stub.bin;
     } else {
       bin = path.join(tmp, 'gh');
-      fs.writeFileSync(bin, stub.script, { mode: 0o755 });
+      fs.writeFileSync(bin, withSpecListings(stub.script), { mode: 0o755 });
     }
     try {
       const out = execFileSync('npx', ['tsx', CLI, ...args], {
         cwd: REPO_ROOT,
         encoding: 'utf-8',
-        env: { ...process.env, DR_ID_GH_BIN: bin, GITHUB_ACTIONS: '' },
+        env: { ...process.env, DR_ID_GH_BIN: bin, GITHUB_ACTIONS: '', DR_ID_RATE_LIMIT_MAX_WAIT_MS: '0' },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       return { status: 0, stdout: out, stderr: '' };
@@ -594,18 +611,16 @@ describe('B — check-dr-id-collision.ts fails closed when its witness is missin
   it('reports the collision and the next free id end-to-end against a stub gh', () => {
     // main holds DR-077 + DR-078; the subject PR adds DR-077; PR #1240 adds DR-081.
     // The `api --paginate --slurp` responses use the PAGED shape real gh emits
-    // (an array of per-page arrays); `pr list --json` is flat, as real gh emits.
+    // (an array of per-page arrays); the other open PRs arrive in ONE batched GraphQL response (#3077).
     const script = `#!/bin/sh
 argv="$*"
 case "$argv" in
   *"pulls/1209/files"*)
     echo '[[{"filename":"docs/decisions/DR-077.md","status":"added"},{"filename":"docs/decisions/INDEX.md","status":"modified"}]]' ;;
-  *"pulls/1240/files"*)
-    echo '[[{"filename":"docs/decisions/DR-081.md","status":"added"}]]' ;;
   *"contents/docs/decisions"*)
     echo '[[{"path":"docs/decisions/DR-077.md","type":"file"},{"path":"docs/decisions/DR-078.md","type":"file"},{"path":"docs/decisions/INDEX.md","type":"file"}]]' ;;
-  *"pr list"*)
-    echo '[{"number":1209},{"number":1240}]' ;;
+  *"graphql"*)
+    echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1209,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}},{"number":1240,"files":{"pageInfo":{"hasNextPage":false},"nodes":[{"path":"docs/decisions/DR-081.md","changeType":"ADDED"}]}}]}}}}' ;;
   *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
 esac
 `;
@@ -623,7 +638,63 @@ argv="$*"
 case "$argv" in
   *"pulls/1209/files"*) echo '[[{"filename":"scripts/foo.ts","status":"added"}]]' ;;
   *"contents/docs/decisions"*) echo '[[{"path":"docs/decisions/DR-077.md","type":"file"}]]' ;;
-  *"pr list"*) echo '[{"number":1209}]' ;;
+  *"graphql"*) echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1209,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}' ;;
+  *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
+esac
+`;
+    expect(runCli(ARGS, { script }).status).toBe(0);
+  });
+
+  const GQL_ONE = '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1209,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}';
+
+  /** A stub whose `pulls/1209/files` call is rate limited `failures` times, then succeeds. */
+  function rateLimitedScript(failures: number): string {
+    return `#!/bin/sh
+argv="$*"
+counter="$(dirname "$0")/count"
+case "$argv" in
+  *"rate_limit"*) echo 0 ;;
+  *"pulls/1209/files"*)
+    n=$(cat "$counter" 2>/dev/null || echo 0)
+    n=$((n + 1))
+    echo "$n" > "$counter"
+    if [ "$n" -le ${failures} ]; then echo "gh: API rate limit exceeded for installation. (HTTP 403)" >&2 ; exit 1 ; fi
+    echo '[[{"filename":"scripts/foo.ts","status":"added"}]]' ;;
+  *"contents/docs/decisions"*) echo '[[{"path":"docs/decisions/DR-077.md","type":"file"}]]' ;;
+  *"graphql"*) echo '${GQL_ONE}' ;;
+  *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
+esac
+`;
+  }
+
+  it('waits out one rate-limit 403 and retries, then passes (#3077)', () => {
+    const r = runCli(ARGS, { script: rateLimitedScript(1) });
+    expect(r.status).toBe(0);
+  });
+
+  it('fails closed naming the rate limit when it keeps failing, not as a collision (#3077)', () => {
+    const r = runCli(ARGS, { script: rateLimitedScript(99) });
+    expect(r.status).not.toBe(0);
+    const out = `${r.stdout}${r.stderr}`;
+    expect(out).toMatch(/FAILED CLOSED/);
+    expect(out).toMatch(/RATE LIMITED \(not a DR id collision\)/);
+  });
+
+  it('keeps other errors generic, without the rate-limit wording', () => {
+    const r = runCli(ARGS, { script: '#!/bin/sh\necho "gh: HTTP 403 forbidden" >&2\nexit 1\n' });
+    expect(r.status).not.toBe(0);
+    expect(`${r.stdout}${r.stderr}`).not.toMatch(/RATE LIMITED/);
+  });
+
+  it('never makes a per-PR files call for another open PR (#3077)', () => {
+    // pulls/1240/files is NOT anticipated: the stub exits 1 on it, so a REST-per-PR
+    // regression goes red.
+    const script = `#!/bin/sh
+argv="$*"
+case "$argv" in
+  *"pulls/1209/files"*) echo '[[{"filename":"scripts/foo.ts","status":"added"}]]' ;;
+  *"contents/docs/decisions"*) echo '[[{"path":"docs/decisions/DR-077.md","type":"file"}]]' ;;
+  *"graphql"*) echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1240,"files":{"pageInfo":{"hasNextPage":false},"nodes":[{"path":"a.ts","changeType":"MODIFIED"}]}}]}}}}' ;;
   *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
 esac
 `;
@@ -641,13 +712,91 @@ argv="$*"
 case "$argv" in
   *"pulls/1209/files"*) echo '[[{"filename":"docs/decisions/DR-099.md","status":"added"}]]' ;;
   *"contents/docs/decisions"*) echo '[[]]' ;;
-  *"pr list"*) echo '[{"number":1209}]' ;;
+  *"graphql"*) echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1209,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}' ;;
   *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
 esac
 `;
     const r = runCli(ARGS, { script });
     expect(r.status).not.toBe(0);
     expect(`${r.stdout}${r.stderr}`).toMatch(/FAILED CLOSED/);
+  });
+
+  // ── The spec-id half (#1327): a duplicate SPEC id reached PR #1302 and nothing said so,
+  // because no workflow ran the spec decision. This CLI is what dr-id-collision.yml runs.
+
+  /** A stub world for PR #1209. `specLines` replaces withSpecListings' clean base listing. */
+  const specWorld = (subjectFiles: string, otherNodes = '', specLines = '') => `#!/bin/sh
+argv="$*"
+log="$(dirname "$0")/calls"
+echo "$argv" >> "$log"
+case "$argv" in
+  ${specLines}
+  *"pulls/1209/files"*) echo '[[${subjectFiles}]]' ;;
+  *"contents/docs/decisions"*) echo '[[{"path":"docs/decisions/DR-077.md","type":"file"}]]' ;;
+  *"graphql"*)
+    n=$(grep -c graphql "$log")
+    if [ "$n" -gt 1 ]; then echo "second open-PR walk (#3077)" >&2; exit 1; fi
+    echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[${otherNodes}]}}}}' ;;
+  *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
+esac
+`;
+  const added = (f: string) => `{"filename":"${f}","status":"added"}`;
+  const openPr = (n: number, f: string) =>
+    `{"number":${n},"files":{"pageInfo":{"hasNextPage":false},"nodes":[{"path":"${f}","changeType":"ADDED"}]}}`;
+
+  it('reports a spec id already on the base, on the same one open-PR walk (#1327)', () => {
+    // The #1302 shape: a different directory under an id main already holds. The stub
+    // refuses a second GraphQL walk, so re-walking the open PRs goes red too (#3077).
+    const r = runCli(ARGS, {
+      script: specWorld(added('specs/minspec/SPEC-232-other/requirements.md'), openPr(1240, 'specs/minspec/SPEC-248-c/requirements.md')),
+    });
+    expect(r.status).not.toBe(0);
+    const out = `${r.stdout}${r.stderr}`;
+    expect(out).toContain('Spec id collision');
+    expect(out).toContain('specs/minspec/SPEC-232-b');
+    expect(out).toContain('Next free id: SPEC-249');
+    expect(out).not.toMatch(/FAILED CLOSED/);
+  });
+
+  it('reports a spec id held by an earlier open PR, and lets the earlier PR pass (#1327)', () => {
+    const clash = 'specs/minspec/SPEC-300-mine/requirements.md';
+    const later = runCli(ARGS, { script: specWorld(added(clash), openPr(1100, 'specs/minspec/SPEC-300-theirs/requirements.md')) });
+    expect(later.status).not.toBe(0);
+    expect(`${later.stdout}${later.stderr}`).toContain('open PR #1100');
+    const earlier = runCli(ARGS, { script: specWorld(added(clash), openPr(1400, 'specs/minspec/SPEC-300-theirs/requirements.md')) });
+    expect(earlier.status).toBe(0);
+  });
+
+  it('prints the spec verdict on a pass, and a slug rename is not a clash with itself (#1327)', () => {
+    const r = runCli(ARGS, {
+      script: specWorld(
+        '{"filename":"specs/minspec/SPEC-232-new-slug/requirements.md","status":"renamed","previous_filename":"specs/minspec/SPEC-232-b/requirements.md"}',
+      ),
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('Spec id uniqueness OK');
+  });
+
+  it('reports a DR clash and a spec clash in one run, not one per push (#1327)', () => {
+    const r = runCli(ARGS, {
+      script: specWorld(`${added('docs/decisions/DR-077.md')},${added('specs/minspec/SPEC-231-other/requirements.md')}`),
+    });
+    expect(r.status).not.toBe(0);
+    const out = `${r.stdout}${r.stderr}`;
+    expect(out).toContain('DR-077');
+    expect(out).toContain('SPEC-231');
+  });
+
+  it.each([
+    ['errors', `*"contents/specs?ref=main"*) echo "gh: HTTP 403" >&2; exit 1 ;;`, /could not list specs on main/],
+    ['comes back empty', `*"contents/specs?ref=main"*) echo '[[]]' ;;`, /listing of specs on main came back empty/],
+  ])('fails closed naming the cause when the base spec listing %s (#1327)', (_name, line, cause) => {
+    const r = runCli(ARGS, { script: specWorld(added('scripts/foo.ts'), '', line) });
+    expect(r.status).not.toBe(0);
+    const out = `${r.stdout}${r.stderr}`;
+    expect(out).toMatch(/FAILED CLOSED/);
+    expect(out).toMatch(cause);
+    expect(out).not.toMatch(/unexpected error/);
   });
 });
 
@@ -827,7 +976,7 @@ describe('C — check-dr-id-collision.ts reports repurposing end-to-end (stub gh
   function runCli(args: string[], script: string): { status: number; out: string } {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dr-rep-cli-'));
     const bin = path.join(tmp, 'gh');
-    fs.writeFileSync(bin, script, { mode: 0o755 });
+    fs.writeFileSync(bin, withSpecListings(script), { mode: 0o755 });
     try {
       const out = execFileSync('npx', ['tsx', CLI, ...args], {
         cwd: REPO_ROOT,
@@ -866,7 +1015,7 @@ case "$argv" in
   *"DR-088.md?ref=${HEAD_SHA}"*)     ${headContent === null ? "echo 'null'" : `printf '%s\\n' '${b64(headContent)}'`} ;;
   *"pulls/1756/files"*)              echo '[[{"filename":"docs/decisions/DR-088.md","status":"modified"}]]' ;;
   *"contents/docs/decisions?ref="*)  echo '[[{"path":"docs/decisions/DR-088.md","type":"file"}]]' ;;
-  *"pr list"*)                       echo '[{"number":1756}]' ;;
+  *"graphql"*)                       echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1756,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}' ;;
   *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
 esac
 `;
@@ -916,7 +1065,7 @@ argv="$*"
 case "$argv" in
   *"pulls/1756/files"*)              echo '[[{"filename":"scripts/foo.ts","status":"modified"},{"filename":"docs/decisions/INDEX.md","status":"modified"}]]' ;;
   *"contents/docs/decisions?ref="*)  echo '[[{"path":"docs/decisions/DR-088.md","type":"file"}]]' ;;
-  *"pr list"*)                       echo '[{"number":1756}]' ;;
+  *"graphql"*)                       echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1756,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}' ;;
   *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
 esac
 `;
@@ -991,7 +1140,7 @@ describe('D — the label works end-to-end through the CLI (stub gh)', () => {
   function runCli(args: string[], script: string): { status: number; out: string } {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dr-lbl-cli-'));
     const bin = path.join(tmp, 'gh');
-    fs.writeFileSync(bin, script, { mode: 0o755 });
+    fs.writeFileSync(bin, withSpecListings(script), { mode: 0o755 });
     try {
       const out = execFileSync('npx', ['tsx', CLI, ...args], {
         cwd: REPO_ROOT,
@@ -1021,7 +1170,7 @@ case "$argv" in
   *"DR-088.md?ref=${SHA}"*)          printf '%s\\n' '${b64(drWith('DR-088', 'Ownership leaves the hashh', '#1481'))}' ;;
   *"pulls/1756/files"*)              echo '[[{"filename":"docs/decisions/DR-088.md","status":"modified"}]]' ;;
   *"contents/docs/decisions?ref="*)  echo '[[{"path":"docs/decisions/DR-088.md","type":"file"}]]' ;;
-  *"pr list"*)                       echo '[{"number":1756}]' ;;
+  *"graphql"*)                       echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1756,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}' ;;
   *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
 esac
 `;
@@ -1047,7 +1196,7 @@ argv="$*"
 case "$argv" in
   *"pulls/1756/files"*)              echo '[[{"filename":"scripts/foo.ts","status":"modified"}]]' ;;
   *"contents/docs/decisions?ref="*)  echo '[[{"path":"docs/decisions/DR-088.md","type":"file"}]]' ;;
-  *"pr list"*)                       echo '[{"number":1756}]' ;;
+  *"graphql"*)                       echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":1756,"files":{"pageInfo":{"hasNextPage":false},"nodes":[]}}]}}}}' ;;
   *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
 esac
 `;
