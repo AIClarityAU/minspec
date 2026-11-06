@@ -2133,13 +2133,15 @@ run_cycle() {
   local inbox_rc ready_rc ready_full ready_spec _lbl ready_total
   local ac_halt ac_sig
   local quota_verdict
-  QUOTA_TEXT_SEEN=0  # per-cycle: a text signal this cycle routes the rest to the #2233 path
   local triage_out triage_rc just_labeled_ready
 
   # Admission control: never START a cycle the quota window cannot finish. This
   # runs before ensure_fresh_run_dir so a deferred cycle costs nothing at all —
   # no git, no gh, no dispatch. Returning 42 reuses the existing quota-pause arm
   # in run_loop, which sleeps and retries rather than counting a failure.
+  # QUOTA_TEXT_SEEN is per-cycle: a text signal this cycle routes the rest to the
+  # #2233 path. Reset BEFORE the gate, so a gate hold never reads last cycle's value.
+  QUOTA_TEXT_SEEN=0
   if ! quota_verdict=$(quota_gate); then
     echo "[drain] $quota_verdict"
     QUOTA_PAUSE_CAUSE="gate"
