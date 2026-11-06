@@ -1152,6 +1152,39 @@ function latestHeadRound({ listing, allowlist, headSha } = {}) {
 }
 
 /**
+ * The machinery path set, as a regex over ONE repo-relative path (#3178). THIRD hand-copy
+ * of `buildMachineryRegexSource()` in packages/minspec/src/lib/machinery-paths.ts (the
+ * others: ai-review.yml's `grep -qE` and scripts/dispatch-issue.sh MACHINERY_PATH_RE); a
+ * test pins this one to the canonical module. It does NOT honour MACHINERY_CARVE_OUTS: a
+ * carved-out path here only costs a fresh review, never a carried pass, which is the safe
+ * direction for a predicate that exists to REFUSE a carry.
+ */
+const MACHINERY_PATH_RE =
+  /^\.github\/|^scripts\/|^\.githooks\/|^\.circleci\/|^\.buildkite\/|^\.husky\/|^packages\/minspec\/src\/lib\/(template-registry|ci-review-templates|machinery-paths)\.ts$/;
+
+/**
+ * Does the reviewable input touch machinery? (#3178) Read from the `diff --git` headers
+ * of the input the voters would be given, so no extra input (and no workflow change) is
+ * needed. FAIL TOWARD "yes": no header at all, or a header that cannot be split into its
+ * two paths, counts as machinery, so an unreadable file list is a fresh review and never
+ * a carry.
+ */
+function inputTouchesMachinery(inputText) {
+  const text = String(inputText == null ? '' : inputText).replace(/\r\n?/g, '\n');
+  const headers = text.split('\n').filter((l) => l.startsWith('diff --git '));
+  if (headers.length === 0) return true;
+  for (const h of headers) {
+    const rest = h.slice('diff --git '.length);
+    // Unquoted `a/<p> b/<p>` only. A quoted path (special characters) or an ambiguous
+    // split is not parsed; it is treated as machinery.
+    const m = /^a\/(\S+) b\/(\S+)$/.exec(rest);
+    if (!m) return true;
+    if (MACHINERY_PATH_RE.test(m[1]) || MACHINERY_PATH_RE.test(m[2])) return true;
+  }
+  return false;
+}
+
+/**
  * May the verdict on the previous head be carried to this one? (#1688)
  *
  * Deny by default: every path that is not the one carry returns `{ carry: false,
@@ -1170,15 +1203,21 @@ function latestHeadRound({ listing, allowlist, headSha } = {}) {
  * @param {object|null} o.listing  the check-runs API response for `beforeSha`, exactly as
  *                                 GitHub returned it (`{ total_count, check_runs }`); one
  *                                 that is unreadable or not provably whole is a refusal
+ * @param {boolean} o.touchesMachinery  the change touches machinery paths (#3178); anything
+ *                                 but an explicit `false` refuses, so a caller that cannot
+ *                                 say gets a fresh review
  * @param {string[]} o.allowlist  parsed AI_REVIEW_BOT_LOGINS
  */
-function decideVerdictCarry({ action, runAttempt, headSha, beforeSha, inputHash, panelKey, listing, allowlist } = {}) {
+function decideVerdictCarry({ action, runAttempt, headSha, beforeSha, inputHash, panelKey, listing, allowlist, touchesMachinery } = {}) {
   const no = (reason) => ({ carry: false, reason });
   if (action !== 'synchronize') {
     return no('only a push to an open pull request can carry a verdict; a newly opened or reopened one is always reviewed');
   }
   if (String(runAttempt).trim() !== '1') {
     return no('this is a re-run of the workflow, which always gets a fresh review');
+  }
+  if (touchesMachinery !== false) {
+    return no('the change touches machinery paths (or its file list is unreadable), so it always gets fresh voters: the merge helper needs a REVIEW_VERDICT block bound to this head (#3178)');
   }
   if (!isCommitSha(headSha)) return no('the head commit under review is not known');
   if (!isCommitSha(beforeSha)) return no('the push reports no previous head commit');
@@ -1319,6 +1358,7 @@ function planVerdictCarry(raw) {
     panelKey,
     listing,
     allowlist: parseAllowlist(o.allowlistRaw),
+    touchesMachinery: inputTouchesMachinery(o.inputText),
   });
   const comment = d.carry
     ? renderCarriedComment({
@@ -2176,6 +2216,8 @@ module.exports = {
   wholeCheckRunListing,
   latestHeadRound,
   decideVerdictCarry,
+  inputTouchesMachinery,
+  MACHINERY_PATH_RE,
   renderCarriedComment,
   carriedLabelFault,
   planVerdictCarry,

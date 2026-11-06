@@ -37,8 +37,10 @@
 # Testable decision seams (pure — no gh/git/claude; used by the loop + unit tests):
 #   scripts/drain-inbox.sh --session-alive <pid>            # exit 0 alive / 1 gone
 #   scripts/drain-inbox.sh --should-continue <pid> <epoch>  # exit 0 continue / 1 stop
+#   scripts/drain-inbox.sh --self-drift <start-hash>        # exit 0 script differs from <start-hash> / 1 same (#3397)
 #   scripts/drain-inbox.sh --paused                         # exit 0 paused / 1 not (#1187)
 #   scripts/drain-inbox.sh --zai-key-note                   # where the z.ai key comes from (never its value; zaikey23)
+#   scripts/drain-inbox.sh --unlaned    (<json on stdin)    # issue numbers carrying no lane label (#3355)
 #   scripts/drain-inbox.sh --is-quota   (<text on stdin)    # exit 0 iff the CLI's OWN limit line is in it
 #   scripts/drain-inbox.sh --resolve-session-pid            # print session anchor PID
 #   scripts/drain-inbox.sh --quota-gate                     # exit 0 admit / 42 defer
@@ -59,6 +61,8 @@
 #                                    (`agent/issue-*`) sit at `needs-human-review` (#2939).
 #                                    An unreadable count pauses too. Anything but a whole
 #                                    number is read as 0, and said so.
+#   MINSPEC_DRAIN_SPECIFY_MAX_PENDING=40 — with spec-writing on, also pause it while this many
+#                                    specs on main are `new` or `specifying` (#3344).
 #   MINSPEC_DRAIN_INTERVAL=1200   — seconds between cycles (default 20 min).
 #   MINSPEC_DRAIN_QUOTA_BACKOFF=1800 — seconds to pause after a quota signal (30 min).
 #                  Now only a FALLBACK: when ~/.claude/quota.json carries a live
@@ -88,6 +92,25 @@
 #                                    A reading with no usable reset time gets the floor.
 #                                    Any of the six that is not a whole number holds
 #                                    everything and says which, rather than guess a cap.
+#   MINSPEC_QUOTA_BOOST_FILE=<primary>/.git/minspec/drain-quota-boost — a time-bounded
+#                                    RAISE of a ramped cap (in72), read at every judgment,
+#                                    so no restart is needed and none is needed to end it:
+#                                        until=2026-10-29T17:00:00Z
+#                                        cap_7d=100
+#                                        cap_5h=100
+#                                    Until that moment a ramped cap is max(ramp, cap_*);
+#                                    from it on, the ramp alone, with nobody acting. It
+#                                    never lowers a cap and never moves a fixed one. A file
+#                                    that cannot be read or parsed, or whose `until` is more
+#                                    than 8 days off, is ignored and the line says so.
+#                                    The same file may also hold the weekly cap AT a figure
+#                                    (in81), for a reserve the ramp would otherwise spend in
+#                                    the last hours of the week:
+#                                        ceiling_7d=95
+#                                    Until `until` a ramped or boosted weekly cap is
+#                                    min(that cap, ceiling_7d); from it on, gone like the
+#                                    boost. It never raises a cap and never moves a fixed
+#                                    one. `until` and `ceiling_7d` alone is a valid file.
 #   MINSPEC_QUOTA_STALE_SEC=900    — ignore a reading older than this (fails CLOSED — defers).
 #   MINSPEC_QUOTA_BOOTSTRAP_ADMITS=3 — admits granted while NO reading has EVER existed,
 #                                    before the gate refuses outright (#1775 bootstrap
@@ -314,6 +337,13 @@ QUOTA_RAMP_FLOOR="${MINSPEC_QUOTA_RAMP_FLOOR:-60}"        # 5h ramp: never below
 QUOTA_RAMP_PER_HOUR="${MINSPEC_QUOTA_RAMP_PER_HOUR:-8}"   # 5h ramp: % held back per hour left
 QUOTA_RAMP_FLOOR_7D="${MINSPEC_QUOTA_RAMP_FLOOR_7D:-60}"  # weekly ramp: never below this %
 QUOTA_RAMP_PER_DAY_7D="${MINSPEC_QUOTA_RAMP_PER_DAY_7D:-10}"  # weekly ramp: % held back per day left
+# The boost (in72): a raise with an end date, kept outside the working tree so it never
+# dirties the primary checkout and outlives a container restart. Loaded fresh at every
+# judgment by _quota_boost_load; _quota_cap applies it. The file's ceiling (in81) is the
+# opposite move with the same end date.
+QUOTA_BOOST_FILE="${MINSPEC_QUOTA_BOOST_FILE:-${PREF_ROOT}/.git/minspec/drain-quota-boost}"
+QUOTA_BOOST_MAX_AHEAD=691200   # 8 days: a weekly window and a day of slack, no further
+QBOOST_5H=""; QBOOST_7D=""; QBOOST_CEIL_7D=""; QBOOST_UNTIL=""; QBOOST_LEFT=0; QBOOST_NOTE=""
 QUOTA_STALE_SEC="${MINSPEC_QUOTA_STALE_SEC:-900}"    # older reading proves nothing
 QUOTA_SLEEP_MAX="${MINSPEC_QUOTA_SLEEP_MAX:-21600}"  # 6 h clamp vs a corrupt epoch
 QUOTA_SLEEP_MIN="${MINSPEC_QUOTA_SLEEP_MIN:-60}"     # never spin
@@ -384,12 +414,13 @@ QUOTA_CONTRADICTED_STREAK=0
 # long a hold will last, so they set these instead of printing, which would cost a fork
 # per ask.
 QCAP_TENTHS=0      # the cap in force, in tenths of a percent
-QCAP_MODE=""       # fixed | ramped
+QCAP_MODE=""       # fixed | ramped | boosted | ceiling
 QWAIT_SECS=0       # seconds until that cap would admit the usage asked about
-QWAIT_WHY=""       # ramp (it admits before the reset) | reset (it does not)
+QWAIT_WHY=""       # ramp (it admits before the reset) | ceiling (it admits when the boost
+                   # file's ceiling ends, before the reset) | reset (it does not)
 # What the last quota_gate judged, per window, for quota_cap_line (in41). Empty means
 # that window was not judged: the gate held before reaching it, or it was not reported.
-QG_USED7=""; QG_CAP7=""; QG_MODE7=""   # weekly: used %, cap in tenths, fixed|ramped
+QG_USED7=""; QG_CAP7=""; QG_MODE7=""   # weekly: used %, cap in tenths, QCAP_MODE
 QG_USED5=""; QG_CAP5=""; QG_MODE5=""   # 5h: the same, or QG_USED5=reset when it has turned over
 
 # Dispatch fan-out (#1208). Default 1 = the historical strictly-sequential walk,
@@ -409,6 +440,7 @@ QG_USED5=""; QG_CAP5=""; QG_MODE5=""   # 5h: the same, or QG_USED5=reset when it
 # cannot see an unmerged sibling. That is true serially too (it is just slower to
 # hit), so it is tracked separately rather than pretended away — keep the default
 # at 1 until same-file serialisation exists, and de-duplicate the queue first.
+# (The host drain service defaults to 8 instead: DR-114.)
 # (assigned below, once _validated_concurrency is defined)
 
 # ── Pure decision helpers (no gh/git/claude — safe to unit-test in isolation) ──
@@ -474,6 +506,9 @@ _breaker_decide() {
 # what `wait` returns for the process this cycle launched for this issue.
 _DISPATCH_RC_DECLINED=75
 _DISPATCH_RC_STARTED=76
+# The dispatcher's own first `gh` call got a 401, before any claim (#3176). Told by status
+# alone, never by the dispatcher's output, which carries the build agent's prose (#2233).
+_DISPATCH_RC_AUTH_FAILED=78
 
 # _dispatch_own_status <dispatcher's status> [<status of each later stage>...]
 # Prints the one status to judge a dispatch by, from the PIPESTATUS of
@@ -514,6 +549,14 @@ _dispatch_outcome() {
     0)                        printf 'unanswered' ;;
     *)                        printf 'failed' ;;
   esac
+}
+
+# _dispatch_auth_failed <status>: did the dispatcher say, by its own exit status, that its
+# first `gh` call got a 401? That is a `failed` outcome like any other for every count; this
+# only marks the one the cycle can act on (#3176). The status is the dispatcher's own
+# (_dispatch_own_status), so nothing the build agent writes can produce it.
+_dispatch_auth_failed() {
+  [[ "${1-}" == "$_DISPATCH_RC_AUTH_FAILED" ]]
 }
 
 DISPATCH_CONCURRENCY="$(_validated_concurrency "${MINSPEC_DRAIN_CONCURRENCY:-1}")"
@@ -812,6 +855,91 @@ session_anchor_note() {
   return 0
 }
 
+# provision_run_dir_modules: give the run dir its OWN node_modules, installed offline
+# from the npm cache, instead of a symlink to the primary checkout's tree.
+#
+# Why not the symlink (#3048 linked the primary's tree): that tree is shared with every
+# worktree that links it, and `npm ci` (npm 10, lib/commands/ci.js) reads the entries
+# of node_modules THROUGH a symlink and deletes each one. On 2026-10-28 an agent
+# worktree linked the primary's tree and ran `npm ci`; the primary's node_modules was
+# emptied, the run dir's link then pointed at an empty tree, and the old `-d` check
+# passed it every cycle in silence, so the delegated-merge judge held every merge as
+# judge-unrunnable. Owning the tree takes the drain's gates out of that blast radius.
+#
+# Order: (1) the tree is ours, has a runnable tsx and matches package-lock.json - done;
+# (2) unlink any shared tree FIRST (npm ci over a link would empty its target), then
+# `npm ci --offline --ignore-scripts` - never a network fetch; (3) if that fails, link a
+# tree that actually has a runnable tsx (primary checkout, then the primary worktree);
+# (4) otherwise WARN visibly. A missing tsx keeps every tsx gate failing CLOSED; this
+# function never fakes a runner.
+#
+# `--ignore-scripts` skips the root `prepare`, the only step that builds @aiclarity/shared
+# into the gitignored packages/shared/out (its package "main"). So after the install we
+# build it explicitly: render-review-signals imports it, and dispatch-issue.sh hides that
+# import's stderr, so an unbuilt package drops the review-signals block from every PR
+# summary in silence. tsc is a local devDependency, so the build needs no network. A failed
+# build WARNs, leaves the stamp unwritten (the next cycle retries) and never touches tsx.
+provision_run_dir_modules() {
+  local run="$DRAIN_RUN_DIR" nm="${DRAIN_RUN_DIR}/node_modules"
+  local stamp="${nm}/.minspec-run-dir-lock" lock_sum="" ws
+  # No lockfile (or an unreadable one) leaves lock_sum empty, which skips the install
+  # below and goes straight to the tsx-gated fallback.
+  if [[ -r "${run}/package-lock.json" ]]; then
+    lock_sum="$(sha256sum "${run}/package-lock.json" | cut -d' ' -f1)" || lock_sum=""
+  fi
+  if [[ -n "$lock_sum" && ! -L "$nm" && -x "${nm}/.bin/tsx" \
+        && -f "${run}/packages/shared/out/index.js" \
+        && "$(cat "$stamp" 2>/dev/null)" == "$lock_sum" ]]; then
+    return 0
+  fi
+
+  # Remove links ONLY (rm -f on a symlink never touches its target). A real directory
+  # left here is our own earlier install, which npm ci replaces.
+  [[ -L "$nm" ]] && rm -f "$nm"
+  for ws in "${run}"/packages/*/node_modules; do
+    [[ -L "$ws" ]] && rm -f "$ws"
+  done
+
+  local npm_err=""
+  if [[ -n "$lock_sum" ]] \
+     && npm_err="$(cd "$run" && npm ci --offline --ignore-scripts --no-audit --no-fund 2>&1 >/dev/null)" \
+     && [[ -x "${nm}/.bin/tsx" ]]; then
+    echo "[drain] run dir node_modules installed offline from the npm cache (own tree, not linked)."
+    local build_err=""
+    if build_err="$(cd "$run" && npm run build --workspace=@aiclarity/shared 2>&1 >/dev/null)" \
+       && [[ -f "${run}/packages/shared/out/index.js" ]]; then
+      printf '%s\n' "$lock_sum" > "$stamp"
+    else
+      echo "[drain] WARNING: @aiclarity/shared build failed in the run dir: $(printf '%s\n' "${build_err:-no packages/shared/out/index.js after build}" | tail -n 1) - review-signals will be missing from PR summaries until it builds; retrying next cycle." >&2
+    fi
+    return 0
+  fi
+  echo "[drain] WARNING: offline npm ci failed in the run dir: $(printf '%s\n' "${npm_err:-no package-lock.json, or no tsx after install}" | tail -n 1)" >&2
+
+  # Fallback: link a tree that HAS a runnable tsx. Gate on tsx, not on `-d`: an emptied
+  # node_modules directory still passes `-d` (the 2026-10-28 incident).
+  local src="" first_wt="" cand
+  first_wt="$(git -C "$PRIMARY_ROOT" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
+  for cand in "$PRIMARY_ROOT" "$first_wt"; do
+    [[ -n "$cand" && -x "${cand}/node_modules/.bin/tsx" ]] && { src="$cand"; break; }
+  done
+  if [[ -z "$src" ]]; then
+    echo "[drain] WARNING: no runnable tsx for the run dir (own install failed; ${PRIMARY_ROOT}/node_modules and ${first_wt:-the primary worktree}/node_modules have no .bin/tsx) - the delegated-merge judge, auto-merge gate and ranker fail closed until \`npm ci\` succeeds in ${run}." >&2
+    return 0
+  fi
+  # A partial own install is a real directory; `ln -sfn` onto a directory would nest
+  # the link inside it, so remove it first (rm -rf does not follow links inside it).
+  [[ -d "$nm" && ! -L "$nm" ]] && rm -rf "$nm"
+  ln -sfn "${src}/node_modules" "$nm" 2>/dev/null || true
+  if [[ -d "${src}/packages/minspec/node_modules" ]]; then
+    [[ -d "${run}/packages/minspec/node_modules" && ! -L "${run}/packages/minspec/node_modules" ]] \
+      && rm -rf "${run}/packages/minspec/node_modules"
+    ln -sfn "${src}/packages/minspec/node_modules" "${run}/packages/minspec/node_modules" 2>/dev/null || true
+  fi
+  echo "[drain] NOTE: linked node_modules from ${src} (has tsx); the run dir retries its own offline install next cycle." >&2
+  return 0
+}
+
 # ensure_fresh_run_dir (#773): guarantee the pipeline scripts we run this cycle are
 # CURRENT, by maintaining a dedicated worktree hard-synced to origin/main and
 # repointing TRIAGE/DISPATCH/REMEDIATE at ITS copies. This replaces the old
@@ -879,34 +1007,9 @@ ensure_fresh_run_dir() {
   git -C "$DRAIN_RUN_DIR" reset --hard origin/main -q 2>/dev/null \
     || echo "[drain] WARNING: could not resync run-dir to origin/main." >&2
 
-  # node/tsx helpers (render-review-signals.mjs, auto-merge-gate.ts) need the
-  # workspace's hoisted modules; symlink the primary's so children resolve without a
-  # per-cycle install. HONEST CAVEAT (#773 review, minor): this uses the primary's
-  # COMPILED deps — including @aiclarity/shared's gitignored `out/` — which can lag
-  # origin/main's source. Those helpers are best-effort and degrade if it mismatches
-  # (the render block is skipped, not corrupted), so the staleness is accepted, not fatal.
-  # Module source (#3048): PRIMARY_ROOT is the toplevel of SCRIPT_DIR, so a drain launched
-  # from a fresh worktree gets that worktree, which has no node_modules. Fall back to the
-  # git common dir's primary worktree (first `git worktree list --porcelain` entry), and
-  # warn loudly when nothing can be linked - the tsx helpers (ranker, auto-merge gate,
-  # render-review-signals) would otherwise fail 127 and degrade the drain silently.
-  local mod_root="$PRIMARY_ROOT"
-  if [[ ! -d "${mod_root}/node_modules" ]]; then
-    local first_wt
-    first_wt="$(git -C "$PRIMARY_ROOT" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
-    if [[ -n "$first_wt" && -d "${first_wt}/node_modules" ]]; then
-      echo "[drain] NOTE: ${PRIMARY_ROOT} has no node_modules; linking from primary worktree ${first_wt} (#3048)." >&2
-      mod_root="$first_wt"
-    else
-      echo "[drain] WARNING: no node_modules found in ${PRIMARY_ROOT} or the primary worktree - tsx helpers (ranker, auto-merge gate, render-review-signals) will fail 127 (#3048)." >&2
-    fi
-  fi
-  if [[ -d "${mod_root}/node_modules" ]]; then
-    ln -sfn "${mod_root}/node_modules" "${DRAIN_RUN_DIR}/node_modules" 2>/dev/null || true
-  fi
-  if [[ -d "${mod_root}/packages/minspec/node_modules" ]]; then
-    ln -sfn "${mod_root}/packages/minspec/node_modules" "${DRAIN_RUN_DIR}/packages/minspec/node_modules" 2>/dev/null || true
-  fi
+  # node/tsx helpers (delegated-merge judge, auto-merge gate, ranker,
+  # render-review-signals) need the workspace's modules - see provision_run_dir_modules.
+  provision_run_dir_modules
 
   # VERIFY the run dir is ACTUALLY at origin/main before trusting it (#773 review,
   # MAJOR). Only then repoint children + tell them freshness is validated. If the reset
@@ -1001,13 +1104,36 @@ dispatch_alive_for() {
   pgrep -f "dispatch-issue\.sh[[:space:]]+$1([[:space:]]|$)" >/dev/null 2>&1
 }
 
+# #3408 — how many times an issue may be released as an orphan before it is surfaced.
+# A release leaves the issue with no lane, so the lane pass gives it `inbox` and triage
+# sends it back to a dispatch; without a cap a dispatch that dies every time loops forever,
+# spending quota each lap. Each release leaves a marker comment; the count is the markers.
+ORPHAN_RELEASE_CAP="${MINSPEC_ORPHAN_RELEASE_CAP:-3}"
+ORPHAN_RELEASE_MARKER='<!-- drain-orphan-release -->'
+
+# orphan_release_count <issue>: prints how many marker comments the issue carries.
+# Returns 1 (prints nothing) when the comments cannot be read or do not reduce to a
+# number: an unreadable count is never read as zero. Fetched raw and flattened locally,
+# like the timeline readers above, so pagination cannot split the count.
+orphan_release_count() {
+  local raw cnt
+  raw=$(gh api "repos/${REPO}/issues/$1/comments" --paginate 2>/dev/null) || return 1
+  [[ -n "$raw" ]] || return 1
+  cnt=$(printf '%s' "$raw" | jq -r -s --arg m "$ORPHAN_RELEASE_MARKER" '
+      (add // []) as $c
+      | if ($c | type) != "array" then "unknown"
+        else [$c[] | select((.body // "") | contains($m))] | length end' 2>/dev/null) || return 1
+  [[ "$cnt" =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$cnt"
+}
+
 # #1306 — release `agent-running` claims that no dispatch is holding.
 # TWO independent witnesses must agree before anything is touched: the claim is older
 # than the stale threshold AND no live dispatch process exists for it. Either one alone
 # could be wrong (a long build looks old; pgrep cannot see a dispatch on another host),
 # so requiring both means the reaper fails toward leaving the claim in place.
 reconcile_stale_claims() {
-  local running n applied age
+  local running n applied age prior
   running=$(gh issue list --repo "$REPO" --state open --label "agent-running" \
     --json number --jq '.[].number' 2>/dev/null || true)  # swallow-ok: the next line returns 0 on empty, before the loop holding this function's only label edit — a failed query skips this cycle's reaping and the next retries; nothing is reaped on bad data
   [[ -n "$running" ]] || return 0
@@ -1021,7 +1147,26 @@ reconcile_stale_claims() {
     }
     age=$(( $(date -u +%s) - applied ))
     (( age >= RECONCILE_CLAIM_STALE_SECS )) || continue    # witness 1: genuinely old
-    echo "[drain] reconcile: releasing orphaned agent-running on #$n (claimed ${age}s ago, no live dispatch) — #1306."
+    prior=0; prior=$(orphan_release_count "$n") || {
+      echo "[drain] reconcile: could not read the comments of #$n, so its orphan-release count is unknown — leaving the claim as-is; the next cycle retries (#3408)."
+      continue
+    }
+    if (( prior >= ORPHAN_RELEASE_CAP )); then
+      echo "[drain] reconcile: #$n was already released as an orphan ${prior} time(s) (cap ${ORPHAN_RELEASE_CAP}) — surfacing as needs-human-review instead of re-queueing (#3408)."
+      gh issue comment "$n" --repo "$REPO" --body "The drain reconciler has released this issue's orphaned \`agent-running\` claim ${prior} times (cap ${ORPHAN_RELEASE_CAP}) and will not return it to \`inbox\` again: each lap re-triages and re-dispatches it at a cost in quota. Labelled \`needs-human-review\`; a human should find out why the dispatch keeps dying. (#3408)" >/dev/null 2>&1 \
+        || echo "[drain] reconcile: could not comment on #$n — continuing with the label change."
+      gh issue edit "$n" --repo "$REPO" --remove-label "agent-running" --add-label "needs-human-review" 2>/dev/null \
+        || echo "[drain] reconcile: could not surface #$n — it stays as-is."
+      continue
+    fi
+    echo "[drain] reconcile: releasing orphaned agent-running on #$n (claimed ${age}s ago, no live dispatch; release $((prior + 1)) of ${ORPHAN_RELEASE_CAP}) — #1306."
+    # The marker is written BEFORE the release: a release that could not be counted would
+    # make the cap unenforceable, so a failed comment leaves the claim for the next cycle.
+    gh issue comment "$n" --repo "$REPO" --body "${ORPHAN_RELEASE_MARKER}
+Drain reconciler released this issue's orphaned \`agent-running\` claim (release $((prior + 1)) of ${ORPHAN_RELEASE_CAP}; claimed ${age}s ago, no live dispatch). (#3408)" >/dev/null 2>&1 || {
+      echo "[drain] reconcile: could not record the release on #$n — leaving the claim as-is so the cap stays enforceable (#3408)."
+      continue
+    }
     gh issue edit "$n" --repo "$REPO" --remove-label "agent-running" 2>/dev/null \
       || echo "[drain] reconcile: could not release the claim on #$n — it stays as-is."
   done <<< "$running"
@@ -1122,14 +1267,107 @@ reopened_after_close() {
 # outright when the issue's own history shows a reopen after the last close — that
 # is a standing human veto on the merged-branch inference, and re-deriving the same
 # conclusion from the same branch state on every cycle cannot see it otherwise.
+#
+# #3351 review: `awaiting-spec-signoff` is the one case where an open `agent-done` issue
+# is NOT a contradiction, provided its spec PR exists. A finished specify run leaves its
+# issue open on purpose to carry the build (#3348), so neither arm's inference holds: a
+# merged `agent/issue-<N>` PR is the SPEC, not the build, and an open one is a spec in
+# flight, not a false completion. Such an issue is left exactly as it is until sign-off
+# moves it on (#3350). An unmerged branch proves nothing, and the label does not either:
+# the stamp is written even when the push or `gh pr create` failed, so spec_pr_exists
+# below decides.
+#
+# Three outcomes, as in reopened_after_close above:
+#   0  awaiting — the labels were read and carry awaiting-spec-signoff. Leave it alone.
+#   1  ordinary — the labels were read and do not. Reconcile as usual.
+#   2  unknown  — no readable label list, or one without the `agent-done` the issue was
+#                 just selected on. The caller changes nothing on this issue.
+# The JSON is fetched raw and reduced here so the reduction is what a test exercises.
+awaits_spec_signoff() {
+  local n="$1" raw verdict
+  raw=$(gh issue view "$n" --repo "$REPO" --json labels 2>/dev/null) || return 2
+  verdict=$(printf '%s' "$raw" | jq -r '
+      if (.labels | type) != "array" then "unknown"
+      else
+        [.labels[].name] as $names
+        | if ($names | index("agent-done")) == null then "unknown"
+          elif ($names | index("awaiting-spec-signoff")) != null then "yes"
+          else "no" end
+      end' 2>/dev/null) || return 2
+  case "$verdict" in
+    yes) return 0 ;;
+    no)  return 1 ;;
+    *)   return 2 ;;   # empty, multi-line, or anything this function does not recognise
+  esac
+}
+
+# spec_pr_exists <n>: does this repo have an open or merged PR from `agent/issue-<n>`?
+# A fork can name a branch anything, so its PRs do not count. Fetched raw and reduced
+# here, as above.
+#   0  yes
+#   1  no — the list was read, and holds no such PR.
+#   2  unknown — no readable list. Never reported as "no PR" (#1855).
+spec_pr_exists() {
+  local n="$1" raw verdict
+  raw=$(gh pr list --repo "$REPO" --state all --head "agent/issue-${n}" --limit 100 \
+    --json number,state,isCrossRepository 2>/dev/null) || return 2
+  verdict=$(printf '%s' "$raw" | jq -r '
+      if type != "array" or (all(.[]; (.state | type) == "string") | not) then "unknown"
+      elif any(.[]; .isCrossRepository != true and (.state == "OPEN" or .state == "MERGED")) then "yes"
+      else "no" end' 2>/dev/null) || return 2
+  case "$verdict" in
+    yes) return 0 ;;
+    no)  return 1 ;;
+    *)   return 2 ;;   # empty, multi-line, or anything this function does not recognise
+  esac
+}
+
+# merged_pr_is_spec_only <pr>: spec and build share `agent/issue-<N>`, so a merged PR on
+# that branch whose whole diff is spec corpus says nothing about a build having landed
+# (#3351 review). The corpus is dispatch-issue.sh's own definition, asked rather than copied.
+#   0  spec-only
+#   1  touches something else
+#   2  unknown — the diff was unreadable or empty.
+merged_pr_is_spec_only() {
+  local pr="$1" changed rc=0
+  changed=$(gh pr diff "$pr" --repo "$REPO" --name-only 2>/dev/null) || return 2
+  [[ -n "${changed//[$'\n\r\t ']/}" ]] || return 2
+  "${SCRIPT_DIR}/dispatch-issue.sh" --specify-scope-stray <<<"$changed" >/dev/null 2>&1 || rc=$?
+  case "$rc" in
+    0) return 1 ;;   # a path outside the corpus
+    1) return 0 ;;
+    *) return 2 ;;
+  esac
+}
+
 reconcile_done_issues() {
-  local done_issues n pr veto rc
-  done_issues=$(gh issue list --repo "$REPO" --state open --label "agent-done" \
+  local done_issues n pr veto rc awaiting spec_pr spec_only
+  # --limit: issues awaiting sign-off stay in this selector until sign-off, so gh's default
+  # 30-row page would fill with them and silently stop reconciling everything older.
+  done_issues=$(gh issue list --repo "$REPO" --state open --label "agent-done" --limit 1000 \
     --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no agent-done issues
   [[ -n "$done_issues" ]] || return 0
 
   while read -r n; do
     [[ -n "$n" ]] || continue
+    awaiting=0; awaits_spec_signoff "$n" || awaiting=$?
+    case "$awaiting" in
+      0)
+        spec_pr=0; spec_pr_exists "$n" || spec_pr=$?
+        case "$spec_pr" in
+          1)
+            echo "[drain] reconcile: #$n is awaiting spec sign-off but NO open or merged PR exists for agent/issue-${n} — stripping the stamp and surfacing (#3351 review)."
+            gh issue edit "$n" --repo "$REPO" \
+              --remove-label "agent-done,awaiting-spec-signoff" --add-label "needs-human-review" 2>/dev/null \
+              || echo "[drain] reconcile: could not correct #$n — left as-is." ;;
+          2)
+            echo "[drain] reconcile: could not read the PRs of agent/issue-${n} — leaving #$n exactly as it is. This is NOT evidence that no spec PR exists (#1855)." ;;
+        esac
+        continue ;;
+      2)
+        echo "[drain] reconcile: could not read the labels of #$n, so it may be awaiting spec sign-off — leaving it exactly as it is (#3351 review). The rest of the board is still reconciled."
+        continue ;;
+    esac
     # Keep the EXIT STATUS, not just the output (#1855). An empty $pr is consumed as a
     # BRANCH below, and the else arm is the MUTATING one: it strips `agent-done`, adds
     # `needs-human-review`, and prints "NO merged PR exists". With the status swallowed,
@@ -1144,6 +1382,18 @@ reconcile_done_issues() {
       continue
     fi
     if [[ -n "$pr" ]]; then
+      spec_only=0; merged_pr_is_spec_only "$pr" || spec_only=$?
+      case "$spec_only" in
+        0)
+          echo "[drain] reconcile: #$n is labelled agent-done but only spec-only PR #$pr merged for agent/issue-${n} — no build landed, so stripping the stamp and surfacing (#3351 review)."
+          gh issue edit "$n" --repo "$REPO" \
+            --remove-label "agent-done" --add-label "needs-human-review" 2>/dev/null \
+            || echo "[drain] reconcile: could not correct #$n — left as-is."
+          continue ;;
+        2)
+          echo "[drain] reconcile: could not read the diff of #$pr, so whether it is the build or only the spec is unknown — leaving #$n exactly as it is (#3351 review)."
+          continue ;;
+      esac
       veto=0; reopened_after_close "$n" || veto=$?
       case "$veto" in
         0)
@@ -1171,11 +1421,94 @@ reconcile_done_issues() {
   done <<< "$done_issues"
 }
 
+# ── Lane reconciler (#3355) ──────────────────────────────────────────────────
+#
+# triage-inbox.sh reads only `--label inbox` and the drain reads only `agent-ready*`, so
+# an open issue carrying NO lane label is invisible to every producer (103 of 1029 were,
+# on 2026-10-30, including the drain bug #2699). Nothing asserted that every open issue
+# sits in a lane; triage validated what it was given and never that it was given all.
+#
+# A lane label is any label an actor reads: inbox, agent-* (ready, ready-specify, running,
+# done, escalated, ...), hold:*, needs-review, needs-human-review, needs-info, blocked-by*, parked.
+# unlaned_numbers is the pure decision (stdin: `gh issue list --json number,labels`,
+# stdout: one number per issue with no lane label). It needs jq; without it the caller
+# reports loudly instead of guessing.
+unlaned_numbers() {
+  jq -r '.[] | select(([.labels[].name | select(
+      . == "inbox" or . == "needs-review" or . == "needs-human-review" or . == "needs-info" or . == "parked"
+      or startswith("agent-") or startswith("hold:") or startswith("blocked-by")
+    )] | length) == 0) | .number'
+}
+
+# Adds `inbox` to every open issue with no lane label and ALWAYS prints the count, even
+# when zero (invariant 2: never silent). Never fatal: a failed query or edit is printed
+# loudly and the cycle goes on; an unreadable list is NOT read as "no unlaned issues".
+reconcile_unlaned_issues() {
+  local json nums n count=0 failed=0
+  if ! command -v jq >/dev/null 2>&1; then
+    echo "[drain] lane check: jq missing — could not look for issues with no lane label (#3355)."
+    return 0
+  fi
+  if ! json=$(gh issue list --repo "$REPO" --state open --limit 5000 --json number,labels 2>/dev/null); then
+    echo "[drain] lane check: could not list open issues — NOT evidence that every issue has a lane (#3355)."
+    return 0
+  fi
+  local listed
+  listed=$(printf '%s' "$json" | jq 'length' 2>/dev/null || echo 0)
+  if [[ "$listed" -ge 5000 ]]; then
+    echo "[drain] lane check: open-issue list hit the 5000 limit — issues beyond it were NOT checked (#3355)."
+  fi
+  if ! nums=$(printf '%s' "$json" | unlaned_numbers); then
+    echo "[drain] lane check: could not parse the issue list — NOT evidence that every issue has a lane (#3355)."
+    return 0
+  fi
+  # Issues the chief-of-staff runner parked on purpose carry a comment ending "Do not
+  # re-triage" (triage reads title and body only, so it would never see that comment).
+  # A failed or unreadable search must not read as "nothing parked": edit nothing.
+  local pjson parked
+  if ! pjson=$(gh issue list --repo "$REPO" --state open --limit 5000 \
+        --search '"Do not re-triage" in:comments' --json number 2>/dev/null); then
+    echo "[drain] lane check: could not search for parked issues — NO edits this pass, NOT evidence that nothing is parked (#3355)."
+    return 0
+  fi
+  if ! parked=$(printf '%s' "$pjson" | jq -r '.[].number' 2>/dev/null); then
+    echo "[drain] lane check: could not parse the parked-issue search — NO edits this pass (#3355)."
+    return 0
+  fi
+  if [[ "$(printf '%s' "$pjson" | jq 'length' 2>/dev/null || echo 0)" -ge 5000 ]]; then
+    echo "[drain] lane check: parked-issue search hit the 5000 limit — some parked issues may be re-triaged (#3355)."
+  fi
+  # main-red reports are filed by main-red-watch for a human, and no queue reads them.
+  local red
+  red=$(printf '%s' "$json" | jq -r '.[] | select(any(.labels[]; .name == "main-red")) | .number' 2>/dev/null) || red=""
+  local skipped_parked=0 skipped_red=0
+  while read -r n; do
+    [[ -n "$n" ]] || continue
+    if grep -qxF "$n" <<< "$parked"; then
+      skipped_parked=$((skipped_parked + 1))
+      continue
+    fi
+    if grep -qxF "$n" <<< "$red"; then
+      skipped_red=$((skipped_red + 1))
+      continue
+    fi
+    if gh issue edit "$n" --repo "$REPO" --add-label inbox >/dev/null 2>&1; then
+      count=$((count + 1))
+    else
+      failed=$((failed + 1))
+      echo "[drain] lane check: could not add inbox to #$n — left as-is."
+    fi
+  done <<< "$nums"
+  echo "[drain] lane check: ${count} open issue(s) had no lane label and got inbox; ${failed} could not be labelled (#3355)."
+  echo "[drain] lane check: skipped ${skipped_parked} parked on purpose (Do not re-triage) and ${skipped_red} main-red report(s) (#3355)."
+}
+
 # Never fatal: a reconciler exists to reduce drift, and must not become a new way for
 # a cycle to die. Failures are reported, then the cycle proceeds.
 reconcile_labels() {
   reconcile_stale_claims || echo "[drain] reconcile: stale-claim pass errored — continuing."
   reconcile_done_issues  || echo "[drain] reconcile: agent-done pass errored — continuing."
+  reconcile_unlaned_issues || echo "[drain] reconcile: lane check errored — continuing."
 }
 
 # record_delegated_approvals: Step 0b of a cycle (#2981, DR-108). For content that a
@@ -1223,6 +1556,51 @@ record_delegated_approvals() {
   return 0
 }
 
+# close_finished_specs: Step 0d of a cycle (#1595). Nothing wrote `phases.implement: done`
+# when a spec's build landed, so the implementing -> done lane never moved without a human.
+# This runs scripts/lib/close-finished-specs.ts, which owns every decision: on a fresh
+# worktree of origin/main it closes each spec the `implement.finished-not-closed` gate calls
+# finished (approved, every task ticked, every implements: path on disk), cites the merged
+# commit that ticked its list, and opens ONE pull request as minspec-sdd[bot]. It never
+# merges, never arms auto-merge, never ticks a task, and spends no Claude quota.
+#
+# Not a gate, so it never fails the cycle: a refused or errored run is printed LOUDLY with
+# the producer's JSON report above it, and the cycle goes on.
+# Off: MINSPEC_DRAIN_CLOSEOUT=0. Per-cycle cap: MINSPEC_DRAIN_CLOSEOUT_MAX (default 10).
+CLOSEOUT_CMD="${MINSPEC_DRAIN_CLOSEOUT_CMD:-}"
+close_finished_specs() {
+  if [[ "${MINSPEC_DRAIN_CLOSEOUT:-1}" == "0" ]]; then
+    echo "[drain] spec close-out: off (MINSPEC_DRAIN_CLOSEOUT=0)."
+    return 0
+  fi
+  local max="${MINSPEC_DRAIN_CLOSEOUT_MAX:-10}"
+  if [[ ! "$max" =~ ^[1-9][0-9]*$ ]]; then
+    echo "[drain] WARNING: spec close-out NOT run: MINSPEC_DRAIN_CLOSEOUT_MAX='${max}' is not a positive integer." >&2
+    return 0
+  fi
+  local scripts_dir root rc=0
+  scripts_dir="$(dirname "$REMEDIATE")"
+  root="$(cd "${scripts_dir}/.." && pwd)"
+  local -a cmd
+  if [[ -n "$CLOSEOUT_CMD" ]]; then
+    cmd=("$CLOSEOUT_CMD")
+  else
+    if [[ ! -f "${scripts_dir}/lib/close-finished-specs.ts" ]]; then
+      echo "[drain] WARNING: spec close-out NOT run: no producer at ${scripts_dir}/lib/close-finished-specs.ts." >&2
+      return 0
+    fi
+    cmd=(npx --no-install tsx "${scripts_dir}/lib/close-finished-specs.ts")
+  fi
+  echo "[drain] spec close-out: closing finished specs (max ${max})..."
+  ( cd "$root" && "${cmd[@]}" --repo-root "$root" --repo "$REPO" --max "$max" --write ) || rc=$?
+  case "$rc" in
+    0) echo "[drain] spec close-out: done (outcomes in the report above)." ;;
+    1) echo "[drain] WARNING: spec close-out REFUSED this cycle (producer exit 1) - nothing written. The reason is in the report above; this is not an empty lane." >&2 ;;
+    *) echo "[drain] WARNING: spec close-out FAILED mid-write (producer exit ${rc}) - see the report above." >&2 ;;
+  esac
+  return 0
+}
+
 # arm_delegated_spec_merges: Step 0c of a cycle (#2981, DR-108). Spec PRs that step 6b
 # held as needs-human-review merge without the founder once delegation DLG-001 covers
 # them (queue item dlg2981, 2026-10-21: "y - my aproval is already the Alt-A"). For each
@@ -1236,7 +1614,17 @@ record_delegated_approvals() {
 # and is printed as one line with its reason; an arm that failed after admission, an
 # unreadable PR list, or a list cut off at its limit is printed LOUDLY on stderr.
 # Off: MINSPEC_DRAIN_DELEGATED_MERGE=0. Per-cycle cap: MINSPEC_DRAIN_DELEGATED_MERGE_MAX.
+#
+# The cap ROTATES (MINSPEC_DRAIN_DELEGATED_MERGE_CURSOR, the last PR judged). The cap
+# counts every judgement, held or armed, and a held PR is usually held again next cycle
+# (handed to the founder, hold:human). Judged oldest-first from the top
+# every cycle, the oldest held PRs took the whole cap: on 2026-10-30 seven of them filled
+# seven of ten slots, twelve cycles in a row ended "0 armed of 10 judged", and 36 newer
+# spec PRs were never judged. Each cycle now resumes after the last PR judged and wraps,
+# so every candidate is judged within ceil(candidates / cap) cycles. The cursor only
+# orders the work; it admits nothing, so an unreadable one starts from the oldest.
 arm_delegated_spec_merges() {
+  local cursor_file="${MINSPEC_DRAIN_DELEGATED_MERGE_CURSOR:-/tmp/minspec-drain-delegated-merge.cursor}"
   if [[ "${MINSPEC_DRAIN_DELEGATED_MERGE:-1}" == "0" ]]; then
     echo "[drain] delegated spec merge: off (MINSPEC_DRAIN_DELEGATED_MERGE=0)."
     return 0
@@ -1251,35 +1639,78 @@ arm_delegated_spec_merges() {
   # One retry (#3098): the read failed intermittently (2 of 9 cycles) and skipped every
   # delegated merge for the whole cycle. Each attempt's stderr is kept so a persistent
   # failure names its cause in the WARNING instead of discarding it.
-  rows=""
-  rc=1
-  for attempt in 1 2; do
-    if rows=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit "$limit" \
-         --json number,isDraft,autoMergeRequest,files 2>"$errfile"); then
-      rc=0
-      break
+  # A held spec PR carries `needs-human-review` (opened by the drain) OR `awaiting-approval`
+  # (opened by a CoS/agent session outside it, #3123). `gh pr list --label` ANDs repeated
+  # flags, so each hold label is its own read; the results are merged and de-duplicated by
+  # PR number. Selection stays a prefilter: the seam's judge is the only decider.
+  local label one_rows="" all_rows="[]"
+  for label in needs-human-review awaiting-approval; do
+    one_rows=""
+    rc=1
+    for attempt in 1 2; do
+      if one_rows=$(gh pr list --repo "$REPO" --state open --label "$label" --limit "$limit" \
+           --json number,isDraft,autoMergeRequest,files 2>"$errfile"); then
+        rc=0
+        break
+      fi
+      gh_err=$(tr '\n' ' ' < "$errfile" 2>/dev/null | cut -c1-500 || true)  # swallow-ok: diagnostic text only; the failure itself is reported below
+      # A failed read is the authoritative sign of a dead credential (#3400): this step runs
+      # after an hour-long cycle's first reads, so the bot token is often stale here. Re-mint
+      # in THIS shell (the next read, every later step and every child inherit it), exactly
+      # as _read_queue does; the retry then runs at once. A broker that hands back the same
+      # token re-mints nothing, and the plain sleep-and-retry below stays as it was.
+      if gh_bot_reauth_read; then
+        echo "[drain] the delegated-merge read (label ${label}) failed and the credential was stale — re-minted, retrying." >&2
+      elif (( attempt == 1 )); then
+        sleep "${MINSPEC_DRAIN_DELEGATED_MERGE_RETRY_SLEEP:-5}"
+      fi
+    done
+    if (( rc != 0 )); then
+      [[ "$errfile" == /dev/null ]] || rm -f "$errfile"
+      echo "[drain] WARNING: delegated spec merge NOT run: the held PR list (label ${label}) could not be read after 2 attempts (gh stderr: ${gh_err:-<empty>}). This is not an empty queue." >&2
+      return 0
     fi
-    gh_err=$(tr '\n' ' ' < "$errfile" 2>/dev/null | cut -c1-500 || true)  # swallow-ok: diagnostic text only; the failure itself is reported below
-    (( attempt == 1 )) && sleep "${MINSPEC_DRAIN_DELEGATED_MERGE_RETRY_SLEEP:-5}"
+    if ! count=$(printf '%s' "$one_rows" | jq 'length' 2>/dev/null); then
+      [[ "$errfile" == /dev/null ]] || rm -f "$errfile"
+      echo "[drain] WARNING: delegated spec merge NOT run: the held PR list (label ${label}) did not parse." >&2
+      return 0
+    fi
+    if (( count >= limit )); then
+      [[ "$errfile" == /dev/null ]] || rm -f "$errfile"
+      echo "[drain] WARNING: delegated spec merge NOT run: the held PR list (label ${label}) returned ${count}, its limit; it may be cut off." >&2
+      return 0
+    fi
+    all_rows=$(jq -n --argjson a "$all_rows" --argjson b "$one_rows" '$a + $b') || {
+      [[ "$errfile" == /dev/null ]] || rm -f "$errfile"
+      echo "[drain] WARNING: delegated spec merge NOT run: could not merge the held PR lists." >&2
+      return 0
+    }
   done
   [[ "$errfile" == /dev/null ]] || rm -f "$errfile"
-  if (( rc != 0 )); then
-    echo "[drain] WARNING: delegated spec merge NOT run: the held PR list could not be read after 2 attempts (gh stderr: ${gh_err:-<empty>}). This is not an empty queue." >&2
-    return 0
-  fi
-  if ! count=$(printf '%s' "$rows" | jq 'length' 2>/dev/null); then
-    echo "[drain] WARNING: delegated spec merge NOT run: the held PR list did not parse." >&2
-    return 0
-  fi
-  if (( count >= limit )); then
-    echo "[drain] WARNING: delegated spec merge NOT run: the held PR list returned ${count}, its limit; it may be cut off." >&2
-    return 0
-  fi
+  rows=$(printf '%s' "$all_rows" | jq -c 'unique_by(.number)')
+
   # Already-armed PRs are skipped (the arm stands); so are drafts and any PR with a
   # file outside specs/. Oldest first, so the longest-held spec goes first.
+  #
+  # A PR carrying a plan artifact is skipped too, by name. The judge denies it whatever
+  # else is true (PLAN_ARTIFACT in scripts/lib/delegated-merge.ts, #2980; the parity test
+  # pins this regex to that one), so judging it only spends a slot of the cap. On
+  # 2026-10-30, 21 of 26 candidates were such PRs and a cycle ended "0 armed of 10 judged"
+  # with #3391 waiting behind them. Skipping only removes: nothing here admits a PR.
+  local plan_only
+  plan_only=$(printf '%s' "$rows" | jq -r '[.[]
+      | select(.isDraft | not) | select(.autoMergeRequest == null)
+      | select((.files | length) > 0 and all(.files[]; .path | startswith("specs/")))
+      | select(any(.files[]; .path | test("(^|/)(design|tasks)\\.md$")))
+      | .number] | sort | map("#\(.)") | (if length > 0 then "\(length) held PR(s) carry a plan artifact (#2980), not judged: \(join(" "))" else empty end)' 2>/dev/null) || {
+    echo "[drain] WARNING: delegated spec merge NOT run: could not filter the held PR list." >&2
+    return 0
+  }
+  [[ -z "$plan_only" ]] || echo "[drain] delegated spec merge: ${plan_only}"
   candidates=$(printf '%s' "$rows" | jq -r '[.[]
       | select(.isDraft | not) | select(.autoMergeRequest == null)
       | select((.files | length) > 0 and all(.files[]; .path | startswith("specs/")))
+      | select(any(.files[]; .path | test("(^|/)(design|tasks)\\.md$")) | not)
       | .number] | sort | .[]' 2>/dev/null) || {
     echo "[drain] WARNING: delegated spec merge NOT run: could not filter the held PR list." >&2
     return 0
@@ -1288,6 +1719,12 @@ arm_delegated_spec_merges() {
     echo "[drain] delegated spec merge: no held spec-only PRs."
     return 0
   fi
+  # Resume after the last PR judged, then wrap to the oldest (see the header).
+  local cursor="" last=""
+  cursor=$(head -n 1 "$cursor_file" 2>/dev/null | tr -d '[:space:]' || true)  # swallow-ok: ordering only, an absent cursor is the first cycle
+  if [[ "$cursor" =~ ^[0-9]+$ ]]; then
+    candidates=$(awk -v c="$cursor" '$1 > c' <<< "$candidates"; awk -v c="$cursor" '$1 <= c' <<< "$candidates")
+  fi
   while read -r pr; do
     [[ -n "$pr" ]] || continue
     if (( tried >= max )); then
@@ -1295,6 +1732,7 @@ arm_delegated_spec_merges() {
       break
     fi
     tried=$((tried + 1))
+    last="$pr"
     out=$(bash "$DISPATCH" --delegated-spec-merge "$pr" --arm 2>/dev/null) && rc=0 || rc=$?
     out=$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -n 1 || true)  # swallow-ok: grep -v exits 1 when the seam printed nothing, which is reported below as an unreadable result
     case "$rc" in
@@ -1304,6 +1742,9 @@ arm_delegated_spec_merges() {
       *) echo "[drain] WARNING: delegated spec merge: #${pr} was admitted but NOT armed (seam exit ${rc}): ${out:-<no output>}" >&2 ;;
     esac
   done <<< "$candidates"
+  if [[ -n "$last" ]] && ! { printf '%s\n' "$last" > "$cursor_file"; } 2>/dev/null; then
+    echo "[drain] WARNING: delegated spec merge: could not record the cursor at ${cursor_file}; next cycle starts from the oldest PR again." >&2
+  fi
   echo "[drain] delegated spec merge: ${armed} armed of ${tried} judged."
   return 0
 }
@@ -1339,8 +1780,14 @@ sweep_open_prs() {
     # saw half of a 61-PR pile. One row per open PR, drafts included, so the count below
     # is the count gh RETURNED and can be compared with the limit.
     local pr_limit="${MINSPEC_DRAIN_PR_SWEEP_LIMIT:-500}"
+    local open_rc=0
     open_rows=$(gh pr list --repo "$REPO" --state open --limit "$pr_limit" --json number,isDraft \
-      --jq '.[] | "\(.number) \(.isDraft)"' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
+      --jq '.[] | "\(.number) \(.isDraft)"' 2>/dev/null) || open_rc=$?
+    if (( open_rc != 0 )) && gh_bot_reauth_read; then   # dead credential: re-mint in this shell, retry once (#3400)
+      echo "[drain] the open-PR list failed and the credential was stale — re-minted, retrying once." >&2
+      open_rows=$(gh pr list --repo "$REPO" --state open --limit "$pr_limit" --json number,isDraft \
+        --jq '.[] | "\(.number) \(.isDraft)"' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
+    fi
     open_count=0
     [[ -n "$open_rows" ]] && open_count=$(printf '%s\n' "$open_rows" | wc -l | tr -d ' ')
     # Fail closed (#2975): a read that came back exactly at the limit may have been cut
@@ -1521,23 +1968,85 @@ DRAIN_SPECIFY="${MINSPEC_DRAIN_SPECIFY:-1}"
 # 2026-10-18, the last at 62). Every spec draft is withheld from auto-merge as
 # approval-or-acceptance, so writing more while that many already wait on a human spends
 # quota on work nothing can land. With the switch on, each cycle counts the drain's own
-# open pull requests held for a human (`needs-human-review` on an `agent/issue-*`
-# branch) and leaves the spec-writing queue alone while that count is at or above this
+# open spec-draft pull requests held for a human (`needs-human-review` on an
+# `agent/issue-*` branch, a file under specs/, the rest under specs/ or docs/decisions/; build PRs are not
+# counted, #3570) and leaves the spec-writing queue alone while that count is at or above this
 # cap. Builds, triage and remediation are untouched. Anything but a whole number is read
 # as 0, which pauses spec-writing: the reading that spends nothing.
 SPECIFY_MAX_HELD="${MINSPEC_DRAIN_SPECIFY_MAX_HELD:-10}"
 
-# _held_drain_prs <varname> — count the drain's open pull requests held for a human INTO
-# a named variable. Returns gh's status: a failed read is not a count of zero, and the
+# _held_drain_prs <varname> — count the drain's open SPEC-DRAFT pull requests held for a
+# human (#3570: a specs/ file, rest under specs/ or docs/decisions/) INTO a named variable. Returns gh's status: a failed read is not a count of zero, and the
 # caller pauses spec-writing on it rather than guess (invariant 2).
 _held_drain_prs() {
   local -n _held_out="$1"
   local _held_val _held_rc=0
+  # Only SPEC DRAFTS count (#3570): a pull request with AT LEAST ONE file under specs/ and
+  # every file under specs/ or docs/decisions/ (a draft ships its decision record and
+  # INDEX.md beside it, e.g. #3217; those must still count). A PR touching only
+  # docs/decisions/ has no spec file, so it is NOT a draft and is not counted. A held machinery build is waiting on a merge path, not on a spec decision, and
+  # counting it paused spec-writing behind 44 builds. A null `files` makes jq fail, which
+  # fails the read closed rather than counting 0.
   _held_val=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit 1000 \
-    --json headRefName --jq '[.[] | select(.headRefName | startswith("agent/issue-"))] | length') || _held_rc=$?
+    --json headRefName,files --jq '[.[] | select(.headRefName | startswith("agent/issue-"))
+      | select((.files | map(.path)) as $p
+          | ($p | any(startswith("specs/"))) and ($p | all(startswith("specs/") or startswith("docs/decisions/"))))] | length') || _held_rc=$?
+  if (( _held_rc != 0 )) && gh_bot_reauth_read; then   # dead credential: re-mint in this shell, retry once (#3400)
+    echo "[drain] the held-PR count failed and the credential was stale — re-minted, retrying once." >&2
+    _held_rc=0
+    _held_val=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit 1000 \
+      --json headRefName,files --jq '[.[] | select(.headRefName | startswith("agent/issue-"))
+      | select((.files | map(.path)) as $p
+          | ($p | any(startswith("specs/"))) and ($p | all(startswith("specs/") or startswith("docs/decisions/"))))] | length') || _held_rc=$?
+  fi
   if (( _held_rc != 0 )); then return "$_held_rc"; fi
   [[ "$_held_val" =~ ^[0-9]+$ ]] || return 1
   _held_out="$_held_val"
+}
+
+# SPECIFY_MAX_PENDING — the second half of the same brake (#3344). The held count above
+# sees a draft only while its pull request is open. Delegated spec merge (Step 0c, #2981)
+# lands a covered draft on main at `status: specifying`, which takes it out of that count
+# and reopens spec-writing while the draft still waits on Clarify and sign-off: specs at
+# specifying on main went from 30 to 77 between 2026-10-27 and 2026-10-29 with the held
+# cap reporting PAUSED throughout. So the same decision also counts specs on the tree the
+# drain runs from whose frontmatter `status:` is `new` or `specifying`, and leaves the
+# spec-writing queue alone while that count is at or above this cap. Same readings as the
+# held cap: anything but a whole number is read as 0, and a count nobody read pauses.
+SPECIFY_MAX_PENDING="${MINSPEC_DRAIN_SPECIFY_MAX_PENDING:-40}"
+
+# _pending_specs <varname> — count the specs on the tree the drain runs from whose
+# frontmatter `status:` is `new` or `specifying`, INTO a named variable. The tree is the
+# one the delegated-approval stage reads (the parent of the scripts the cycle runs, so
+# origin/main's verified run dir when self-refresh found it current). Only the
+# frontmatter counts: a body line quoting `status: specifying` is not a status. Returns 1
+# when the tree has no specs/ folder or the read fails: an absent folder is a count
+# nobody read, not zero (invariant 2).
+_pending_specs() {
+  local -n _pend_out="$1"
+  local root _pend_val
+  root="$(cd "$(dirname "$REMEDIATE")/.." 2>/dev/null && pwd)" || return 1
+  [[ -d "${root}/specs" ]] || return 1
+  # specs/<project>/SPEC-NNN-<slug>/requirements.md, the layout this repo's specs use.
+  # No pipeline: an empty folder is a count of 0, and awk's own exit is
+  # the only status, so a failed read cannot pass as a number.
+  local -a _pend_files=()
+  local _pend_ng=0
+  shopt -q nullglob && _pend_ng=1
+  shopt -s nullglob
+  _pend_files=("${root}"/specs/*/*/requirements.md)
+  (( _pend_ng )) || shopt -u nullglob
+  if (( ${#_pend_files[@]} == 0 )); then
+    _pend_out=0
+    return 0
+  fi
+  _pend_val=$(awk '
+      FNR == 1 { fm = ($0 ~ /^---[[:space:]]*$/); next }
+      fm && /^---[[:space:]]*$/ { fm = 0; nextfile }
+      fm && /^status:[[:space:]]*["'\'']?(new|specifying)["'\'']?[[:space:]]*(#.*)?$/ { n++; fm = 0; nextfile }
+      END { print n + 0 }' "${_pend_files[@]}") || return 1
+  [[ "$_pend_val" =~ ^[0-9]+$ ]] || return 1
+  _pend_out="$_pend_val"
 }
 
 # _specify_only <agent-ready numbers> <agent-ready-specify numbers>: the issues that are
@@ -1550,6 +2059,52 @@ _specify_only() {
   for n in $1; do build[$n]=1; done
   for n in $2; do [[ -n "${build[$n]:-}" ]] || printf '%s\n' "$n"; done
   return 0
+}
+
+# _pr_claims <varname> — INTO a named variable, one "<pr> <issue>" line per open pull
+# request that closes an issue (#3241): GitHub's closingIssuesReferences, plus a
+# `Closes/Fixes/Resolves #N` in the body, because a runner job opens its PR without a
+# drain lease and the closing reference is not always parsed yet. Returns gh's status: a
+# failed read is not "no PR claims anything", and the caller holds dispatch on it
+# (invariant 2).
+_pr_claims() {
+  local -n _claims_out="$1"
+  local _claims_val _claims_rc=0
+  local _claims_jq='
+      .[] | .number as $pr
+      | ([(.closingIssuesReferences // [])[].number]
+         + [(.body // "") | match("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s*:?\\s+#([0-9]+)"; "g").captures[0].string | tonumber])
+      | unique[] | "\($pr) \(.)"'
+  _claims_val=$(gh pr list --repo "$REPO" --state open --limit 1000 \
+    --json number,body,closingIssuesReferences --jq "$_claims_jq") || _claims_rc=$?
+  if (( _claims_rc != 0 )) && gh_bot_reauth_read; then   # dead credential: re-mint in this shell, retry once (#3400)
+    echo "[drain] the open-PR claims read failed and the credential was stale — re-minted, retrying once." >&2
+    _claims_rc=0
+    _claims_val=$(gh pr list --repo "$REPO" --state open --limit 1000 \
+      --json number,body,closingIssuesReferences --jq "$_claims_jq") || _claims_rc=$?
+  fi
+  if (( _claims_rc != 0 )); then return "$_claims_rc"; fi
+  _claims_out="$_claims_val"
+}
+
+# _drop_pr_claimed <varname> <claims> <issues> — INTO a named variable, <issues> (one per
+# line) without those an open pull request already closes (#3241: #3238 was dispatched
+# while #3240 `Closes #3238` was open). Names the pull request in one line per issue.
+_drop_pr_claimed() {
+  local -n _drop_out="$1"
+  local _drop_claims="$2" _drop_kept="" _drop_n _drop_pr
+  local -A _drop_by=()
+  while read -r _drop_pr _drop_n; do
+    [[ -n "$_drop_n" && -z "${_drop_by[$_drop_n]:-}" ]] && _drop_by[$_drop_n]="$_drop_pr"
+  done <<<"$_drop_claims"
+  for _drop_n in $3; do
+    if [[ -n "${_drop_by[$_drop_n]:-}" ]]; then
+      echo "[drain] skipping #${_drop_n}: open pull request #${_drop_by[$_drop_n]} already closes it (#3241)." >&2
+    else
+      _drop_kept+="${_drop_n}"$'\n'
+    fi
+  done
+  _drop_out="${_drop_kept%$'\n'}"
 }
 
 # _read_queue <varname> <label> — read one label's queue INTO a named variable, and
@@ -1649,6 +2204,10 @@ run_cycle() {
   # Step 0c: delegated merges of held spec PRs (#2981, DR-108). Beside 0b and for the
   # same reason: it must run every cycle, including the empty-queue ones.
   arm_delegated_spec_merges
+
+  # Step 0d: close the implement phase of finished specs (#1595). Every cycle, beside 0b,
+  # for the same reason: the lane it moves must not wait on a non-empty queue.
+  close_finished_specs
 
   # Step 1: triage inbox issues → labels T1/T2 as agent-ready
   # A failed inbox query must not read as an empty inbox (#1855). Triage is not
@@ -1759,6 +2318,21 @@ run_cycle() {
           echo "[drain] spec-writing is PAUSED: ${held} drain pull request(s) held for a human (needs-human-review on agent/issue-*), at or above the cap ${SPECIFY_MAX_HELD} (MINSPEC_DRAIN_SPECIFY_MAX_HELD, #2939): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
         fi
       fi
+      # The pile already on main (#3344, see SPECIFY_MAX_PENDING). Asked only while the
+      # held cap still leaves spec-writing on, so a cycle prints one PAUSED line at most.
+      if (( specify_on )); then
+        local pending=0
+        if [[ ! "$SPECIFY_MAX_PENDING" =~ ^[0-9]+$ ]]; then
+          specify_on=0
+          echo "[drain] spec-writing is PAUSED: MINSPEC_DRAIN_SPECIFY_MAX_PENDING=$(printf '%q' "$SPECIFY_MAX_PENDING") is not a whole number, so it is read as 0, the setting that spends nothing: ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+        elif ! _pending_specs pending; then
+          specify_on=0
+          echo "[drain] spec-writing is PAUSED: the unapproved specs on main could not be counted (no specs/ folder or an unreadable one under $(printf '%q' "$(dirname "$REMEDIATE")/..")), and a count nobody read is not zero (#3344): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+        elif (( 10#$pending >= 10#$SPECIFY_MAX_PENDING )); then
+          specify_on=0
+          echo "[drain] spec-writing is PAUSED: ${pending} spec(s) on main waiting for Clarify or sign-off (status new or specifying), at or above the cap ${SPECIFY_MAX_PENDING} (MINSPEC_DRAIN_SPECIFY_MAX_PENDING, #3344): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+        fi
+      fi
     fi
   fi
 
@@ -1795,8 +2369,28 @@ run_cycle() {
     fi
   fi
 
-  # Dispatch ORDER (#2196): what each issue unblocks, then the spec it serves, then
-  # tier, then number — scripts/rank-issues.ts, run from the same scripts dir as TRIAGE
+  # Open pull request already closes the issue (#3241): never build it twice. A failed read
+  # holds ALL dispatch this cycle (fail closed, invariant 2); the PR sweep still runs.
+  local pr_claims="" pr_claims_rc=0
+  _pr_claims pr_claims || pr_claims_rc=$?
+  if (( pr_claims_rc != 0 )); then
+    echo "[drain] HOLDING dispatch: the open pull request list could not be read (gh exit ${pr_claims_rc}), so whether one already closes a ready issue is unknown (#3241). Nothing was dispatched this cycle." >&2
+    all_ready=""
+  else
+    _drop_pr_claimed all_ready "$pr_claims" "$all_ready"
+    if [[ -z "$all_ready" ]]; then
+      echo "[drain] nothing to dispatch this cycle: every ready issue is already closed by an open pull request. Going on to pull request remediation."
+    fi
+  fi
+  if [[ -z "$all_ready" ]]; then
+    sweep_open_prs || return $?
+    _sweep_fetch_verdict || return $?
+    echo "[drain] cycle done."
+    return $(( pr_claims_rc != 0 ))
+  fi
+
+  # Dispatch ORDER (#2196): a `pipeline-blocker` label first (prio-rcdd-1030), then what
+  # each issue unblocks, then the spec it serves, then tier, then number — scripts/rank-issues.ts, run from the same scripts dir as TRIAGE
   # (the hard-synced run dir once ensure_fresh_run_dir has verified it). `sort -un`
   # above fixes the SET; ordering is not a gate, so a ranker that fails, or returns
   # anything but exactly that set, is overruled LOUDLY and numeric order stands —
@@ -1923,6 +2517,24 @@ run_cycle() {
     printf '%s%s' "$thrash" "$quota"
   }
 
+  # The verdict "this dispatch died on a dead credential" (#3176) is _dispatch_auth_failed,
+  # keyed on the dispatcher's exit status. It was a grep of the dispatcher's whole output,
+  # and that output carries the build agent's prose (#2233): a build working on any
+  # 401-related issue quotes the text and stopped the drain.
+  # `gh_bot_warm_read` re-mints on token AGE, which is a guess: the broker keeps serving
+  # one cached token machine-wide after it dies (#2114), and a host suspend moves the
+  # wall clock under it. A dispatch whose own output says 401 is the OBSERVATION. The
+  # 2026-10-27 cycle never acted on it and ran the whole queue, one `HTTP 401: Bad
+  # credentials` per issue, spending no quota and opening no PR.
+
+  # announce_auth_stop <issue> <why>: the loud end of a cycle that cannot authenticate
+  # (constitution invariant 2). The caller returns 1, so run_loop counts it toward
+  # MAX_CONSEC_FAIL rather than treating the cycle as done.
+  announce_auth_stop() {
+    echo "[drain] AUTH FAILURE: dispatch of #$1 answered HTTP 401 Bad credentials and $2 — stopping this cycle instead of walking the rest of the queue on a dead token (#3176)." >&2
+    echo "[drain]              The ready issues stay queued. Check the token broker (scripts/cos-runner-gh.sh --check)." >&2
+  }
+
   announce_halt() {
     echo "[drain] 🛑 HALTING dispatch for the rest of this cycle: the last ${ac_halt} dispatches to COMPLETE all crashed with '${ac_sig}'." >&2
     echo "[drain]     The dispatched build agent is starting near the context limit — refusing to burn more quota on a broken path (#912)." >&2
@@ -2044,6 +2656,8 @@ run_cycle() {
       # The child inherits GH_TOKEN from here, so refreshing here fixes it for the child
       # too.
       gh_bot_warm_read
+      local auth_retried=0 auth_dead=0
+      while :; do
       echo "[drain] dispatching #$n..."
       cap=$(mktemp)
       # The question goes to the dispatcher as a prefix on its own command, so it is
@@ -2052,12 +2666,34 @@ run_cycle() {
       # pipeline's, which under `pipefail` is whichever stage failed last (#2641).
       if MINSPEC_DISPATCH_OUTCOME_STATUS=1 "$DISPATCH" "$n" 2>&1 | tee "$cap"; then pst=("${PIPESTATUS[@]}"); else pst=("${PIPESTATUS[@]}"); fi
       drc="$(_dispatch_own_status "${pst[@]}")"
-      out=$(cat "$cap" 2>/dev/null || true); rm -f "$cap"
+      out=$(cat "$cap" 2>/dev/null || true); rm -f "$cap"  # swallow-ok: the capture only feeds text signals; the dispatcher's exit status is the failure verdict, so an unreadable capture at worst skips the 401 re-mint and the all-failed gate (#2140) still fires
       # From here `drc` is a FAILURE's status and nothing else: "started" and "refused"
       # are non-zero answers, not failures, and classify_dispatch warns on any non-zero.
       outcome="$(_dispatch_outcome "$drc")"
+      auth_dead=0; _dispatch_auth_failed "$drc" && auth_dead=1
       [[ "$outcome" == "failed" ]] || drc=0
       verdict="$(classify_dispatch "$n" "$drc" "$out")"
+      # A 401 is acted on, not just counted (#3176): re-mint once, in this shell, and
+      # retry this issue once. Still 401, or no different credential to be had: stop.
+      if (( auth_dead )); then
+        if (( ! auth_retried )) && gh_bot_reauth_read; then
+          echo "[drain] dispatch of #$n answered HTTP 401 — credential re-minted, retrying this issue once (#3176)." >&2
+          # The gate is asked before EVERY launch, the retry included (#2573). Held: the
+          # failed attempt is still counted, and the cycle pauses like any other hold.
+          if ! admit_next_dispatch; then
+            book_dispatch "$n" "$outcome" "${verdict:0:1}"
+            return 42
+          fi
+          auth_retried=1
+          continue
+        fi
+        book_dispatch "$n" "$outcome" "${verdict:0:1}"
+        if (( auth_retried )); then announce_auth_stop "$n" "the retry on a freshly minted credential failed too"
+        else announce_auth_stop "$n" "no different credential could be minted"; fi
+        return 1
+      fi
+      break
+      done
       book_dispatch "$n" "$outcome" "${verdict:0:1}"
       [[ "${verdict:1:1}" == "1" ]] && saw_quota=1
       if (( saw_quota )); then
@@ -2071,9 +2707,16 @@ run_cycle() {
     # ── Parallel path (#1208) — launch up to N, reap as they finish.
     # Each job tees to its own capture file AND to a per-issue prefixed stream, so
     # concurrent builds stay live AND readable instead of interleaving anonymously.
-    local -A pid_issue=() pid_cap=()
+    local -A pid_issue=() pid_cap=() pid_gen=()
     local -a queue=($all_ready)
     local qi=0 stop_launching=0 p rc n out
+    # #3176: issues already retried after an observed 401, how many times this cycle has
+    # re-minted (the credential GENERATION every launch records in pid_gen), and whether a
+    # second 401 (or an impossible re-mint) ended the cycle. The generation is what tells a
+    # 401 from a job launched on the token the re-mint replaced (stale: retry once) from a
+    # 401 from a job launched on the fresh one (the fresh token is dead too: stop).
+    local -A auth_retried=()
+    local mint_gen=0 auth_stop=0 auth_dead=0
 
     launch_next() {
       # Same per-item refresh as the serial path. This runs in the PARENT — only the
@@ -2094,7 +2737,7 @@ run_cycle() {
         exit "$(_dispatch_own_status "${PIPESTATUS[@]}")"
       ) &
       local pid=$!
-      pid_issue[$pid]="$n"; pid_cap[$pid]="$cap"
+      pid_issue[$pid]="$n"; pid_cap[$pid]="$cap"; pid_gen[$pid]="$mint_gen"
     }
 
     while (( qi < ${#queue[@]} || ${#pid_issue[@]} > 0 )); do
@@ -2120,13 +2763,55 @@ run_cycle() {
       wait -n -p p || rc=$?
       [[ -z "$p" ]] && continue
       n="${pid_issue[$p]:-}"; [[ -z "$n" ]] && continue
-      out=$(cat "${pid_cap[$p]}" 2>/dev/null || true); rm -f "${pid_cap[$p]}"
-      unset 'pid_issue[$p]' 'pid_cap[$p]'
+      local job_gen="${pid_gen[$p]:-0}"
+      out=$(cat "${pid_cap[$p]}" 2>/dev/null || true); rm -f "${pid_cap[$p]}"  # swallow-ok: the capture only feeds text signals; the dispatcher's exit status is the failure verdict, so an unreadable capture at worst skips the 401 re-mint and the all-failed gate (#2140) still fires
+      unset 'pid_issue[$p]' 'pid_cap[$p]' 'pid_gen[$p]'
 
       # As on the serial path: past this point `rc` is a failure's status and nothing else.
       outcome="$(_dispatch_outcome "$rc")"
+      auth_dead=0; _dispatch_auth_failed "$rc" && auth_dead=1
       [[ "$outcome" == "failed" ]] || rc=0
       verdict="$(classify_dispatch "$n" "$rc" "$out")"
+      if (( auth_dead )); then
+        # Re-mint once per cycle and retry each issue once. Which 401 may be retried is
+        # decided by the generation the job was LAUNCHED under, not by whether a re-mint
+        # has happened (review of #3185): a job launched before the latest re-mint ran on
+        # the replaced token, so its 401 says nothing about the fresh one and it is
+        # requeued; a job launched after it ran on the fresh token, so its 401 means that
+        # token is dead too and the cycle stops, exactly as the serial path does. The
+        # first 401 of the cycle (generation 0, nothing re-minted yet) is the one that
+        # asks for the re-mint. Anything else stops launching, drains what is in flight,
+        # and fails the cycle.
+        # Never once launching has stopped (the cycle failed on a 401, or the quota gate or
+        # the breaker held it): a requeued issue would never be launched and would vanish
+        # from every count. It is booked as the failure it is, below.
+        local auth_requeue=0
+        if (( ! stop_launching )) && [[ -z "${auth_retried[$n]:-}" ]]; then
+          if (( job_gen < mint_gen )); then
+            auth_requeue=1
+          elif (( mint_gen == 0 )) && gh_bot_reauth_read; then
+            mint_gen=$(( mint_gen + 1 )); auth_requeue=1
+          fi
+        fi
+        if (( auth_requeue )); then
+          auth_retried[$n]=1
+          echo "[drain] dispatch of #$n answered HTTP 401 — credential re-minted, queuing this issue for one retry (#3176)." >&2
+          queue+=("$n")
+          continue
+        fi
+        book_dispatch "$n" "$outcome" "${verdict:0:1}"
+        if (( auth_stop )); then
+          echo "[drain] dispatch of #$n answered HTTP 401 after the cycle stopped — counted as failed, not retried (#3176)." >&2
+        else
+          local was_stopped=$stop_launching
+          auth_stop=1; stop_launching=1
+          if [[ -n "${auth_retried[$n]:-}" ]]; then announce_auth_stop "$n" "the retry on a freshly minted credential failed too"
+          elif (( was_stopped )); then announce_auth_stop "$n" "launching had already stopped, so it was not retried"
+          elif (( mint_gen > 0 )); then announce_auth_stop "$n" "it was launched on the freshly minted credential, which failed too"
+          else announce_auth_stop "$n" "no different credential could be minted"; fi
+        fi
+        continue
+      fi
       book_dispatch "$n" "$outcome" "${verdict:0:1}"
       if [[ "${verdict:1:1}" == "1" ]]; then
         saw_quota=1
@@ -2145,6 +2830,7 @@ run_cycle() {
       fi
     done
 
+    (( auth_stop )) && return 1
     (( saw_quota )) && return 42
   fi
 
@@ -2323,12 +3009,14 @@ _quota_read() {
 #
 # THIS FUNCTION MUST NEVER WRITE TO STDOUT. quota_gate's stdout IS the verdict
 # channel its callers capture (`quota_verdict=$(quota_gate)`), so a stray line here
-# would be parsed as an admission verdict. The producer's stdout goes to /dev/null
-# and every diagnostic to stderr.
+# would be parsed as an admission verdict. The producer's stdout and stderr are
+# captured into a variable (never printed raw), and every diagnostic goes to stderr.
 #
-# It cannot admit anything. On any failure the reading is left exactly as it was and
-# the stale / no-reading arms below still fail closed — this only ever makes a
-# reading fresher, never a verdict weaker.
+# It cannot admit anything. A failed refresh does not make the verdict weaker: the
+# producer is not guaranteed to leave the reading as it found it (it may change or
+# remove it, or leave it unreadable), and whatever is left is judged by the stale /
+# no-reading arms below, which still fail closed. This only ever makes a reading
+# fresher, never a verdict weaker.
 #
 # `_quota_try_refresh force` skips the age check, and ONLY the age check (#2233). A
 # usage-limit text signal is judged against the meter, and a reading taken BEFORE the
@@ -2355,9 +3043,48 @@ _quota_try_refresh() {
   vals=$(_quota_read 2>/dev/null) || return 0
   read -r _ _ o _ wr <<<"$vals"
   [[ "${1:-}" == "force" ]] || (( now - o > QUOTA_REFRESH_MIN_AGE )) || (( wr > 0 && wr <= now )) || return 0
-  if ! timeout "$QUOTA_REFRESH_TIMEOUT" bash -c "$QUOTA_REFRESH_CMD" >/dev/null 2>&1; then
-    echo "[drain] quota refresh failed (\`$QUOTA_REFRESH_CMD\`) — the reading stands as-is and the gate still fails closed on it." >&2
+  # Judge the refresh by the outcome it exists for, a fresher reading (#2699). The
+  # producer's exit code is not that witness: cos.py reports every failure with exit 0
+  # and a reason on stdout, so an exit-code-only check was unreachable for them all.
+  # The producer's output is captured here, never printed to stdout (verdict channel),
+  # and only a bounded single-line excerpt reaches the log, on stderr.
+  local out rc=0 after="" vals2 o2 why
+  out=$(timeout "$QUOTA_REFRESH_TIMEOUT" bash -c "$QUOTA_REFRESH_CMD" 2>&1 </dev/null) || rc=$?
+  if vals2=$(_quota_read 2>/dev/null); then
+    read -r _ _ o2 _ _ <<<"$vals2"
+    [[ "$o2" =~ ^[0-9]+$ ]] && after="$o2"
   fi
+  # An absent or unreadable reading afterwards is a failed refresh, never a success.
+  if [[ -n "$after" ]] && (( after > o )); then
+    # Moved is not the same as fresh: a reading still past the staleness limit leaves the
+    # gate deferring, so say so. Log only; the decision is the gate's, unchanged.
+    (( $(date +%s) - after > QUOTA_STALE_SEC )) || return 0
+    why="reading moved but is still older than the staleness limit (${QUOTA_STALE_SEC}s)"
+  elif (( rc == 124 )); then
+    why="timed out after ${QUOTA_REFRESH_TIMEOUT}s"
+  elif (( rc != 0 )); then
+    why="exit $rc"
+  elif [[ -z "$after" ]]; then
+    why="reading absent or unreadable afterwards"
+  else
+    why="exit 0 but the reading did not move"
+  fi
+  # The producer's LAST non-blank line, not its first: a traceback ends with the exception
+  # line, which is the part that says what failed. Then one line, at most 200 characters.
+  out=$(printf '%s\n' "$out" | awk 'NF { last = $0 } END { printf "%s", last }' | tr -s '[:space:][:cntrl:]' ' ' | cut -c1-200)
+  # Trim the edges a squeezed run of whitespace leaves, so an empty excerpt stays empty
+  # (the producer-said clause keys on non-empty) and none ends with a stray space.
+  out="${out# }"; out="${out% }"
+  # Say only what is true of the reading AFTER the attempt; the decision stays the gate's.
+  local tail
+  if [[ -z "$after" ]]; then
+    tail="no reading is left for the gate to use"
+  elif (( $(date +%s) - after > QUOTA_STALE_SEC )); then
+    tail="the reading is past the staleness limit, so the gate fails closed on it"
+  else
+    tail="the reading is still within the staleness limit, so the gate judges it as it stands"
+  fi
+  echo "[drain] quota refresh failed (\`$QUOTA_REFRESH_CMD\`): $why${out:+; producer said: $out} — $tail." >&2
 }
 
 # ── The cap in force (#2514) ───────────────────────────────────────────────────
@@ -2402,7 +3129,7 @@ _quota_cap_config_problem() {
 }
 
 # _quota_cap <5h|7d> <seconds to that window's reset>: the cap in force for one window.
-# Sets QCAP_TENTHS (tenths of a percent) and QCAP_MODE (fixed|ramped). Prints nothing
+# Sets QCAP_TENTHS (tenths of a percent) and QCAP_MODE (as above it). Prints nothing
 # and forks nothing. Only call it once _quota_cap_config_problem has found no problem:
 # it does arithmetic on the knobs.
 #
@@ -2420,7 +3147,108 @@ _quota_cap_config_problem() {
 # true, where a cap of 70.0001 shown as 70.0 and admitting 70% would not.
 #
 # `10#` because a knob may be written 060, which bash would otherwise read as octal.
+#
+# BOOSTED (in72). While a boost is loaded (_quota_boost_load) a RAMPED cap is raised to
+# the boost's figure for that window when the boost is higher; QCAP_MODE is then
+# `boosted` and QCAP_BASE_TENTHS keeps what the ramp alone gives, for the log. A raise
+# leaves the cap non-decreasing toward the reset, and a usage held under a boost is at or
+# above the boost's figure, where the answer is the ramp's own. A fixed cap is never moved:
+# whoever fixed it said so.
+#
+# CEILING (in81). While the file's ceiling_7d is loaded, a ramped or boosted weekly cap
+# above it comes down to it; QCAP_MODE is then `ceiling` and QCAP_UNCEILED_TENTHS keeps what
+# it came down from, for the log. This answers for one moment and assumes the file's `until`
+# has not passed; the cap across time is NOT monotonic with a ceiling in force, because it
+# jumps back up to the ramp at `until`. _quota_admit_wait is what accounts for that.
 _quota_cap() {
+  local boost="$QBOOST_5H"
+  [[ "$1" == "7d" ]] && boost="$QBOOST_7D"
+  _quota_cap_base "$1" "$2"
+  QCAP_BASE_TENTHS="$QCAP_TENTHS"
+  if [[ -n "$boost" && "$QCAP_MODE" == "ramped" ]] && (( boost * 10 > QCAP_TENTHS )); then
+    QCAP_TENTHS=$(( boost * 10 )); QCAP_MODE="boosted"
+  fi
+  QCAP_UNCEILED_TENTHS="$QCAP_TENTHS"
+  if [[ "$1" == "7d" && -n "$QBOOST_CEIL_7D" && "$QCAP_MODE" != "fixed" ]] && (( QBOOST_CEIL_7D * 10 < QCAP_TENTHS )); then
+    QCAP_TENTHS=$(( QBOOST_CEIL_7D * 10 )); QCAP_MODE="ceiling"
+  fi
+  return 0
+}
+
+# _quota_boost_load: read QUOTA_BOOST_FILE into QBOOST_5H / QBOOST_7D / QBOOST_CEIL_7D (whole
+# percents, or empty when that key is not in force), QBOOST_UNTIL (its ISO end), QBOOST_LEFT
+# (seconds to that end, as of this load) and QBOOST_NOTE (why a file that exists is not in
+# force, empty otherwise). Call it once per judgment, before any _quota_cap: it forks
+# `date`, which _quota_cap must not.
+#
+# EVERY FAULT MEANS THE NORMAL CAPS. A boost raises a cap, so the cautious answer to a
+# boost nobody can read is no boost, never a guess at one. That is said, not swallowed
+# (invariant 2): QBOOST_NOTE reaches stderr here and the end of the --quota-cap line.
+# The end date is mandatory and bounded, so a boost can never become a raise that
+# somebody has to remember to take away.
+#
+# A ceiling restricts where a boost raises, and it takes the same rule on purpose: one
+# reading of the file, not one per key, so a file half understood never half applies. An
+# empty `ceiling_7d=` is a fault rather than an unset key: whoever wrote the key meant to
+# hold something back, and treating it as absent would apply the raise beside it alone.
+_quota_boost_load() {
+  QBOOST_5H=""; QBOOST_7D=""; QBOOST_CEIL_7D=""; QBOOST_UNTIL=""; QBOOST_LEFT=0; QBOOST_NOTE=""
+  [[ -e "$QUOTA_BOOST_FILE" || -L "$QUOTA_BOOST_FILE" ]] || return 0
+  local line key val until="" c5="" c7="" ceil="" ceil_set=0 end now bad=""
+  if [[ ! -f "$QUOTA_BOOST_FILE" || ! -r "$QUOTA_BOOST_FILE" ]]; then
+    bad="the file cannot be read"
+  else
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      line="${line%%#*}"; line="${line//[[:space:]]/}"
+      [[ -z "$line" ]] && continue
+      if [[ "$line" != *=* ]]; then bad=$(printf 'line %q is not key=value' "$line"); break; fi
+      key="${line%%=*}"; val="${line#*=}"
+      case "$key" in
+        until) until="$val" ;;
+        cap_5h) c5="$val" ;;
+        cap_7d) c7="$val" ;;
+        ceiling_7d) ceil="$val"; ceil_set=1 ;;
+        *) bad=$(printf 'unknown key %q' "$key"); break ;;
+      esac
+    done <"$QUOTA_BOOST_FILE" || bad="the file cannot be read"
+  fi
+  if [[ -z "$bad" ]]; then
+    if [[ -z "$c5" && -z "$c7" ]] && (( ! ceil_set )); then
+      bad="it sets neither cap_5h nor cap_7d nor ceiling_7d"
+    elif [[ -n "$c5" ]] && { [[ ! "$c5" =~ ^[0-9]{1,3}$ ]] || (( 10#$c5 > 100 )); }; then
+      bad=$(printf 'cap_5h=%q is not a whole percent from 0 to 100' "$c5")
+    elif [[ -n "$c7" ]] && { [[ ! "$c7" =~ ^[0-9]{1,3}$ ]] || (( 10#$c7 > 100 )); }; then
+      bad=$(printf 'cap_7d=%q is not a whole percent from 0 to 100' "$c7")
+    elif (( ceil_set )) && { [[ ! "$ceil" =~ ^[0-9]{1,3}$ ]] || (( 10#$ceil > 100 )); }; then
+      bad=$(printf 'ceiling_7d=%q is not a whole percent from 0 to 100' "$ceil")
+    elif [[ ! "$until" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] \
+        || ! end=$(date -u -d "$until" +%s 2>/dev/null) || [[ ! "$end" =~ ^[0-9]+$ ]]; then
+      bad=$(printf 'until=%q is not a UTC time like 2026-10-29T17:00:00Z' "$until")
+    fi
+  fi
+  if [[ -n "$bad" ]]; then
+    QBOOST_NOTE="quota boost ${QUOTA_BOOST_FILE} IGNORED: ${bad}, so the normal caps apply"
+    echo "[drain] ${QBOOST_NOTE}" >&2
+    return 0
+  fi
+  now=$(date +%s)
+  # Over: the ramp is back on its own, which is the whole point. Nothing to say.
+  (( now >= end )) && return 0
+  if (( end - now > QUOTA_BOOST_MAX_AHEAD )); then
+    QBOOST_NOTE="quota boost ${QUOTA_BOOST_FILE} IGNORED: until=${until} is more than $(( QUOTA_BOOST_MAX_AHEAD / 86400 )) days off, which is not a time-bounded boost, so the normal caps apply"
+    echo "[drain] ${QBOOST_NOTE}" >&2
+    return 0
+  fi
+  [[ -n "$c5" ]] && QBOOST_5H=$(( 10#$c5 ))
+  [[ -n "$c7" ]] && QBOOST_7D=$(( 10#$c7 ))
+  (( ceil_set )) && QBOOST_CEIL_7D=$(( 10#$ceil ))
+  QBOOST_UNTIL="$until"
+  QBOOST_LEFT=$(( end - now ))
+  return 0
+}
+
+# _quota_cap_base: _quota_cap without the boost, as described above it.
+_quota_cap_base() {
   local win="$1" left="$2" fixed floor rate unit t
   if [[ "$win" == "7d" ]]; then
     fixed="$QUOTA_ADMIT_PCT_7D"; floor="$QUOTA_RAMP_FLOOR_7D"; rate="$QUOTA_RAMP_PER_DAY_7D"; unit=86400
@@ -2464,14 +3292,45 @@ _quota_defers() {
 # that window's cap would admit that usage, were usage to stand still. Sets QWAIT_SECS,
 # and QWAIT_WHY to `ramp` (the ramp gets there before the reset) or `reset` (nothing
 # admits before the reset: a fixed cap does not move, and no ramp admits a spent
-# window). Ask only about a usage the cap is holding now.
+# window), or `ceiling` (the boost file's ceiling_7d is what holds it, and the moment it
+# ends is the first that admits). Ask only about a usage the cap is holding now.
+#
+# A CEILING BREAKS THE HALVING (in81), because from its `until` on the cap jumps from the
+# ceiling back up to the ramp alone. For a usage below the ceiling that changes nothing: the
+# ceiling can never hold it, so what is holding it rises steadily, and the halving below is
+# right. A usage at or above the ceiling is not admitted by anything before `until`, however
+# high the ramp is, so the halving would either call it the reset or name a ramp time that
+# will not admit. Its answer is the later of `until` and the moment the ramp ALONE (the boost
+# ends at `until` too) passes that usage, and the reset if either lies at or past it.
+# A fixed cap ignores the file, so it takes the ordinary path, which answers the reset.
+_quota_admit_wait() {
+  local win="$1" used="$2" left="$3" until_left
+  if [[ "$win" == "7d" && -n "$QBOOST_CEIL_7D" ]] && (( used >= QBOOST_CEIL_7D )); then
+    _quota_cap 7d "$left"
+    if [[ "$QCAP_MODE" != "fixed" ]]; then
+      until_left="$QBOOST_LEFT"
+      # Dynamic scope: _quota_cap, called below this, sees neither key.
+      local QBOOST_7D="" QBOOST_CEIL_7D=""
+      _quota_admit_wait_monotonic "$win" "$used" "$left"
+      if [[ "$QWAIT_WHY" == "reset" ]] || (( until_left >= left )); then
+        QWAIT_SECS="$left"; QWAIT_WHY="reset"
+      elif (( until_left >= QWAIT_SECS )); then
+        QWAIT_SECS="$until_left"; QWAIT_WHY="ceiling"
+      fi
+      return 0
+    fi
+  fi
+  _quota_admit_wait_monotonic "$win" "$used" "$left"
+}
+
+# _quota_admit_wait_monotonic: _quota_admit_wait for a cap that only rises toward the reset.
 #
 # It ASKS _quota_cap about later moments instead of inverting the ramp with a formula
 # of its own. Two formulas for one rule would have to be kept in step by hand, and the
 # one that drifted would be this one, the one nobody reads. The cap never falls as the
 # reset nears, so the first moment it admits is found by halving: about twenty asks for
 # a week of seconds, none of which forks.
-_quota_admit_wait() {
+_quota_admit_wait_monotonic() {
   local win="$1" used="$2" left="$3" lo=1 hi="$3" mid
   QWAIT_SECS="$left"; QWAIT_WHY="reset"
   # Still held with one second to go: only the reset itself will admit this.
@@ -2514,6 +3373,14 @@ _quota_cap_text() {
   fi
   if [[ "$QCAP_MODE" == "fixed" ]]; then
     printf '%d%% fixed by %s' "$(( QCAP_TENTHS / 10 ))" "$var"
+  elif [[ "$QCAP_MODE" == "boosted" ]]; then
+    printf '%d.%d%% boosted until %s by %s, the ramp alone %d.%d%%' \
+      "$(( QCAP_TENTHS / 10 ))" "$(( QCAP_TENTHS % 10 ))" "$QBOOST_UNTIL" "$QUOTA_BOOST_FILE" \
+      "$(( QCAP_BASE_TENTHS / 10 ))" "$(( QCAP_BASE_TENTHS % 10 ))"
+  elif [[ "$QCAP_MODE" == "ceiling" ]]; then
+    printf '%d.%d%% ceiling until %s by %s, the ramp and boost without it %d.%d%%' \
+      "$(( QCAP_TENTHS / 10 ))" "$(( QCAP_TENTHS % 10 ))" "$QBOOST_UNTIL" "$QUOTA_BOOST_FILE" \
+      "$(( QCAP_UNCEILED_TENTHS / 10 ))" "$(( QCAP_UNCEILED_TENTHS % 10 ))"
   elif (( left <= 0 )); then
     printf '%d.%d%% ramped: no reset time in the reading, so the floor' "$(( QCAP_TENTHS / 10 ))" "$(( QCAP_TENTHS % 10 ))"
   else
@@ -2545,6 +3412,7 @@ quota_gate() {
     return 42
   fi
   _quota_try_refresh
+  _quota_boost_load
   now=$(date +%s)
   if ! vals=$(_quota_read); then
     local bc="$(_quota_bootstrap_count)"
@@ -2578,6 +3446,7 @@ quota_gate() {
       if (( left > 0 )); then
         _quota_admit_wait 7d "$wp" "$left"
         [[ "$QWAIT_WHY" == "ramp" ]] && next="; at this usage the ramp next admits in $(_quota_span "$QWAIT_SECS")"
+        [[ "$QWAIT_WHY" == "ceiling" ]] && next="; at this usage the ceiling_7d holds until ${QBOOST_UNTIL}, when the ramp admits, in $(_quota_span "$QWAIT_SECS")"
         echo "defer:${QWAIT_SECS} (7d window ${wp}% used — the WEEKLY ceiling, resets in $(( (left + 3599) / 3600 )) h; cap ${cap7}${next})"
       else
         # No usable weekly reset: this is the "no deadline" case _quota_sleep_plan
@@ -2596,6 +3465,9 @@ quota_gate() {
     # restrict the drain, 0 to pause it, and an admit that quietly skipped it would
     # look exactly like an admit that honoured it (#2586).
     cap7="; this reading reports NO weekly window, so the weekly cap of $(( 10#$QUOTA_ADMIT_PCT_7D ))% fixed by MINSPEC_QUOTA_ADMIT_PCT_7D was not applied"
+  elif [[ -n "$QBOOST_CEIL_7D" ]]; then
+    # The same, for a ceiling: it restricts the drain just as a fixed cap does.
+    cap7="; this reading reports NO weekly window, so the ceiling_7d of ${QBOOST_CEIL_7D}% from ${QUOTA_BOOST_FILE} was not applied"
   fi
   if (( r <= now )); then
     QG_USED5="reset"
@@ -2621,6 +3493,10 @@ quota_gate() {
 #   open 7d 89% vs 92.4% ramped; 5h 29% vs 77.1% ramped | <quota_gate's own verdict>
 #   closed 7d 95% vs 92.4% ramped; 5h not judged | defer:...
 #   closed unknown | defer:stale (...)
+#
+# The word after each cap is QCAP_MODE, so `boosted` or `ceiling` as well (in72, in81).
+# Readers branch on the first word only: both copies of drain_cap (cos-runner-loop.sh and
+# cos.py) test `open ` and `closed ` and carry the rest as text.
 #
 # Exit 0 open, 42 closed, exactly as quota_gate. It IS quota_gate, so there is one cap
 # and one comparison: anything outside this script that asks "may work start?" (the
@@ -2658,13 +3534,16 @@ quota_cap_line() {
     fi
     w7="${w7}; ${w5}"
   fi
+  # A boost that exists and is not in force is said on the line its reader parses.
+  [[ -n "$QBOOST_NOTE" ]] && verdict="${verdict} | ${QBOOST_NOTE}"
   if (( rc == 0 )); then echo "open ${w7} | ${verdict}"; return 0; fi
   echo "closed ${w7} | ${verdict}"; return 42
 }
 
 # _quota_sleep_plan: how long to wait after a hold, and what set that length. Prints
 # "<secs> <why>": `reset` (to the published reset), `ramp` (to the moment a ramped cap
-# would next admit the usage as read), `fallback` (QUOTA_BACKOFF: the reading offers
+# would next admit the usage as read), `ceiling` (to the moment the boost file's ceiling
+# ends, when the ramp admits it), `fallback` (QUOTA_BACKOFF: the reading offers
 # no usable deadline) or `clamp` (any of those, cut short at QUOTA_SLEEP_MAX). Clamped
 # both ways, so a corrupt epoch can neither spin the loop nor park it for a week.
 #
@@ -2677,6 +3556,7 @@ quota_cap_line() {
 # itself for a fixed cap or a spent window, and never later than the reset.
 _quota_sleep_plan() {
   local vals p r o wp wr now secs="" why="fallback"
+  _quota_boost_load 2>/dev/null   # the gate that held has already said what was wrong
   now=$(date +%s)
   if ! _quota_cap_config_problem >/dev/null && vals=$(_quota_read); then
     read -r p r o wp wr <<<"$vals"
@@ -2851,6 +3731,7 @@ quota_health() {
     echo "inert: the cap cannot be worked out (${why}), so admission control is HOLDING (failing closed) on every reading until that knob is fixed or unset."
     return 0
   fi
+  _quota_boost_load
   now=$(date +%s)
   caps="Caps once a reading exists: 5h $(_quota_cap_config_text 5h); 7d $(_quota_cap_config_text 7d)."
   if ! vals=$(_quota_read); then
@@ -2976,6 +3857,8 @@ quota_backoff_sleep() {
   case "$why" in
     ramp)
       echo "[drain] quota cap holding - sleeping ${secs}s, until the ramped cap would next admit at this usage, not on to the reset." ;;
+    ceiling)
+      echo "[drain] quota ceiling holding - sleeping ${secs}s, until the ceiling_7d in ${QUOTA_BOOST_FILE} ends and the ramp admits at this usage." ;;
     fallback)
       echo "[drain] quota window exhausted — sleeping ${secs}s, the fixed backoff: no deadline could be taken from the reading (it is missing, stale, or carries no usable reset time)." ;;
     clamp)
@@ -3016,6 +3899,22 @@ wait_interval() {
 # unreadable parent — is "not paused", so a drain nobody paused behaves as before.
 drain_paused() { [[ -e "$PAUSE_FILE" ]]; }
 
+# lock_held: exit 0 iff the singleton lock file holds THIS loop's own PID (#2241).
+# BASHPID, not $$: the loop is a backgrounded subshell (see the acquire block below).
+lock_held() { [[ "$(cat "$LOCK" 2>/dev/null || true)" == "$BASHPID" ]]; }  # swallow-ok: an unreadable lock reads as empty, which is "not ours"
+
+# lock_release: remove the lock only if it still names this loop (#2241). The EXIT trap and
+# the SIGTERM handler used to `rm -f "$LOCK"` unconditionally, so a loop that had lost its
+# lock (or never held it) deleted the file a DIFFERENT live loop held, and the next
+# --auto start saw no lock and launched a second concurrent loop.
+lock_release() {
+  if lock_held; then
+    rm -f "$LOCK"
+  else
+    echo "[drain] not releasing $LOCK — it no longer names this loop (pid $BASHPID); leaving the current holder's lock alone."
+  fi
+}
+
 # _drain_on_signal <SIGNAL> <exit-code>: the loop's SIGTERM handler (#1187).
 # Says why it stopped, TERMs the children it started (a dispatch's own EXIT trap then
 # releases its lease), drops the lock, and exits. Idempotent: a second SIGTERM while
@@ -3027,7 +3926,8 @@ _drain_on_signal() {
   kids="$(jobs -p 2>/dev/null || true)"  # swallow-ok: no jobs is the common case
   # shellcheck disable=SC2086
   [[ -z "$kids" ]] || kill -TERM $kids 2>/dev/null || true
-  rm -f "$LOCK"
+  lock_release
+  trap - EXIT  # the lock is already handled; a second lock_release would log a phantom holder
   exit "$2"
 }
 
@@ -3052,14 +3952,39 @@ zai_key_note() {
   )
 }
 
+# self_hash: sha256 of THIS script as it is on disk now; empty when unreadable (#3397).
+# bash parses the loop's functions once at process start, so a merged fix to this file
+# stays inert in a running loop. The freshness check on the run directory covers only the
+# helpers the loop calls, not the loop's own functions. MINSPEC_DRAIN_SELF is a test seam.
+DRAIN_SELF="${MINSPEC_DRAIN_SELF:-${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")}"
+self_hash() {
+  local out
+  if out="$(sha256sum "$DRAIN_SELF" 2>/dev/null)"; then printf '%s\n' "${out%% *}"; fi
+}
+
+# self_drifted <start-hash>: exit 0 iff the script on disk is not the one this process
+# loaded. An unreadable script counts as drifted: fail closed, never silently keep running
+# code that can no longer be compared. An empty <start-hash> means the comparison was
+# never possible (the caller already warned), so it reports not drifted.
+self_drifted() {
+  local start="$1" now
+  [[ -n "$start" ]] || return 1
+  now="$(self_hash)"
+  [[ "$now" != "$start" ]]
+}
+
 # run_loop: the session-scoped continuous scheduler. Repeats run_cycle until the
 # session ends, the wall-clock cap is hit, freshness fails persistently, or too
 # many consecutive cycle errors accrue. Quota signals pause-and-retry; a single
 # cycle error never kills the loop (log + continue).
 run_loop() {
-  local deadline consec=0 rc
+  local deadline consec=0 rc start_hash
   local LOOP_PAUSED=false
   deadline=$(( $(date +%s) + MAX_LIFETIME ))
+  start_hash="$(self_hash)"
+  if [[ -z "$start_hash" ]]; then
+    echo "[drain] WARNING: cannot hash $DRAIN_SELF — a merged fix to this script will NOT end this loop; restart it by hand to pick one up (#3397)." >&2
+  fi
   echo "[drain] continuous loop started (session=$SESSION_PID$(session_anchor_note), interval=${INTERVAL}s, quota_backoff=${QUOTA_BACKOFF}s, max_lifetime=${MAX_LIFETIME}s)."
   echo "[drain] quota gate — $(quota_health)"
   zai_key_note
@@ -3067,8 +3992,20 @@ run_loop() {
     if ! session_alive "$SESSION_PID"; then
       echo "[drain] session $SESSION_PID ended — stopping loop (drain dies with the session)."; break
     fi
+    # Singleton check (#2241): a loop that no longer holds the lock must not keep
+    # dispatching beside the loop that does. Exit rather than race it on one queue.
+    if ! lock_held; then
+      echo "[drain] lock $LOCK no longer names this loop (pid $BASHPID; holder: $(cat "$LOCK" 2>/dev/null || echo none)) — stopping loop so two loops never dispatch from one queue (#2241)."; break
+    fi
     if (( $(date +%s) >= deadline )); then
       echo "[drain] max lifetime (${MAX_LIFETIME}s) reached — stopping loop (backstop cap)."; break
+    fi
+
+    # Code drift (#3397): the functions this loop runs were parsed at start. When the script
+    # on disk differs, end the loop so drain-service.sh starts the new code. Checked between
+    # cycles, so a cycle in flight finishes first.
+    if self_drifted "$start_hash"; then
+      echo "[drain] $DRAIN_SELF changed (or became unreadable) since this loop started — stopping so the supervisor starts the new code (#3397)."; break
     fi
 
     # Pause (#1187): checked HERE, between cycles, so a cycle in flight always finishes.
@@ -3209,6 +4146,11 @@ case "$1" in
     if ! session_alive "$_pid"; then echo "session $_pid ended"; exit 1; fi
     echo "continue"; exit 0
     ;;
+  --self-drift)
+    # Pure seam (#3397): with a hash, exit 0 iff this script differs from it; bare, print the current hash.
+    if [[ -z "${2:-}" ]]; then self_hash; exit 0; fi
+    if self_drifted "$2"; then echo "drifted"; exit 0; else echo "same"; exit 1; fi
+    ;;
   --zai-key-note)
     # Pure seam (zaikey23): the startup line naming the z.ai key's SOURCE. Never its value.
     zai_key_note; exit 0
@@ -3227,6 +4169,11 @@ case "$1" in
     rm -f "$PAUSE_FILE"
     echo "▶️   Drain pause marker removed ($PAUSE_FILE). A running loop resumes within one poll."
     exit 0
+    ;;
+  --unlaned)
+    # Pure seam (#3355): stdin = `gh issue list --json number,labels`; prints numbers with no lane label.
+    unlaned_numbers
+    exit $?
     ;;
   --is-quota)
     # Pure seam: classify combined agent output (stdin) as quota/limit or not.
@@ -3396,8 +4343,16 @@ fi
   # session and spawn a second concurrent loop (double-dispatch / quota abuse).
   # $BASHPID is this subshell's own PID (== $DRAIN_PID), i.e. the long-lived loop
   # the reclaim's `kill -0` must actually probe. (ai-review #676: BLOCKING/HIGH.)
-  echo "$BASHPID" > "$LOCK"
-  trap 'rm -f "$LOCK"' EXIT
+  # Atomic acquire (#2241): noclobber makes the create fail if another loop won the
+  # check-then-write window above, instead of overwriting its lock. The EXIT trap is
+  # installed only AFTER acquiring, and releases only a lock that still names us.
+  set -C
+  if ! echo "$BASHPID" > "$LOCK" 2>/dev/null; then
+    echo "[drain] lost the lock race — $LOCK is held by PID $(cat "$LOCK" 2>/dev/null || echo '?'); exiting without dispatching."
+    exit 0
+  fi
+  set +C
+  trap lock_release EXIT
   trap '_drain_on_signal SIGTERM 143' TERM
 
   if $CONTINUOUS; then
