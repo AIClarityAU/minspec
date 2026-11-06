@@ -26,6 +26,7 @@
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 
@@ -50,6 +51,9 @@ function findScriptsDir(): string {
 }
 
 const scriptPath = path.join(findScriptsDir(), 'dispatch-issue.sh');
+// The gate starts each check through the environment allowlist program (#1203), which
+// the script gets by sourcing this library. The extracted block gets it the same way.
+const launchEnvLib = path.join(findScriptsDir(), 'lib', 'agent-context.sh');
 const content = fs.readFileSync(scriptPath, 'utf-8');
 
 /**
@@ -84,12 +88,13 @@ function runGateStatus(
     'WORKTREE="${WORKTREE:-/tmp}"',
     'ISSUE=999',
     'BUILD_DEADLINE=${BUILD_DEADLINE:-0}',
+    `source ${JSON.stringify(launchEnvLib)}`,
     gateBlock,
     `gate_status ${cmd}`,
   ].join('\n');
 
   const stderrFile = path.join(
-    fs.mkdtempSync(path.join(require('os').tmpdir(), 'gate-bound-')),
+    fs.mkdtempSync(path.join(os.tmpdir(), 'gate-bound-')),
     'err',
   );
   let out = '';

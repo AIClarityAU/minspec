@@ -32,6 +32,7 @@ function makeVsCodeStub(
     enabled: boolean;
     response: string | undefined;
     settings: Record<string, boolean>;
+    memory: Map<string, unknown>;
   }> = {},
 ) {
   const enabled = overrides.enabled ?? true;
@@ -43,14 +44,23 @@ function makeVsCodeStub(
   // so a test can stand in a contributed VS Code setting value.
   const settings = overrides.settings ?? {};
   const getBooleanSetting = vi.fn((key: string) => settings[key] === true);
+  // Stand-in for VS Code's `workspaceState` (#2355): where an answer given in a
+  // folder with no `.minspec/` is remembered, instead of in a file there.
+  const memory = overrides.memory ?? new Map<string, unknown>();
   const stub: BootstrapVsCode = {
     isEnabled: () => enabled,
     showPrompt,
     executeCommand,
     enableAutoClassify,
     getBooleanSetting,
+    preOptInMemory: {
+      get: <T,>(key: string) => memory.get(key) as T | undefined,
+      update: async (key: string, value: unknown) => {
+        memory.set(key, value);
+      },
+    },
   };
-  return { stub, showPrompt, executeCommand, enableAutoClassify, getBooleanSetting };
+  return { stub, showPrompt, executeCommand, enableAutoClassify, getBooleanSetting, memory };
 }
 
 describe('auto-bootstrap', () => {
@@ -195,6 +205,7 @@ describe('auto-bootstrap', () => {
     });
 
     it('T0: returns true when .git/index is newer and no classifications exist', () => {
+      fs.mkdirSync(path.join(tmpDir, '.minspec'));
       fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
       const headPath = path.join(tmpDir, '.git', 'HEAD');
       const indexPath = path.join(tmpDir, '.git', 'index');
@@ -244,14 +255,21 @@ describe('auto-bootstrap', () => {
       expect(loadPreferences(tmpDir)).toEqual({});
     });
 
-    it('T0: savePreferences creates .minspec/ and writes JSON', () => {
+    it('T0: savePreferences writes JSON into an existing .minspec/', () => {
+      fs.mkdirSync(path.join(tmpDir, '.minspec'));
       savePreferences(tmpDir, { skipInitPrompt: true });
       expect(fs.existsSync(preferencesPath(tmpDir))).toBe(true);
       const loaded = loadPreferences(tmpDir);
       expect(loaded.skipInitPrompt).toBe(true);
     });
 
+    it('T0: savePreferences never creates .minspec/ - it refuses instead (#2355)', () => {
+      expect(() => savePreferences(tmpDir, { skipInitPrompt: true })).toThrow(/has not opted in/);
+      expect(fs.readdirSync(tmpDir)).toEqual([]);
+    });
+
     it('T0: savePreferences merges with existing preferences (does not clobber)', () => {
+      fs.mkdirSync(path.join(tmpDir, '.minspec'));
       savePreferences(tmpDir, { skipInitPrompt: true });
       savePreferences(tmpDir, { skipRefreshPrompt: true });
       const loaded = loadPreferences(tmpDir);
@@ -309,11 +327,13 @@ describe('auto-bootstrap', () => {
       expect(prefs.skipInitPrompt).toBeFalsy();
     });
 
-    it("T0: Don't ask again persists skipInitPrompt: true", async () => {
-      const { stub } = makeVsCodeStub({ response: "Don't ask again" });
+    it("T0: Don't ask again persists skipInitPrompt: true - in workspace memory, not in the folder (#2355)", async () => {
+      const { stub, memory } = makeVsCodeStub({ response: "Don't ask again" });
       await runBootstrap(tmpDir, stub);
-      const prefs = loadPreferences(tmpDir);
-      expect(prefs.skipInitPrompt).toBe(true);
+      // The folder has not opted in, so the answer must not be written into it:
+      // `.minspec/preferences.json` there would BE the opt-in marker.
+      expect([...memory.values()]).toEqual([{ skipInitPrompt: true }]);
+      expect(fs.readdirSync(tmpDir)).toEqual([]);
     });
   });
 
@@ -486,6 +506,7 @@ describe('auto-bootstrap', () => {
         skipPrefKey: 'skipClassifyPrompt',
         alwaysAction: 'Always',
       };
+      fs.mkdirSync(path.join(tmpDir, '.minspec'));
       savePreferences(tmpDir, { autoClassifyOnCommit: true });
       const { stub, showPrompt } = makeVsCodeStub({
         response: undefined,
@@ -541,9 +562,14 @@ describe('auto-bootstrap', () => {
 
   describe('runBootstrap() — honoring skip preferences', () => {
     it('T0: respects skipInitPrompt and surfaces no init toast', async () => {
-      // .minspec/ missing → would normally trigger init prompt
-      savePreferences(tmpDir, { skipInitPrompt: true });
-      const { stub, showPrompt } = makeVsCodeStub();
+      // .minspec/ missing → would normally trigger init prompt. The skip flag for
+      // a folder that has not opted in lives in workspace memory (#2355): answer
+      // "Don't ask again" once, then reload against the same memory.
+      const first = makeVsCodeStub({ response: "Don't ask again" });
+      await runBootstrap(tmpDir, first.stub);
+      expect(first.showPrompt).toHaveBeenCalledTimes(1);
+
+      const { stub, showPrompt } = makeVsCodeStub({ memory: first.memory });
       const result = await runBootstrap(tmpDir, stub);
       expect(showPrompt).not.toHaveBeenCalled();
       expect(result.offered).toBeNull();
@@ -967,6 +993,14 @@ describe('auto-bootstrap', () => {
   // =========================================================================
 
   describe('runBootstrap() — per-signature answer memory (#883)', () => {
+    // These pin the FILE-backed memory, which is what an opted-in project uses.
+    // The store never creates `.minspec/` (#2355), so the fixture opts in the way
+    // a real project has; the not-opted-in half lives in
+    // bootstrap-opt-in-invariant.test.ts.
+    beforeEach(() => {
+      fs.mkdirSync(path.join(tmpDir, '.minspec'));
+    });
+
     /**
      * A controllable step whose signature and skip flag we can drive. `shouldRun`
      * mirrors the real steps (honours its DONT_ASK boolean) so the forever-skip

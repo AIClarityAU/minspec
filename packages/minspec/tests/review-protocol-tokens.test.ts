@@ -19,6 +19,7 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- CJS script, no ESM export
 const GUARD = require('../../../.github/scripts/ai-review-guard.js');
 const { VERDICT_BEGIN_TOKEN, VERDICT_END_TOKEN, UNAVAILABLE_TOKEN } = GUARD;
 

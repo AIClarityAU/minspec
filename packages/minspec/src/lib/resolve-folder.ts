@@ -33,10 +33,9 @@ export async function resolveTargetFolder(): Promise<string | undefined> {
 
 /**
  * Non-interactive target-folder resolution for ACTIVATION-time code (the file
- * watchers and the module-level `workspaceRoot` in `extension.ts`, the
- * conformance watcher in `bridge.ts`). These run when no user is present, so
- * they MUST NOT pop a quick-pick — `resolveTargetFolder()` is the wrong tool
- * here. Resolution order:
+ * watchers and the module-level `workspaceRoot` in `extension.ts`). These run
+ * when no user is present, so they MUST NOT pop a quick-pick:
+ * `resolveTargetFolder()` is the wrong tool here. Resolution order:
  *   1. the workspace folder containing the active editor's file (multi-root
  *      safe via longest-prefix match), else
  *   2. the first workspace folder, else

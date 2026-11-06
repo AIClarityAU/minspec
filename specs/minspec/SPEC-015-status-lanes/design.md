@@ -1,7 +1,7 @@
 ---
 id: SPEC-015
 type: design
-status: implementing  # design realized — lanes shipped (feat #105); tracks requirements.md
+status: implementing
 tier: T2
 product: minspec
 epic: EPIC-003  # SDD Core Methodology
@@ -9,6 +9,9 @@ depends_on: [DR-012]
 ---
 
 # Status Lanes — Plan
+
+> **Status note.** Design realized — lanes shipped (feat #105); tracks requirements.md
+> *(Moved off the `status:` line, which the status writer owns and rebuilds from the value alone — #1912 / #1900.)*
 
 Plan phase for [SPEC-015](./requirements.md). Implements the four lifecycle lanes
 (Specifying / Implementing / Done / Archived) defined in the requirements.

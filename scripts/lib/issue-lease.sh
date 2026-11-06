@@ -278,21 +278,59 @@ lease_acquire() {
 # walked `.[][]` over UNSLURPED `gh api --paginate` output: the second `[]` iterated a
 # comment's field values, `.body` on the first string (`url`) aborted jq with exit 5,
 # and no renewal or release ever reached GitHub (#2298). Only lease_read_claims slurped.
+#
+# Each failure branch prints ITS OWN reason on stderr before returning (#2299 gap 2).
+# The renew ticker's report carries only an exit status (`FAILED (exit 1)` for all three
+# of these, indistinguishable from each other and from gh_bot_die's own `exit 1` when no
+# bot token can be minted), and every internal `gh`/jq call here had its stderr sent to
+# /dev/null, so a reader of the drain log had to reproduce the failure by hand to learn
+# which of "can't read claims", "claim is gone" or "PATCH refused" it was. The fourth
+# reason (no bot token) is gh_bot_die's own message, printed by the `gh` wrapper that
+# gh_bot_init arms when it reaches the PATCH: the capture below carries it into the
+# PATCH reason line.
+#
+# A reason line deliberately does not say FAILED. In the ticker it is followed by the
+# ticker's own `FAILED (exit N)` report, and that stays the ONE line per failed tick
+# carrying the word, so counting FAILED lines in a drain log still counts failed
+# renewals (issue-lease-renew-release.test.ts waits on exactly that count).
 lease_renew() {
   gh_bot_init   # arm bot attribution before this function's GitHub write (#1355)
   local item="${1:?lease_renew needs an item}" sid host now claims
   sid="$(lease_self_sid)"; host="$(lease_self_host)"; now="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
-  claims="$(lease_read_claims "$item")" || return 1
+
+  # Going through lease_read_claims is also what makes "the read itself failed"
+  # (network/auth; gh/jq returned nonzero) distinguishable from "the read succeeded and
+  # our claim just is not in it" (deleted, or never posted).
+  if ! claims="$(lease_read_claims "$item")"; then
+    echo "lease: cannot renew the claim on #${item}: could not read claims (gh api error; network or auth)." >&2
+    return 1
+  fi
+
   local cid claimed
   # Our claim comment id (its serverOrder) + its original claimedAt (preserve it; only
-  # bump lastRenewed).
+  # bump lastRenewed). `|| true`: with no claim of ours jq prints nothing and `read`
+  # returns 1 at end of input. The CLI `renew` subcommand runs this under
+  # `set -euo pipefail`, where an unguarded failing `read` would end the script before
+  # the reason below is printed; the empty $cid is what the next test reports.
   IFS=$'\t' read -r cid claimed < <(printf '%s' "$claims" | jq -r --arg sid "$sid" '
       [ .[] | select(.sessionId == $sid) ] | (.[-1] // empty)
-      | "\(.serverOrder)\t\(.claimedAt)"' 2>/dev/null) || return 1
-  [[ -n "$cid" ]] || return 1
-  local wt pid; wt="$(lease_worktree_path "$item")"; pid=$$
-  gh api -X PATCH "repos/${MINSPEC_LEASE_REPO}/issues/comments/${cid}" \
-     -f body="$(lease_claim_body "$sid" "$host" "$wt" "$pid" "$claimed" "$now")" >/dev/null 2>&1 || return 1
+      | "\(.serverOrder)\t\(.claimedAt)"' 2>/dev/null) || true
+  if [[ -z "$cid" ]]; then
+    echo "lease: cannot renew the claim on #${item}: no claim by this session was found (deleted, or never posted)." >&2
+    return 1
+  fi
+
+  local wt pid patch_err
+  wt="$(lease_worktree_path "$item")"; pid=$$
+  # Capture ONLY stderr (`2>&1 >/dev/null`: dup stderr onto the capture pipe first,
+  # then send stdout — the PATCHed comment body gh would otherwise print — to
+  # /dev/null), so a refused PATCH (404/403) reports gh's own reason instead of a
+  # bare exit code.
+  if ! patch_err="$(gh api -X PATCH "repos/${MINSPEC_LEASE_REPO}/issues/comments/${cid}" \
+       -f body="$(lease_claim_body "$sid" "$host" "$wt" "$pid" "$claimed" "$now")" 2>&1 >/dev/null)"; then
+    echo "lease: cannot renew the claim on #${item}: the PATCH was refused: ${patch_err:-no detail from gh}" >&2
+    return 1
+  fi
   return 0
 }
 
@@ -370,12 +408,30 @@ _LEASE_TICKER_PID=""
 lease_start_renew_ticker() {
   local item="${1:?lease_start_renew_ticker needs an item}"
   [[ -z "$_LEASE_TICKER_PID" ]] || return 0    # idempotent — exactly one ticker per dispatch
-  ( while sleep "$LEASE_RENEW_SECS"; do
+  (
+    # fd 3 keeps the REAL stderr reachable after the next redirect silences fd 2 on
+    # THIS subshell. The only thing fd 2 would otherwise carry from here is bash's own
+    # job-status notice — a bare "Terminated" — for `sleep`, this subshell's foreground
+    # child, the moment lease_stop_renew_ticker signals it at teardown (#2299 gap 1):
+    # `pkill -P` kills `sleep` (almost always what is in flight), and THIS subshell's
+    # own bash prints that notice for a foreground child a signal killed. The drain
+    # runs every dispatch `2>&1`, so it used to land in the log right after the
+    # dispatch's last line, reading as "the dispatch was killed" when nothing of the
+    # kind happened — it is routine per-dispatch teardown, at most once per build.
+    #
+    # Everything this loop actually wants seen is routed to fd 3 explicitly at its own
+    # call site below, which overrides this blanket silence for exactly these three
+    # writers and nothing else: any genuine error `sleep` itself prints (e.g. a rejected
+    # interval), the renewal's own stderr (lease_renew's reason line, #2299 gap 2), and
+    # this loop's FAILED report.
+    exec 3>&2 2>/dev/null
+    while sleep "$LEASE_RENEW_SECS" 2>&3; do
       _lease_rc=0
-      ( lease_renew "$item" ) >/dev/null || _lease_rc=$?
+      ( lease_renew "$item" ) 2>&3 >/dev/null || _lease_rc=$?
       (( _lease_rc == 0 || _lease_rc == 143 )) && continue
-      echo "lease: renewal of the claim on #${item} FAILED (exit ${_lease_rc}); heartbeat not written. The claim lapses ${LEASE_TTL_SECS}s after its last successful renewal, and this session then no longer holds it." >&2
-    done ) &
+      echo "lease: renewal of the claim on #${item} FAILED (exit ${_lease_rc}); heartbeat not written. The claim lapses ${LEASE_TTL_SECS}s after its last successful renewal, and this session then no longer holds it." >&3
+    done
+  ) &
   _LEASE_TICKER_PID=$!
   return 0
 }

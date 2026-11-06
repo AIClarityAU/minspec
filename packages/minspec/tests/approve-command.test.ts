@@ -39,6 +39,19 @@ vi.mock('../src/lib/approval', () => ({
   gitConfigEmail: vi.fn(() => 'tester@example.com'),
 }));
 
+// ─── The folder has opted in (SPEC-096) ─────────────────────────────────────
+// Every test here drives a command against the fake root `/tmp/ws`, and has always treated it
+// as an initialized project. The commands now check for the `.minspec/` opt-in
+// marker before they do anything. The fake root is not a real folder, and a path
+// under /tmp can be left behind by some other run, so the precondition is stated
+// here instead of being read from whatever the disk happens to hold. What these
+// commands do in a folder that has NOT opted in is pinned, on real folders, by
+// commands-opt-in-invariant.test.ts.
+vi.mock('../src/lib/opt-in', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/opt-in')>()),
+  hasOptInMarker: vi.fn(() => true),
+}));
+
 // ─── Imports ───────────────────────────────────────────────────────────────
 
 import * as vscode from 'vscode';

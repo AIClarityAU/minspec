@@ -7,6 +7,7 @@ import {
   type SessionType,
 } from '../lib/session';
 import { resolveTargetFolder } from '../lib/resolve-folder';
+import { hasOptInMarker, notOptedInMessage, NotOptedInError } from '../lib/opt-in';
 
 const SESSION_TYPES: SessionType[] = ['bug', 'feat', 'explore', 'plan'];
 
@@ -20,6 +21,14 @@ export async function declareScopeCommand(): Promise<void> {
   // session (AIClarityAU/minspec#373).
   const folder = await resolveTargetFolder();
   if (!folder) return;
+
+  // SPEC-096 FR-6: the session lives in `.minspec/session.json`, and `.minspec/`
+  // is the opt-in marker. In a folder that has not opted in, refuse before asking
+  // anything: one message, no button, nothing written.
+  if (!hasOptInMarker(folder)) {
+    vscode.window.showErrorMessage(notOptedInMessage(folder));
+    return;
+  }
 
   // Check for existing session
   const existing = loadSession(folder);
@@ -62,7 +71,17 @@ export async function declareScopeCommand(): Promise<void> {
   if (!sessionType) return; // Cancelled
 
   const session = createSession(scope, project, sessionType as SessionType);
-  saveSession(folder, session);
+  try {
+    saveSession(folder, session);
+  } catch (err) {
+    // The marker can be removed while the questions above are open. The store
+    // then refuses, and that refusal is shown here rather than left to the
+    // editor's handling of a rejected command (SPEC-096 FR-8). No "Session
+    // started" follows it.
+    if (!(err instanceof NotOptedInError)) throw err;
+    vscode.window.showErrorMessage(err.message);
+    return;
+  }
 
   vscode.window.showInformationMessage(
     `MinSpec: Session started — "${scope}" (${sessionType})`,

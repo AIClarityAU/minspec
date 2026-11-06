@@ -15,7 +15,7 @@
  * KNOWN LIMITATION: a renamed file's numstat path (`old => new` or
  * `{old => new}`) is treated as one opaque path string for area classification
  * — renames occasionally misclassify by area, but never drop churn from the
- * total. Acceptable for a monthly trend tripwire; not a source of truth.
+ * total. Acceptable for a monthly trend tripwire; not a source of truth (#2684).
  */
 
 /** Conventional-commit type this module cares about; everything else is `other`. */

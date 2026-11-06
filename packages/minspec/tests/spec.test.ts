@@ -394,6 +394,58 @@ Body.
     expect(reparsed.frontmatter.type).toBe('requirements');
   });
 
+  // #2324: ticking a task checkbox in the spec panel, and `MinSpec: Migrate
+  // Layout`, both write via writeSpec() — and serializeFrontmatter only ever
+  // emitted the fixed field set SpecFrontmatter models, so SPEC-038 ownership
+  // fields (implements:/affects:/implements_reason:) and FR-13 edge fields
+  // (depends_on:/supersedes:/relates_to:) were silently dropped on every such
+  // round trip, undoing the ownership declaration the #2250 gate requires.
+  it('round-trips implements:/affects:/relates_to: and other unmodeled frontmatter fields', () => {
+    const input = `---
+id: SPEC-099
+title: X
+tier: T3
+status: planning
+depends_on: [SPEC-001]
+relates_to: [DR-001, DR-002]
+implements:
+  - packages/minspec/src/lib/foo.ts
+  - packages/minspec/src/lib/bar.ts
+implements_reason: >-
+  Folded scalar continuation line.
+affects:
+  - packages/minspec/src/lib/baz.ts
+created: 2026-06-05
+---
+
+# X
+
+## Specify
+
+Body.
+
+## Tasks
+
+- [ ] a task
+`;
+    const parsed = parseSpec(input);
+    const written = writeSpec(parsed);
+    expect(written).toContain('depends_on: [SPEC-001]');
+    expect(written).toContain('relates_to: [DR-001, DR-002]');
+    expect(written).toContain('implements:');
+    expect(written).toContain('  - packages/minspec/src/lib/foo.ts');
+    expect(written).toContain('  - packages/minspec/src/lib/bar.ts');
+    expect(written).toContain('implements_reason: >-');
+    expect(written).toContain('affects:');
+    expect(written).toContain('  - packages/minspec/src/lib/baz.ts');
+
+    // And a second round trip (mirrors toggling a task then re-reading) keeps them.
+    const reparsed = parseSpec(written);
+    const rewritten = writeSpec(reparsed);
+    expect(rewritten).toContain('implements:');
+    expect(rewritten).toContain('  - packages/minspec/src/lib/foo.ts');
+  });
+
   it('omits product/type lines when absent (single-product single-file spec)', () => {
     // EXAMPLE_SPEC carries neither field — the writer must not invent empty lines.
     const written = writeSpec(parseSpec(EXAMPLE_SPEC));

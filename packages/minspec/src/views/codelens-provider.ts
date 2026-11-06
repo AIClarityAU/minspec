@@ -28,6 +28,7 @@ import {
 } from '../lib/traceability';
 import { loadConfig, resolveAndValidate } from '../lib/config';
 import { parseSpec } from '../lib/spec';
+import { hasOptInMarker, notOptedInMessage, NotOptedInError } from '../lib/opt-in';
 
 // --- CodeLens Provider ---
 
@@ -440,6 +441,14 @@ export async function linkToSpecCommand(workspaceRoot: string): Promise<void> {
     return;
   }
 
+  // SPEC-096 FR-6: a link lives in `.minspec/traceability.json`, and `.minspec/`
+  // is the opt-in marker. In a folder that has not opted in, refuse as soon as
+  // the folder is known - before the editor check and before any question.
+  if (!hasOptInMarker(workspaceRoot)) {
+    vscode.window.showErrorMessage(notOptedInMessage(workspaceRoot));
+    return;
+  }
+
   const editor = vscode.window.activeTextEditor;
   if (!editor) {
     vscode.window.showErrorMessage('MinSpec: No active editor.');
@@ -546,7 +555,17 @@ export async function linkToSpecCommand(workspaceRoot: string): Promise<void> {
     ? addTestMapping(data, specId, requirementKey, locationStr)
     : addFileMapping(data, specId, requirementKey, locationStr);
 
-  saveTraceability(workspaceRoot, updatedData);
+  try {
+    saveTraceability(workspaceRoot, updatedData);
+  } catch (err) {
+    // The marker can be removed while the questions above are open. The store
+    // then refuses, and that refusal is shown here rather than left to the
+    // editor's handling of a rejected command (SPEC-096 FR-8). No "Linked"
+    // follows it.
+    if (!(err instanceof NotOptedInError)) throw err;
+    vscode.window.showErrorMessage(err.message);
+    return;
+  }
 
   const mappingType = isTest ? 'test' : 'code';
   vscode.window.showInformationMessage(

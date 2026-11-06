@@ -98,6 +98,9 @@ describe('the project-local store carries the two migrated preferences', () => {
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-inv3-'));
+    // The store lives INSIDE the opt-in marker and never creates it (#2355), so
+    // a project-local preference only exists in a project that has opted in.
+    fs.mkdirSync(path.join(tmp, '.minspec'));
   });
   afterEach(() => {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -131,4 +134,49 @@ describe('the project-local store carries the two migrated preferences', () => {
     expect(p.startsWith(tmp)).toBe(true);
     expect(p).toContain(path.join('.minspec', 'preferences.json'));
   });
+});
+
+describe('INVARIANT 3 — the manifest describes an "Always" choice as it is stored (#2457)', () => {
+  /**
+   * Two settings describe an "Always" button on a prompt. #1319 moved what that button writes
+   * from the user's global settings to this project's `.minspec/preferences.json` (the
+   * suite above pins the write). The two setting descriptions went on saying "Set globally
+   * ... a personal preference that follows you across projects", because nothing read
+   * them. They are shown in the Settings editor and on the Marketplace listing, so they
+   * are a published statement about where MinSpec writes.
+   *
+   * A text check: it pins that the description names the project-local store and does not
+   * claim a global one. It cannot prove the sentence around those words is right.
+   */
+  const MANIFEST = path.resolve(__dirname, '../package.json');
+  const properties = (
+    JSON.parse(fs.readFileSync(MANIFEST, 'utf-8')) as {
+      contributes: { configuration: { properties: Record<string, { description?: string; markdownDescription?: string }> } };
+    }
+  ).contributes.configuration.properties;
+  const descriptionOf = (key: string): string =>
+    properties[key]?.description ?? properties[key]?.markdownDescription ?? '';
+
+  // The two settings whose description says what the "Always" button on their prompt does.
+  // (`minspec.pushOnApprove` has such a button too; its description does not mention it.)
+  // `minspec.approverEmail` also says "follows you across projects", and for it that is
+  // true: it is an application-scope setting that only the user writes, so it is not here.
+  const SETTINGS_THAT_DESCRIBE_ALWAYS = ['minspec.autoBackfillUseAi', 'minspec.advancePhaseOnApprove'];
+
+  it.each(SETTINGS_THAT_DESCRIBE_ALWAYS)(
+    'T0: %s says "Always" is kept for this project, in .minspec/preferences.json',
+    key => {
+      const text = descriptionOf(key);
+      expect(text).toContain("'Always'");
+      expect(text).toContain('for this project only');
+      expect(text).toContain('.minspec/preferences.json');
+    },
+  );
+
+  it.each(SETTINGS_THAT_DESCRIBE_ALWAYS)(
+    'T0: %s does not say the choice is set globally or follows you across projects',
+    key => {
+      expect(descriptionOf(key)).not.toMatch(/set globally|across projects/i);
+    },
+  );
 });

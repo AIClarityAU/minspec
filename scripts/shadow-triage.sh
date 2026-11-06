@@ -6,6 +6,7 @@
 # Usage:
 #   shadow-triage.sh record --issue N --repo OWNER/REPO \
 #                           --prompt-file FILE --live-fields FILE
+#                           [--named-spec-status STATUS]
 #   shadow-triage.sh report [--log FILE] [--json]
 #
 # Pure seams (exist so the properties below are testable as BEHAVIOUR, not by
@@ -131,6 +132,15 @@ shadow_resolve_model() {
   status="$(shadow_http "$(shadow_endpoint_url /v1/models)" "$out_file" 20)"
   rc=$?
   if [[ $rc -ne 0 || ! "$status" =~ ^2[0-9][0-9]$ ]]; then rm -f "$out_file"; return 1; fi
+  # A 2xx is not proof of a listing: z.ai answers 200 for a refused key with the error
+  # in the body (#3005). Name that fault instead of letting it surface as an
+  # unparseable listing (`model-resolve-failed`).
+  local refusal
+  refusal="$(shadow_classify_error "$status" < "$out_file")"
+  if [[ "$refusal" == auth-refused:* ]]; then
+    note "z.ai refused the key on the model listing (${refusal}) — skipped."
+    rm -f "$out_file"; return 1
+  fi
   shadow_pick_latest_model < "$out_file"
   rc=$?
   rm -f "$out_file"
@@ -166,13 +176,14 @@ esac
 MODE="${1:-}"
 shift || true
 
-ISSUE="" REPO="" PROMPT_FILE="" LIVE_FIELDS_FILE="" REPORT_JSON=""
+ISSUE="" REPO="" PROMPT_FILE="" LIVE_FIELDS_FILE="" REPORT_JSON="" NAMED_SPEC_STATUS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --issue)       ISSUE="$2"; shift 2 ;;
     --repo)        REPO="$2"; shift 2 ;;
     --prompt-file) PROMPT_FILE="$2"; shift 2 ;;
     --live-fields) LIVE_FIELDS_FILE="$2"; shift 2 ;;
+    --named-spec-status) NAMED_SPEC_STATUS="$2"; shift 2 ;;
     --log)         SHADOW_LOG="$2"; shift 2 ;;
     --json)        REPORT_JSON="--json"; shift ;;
     *) note "unknown argument: $1"; exit 0 ;;
@@ -210,6 +221,9 @@ fi
 # Presence is tested WITHOUT binding the key to a variable here. `shadow_curl_config`
 # reads it straight from the environment at request time, so this runner never holds
 # it — one fewer place for a future `note`/`echo`/trap to interpolate it into a log.
+if shadow_key_legacy_in_use; then
+  note "MINSPEC_SHADOW_TRIAGE_KEY is deprecated — rename it to MINSPEC_ZAI_API_KEY (it is the z.ai key); the old name is read for one release only."
+fi
 if [[ -n "$(shadow_key)" ]] && ! shadow_key_wellformed "$(shadow_key)"; then
   # Deliberately says nothing about the value beyond its shape — a note that echoed
   # the key to diagnose it would be the leak this transport exists to avoid.
@@ -217,7 +231,8 @@ if [[ -n "$(shadow_key)" ]] && ! shadow_key_wellformed "$(shadow_key)"; then
   exit 0
 fi
 if [[ -z "$(shadow_key)" ]]; then
-  note "no z.ai key configured (MINSPEC_SHADOW_TRIAGE_KEY) — skipped; real triage is unaffected."
+  # Names both places looked and why the file was not used — never the value.
+  note "no z.ai key configured (MINSPEC_ZAI_API_KEY unset; key file $(shadow_key_file): $(shadow_key_file_state)) — skipped; real triage is unaffected."
   exit 0
 fi
 
@@ -317,7 +332,12 @@ fi
 # would be a second parser of a format the gate already owns, which is exactly how a
 # gate and its record start disagreeing (the reason triage-inbox.sh takes `--fields`
 # rather than re-reading the agent's raw text).
-SHADOW_FIELDS="$(printf '%s\n' "$SHADOW_OUT" | "$DECIDE" --fields 2>/dev/null)"
+# The live call was handed the status of the spec the issue names (#3282), so the shadow
+# call gets the SAME value, forwarded by triage-inbox.sh rather than looked up a second
+# time. Without it a shadow agent-ready verdict on an already-built spec comes out as
+# specify/agent-ready while the live side is built-spec, and the log records a
+# disagreement the model did not cause.
+SHADOW_FIELDS="$(printf '%s\n' "$SHADOW_OUT" | "$DECIDE" --fields "--named-spec-status=${NAMED_SPEC_STATUS}" 2>/dev/null)"
 LIVE_JSON="$(shadow_fields_to_json < "$LIVE_FIELDS_FILE")"
 SHADOW_JSON="$(printf '%s\n' "$SHADOW_FIELDS" | shadow_fields_to_json)"
 [[ "$CONFORMANT" == "true" ]] || SHADOW_JSON='{}'

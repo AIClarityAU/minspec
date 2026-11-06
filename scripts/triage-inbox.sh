@@ -13,10 +13,19 @@
 # With arg: triages single issue
 #
 # Security model (mirrors dispatch-issue.sh): the issue body is UNTRUSTED
-# (prompt-injection surface). The triage AGENT therefore gets NO credentials and
-# CANNOT mutate labels — it only emits a verdict block. This PARENT script feeds
-# that verdict through the deterministic gate (triage-decide.sh) and applies the
-# result with gh. An injected "make this agent-ready" cannot reach the label.
+# (prompt-injection surface). Three things follow, each enforced by code:
+#   1. WHO WROTE IT is asked first. An issue is triaged only when everyone who wrote its
+#      text (who opened it, who edited its body, who changed its title) is on the list
+#      in scripts/lib/dispatch-author-gate.sh. Any other issue is refused before a model
+#      is started on it, and stays in `inbox` untouched.
+#   2. The triage AGENT has NO tools and CANNOT mutate labels: it only emits a verdict
+#      block. This PARENT script feeds that verdict through the deterministic gate
+#      (triage-decide.sh) and applies the result with gh. An injected "make this
+#      agent-ready" cannot reach the label.
+#   3. The agent's ENVIRONMENT is built from a list of names
+#      (scripts/lib/agent-context.sh), so it is not handed the token this script
+#      writes with, nor anything else named like a credential. That is a statement
+#      about what it inherits: it is still a process of this script's user.
 #
 # ── Verdict RECORD, not just a label (#1002, enabling #983) ──────────────────
 # A label is a lossy, point-in-time STAMP: it says a gate once ran, never what it
@@ -59,6 +68,15 @@ source "${SCRIPT_DIR}/lib/agent-context.sh"
 # shellcheck source=scripts/lib/gh-bot.sh
 source "${SCRIPT_DIR}/lib/gh-bot.sh"
 gh_bot_init
+# Whose issue may be triaged: one list, shared with dispatch-issue.sh. The source is
+# deliberately not guarded by an `[[ -f ]]` test: without it the gate below is an
+# undefined function, and a missing library must stop this script, not skip the gate.
+# shellcheck source=scripts/lib/dispatch-author-gate.sh
+source "${SCRIPT_DIR}/lib/dispatch-author-gate.sh"
+# What the agent is started with: an environment built from a list of names. That is
+# lib/agent-context.sh, sourced above, run as a program: `bash "$AGENT_LAUNCH_ENV"
+# claude ...` on the launch line itself. That file assigns the variable, to its own
+# absolute path, so a value from the environment never survives to a launch.
 
 DECIDE="${SCRIPT_DIR}/triage-decide.sh"
 READY_CHECK="${SCRIPT_DIR}/dispatch-ready-check.sh"
@@ -79,6 +97,37 @@ triage_issue() {
 
   local ISSUE_JSON ISSUE_BODY ISSUE_TITLE
   ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,labels)
+
+  # ── Author gate: who wrote this issue's text? ───────────────────────────────
+  # Asked BEFORE anything of the issue's is read, printed or shown to a model. Until
+  # this, nobody's identity was fetched at all: every `inbox` issue was triaged, and an
+  # issue form applies `inbox` for whoever fills it in.
+  #
+  # dispatch_issue_gate reads, in one more query, who opened the issue, everyone who has
+  # edited its body and everyone who has changed its title, and requires each of them to
+  # be on the list by account number and kind. It also requires the title and body in
+  # that answer to equal the ones in ISSUE_JSON just above, which is the document the
+  # prompt below is built from: the text that was judged is the text that is used.
+  #
+  # Default deny. The one way past is that function answering yes; an account that is
+  # not on the list, anything that cannot be read, and a check that fails to run all
+  # land in the refusal.
+  #
+  # A refusal is a decision about this issue and not a fault of this script, so it
+  # returns 0: the whole-inbox form below runs under `set -e`, and a non-zero here would
+  # end the pass at the first issue a stranger opened, for every issue behind it. It
+  # writes nothing either. The issue keeps `inbox` and is refused again each cycle, at
+  # the cost of these two reads, until it is closed or filed again by a listed account.
+  #
+  # The title is printed further down, after this, because it is the author's text too:
+  # the drain reads this script's output for the line that says an issue was stamped
+  # ready, and a title can be made to look like one.
+  local AUTHOR_REASON
+  if ! AUTHOR_REASON="$(dispatch_issue_gate "$REPO" "$ISSUE" "$ISSUE_JSON")"; then
+    echo "Refusing #$ISSUE — ${AUTHOR_REASON:-who wrote it could not be checked}. Not triaged: no model was started on it and none of its labels were changed. It stays in the inbox until it is closed, or filed again under an account on the list (scripts/lib/dispatch-author-gate.sh)."
+    return 0
+  fi
+
   ISSUE_BODY=$(echo "$ISSUE_JSON" | jq -r '"# " + .title + "\n\n" + .body')
   ISSUE_TITLE=$(echo "$ISSUE_JSON" | jq -r '.title')
 
@@ -121,8 +170,15 @@ CONTENT
   # absolute paths OUTSIDE cwd; cwd is not a sandbox boundary), so the tool is
   # ELIMINATED, not justified by triage.md's anti-injection prose (#344). `--tools
   # ""` disables the entire built-in tool set. We capture the returned text.
+  #
+  # Its environment is the allowlist's (see AGENT_LAUNCH_ENV above), not this script's.
+  # With no tools the agent has no way to read an environment, so this is the same rule
+  # as dispatch-issue.sh's applied for its own sake: one way of starting an agent over
+  # issue text, rather than a second one that is safe only while `--tools ""` stays. The
+  # wrapper prints nothing when it starts something, so the capture below is the
+  # agent's output and nothing else.
   local AGENT_OUT
-  AGENT_OUT=$("${AGENT_ENV_SCRUB[@]}" claude -p "$USER_CONTENT" \
+  AGENT_OUT=$(bash "$AGENT_LAUNCH_ENV" claude -p "$USER_CONTENT" \
     --system-prompt-file "${ROLES_DIR}/triage.md" \
     "${AGENT_CONTEXT_ARGS[@]}" \
     --tools "" \
@@ -135,13 +191,51 @@ CONTENT
   # (not the space-joined default line) because the RECORD must carry the gate's own
   # view of tier / human_only, and re-parsing the agent's raw text here would be a
   # second parser of the same format — the classic way a gate and its record drift.
-  local FIELDS LABEL ROLE HOLD TIER HUMAN_ONLY
-  FIELDS=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" --fields || true)
+  #
+  # The issue's labels go IN to the gate as `--label` inputs, so the one exception the
+  # gate knows (`pipeline-blocker` skips spec-first, DR-118, triggered by #3282) is
+  # decided inside the gate and the record below is the gate's real output. FAIL CLOSED:
+  # if the label list cannot be read, no `--label` is passed and the gate keeps the
+  # spec-first route. Labels come from our own `gh issue view`, never from the agent.
+  #
+  # `pipeline-blocker` reaches the gate only when the account that last applied it is on
+  # the dispatch author list (dispatch_issue_label_gate). The author gate above covers who
+  # wrote the text, not who applied a label, and this label skips a human gate. A
+  # non-listed applier, a missing actor or a failed read all withhold the input, so the
+  # gate keeps the spec-first route, and the refusal is printed and put in the triage
+  # comment below.
+  local FIELDS LABEL ROLE HOLD TIER HUMAN_ONLY EXCEPTION
+  local NAMED_SPEC_STATUS=""
+  local -a LABEL_ARGS=()
+  local LABEL_NAME LABEL_REFUSED=""
+  while IFS= read -r LABEL_NAME; do
+    if [[ "$LABEL_NAME" == "pipeline-blocker" ]]; then
+      local LABEL_APPLIER
+      if ! LABEL_APPLIER="$(dispatch_issue_label_gate "$REPO" "$ISSUE" "$LABEL_NAME" </dev/null)"; then
+        LABEL_REFUSED="${LABEL_APPLIER:-who applied it could not be checked}"
+        echo "WARNING: #$ISSUE pipeline-blocker is not honoured: ${LABEL_REFUSED}. Keeping the spec-first route (DR-118)." >&2
+        continue
+      fi
+    fi
+    [[ -n "$LABEL_NAME" ]] && LABEL_ARGS+=(--label "$LABEL_NAME")
+  done < <(printf '%s' "$ISSUE_JSON" | jq -r '.labels[]?.name' 2>/dev/null || true)  # swallow-ok: an unreadable label list passes no --label, which keeps the restrictive spec-first route (DR-118)
+  # #3282 — a `build: SPEC-NNN` title names a spec; hand its on-disk status to the
+  # gate so an already-approved spec is never sent to the specify queue.
+  if [[ "$ISSUE_TITLE" =~ ^[[:space:]]*[Bb]uild:[[:space:]]*SPEC-([0-9]+) ]]; then
+    local SPEC_FILE SPEC_NUM
+    SPEC_NUM=$(printf '%03d' "$((10#${BASH_REMATCH[1]}))")
+    SPEC_FILE=$(ls "${SCRIPT_DIR}"/../specs/*/SPEC-"${SPEC_NUM}"-*/requirements.md 2>/dev/null | head -1 || true)  # swallow-ok: no matching spec dir means no status; the gate treats empty as "no spec named"
+    if [[ -n "$SPEC_FILE" ]]; then
+      NAMED_SPEC_STATUS=$(awk 'NR>1 && /^---$/{exit} NR>1 && /^status:/{print $2; exit}' "$SPEC_FILE" || true)  # swallow-ok: unreadable frontmatter leaves status empty = no spec named
+    fi
+  fi
+  FIELDS=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" --fields "--named-spec-status=${NAMED_SPEC_STATUS}" ${LABEL_ARGS[@]+"${LABEL_ARGS[@]}"} || true)
   LABEL=$(verdict_field label "$FIELDS")
   ROLE=$(verdict_field role "$FIELDS")
   HOLD=$(verdict_field hold "$FIELDS")
   TIER=$(verdict_field tier "$FIELDS")
   HUMAN_ONLY=$(verdict_field human_only "$FIELDS")
+  EXCEPTION=$(verdict_field exception "$FIELDS")
 
   if [[ -z "$LABEL" || -z "$ROLE" || -z "$HOLD" || -z "$TIER" || -z "$HUMAN_ONLY" ]]; then
     echo "WARNING: no verdict parsed for #$ISSUE — leaving in inbox" >&2
@@ -155,6 +249,18 @@ CONTENT
     | { grep -iE '^[[:space:]]*rationale[[:space:]]*:' || true; } \
     | head -1 | sed -E 's/^[^:]*:[[:space:]]*//')  # swallow-ok: grep exits 1 when the agent emitted no rationale line, and the next line substitutes an explicit placeholder
   [[ -z "$RATIONALE" ]] && RATIONALE="(no rationale emitted)"
+
+  # DR-118 (proposed): the gate itself routed this issue past spec-first. Say so in the
+  # human-readable rationale; the label/hold pair is already the gate's own output.
+  if [[ "$EXCEPTION" == "pipeline-blocker" ]]; then
+    RATIONALE="${RATIONALE} [pipeline-blocker: spec-first skipped, routed to a full build (DR-118, founder decision 2026-10-30, pb1030)]"
+  fi
+
+  # The label was there and was not believed, and that changed the route: say why, so
+  # nobody reads the spec-first outcome as the exception having silently failed.
+  if [[ -n "$LABEL_REFUSED" && "$HOLD" == "specify" ]]; then
+    RATIONALE="${RATIONALE} [pipeline-blocker not honoured: ${LABEL_REFUSED}; spec-first route kept (DR-118)]"
+  fi
 
   # Mint the machine-readable verdict record, keyed to the body we just triaged.
   # FAIL CLOSED: if the record cannot be rendered we apply NO labels at all —
@@ -229,8 +335,8 @@ CONTENT
     # and the issue can never be worked by any route. `agent-quarantined` is
     # deliberately NOT cleared: quarantine is a human act, and re-triage must not
     # launder it.
-    agent-ready)          SUPERSEDED="inbox,needs-review,needs-info,needs-human-review,agent-ready-specify,agent-done,agent-escalated" ;;
-    agent-ready-specify)  SUPERSEDED="inbox,needs-review,needs-info,needs-human-review,agent-ready,agent-done,agent-escalated" ;;
+    agent-ready)          SUPERSEDED="inbox,needs-review,needs-info,needs-human-review,agent-ready-specify,agent-done,agent-escalated,agent-crashed" ;;
+    agent-ready-specify)  SUPERSEDED="inbox,needs-review,needs-info,needs-human-review,agent-ready,agent-done,agent-escalated,agent-crashed" ;;
     needs-review)         SUPERSEDED="inbox,agent-ready,agent-ready-specify,needs-info" ;;
     needs-info)           SUPERSEDED="inbox,agent-ready,agent-ready-specify,needs-review" ;;
     *)                    SUPERSEDED="inbox" ;;
@@ -251,7 +357,7 @@ CONTENT
   # (`backfill-hold-labels.sh` already guards this way; this is the same check.)
   local h CURRENT_LABELS
   CURRENT_LABELS=$(echo "$ISSUE_JSON" | jq -r '[.labels[].name] | join(",")')
-  for h in human tier specify info unknown; do
+  for h in human tier specify info built-spec unknown; do
     [[ "hold:${h}" == "$HOLD_LABEL" ]] && continue
     [[ ",${CURRENT_LABELS}," == *",hold:${h},"* ]] || continue
     SUPERSEDED="${SUPERSEDED},hold:${h}"
@@ -276,7 +382,7 @@ CONTENT
   # Runs GLM (z.ai) on the SAME prompt and pushes its output through the SAME gate
   # binary, purely to record whether the two agree. It runs LAST, after every label
   # and the verdict record are already applied, so nothing above can wait on a
-  # third-party endpoint. INERT until MINSPEC_SHADOW_TRIAGE_KEY is set.
+  # third-party endpoint. INERT until MINSPEC_ZAI_API_KEY is set.
   #
   # The call site is the shadow-only guarantee, and it is three properties, not a
   # promise: stdout is discarded (so no verdict can be captured), the exit status is
@@ -291,7 +397,8 @@ CONTENT
     printf '%s' "$USER_CONTENT" > "$SHADOW_PROMPT"
     printf '%s\n' "$FIELDS" > "$SHADOW_FIELDS_FILE"
     "$SHADOW" record --issue "$ISSUE" --repo "$REPO" \
-      --prompt-file "$SHADOW_PROMPT" --live-fields "$SHADOW_FIELDS_FILE" >/dev/null || true
+      --prompt-file "$SHADOW_PROMPT" --live-fields "$SHADOW_FIELDS_FILE" \
+      --named-spec-status "$NAMED_SPEC_STATUS" >/dev/null || true
     rm -f "$SHADOW_PROMPT" "$SHADOW_FIELDS_FILE"
   fi
 

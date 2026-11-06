@@ -45,6 +45,7 @@ import { parseSpec, type ParsedSpec, type SpecStatus } from './spec';
 import { getCurrentPhase } from './lifecycle';
 import { deriveStatus, explicitTerminalOf, type ExplicitTerminal } from './lifecycle';
 import { getApprovalStatus, type ApprovalStatus } from './approval';
+import { isTerminalSpecStatus } from './spec-vocabulary';
 
 // ───────────────────────────────────────────────────────────────────────────
 // Status-enum mapping tables — STRICT 1:1 (INV-FIDELITY).
@@ -336,7 +337,7 @@ function taskItemText(raw: string, softWrapped = false): string {
 }
 
 /** Tally of open/total task items, plus the first open item's text. */
-interface TaskTally {
+export interface TaskTally {
   total: number;
   remaining: number;
   nextItem?: string;
@@ -348,7 +349,7 @@ interface TaskTally {
  * Count checkbox lines in a markdown body, ignoring fenced code blocks.
  * Checkbox-shaped lines inside a fence are documentation examples, not work.
  */
-function tallyTaskLines(body: string): TaskTally {
+export function tallyTaskLines(body: string): TaskTally {
   const lines = body.split('\n');
   let fence: string | undefined; // the OPEN fence's marker, or undefined
   const tally: TaskTally = { total: 0, remaining: 0 };
@@ -388,23 +389,17 @@ function tallyTaskLines(body: string): TaskTally {
 }
 
 /**
- * The spec's implement-phase hole, or `undefined` when there is none.
- *
- * Reads BOTH layouts MinSpec supports, because the extension ships into repos
- * this monorepo's own conventions do not describe (constitution invariant 3):
- *   - SPLIT layout — a sibling `tasks.md` next to the canonical spec file.
- *   - SINGLE-FILE layout — a `## Tasks` / `## Implement` section in the spec
- *     itself, already parsed into `phaseSections` by `parseSpec`.
- * Split wins when both exist; the sections are the fallback, so a single-file
- * spec is never mislabelled as having no task list at all.
- *
- * An unreadable `tasks.md` degrades to `missing-tasks` rather than throwing
- * (INV-DEGRADE): the human is still pointed at the right spec.
+ * The spec's task tally, from whichever layout carries its checkboxes: a sibling
+ * `tasks.md` this spec owns (split layout) or its own `## Tasks` / `## Implement`
+ * sections (single-file layout). The ONE reader of a spec's task progress: the
+ * signpost's implement hole and the close-out gate (`implement.finished-not-closed` /
+ * `implement.phantom-hole`, #1595) both call it, so the two cannot disagree on
+ * what a ticked task is. Never throws; an unreadable `tasks.md` reads as no list.
  */
-function readImplementHole(disc: DiscoveredSpecFile): ImplementHole | undefined {
+export function readSpecTaskTally(filePath: string, parsed: ParsedSpec): TaskTally {
   let tally: TaskTally = { total: 0, remaining: 0 };
 
-  const tasksPath = path.join(path.dirname(disc.filePath), 'tasks.md');
+  const tasksPath = path.join(path.dirname(filePath), 'tasks.md');
   let splitBody: string | undefined;
   try {
     if (fs.existsSync(tasksPath)) {
@@ -417,7 +412,7 @@ function readImplementHole(disc: DiscoveredSpecFile): ImplementHole | undefined 
       // no id at all is still accepted, since the scaffolder's output and older
       // hand-written lists predate the convention.
       const owner = /^id:[ \t]*(\S+)/m.exec(frontmatterBlock(raw))?.[1];
-      if (owner === undefined || owner === disc.parsed.frontmatter.id) splitBody = raw;
+      if (owner === undefined || owner === parsed.frontmatter.id) splitBody = raw;
     }
   } catch {
     /* unreadable — fall through to the single-file sections, then missing-tasks */
@@ -428,7 +423,7 @@ function readImplementHole(disc: DiscoveredSpecFile): ImplementHole | undefined 
   } else {
     // Single-file layout: whichever phase section carries the checkboxes.
     for (const phase of ['tasks', 'implement'] as const) {
-      const body = disc.parsed.phaseSections[phase]?.body;
+      const body = parsed.phaseSections[phase]?.body;
       if (body === undefined) continue;
       const t = tallyTaskLines(body);
       tally = {
@@ -443,6 +438,25 @@ function readImplementHole(disc: DiscoveredSpecFile): ImplementHole | undefined 
       };
     }
   }
+  return tally;
+}
+
+/**
+ * The spec's implement-phase hole, or `undefined` when there is none.
+ *
+ * Reads BOTH layouts MinSpec supports, because the extension ships into repos
+ * this monorepo's own conventions do not describe (constitution invariant 3):
+ *   - SPLIT layout — a sibling `tasks.md` next to the canonical spec file.
+ *   - SINGLE-FILE layout — a `## Tasks` / `## Implement` section in the spec
+ *     itself, already parsed into `phaseSections` by `parseSpec`.
+ * Split wins when both exist; the sections are the fallback, so a single-file
+ * spec is never mislabelled as having no task list at all.
+ *
+ * An unreadable `tasks.md` degrades to `missing-tasks` rather than throwing
+ * (INV-DEGRADE): the human is still pointed at the right spec.
+ */
+function readImplementHole(disc: DiscoveredSpecFile): ImplementHole | undefined {
+  const tally = readSpecTaskTally(disc.filePath, disc.parsed);
 
   // No task list anywhere — or one with no items in it. Either way the spec is
   // being implemented with nothing tracking that work.
@@ -548,6 +562,12 @@ export function buildArtifactGraph(rootDir: string): ArtifactGraph {
       // which ones it acts on (only approved + implementing specs qualify), so
       // the gate stays in ONE place rather than being half-encoded here.
       implementHole: readImplementHole(disc),
+      // #2370: deliberately the ONE spot that reads the literal `status:` line for
+      // a spec — not to derive `status` above (that would re-introduce #112), but
+      // to tell the resolver when `commands/approve.ts` / `approve-active.ts`
+      // (which DO trust the literal, by design since #440) would refuse this spec.
+      // Same predicate those commands use, so the two surfaces can't drift again.
+      literalStatusTerminal: isTerminalSpecStatus(fm.status),
     });
   }
 

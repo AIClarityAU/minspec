@@ -305,6 +305,9 @@ describe('Override-log persistence', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-classifier-test-'));
+    // SPEC-096: the override log lives in `.minspec/`, so it is written only in a
+    // folder that has opted in. The store used to create that directory itself.
+    fs.mkdirSync(path.join(tmpDir, '.minspec'));
   });
 
   afterEach(() => {
@@ -384,7 +387,11 @@ describe('Override-log persistence', () => {
   });
 
   describe('saveCalibration()', () => {
-    it('creates .minspec directory if missing', () => {
+    // Retitled by SPEC-096: this used to say the store creates `.minspec/`. It no
+    // longer does (that directory is the opt-in marker); it writes its file into
+    // one that exists. The refusal with no marker is in
+    // opt-in-writer-inventory.test.ts.
+    it('writes calibration.json into an existing .minspec directory', () => {
       const data: CalibrationData = { overrides: [] };
       saveCalibration(tmpDir, data);
       expect(fs.existsSync(path.join(tmpDir, '.minspec', 'calibration.json'))).toBe(true);

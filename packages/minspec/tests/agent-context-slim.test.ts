@@ -41,6 +41,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import { spawnSync } from 'child_process';
 
 /**
  * Walk up to the repo (or linked-worktree) root that holds scripts/ + .git.
@@ -187,7 +188,7 @@ describe('T0: headless `claude -p` launchers pin their setting sources (no inher
   });
 });
 
-describe('T0: headless `claude -p` launchers scrub the inherited autocompact override (#1203)', () => {
+describe('T0: a headless agent does not inherit the autocompact override (#1203)', () => {
   // `--setting-sources` selects which settings FILES load. It CANNOT unset a
   // variable already exported in the process environment, and
   // CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=55 reaches every dispatched agent by
@@ -196,20 +197,50 @@ describe('T0: headless `claude -p` launchers scrub the inherited autocompact ove
   // compactions and is what turns an ordinary large read into the thrash abort.
   // Verified on a live agent's /proc/<pid>/environ, not inferred.
   //
-  // NOTE the deliberate asymmetry with PINS_SOURCES above: `--bare` is NOT accepted
-  // here. It selects which settings load; like `--setting-sources`, it cannot unset a
-  // variable already exported in the process environment. Only a real `env -u` closes
-  // this one, so every `claude -p` launcher must still carry the unset. (The #1338
-  // shadow instrument no longer appears among them: it is a direct HTTPS request, and
-  // curl does not read CLAUDE_* at all, so there is nothing to scrub.) The `env `
-  // prefix is not required because `-u VAR` occurs only in an `env` invocation, and a
-  // multi-line env array puts the two on separate lines.
-  const SCRUBS = /AGENT_ENV_SCRUB\[@\]|-u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE/;
+  // HOW IT IS HELD NOW. This block used to look for an `env -u` in the launcher's text,
+  // or in the text of a library the launcher sources. That stayed green for any launcher
+  // that sourced the library, whether or not its launch line used what the library
+  // defined, and it said nothing about any OTHER variable: the array it looked for
+  // removed this one name and passed the rest on, the launcher's GitHub token included.
+  // The array is gone. Every launcher starts the CLI through
+  // scripts/lib/agent-context.sh, which builds the child's environment from a list of
+  // names, and the override is not on it. So the assertions below are about what a child
+  // started that way actually holds, and about every launch line going that way.
+  //
+  // NOTE the asymmetry with PINS_SOURCES above still stands: neither `--bare` nor
+  // `--setting-sources` can remove an inherited variable, so neither satisfies this.
+  // agent-launch-sites.test.ts holds the stronger form of the last test here (every
+  // mention of the CLI in every file under scripts/, in any language) and runs each
+  // launcher to read what its agent was handed.
+  const HELPER = path.join(SCRIPTS_DIR, 'lib', 'agent-context.sh');
+  const THROUGH_HELPER = /bash "\$AGENT_LAUNCH_ENV" (?:--model-login [A-Z_]+ )*claude\s+(-p|--print)\b/;
 
-  it('the shared lib scrubs the override by default', () => {
-    const lib = codeOf(LIB);
-    expect(lib).toMatch(/env -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE/);
-    expect(lib).toMatch(/MINSPEC_AGENT_ENV_SCRUB/); // documented kill-switch
+  /** The names a child started through the helper holds, given this environment. */
+  function namesHeldByChild(env: Record<string, string>): string[] {
+    const r = spawnSync('bash', [HELPER, 'env'], { encoding: 'utf-8', env: { PATH: process.env.PATH ?? '', ...env } });
+    expect(r.status, r.stderr).toBe(0);
+    return r.stdout
+      .split('\n')
+      .filter(Boolean)
+      .map((l) => l.slice(0, l.indexOf('=')));
+  }
+
+  it('a child started through the helper does not hold the override', () => {
+    const names = namesHeldByChild({ CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '55', TZ: 'UTC' });
+    expect(names).toContain('TZ'); // the control: an inherited name that IS listed arrives
+    expect(names).not.toContain('CLAUDE_AUTOCOMPACT_PCT_OVERRIDE');
+  });
+
+  it('the documented kill-switch hands the override back, and nothing else', () => {
+    const names = namesHeldByChild({
+      MINSPEC_AGENT_ENV_SCRUB: '0',
+      CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: '55',
+      SOME_OTHER_INHERITED_NAME: 'x',
+    });
+    expect(names).toContain('CLAUDE_AUTOCOMPACT_PCT_OVERRIDE');
+    expect(names).not.toContain('SOME_OTHER_INHERITED_NAME');
+    expect(names).not.toContain('MINSPEC_AGENT_ENV_SCRUB');
+    expect(codeOf(LIB)).toMatch(/MINSPEC_AGENT_ENV_SCRUB/); // still documented where a reader looks
   });
 
   it('does NOT silently strip unrelated inherited config', () => {
@@ -217,35 +248,40 @@ describe('T0: headless `claude -p` launchers scrub the inherited autocompact ove
     // instrument) and CLAUDE_EFFORT is a cost choice. Neither is a correctness
     // bug, so removing them as a side effect of a thrash fix would be an
     // unrelated silent change.
-    const lib = codeOf(LIB);
-    expect(lib).not.toMatch(/env -u[^\n]*ANTHROPIC_BASE_URL/);
-    expect(lib).not.toMatch(/env -u[^\n]*CLAUDE_EFFORT/);
+    const names = namesHeldByChild({ ANTHROPIC_BASE_URL: 'http://127.0.0.1:9', CLAUDE_EFFORT: 'low' });
+    expect(names).toContain('ANTHROPIC_BASE_URL');
+    expect(names).toContain('CLAUDE_EFFORT');
   });
 
-  it('the scrub predicate still REJECTS a launcher that only pins settings', () => {
+  it('the launch predicate still REJECTS a launcher that only pins settings, or only removes one name', () => {
     // The asymmetry made concrete: neither flag can unset an inherited env var, so
-    // neither may satisfy this gate.
-    expect(SCRUBS.test('claude -p "$P" --setting-sources project,local')).toBe(false);
-    expect(SCRUBS.test('claude -p "$P" --bare')).toBe(false);
-    expect(SCRUBS.test('env -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE claude -p "$P"')).toBe(true);
-    // …and the multi-line env-array spelling, where the `env` and the `-u` land on
-    // separate lines. No launcher is written this way today, but the predicate must
-    // keep accepting it or a correct launcher would be failed for its formatting.
-    expect(SCRUBS.test('AGENT_ENV=(\n  env\n  -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE\n)')).toBe(true);
+    // neither may satisfy this gate. And the form this replaced must not satisfy it
+    // either: removing one name is how everything else was passed on.
+    expect(THROUGH_HELPER.test('claude -p "$P" --setting-sources project,local')).toBe(false);
+    expect(THROUGH_HELPER.test('claude -p "$P" --bare')).toBe(false);
+    expect(THROUGH_HELPER.test('env -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE claude -p "$P"')).toBe(false);
+    expect(THROUGH_HELPER.test('"${AGENT_ENV_SCRUB[@]}" claude -p "$P"')).toBe(false);
+    expect(THROUGH_HELPER.test('bash "$AGENT_LAUNCH_ENV" claude -p "$P"')).toBe(true);
+    expect(THROUGH_HELPER.test('bash "$AGENT_LAUNCH_ENV" --model-login ANTHROPIC_API_KEY claude -p --model opus')).toBe(true);
   });
 
-  it('every `claude -p` launcher applies the scrub', () => {
-    const offenders = launcherScripts()
-      .filter((f) => !SCRUBS.test(codeWithSourcedLibs(f)))
-      .map((f) => path.basename(f));
+  it('every `claude -p` launch line goes through the helper, in the launcher\'s OWN text', () => {
+    // The launcher's own code only. Counting a sourced library's text, as this used to,
+    // is what let a launch line that used nothing of the library's pass.
+    const offenders = launcherScripts().flatMap((f) =>
+      codeOf(f)
+        .split('\n')
+        .filter((l) => /(^|[^A-Za-z0-9_./-])claude\s+(-p|--print)\b/.test(l) && !THROUGH_HELPER.test(l))
+        .map((l) => `${path.basename(f)}: ${l.trim().slice(0, 120)}`),
+    );
     expect(
       offenders,
       offenders.length > 0
-        ? `These scripts launch \`claude -p\` without scrubbing the inherited ` +
-          `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE, so the agent compacts at the operator's ` +
-          `interactive threshold and thrashes (#1203). Expand "\${AGENT_ENV_SCRUB[@]}" ` +
-          `before \`claude\`. Offenders: ${offenders.join(', ')}.`
-        : 'all launchers scrub',
+        ? `These lines start \`claude -p\` without going through scripts/lib/agent-context.sh, so the ` +
+          `agent inherits its launcher's whole environment: it compacts at the operator's interactive ` +
+          `threshold and thrashes (#1203), and it holds the launcher's GitHub token. Start it as ` +
+          `\`bash "$AGENT_LAUNCH_ENV" claude -p ...\`. Offenders:\n${offenders.join('\n')}`
+        : 'every launch goes through the helper',
     ).toEqual([]);
   });
 });

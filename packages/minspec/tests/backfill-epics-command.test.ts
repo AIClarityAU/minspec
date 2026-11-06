@@ -195,7 +195,6 @@ describe('backfillEpicsCommand()', () => {
   // (4) choice === 'AI-enhanced', proposeAI returns a proposal → uses it
   it('uses AI proposal when choice is AI-enhanced and proposeAI returns a result', async () => {
     const aiProposal = makeProposal(3, 4);
-    aiProposal.source; // just accessing to confirm shape
     vi.mocked(isClaudeAvailable).mockResolvedValue(true);
     vi.mocked(proposeAI).mockResolvedValue({ proposal: { ...aiProposal, source: 'ai' } as BackfillProposal });
     // First call: AI/heuristic choice
@@ -488,6 +487,37 @@ describe('backfillEpicsCommand()', () => {
     // The machine-wide surface must be left completely untouched.
     expect(update).not.toHaveBeenCalled();
     expect(proposeAI).toHaveBeenCalledWith(FOLDER, expect.objectContaining({ signal: expect.anything() }));
+  });
+
+  // #2506: Backfill Epics is reachable in a folder that has never opted in
+  // (it writes into docs/, which is allowed pre-opt-in) and creates no
+  // `.minspec/` there; Approve Spec, by contrast, refuses. Before this
+  // fix, a `savePreferences` refusal there reached only `console.warn`, which
+  // a user never sees, so the toast's "Always" looked accepted when it silently
+  // remembered nothing.
+  it('warns visibly when "Always" cannot be persisted (not opted in), but still uses AI this run', async () => {
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+      get: vi.fn(() => false),
+      update: vi.fn(() => Promise.resolve()),
+    } as never);
+    vi.mocked(isClaudeAvailable).mockResolvedValue(true);
+    vi.mocked(proposeAI).mockResolvedValue({ proposal: { ...makeProposal(1, 1), source: 'ai' } as BackfillProposal });
+    vi.mocked(vscode.window.showInformationMessage)
+      .mockResolvedValueOnce('Always' as never)
+      .mockResolvedValueOnce('Apply' as never);
+    vi.mocked(applyBackfill).mockReturnValueOnce({ epicsCreated: 1, artifactsTagged: 1, skipped: 0 });
+    vi.mocked(savePreferences).mockImplementationOnce(() => {
+      throw new Error(`MinSpec: ${FOLDER} has no .minspec/ directory (it has not opted in)`);
+    });
+
+    await backfillEpicsCommand(FOLDER);
+
+    // The one-time choice is still honoured for THIS run — a failed "remember
+    // this" must never also undo the "do this" the user asked for.
+    expect(proposeAI).toHaveBeenCalledWith(FOLDER, expect.objectContaining({ signal: expect.anything() }));
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('"Always" was not remembered'),
+    );
   });
 
   // The final approval toast is NON-modal (no { modal: true } options object).

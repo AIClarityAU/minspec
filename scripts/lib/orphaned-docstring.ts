@@ -59,19 +59,12 @@ export function findOrphanedDocstrings(text: string, file: string): OrphanedDocs
  * stable under drift and still fails closed — a fifth orphan in a file known to have two
  * is a new defect and reddens the build.
  *
- * These five are genuine, each one a doc block whose owning function still exists further
- * down the same file. They are NOT fixed here: reattaching a block means deciding which
- * declaration it describes in code this change does not otherwise touch, and guessing
- * wrong replaces an orphaned doc with a WRONG one, which is the worse failure in a
- * codebase whose thesis is that the artifact never lies. Tracked separately; this gate
- * stops the fifth.
+ * The five originally tracked here (#2009) were reattached to the declarations they
+ * described in #2102, so this map is empty until the next genuine instance. It stays a
+ * `Map` rather than being deleted: the gate's lookup (`?? 0`) and the reporting shape are
+ * unchanged either way, and a future orphan is added the same way these were.
  */
-export const KNOWN_ORPHANED_DOCSTRINGS: ReadonlyMap<string, number> = new Map([
-  ['packages/minspec/src/commands/commit-on-approve.ts', 1],
-  ['packages/minspec/src/lib/adr-manager.ts', 2],
-  ['packages/minspec/src/lib/scaffold.ts', 1],
-  ['scripts/lib/swallowed-gate-signal.ts', 1],
-]);
+export const KNOWN_ORPHANED_DOCSTRINGS: ReadonlyMap<string, number> = new Map([]);
 
 /** Human-readable one-liner for a finding. */
 export function formatOrphanedDocstring(f: OrphanedDocstring): string {

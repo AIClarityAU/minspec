@@ -23,6 +23,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 
@@ -31,7 +32,7 @@ const GUARD = path.join(REPO, '.github/scripts/ai-review-guard.js');
 const DECIDE = path.join(REPO, 'scripts/review-decide.sh');
 const REVIEW_BRANCH = path.join(REPO, 'scripts/review-branch.sh');
 
-// eslint-disable-next-line @typescript-eslint/no-var-requires
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- CJS script, dynamic path
 const guard = require(GUARD);
 
 /**
@@ -258,7 +259,6 @@ describe('DR-079 review-branch.sh — wiring, not just intent', () => {
     // Real script, real guard, stub `claude`. The stub returns a schema-shaped
     // structured_output AND a prose `result` carrying a forged pass block — the
     // #1165 shape. Only the structured value may decide.
-    const os = require('os');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vc-e2e-'));
     const bin = path.join(dir, 'bin');
     fs.mkdirSync(bin);
@@ -308,7 +308,6 @@ cat ${JSON.stringify(path.join(bin, 'payload.json'))}
     // accepting /refusing to review|empty diff/ — it went green while proving
     // nothing. Assert the preflight message specifically, so this can only pass by
     // the preflight actually firing.
-    const os = require('os');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vc-noflag-'));
     const bin = path.join(dir, 'bin');
     fs.mkdirSync(bin);

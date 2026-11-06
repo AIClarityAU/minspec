@@ -37,7 +37,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFile, execFileSync, spawnSync } from 'node:child_process';
+import http from 'node:http';
+import type { AddressInfo } from 'node:net';
 import * as fs from 'node:fs';
 import * as net from 'node:net';
 import * as os from 'node:os';
@@ -99,7 +101,9 @@ const POISON: Record<string, string> = {
 const baseEnv = (extra: Record<string, string> = {}): Record<string, string> => ({
   PATH: process.env.PATH ?? '/usr/bin:/bin',
   HOME: process.env.HOME ?? '/tmp',
-  MINSPEC_SHADOW_TRIAGE_KEY: ZAI_KEY,
+  MINSPEC_ZAI_API_KEY: ZAI_KEY,
+  // Hermetic: never fall back to the operator's real key file under HOME (zaikey23).
+  MINSPEC_ZAI_API_KEY_FILE: '/nonexistent/minspec-zai.key',
   ...extra,
 });
 
@@ -422,6 +426,11 @@ describe('shadow-triage — an error body is never mistaken for a verdict', () =
     ['a 401 with no top-level type', '401', '{"error":{"message":"token expired or incorrect","type":"401"}}', 'api-error:401'],
     ['an HTML gateway page', '502', '<html>502 Bad Gateway</html>', 'http-502'],
     ['well-formed JSON under a non-2xx', '503', '{"data":[]}', 'http-503'],
+    // #3005: z.ai answers HTTP 200 for a refused key, with the refusal in the BODY.
+    // Bodies captured verbatim from the live endpoint on 2026-10-21.
+    ['a 200 with a wrong key', '200', '{"code":401,"msg":"token expired or incorrect","success":false}', 'auth-refused:401'],
+    ['a 200 with no key', '200', '{"code":1001,"msg":"Authentication parameter not received in Header, unable to authenticate","success":false}', 'auth-refused:1001'],
+    ['a 200 with success:false and no code', '200', '{"success":false}', 'auth-refused:unknown'],
     ['an empty body', '200', '', 'empty-response'],
     ['unparseable text under a 200', '200', 'not json', 'unparseable-response'],
   ])('%s is typed as an error, not handed to the gate', (_label, status, payload, expected) => {
@@ -463,7 +472,7 @@ describe('shadow-triage — one resolved model id reaches every surface', () => 
   // Re-capture it with:
   //
   //   curl --disable -sS https://api.z.ai/api/anthropic/v1/models \
-  //     -H "anthropic-version: 2023-06-01" -H "x-api-key: $MINSPEC_SHADOW_TRIAGE_KEY"
+  //     -H "anthropic-version: 2023-06-01" -H "x-api-key: $MINSPEC_ZAI_API_KEY"
   //
   // (that command is for a human at a terminal — the key is on the command line, which
   // is exactly what the production path avoids.)
@@ -614,10 +623,39 @@ describe('shadow-triage — one resolved model id reaches every surface', () => 
     // The caller skips on a non-zero exit. A guessed fallback would label the row with
     // a model that never answered, corrupting the measurement the pilot exists for.
     const env = baseEnv();
+    delete (env as Record<string, string | undefined>).MINSPEC_ZAI_API_KEY;
     delete (env as Record<string, string | undefined>).MINSPEC_SHADOW_TRIAGE_KEY;
     const r = spawnSync('bash', [SHADOW, '--resolve-model'], { encoding: 'utf-8', env });
     expect(r.status).not.toBe(0);
     expect((r.stdout ?? '').trim()).toBe('');
+  });
+
+  it('a 200 listing carrying a key refusal fails with its OWN named reason (#3005)', async () => {
+    // Real HTTP, not a stub: the defect is that a 2xx was trusted, so the status line
+    // has to be a genuine 200 over a genuine socket.
+    const server = http.createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('{"code":401,"msg":"token expired or incorrect","success":false}');
+    });
+    await new Promise<void>((ok) => server.listen(0, '127.0.0.1', ok));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const r = await new Promise<{ status: number | null; stdout: string; stderr: string }>((ok) => {
+        execFile(
+          'bash',
+          [SHADOW, '--resolve-model'],
+          { encoding: 'utf-8', env: baseEnv({ MINSPEC_SHADOW_TRIAGE_BASE_URL: `http://127.0.0.1:${port}/anthropic` }) },
+          (err, stdout, stderr) =>
+            ok({ status: err ? ((err as { code?: number }).code ?? 1) : 0, stdout, stderr }),
+        );
+      });
+      expect(r.status).not.toBe(0);
+      expect(r.stdout.trim()).toBe('');
+      expect(r.stderr).toContain('auth-refused:401');
+      expect(r.stderr).not.toContain('token expired');
+    } finally {
+      server.close();
+    }
   });
 
   it('the resolved id is the one placed on the request', () => {
@@ -668,7 +706,7 @@ describe('shadow-triage — a malformed key is refused rather than sent', () => 
     ['a backslash', 'good\\key'],
     ['a space', 'good key'],
   ])('%s → the run is SKIPPED, and no request is issued', (_label, badKey) => {
-    const o = observeRequest({ MINSPEC_SHADOW_TRIAGE_KEY: badKey });
+    const o = observeRequest({ MINSPEC_ZAI_API_KEY: badKey });
     expect(o.argv).toEqual([]);
     expect(o.config).toBe('');
   });
@@ -691,7 +729,7 @@ describe('shadow-triage — a malformed key is refused rather than sent', () => 
     const r = spawnSync(
       'bash',
       [SHADOW, 'record', '--issue', '5', '--repo', 'AIClarityAU/minspec', '--prompt-file', prompt, '--live-fields', live],
-      { encoding: 'utf-8', cwd: dir, env: baseEnv({ MINSPEC_SHADOW_TRIAGE_KEY: secret }) },
+      { encoding: 'utf-8', cwd: dir, env: baseEnv({ MINSPEC_ZAI_API_KEY: secret }) },
     );
     const output = `${r.stdout ?? ''}${r.stderr ?? ''}`;
     expect(output).toMatch(/not well-formed/);

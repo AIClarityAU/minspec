@@ -105,6 +105,23 @@ export interface SpecNode {
    * `phase-action` node source SPEC-012 FR-4 composes rather than re-derives.
    */
   implementHole?: ImplementHole;
+  /**
+   * #2370. True iff the spec's RAW frontmatter `status:` line is itself one of
+   * `done`/`archived`/`superseded` — the SAME literal-trusting check
+   * `commands/approve.ts` / `approve-active.ts` use to decide whether an approve
+   * command will offer this spec. Computed by the fs-adapter (which reads the
+   * literal line) and only CONSUMED here, exactly like `implementHole` —
+   * deliberately NOT folded into `status` above, because `status` must never
+   * trust a literal `done`/etc. (the #112 fix: an unapproved spec with no
+   * `phases:` block cannot become `done` just by being told so).
+   *
+   * Without this, a spec whose literal status is already terminal but whose
+   * `phases:` block is missing/empty derives `status: 'new'` (`allPending` wins
+   * before the approval check), so the gate below kept asking the human to
+   * "Approve" it forever — while every approve command refuses it, because THEY
+   * trust the literal. Absent/false ⇒ no change from before this field existed.
+   */
+  literalStatusTerminal?: boolean;
 }
 
 /**
@@ -247,6 +264,27 @@ function isSpecTerminal(s: SpecNode): boolean {
 }
 
 /**
+ * Is the artifact at `id` a spec that is terminal-out (#2614)? Same two
+ * predicates `generateNodes`' spec-approve loop uses to skip a retired spec
+ * (`isSpecTerminal` for the derived status, `literalStatusTerminal` for #2370's
+ * raw-frontmatter case where a missing/empty `phases:` block would otherwise
+ * derive `status: 'new'`). A retired spec's OWN dangling `depends_on` /
+ * `supersedes` is not a live gate breach — it is on its way out, exactly like
+ * `detectIncoherence`'s `superseded.has(s.id)` skip two sections down, except
+ * that skip is keyed on inbound `supersedes` EDGES (`computeSuperseded`) and
+ * misses a spec retired by a literal `status:` line alone, which is this
+ * artifact's case. Non-spec ids (epics, ADRs) are never terminal-out here —
+ * only a spec source exempts the edge.
+ */
+function isDanglingSourceRetired(id: string, index: Index): boolean {
+  const node = index.byId.get(id);
+  if (!node) return false;
+  if ((node as SpecNode).approvalState === undefined) return false; // epic or ADR: not exempt
+  const s = node as SpecNode;
+  return isSpecTerminal(s) || !!s.literalStatusTerminal;
+}
+
+/**
  * Is the artifact at `id`'s OWN gate cleared? (a `depends_on` target is cleared
  * when: epic→active, spec→approved, adr→accepted). Unknown id ⇒ treated as
  * not-cleared by callers, but danglers are reported separately in Step 2a.
@@ -339,6 +377,12 @@ function detectDangling(graph: ArtifactGraph, index: Index): Corruption[] {
     // edge kinds (`depends_on` / `supersedes`) dangling are corruption. A broken
     // soft link is at most a lint, never a signpost-blocking violation.
     if (edge.kind === 'relates_to') continue;
+    // #2614: a `depends_on`/`supersedes` edge whose SOURCE is a retired spec
+    // (terminal status or literal-terminal frontmatter) is moot — the spec is
+    // on its way out, same rationale as the skips at generateNodes' spec-approve
+    // loop and detectIncoherence's superseded check. A live source's dangling
+    // edge stays gating (see `isDanglingSourceRetired`'s doc comment).
+    if (isDanglingSourceRetired(edge.from, index)) continue;
     if (!index.byId.has(edge.from)) {
       note(`edge-from:${edge.from}->${edge.to}`, {
         kind: 'dangling-ref',
@@ -746,6 +790,11 @@ function generateNodes(
   for (const s of graph.specs) {
     if (superseded.has(s.id)) continue;
     if (isSpecTerminal(s)) continue;
+    // #2370: `status` can derive non-terminal (e.g. `new`, via `allPending`) for a
+    // spec whose literal `status:` line already reads done/archived/superseded —
+    // see `literalStatusTerminal`'s doc comment. Skip it too, or this loop emits
+    // "Approve X" for a spec every approve command refuses, forever.
+    if (s.literalStatusTerminal) continue;
     const pendingApproval = s.approvalState === 'unapproved' || s.approvalState === 'stale';
     if (!pendingApproval) continue;
     const epic = s.epic ? index.epicById.get(s.epic) : undefined;

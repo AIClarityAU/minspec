@@ -57,6 +57,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
+import { toPosixRel } from './approval-store';
 
 const execFileAsync = promisify(execFile);
 
@@ -102,7 +103,9 @@ export type CommitApprovalOutcome =
 
 export interface CommitApprovalResult {
   readonly outcome: CommitApprovalOutcome;
-  /** Repo-relative paths that were staged/committed (present on 'committed'). */
+  /** Repo-relative paths that were staged/committed (present on 'committed'), or
+   *  that were REFUSED and left uncommitted in the working tree (present on
+   *  'protected-branch', #1133 — so the warning can name them). */
   readonly paths?: string[];
   /** Error detail incl. git/hook stderr (present on 'failed'). */
   readonly error?: string;
@@ -241,7 +244,7 @@ export async function commitApproval(
   //     default branch cannot be determined we proceed exactly as before.
   const branch = await resolveBranchDestination(run);
   if (branch && branch.current === branch.default) {
-    return { outcome: 'protected-branch', branch };
+    return { outcome: 'protected-branch', branch, paths: rel };
   }
 
   // 3d. Mid-merge/cherry-pick guard (invariant 5, #1112). Independent of the
@@ -444,7 +447,11 @@ export async function isUntrackedAtHead(
   const rel = path.relative(rootDir, absPath);
   if (rel.length === 0 || rel.startsWith('..' + path.sep) || rel === '..') return true;
   try {
-    await run(['cat-file', '-e', `HEAD:${rel}`]);
+    // Git's `<rev>:<path>` object-name form names a tree entry and takes
+    // forward slashes only — a `path.relative` backslash (Windows) must be
+    // POSIX-normalized here, same as approval.ts's `git show <sha>:<path>`
+    // call and approval-store.ts's sidecar key (#2402).
+    await run(['cat-file', '-e', `HEAD:${toPosixRel(rel)}`]);
     return false;
   } catch {
     return true;

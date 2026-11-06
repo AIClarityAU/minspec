@@ -63,6 +63,19 @@ vi.mock('../src/lib/constitution-nudge', () => ({
   evaluateConstitution: vi.fn(() => ({ empty: false, message: 'm', fixHint: 'f' })),
 }));
 
+// ─── The folder has opted in (SPEC-096) ─────────────────────────────────────
+// Every test here drives a command against the fake root `/tmp/ws`, and has always treated it
+// as an initialized project. The commands now check for the `.minspec/` opt-in
+// marker before they do anything. The fake root is not a real folder, and a path
+// under /tmp can be left behind by some other run, so the precondition is stated
+// here instead of being read from whatever the disk happens to hold. What these
+// commands do in a folder that has NOT opted in is pinned, on real folders, by
+// commands-opt-in-invariant.test.ts.
+vi.mock('../src/lib/opt-in', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/opt-in')>()),
+  hasOptInMarker: vi.fn(() => true),
+}));
+
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
 import * as vscode from 'vscode';
@@ -105,9 +118,43 @@ describe('initCommand() — write-failure surfacing (#153)', () => {
     await initCommand('/tmp/ws');
 
     expect(scaffold).toHaveBeenCalledWith('/tmp/ws');
-    expect(generateHarnessFiles).toHaveBeenCalledWith('/tmp/ws');
+    expect(generateHarnessFiles).toHaveBeenCalledWith('/tmp/ws', []);
     expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
     expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  // #2399 / G-8: a hook init staged into the git index is shown, as on refresh.
+  it('shows the exec-bit notice when init staged a hook into the index', async () => {
+    vi.mocked(generateHarnessFiles).mockImplementationOnce((_dir, notices) => {
+      notices?.push({
+        outputPath: '.minspec/hooks/pre-commit',
+        message: 'STAGED-NOTICE-TEXT',
+        kind: 'exec-bit-recorded',
+      });
+      return [];
+    });
+
+    await initCommand('/tmp/ws');
+
+    const shown = vi.mocked(vscode.window.showInformationMessage).mock.calls.map((c) => String(c[0]));
+    expect(shown.some((m) => m.includes('STAGED-NOTICE-TEXT'))).toBe(true);
+  });
+
+  it('coalesces several staged-hook notices into ONE dialog naming every path', async () => {
+    vi.mocked(generateHarnessFiles).mockImplementationOnce((_dir, notices) => {
+      for (const p of ['.minspec/hooks/pre-commit', '.minspec/hooks/commit-msg', 'scripts/validate.py']) {
+        notices?.push({ outputPath: p, message: `per-file ${p}`, kind: 'exec-bit-recorded' });
+      }
+      return [];
+    });
+
+    await initCommand('/tmp/ws');
+
+    const shown = vi.mocked(vscode.window.showInformationMessage).mock.calls.map((c) => String(c[0]));
+    const combined = shown.filter((m) => m.includes('executable (100755)'));
+    expect(combined).toHaveLength(1);
+    for (const p of ['pre-commit', 'commit-msg', 'validate.py']) expect(combined[0]).toContain(p);
+    expect(shown.some((m) => m.includes('per-file'))).toBe(false);
   });
 });
 

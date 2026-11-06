@@ -32,9 +32,11 @@ describe('dispatch-issue.sh: sources the claim lease lib (held in-parent for the
 describe('dispatch-issue.sh: check-then-claim is the FIRST step, BEFORE the worktree (FR-1)', () => {
   it('the claim (lease_acquire) precedes `git worktree add`', () => {
     const acquireIdx = src.indexOf('lease_acquire "$ISSUE"');
-    // Anchor on the real command (`git worktree add -b "$BRANCH"`), not the earlier
-    // freshness-guard COMMENT that also mentions `git worktree add ... origin/main`.
-    const worktreeAddIdx = src.indexOf('git worktree add -b "$BRANCH"');
+    // Anchor on the real command (`git -C "$REPO_ROOT" worktree add -b "$BRANCH"`,
+    // pinned to the script's own repo root rather than the caller's cwd — #1896),
+    // not the earlier freshness-guard COMMENT that also mentions
+    // `git worktree add ... origin/main`.
+    const worktreeAddIdx = src.indexOf('git -C "$REPO_ROOT" worktree add -b "$BRANCH"');
     expect(acquireIdx).toBeGreaterThan(-1);
     expect(worktreeAddIdx).toBeGreaterThan(-1);
     expect(acquireIdx, 'claim must come before worktree creation').toBeLessThan(worktreeAddIdx);
@@ -51,10 +53,19 @@ describe('dispatch-issue.sh: check-then-claim is the FIRST step, BEFORE the work
   });
 
   it('a failed flock / gate / claim STANDS DOWN cleanly (exit 0), never proceeds to build', () => {
-    // Three guarded early-exits: each `if ! lease_… ; then … exit 0 ; fi`.
-    expect(src).toMatch(/if ! lease_flock "\$ISSUE"; then[\s\S]*?exit 0/);
-    expect(src).toMatch(/if ! lease_gate_open_unshipped "\$ISSUE"; then[\s\S]*?exit 0/);
-    expect(src).toMatch(/if ! lease_acquire "\$ISSUE"; then[\s\S]*?exit 0/);
+    // Three guarded early-exits: each `if ! lease_… ; then <one line saying so> ;
+    // exit_declined ; fi`. exit_declined IS the clean exit 0 for every caller that does
+    // not ask how the run ended, and the "refused before starting" status for the one
+    // that does (#2641). dispatch-outcome-status.test.ts runs all three both ways; this
+    // pins that nothing else has crept in between the refusal and the exit.
+    const standsDown = (check: string) =>
+      new RegExp(`if ! ${check} "\\$ISSUE"; then\\n\\s+echo "[^\\n]+\\n\\s+exit_declined\\n\\s+fi\\n`);
+    expect(src).toMatch(standsDown('lease_flock'));
+    expect(src).toMatch(standsDown('lease_gate_open_unshipped'));
+    expect(src).toMatch(standsDown('lease_acquire'));
+    // And exit_declined is exit 0 unless asked: the line that makes it so.
+    const fn = src.match(/^exit_declined\(\) \{[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(fn).toMatch(/^\s+\(\( DISPATCH_STATUS_ASKED \)\) \|\| exit 0$/m);
   });
 });
 

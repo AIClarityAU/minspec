@@ -106,8 +106,6 @@ describe('review-decide.sh — blocked (reviewer could not run: quota/transient)
  * anchoring none: a marker one sees and another misses is a forgery channel (#1165).
  */
 describe('review-decide.sh — a prose mention is not a marker (#1157)', () => {
-  const BLOCKED = 'ai-review:blocked';
-
   it('inline `REVIEW_UNAVAILABLE` in prose does not force blocked', () => {
     const cited =
       '- **`ai-review.yml:560`** the `REVIEW_UNAVAILABLE_BEGIN/END` sed range. ✅ Confirmed.\n' +

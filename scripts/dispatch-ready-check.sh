@@ -44,7 +44,8 @@
 #
 # Two things now stand where that reasoning did:
 #   1. `--trusted-comment-bodies` — records are read only from comments whose AUTHOR
-#      could legitimately write one (this gate's App, or OWNER/MEMBER/COLLABORATOR).
+#      could legitimately write one (this gate's App, told by its ACCOUNT and never by
+#      its login, or OWNER/MEMBER/COLLABORATOR).
 #   2. `--newest-record` — selection is by the record's own `verdictAt`, not by
 #      position, because comment authorship is NOT record authorship: trusted writers
 #      republish text they did not author (a maintainer quoting a past verdict; the
@@ -101,7 +102,7 @@
 # label-as-authority hole this file exists to close.
 #
 # Usage:
-#   dispatch-ready-check.sh <state> <labels-csv> <verdict-source-file> <body-file>
+#   dispatch-ready-check.sh <state> <labels-csv> <verdict-source-file> <body-file> [issue-number]
 #     <state>               the issue's CURRENT state from `gh issue view --json state`
 #                           (OPEN | CLOSED, case-insensitive).
 #     <labels-csv>          the issue's CURRENT labels, comma-separated (label NAMES).
@@ -114,6 +115,8 @@
 #                           inside a later comment cannot.
 #     <body-file>           a file holding the issue body AS COMPOSED FOR TRIAGE
 #                           ("# " + title + "\n\n" + body), used to recompute bodyHash.
+#     [issue-number]        optional. When given, the issue's declared blockers are read
+#                           and an open one refuses it [blocked] (#3326).
 #
 #   dispatch-ready-check.sh --render-record <decision> <role> <tier> <human_only> <hold> [verdictAt]
 #     Issue body on stdin. Prints the comment-embeddable verdict record. This is the
@@ -192,26 +195,17 @@ RECORD_SCHEMA_HUMAN="minspec-human-approval/1"
 # same authority, not a new one: nothing here lets an approval reach `human`, `info`
 # or `unknown`, which stay absolute.
 APPROVABLE_HOLDS="tier specify"
-# The App login whose comments carry the gate's own verdict records. Defined ONCE,
-# here, because every reader must agree on it. Its authorAssociation is CONTRIBUTOR,
-# so association alone would reject the very writer every record comes from.
-#
-# ── The login form DEPENDS ON WHICH API YOU CALL (measured 2026-07-31) ────────
-#   gh issue view --json comments   (GraphQL)  → "minspec-sdd"        ← bare
-#   gh pr view    --json comments   (GraphQL)  → "minspec-sdd"        ← bare
-#   gh api repos/../issues/N/comments (REST)   → "minspec-sdd[bot]"   ← bracketed
-# Today all three readers use the GraphQL shape, so the bare form is what arrives. But
-# nothing at the call site makes that visible, REST is a perfectly reasonable thing to
-# switch to (`--paginate` alone is a good reason, and this repo already uses REST for
-# the timeline), and getting it wrong fails in the WORST direction: the filter would
-# silently drop every bot-authored record and the gate would refuse to dispatch
-# anything, with no error to explain why. So the comparison normalises BOTH sides —
-# lowercased, with a trailing `[bot]` stripped — and accepts either spelling.
+# WHOSE comments carry the gate's own verdict records is not written here any more. It
+# was a login (`minspec-sdd`), and a login is a spelling: it differs by API (bare from
+# `gh issue view`, `minspec-sdd[bot]` from REST), and a person can hold the bare one as
+# their own account. The App is on the list in lib/dispatch-author-gate.sh by the kind
+# and number of its account, and `--trusted-comment-bodies` below asks that list. Its
+# authorAssociation is CONTRIBUTOR, so association alone would reject the very writer
+# every record comes from, which is why the list is asked at all.
 #
 # NOT `is_bot_identity`: that matches ANY `*[bot]` login, which would trust
 # `github-actions[bot]`, `dependabot[bot]` and every future App installed on the repo
 # to author verdict records. Only THIS gate's App may.
-RECORD_BOT_LOGIN="minspec-sdd"
 RECORD_MARKER="<!-- minspec-verdict-record -->"
 RECORD_BEGIN="MINSPEC_VERDICT_BEGIN"
 RECORD_END="MINSPEC_VERDICT_END"
@@ -423,23 +417,81 @@ fi
 # and a build.
 #
 # Trust is by AUTHOR, which a comment body cannot alter about itself:
-#   • the gate's own bot login (passed in — App identities read as CONTRIBUTOR, so
-#     association alone would reject the very writer the records come from); or
+#   • an ACCOUNT on the list in lib/dispatch-author-gate.sh, which is where this gate's
+#     own App is (App identities read as CONTRIBUTOR, so association alone would reject
+#     the very writer the records come from); or
 #   • an authorAssociation of OWNER / MEMBER / COLLABORATOR.
 # Everything else — CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR, NONE, absent — is dropped.
-# Input: `gh issue view --json comments` output on stdin. Output: the joined bodies,
-# oldest→newest, exactly the shape the reader already expects.
+#
+# AN ACCOUNT, NOT A LOGIN. This arm used to compare `author.login` with the App's name,
+# `minspec-sdd`. A login is a spelling: `gh issue view` prints the App's comments under
+# that name, and a person can register the same name as their own account, at which
+# point a rule written on the spelling trusts both. So the arm is `listed`, the one
+# function every other reader of "who wrote this" uses: the account's kind and number
+# (`Bot:299695933`), which whoever registers an account does not get to choose.
+#
+# `gh issue view --json comments` does not say which account wrote a comment, only its
+# login. So a comment that arrives with no account on it, and that the association arm
+# does not already keep, is looked up by its own id (dispatch_identify_comments), and
+# GitHub's text for that id must be the text that arrived. That lookup is the one thing
+# here that is not pure: it is a read of GitHub, made only for such comments, and a
+# document whose comments all carry their account (what the GraphQL readers pass in)
+# makes none. When it fails this prints NOTHING and says why on stderr: the caller picks
+# the newest record among what it is given, so some of the comments would be worse than
+# none.
+#
+# WHAT THE EXIT STATUS SAYS, because the output cannot. An empty output means two
+# different things, and a caller that confuses them writes a fault of the network onto
+# an issue as if it were a finding about the issue:
+#   0   an ANSWER. The bodies of the trusted comments, which may be none at all.
+#   75  NO ANSWER: the lookup of who wrote a comment could not be completed (the read
+#       failed, GitHub's reply could not be read, or it no longer matched the text that
+#       was read). Nothing is known about the issue's record. Try again later; never
+#       record it as "no verdict".
+#   any other status: the filter could not run on what it was given. Also no answer.
+# 75 is the conventional "temporary failure, try again" status. Every caller treats any
+# status but 0 as no answer; 75 lets its message say which kind.
+#
+# The association arm is as it was (#1105 has what it leaves open).
+#
+# Input: a `comments` list on stdin, as `gh issue view --json comments` prints one.
+# Output: the joined bodies, oldest→newest, exactly the shape the reader already expects.
 if [[ "${1:-}" == "--trusted-comment-bodies" ]]; then
   shift
-  t_bot="${1-$RECORD_BOT_LOGIN}"
-  [[ -n "$t_bot" ]] || t_bot="$RECORD_BOT_LOGIN"
-  jq -r --arg bot "$t_bot" '
-    # Normalise a login so the bare and `[bot]`-suffixed spellings of the SAME App
-    # compare equal, and case can never matter. Applied to both sides.
-    def botnorm: ascii_downcase | sub("\\[bot\\]$"; "");
+  if (( $# > 0 )); then
+    # It took a login to trust. Nothing is trusted on a login now, so one that is still
+    # passed is refused out loud rather than ignored: the caller believes it matters.
+    echo "dispatch-ready-check: --trusted-comment-bodies takes no argument. It used to take a login to trust, and a login does not say which account wrote a comment (lib/dispatch-author-gate.sh has the list)." >&2
+    exit 1
+  fi
+  t_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  # shellcheck source=scripts/lib/dispatch-author-gate.sh
+  source "${t_dir}/lib/dispatch-author-gate.sh" || exit 1
+  t_listed="$(_dispatch_trusted_identities_json 2>/dev/null)" || t_listed=""
+  [[ -n "$t_listed" ]] || { echo "dispatch-ready-check: the list of trusted accounts could not be built, so no comment is trusted." >&2; exit 1; }
+  t_doc="$(cat)"
+  # Is there a comment only a lookup could admit? One the association arm does not
+  # keep, with no account on it, and an id to ask about (an id made of anything but the
+  # characters an id has is never asked about, and its comment is simply not kept).
+  # Unparseable input is "no" here and is refused by the filter below, which prints
+  # nothing.
+  if printf '%s' "$t_doc" | jq -e '
+        [ (.comments // [])[]
+          | select(type == "object")
+          | select(((.authorAssociation // "") as $a | $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR") | not)
+          | select((.author | type) != "object" or (.author.__typename | type) != "string")
+          | select((.id | type) == "string" and (.id | test("^[A-Za-z0-9_=-]{1,128}$"))) ] | length > 0' >/dev/null 2>&1; then
+    # The read needs a credential, and takes the pipeline's own the way every other
+    # read of who wrote something does (lib/gh-bot.sh).
+    # shellcheck source=scripts/lib/gh-bot.sh
+    source "${t_dir}/lib/gh-bot.sh" || exit 75
+    gh_bot_init
+    t_doc="$(printf '%s' "$t_doc" | dispatch_identify_comments "the comments this gate was given")" || exit 75
+  fi
+  printf '%s' "$t_doc" | jq -r --argjson listed "$t_listed" "$(_dispatch_gate_jq_defs)"'
     [ (.comments // [])[]
       | select(
-          ($bot != "" and (((.author.login // "") | botnorm) == ($bot | botnorm)))
+          (.author | listed)
           or ((.authorAssociation // "") as $a
               | $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR")
         )
@@ -573,6 +625,7 @@ STATE="${1:?usage: dispatch-ready-check.sh <state> <labels-csv> <verdict-source-
 LABELS_CSV="${2-}"      # optional: an issue may have zero labels
 VERDICT_SRC="${3-}"     # REQUIRED: absence is itself a refusal (fail closed)
 BODY_FILE="${4-}"       # REQUIRED: needed to recompute bodyHash
+BLOCKER_ISSUE="${5-}"   # OPTIONAL (#3326): issue number; when given, open declared blockers are a HOLD
 
 # Normalise state; gh emits OPEN | CLOSED.
 state_uc="$(printf '%s' "$STATE" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]')"
@@ -632,7 +685,7 @@ fi
 # `needs-human-review`. Either alone would close the hole; both together mean a
 # single missed label write cannot reopen it (constitution invariant 2 — no required
 # check hinging on a single producer).
-for gate in needs-review needs-info needs-human-review agent-quarantined agent-done agent-escalated; do
+for gate in needs-review needs-info needs-human-review agent-quarantined agent-done agent-escalated agent-crashed; do
   if has_label "$gate"; then
     refuse countermanded "countermanding label '${gate}' present (re-triaged / quarantined since drain)"
   fi
@@ -741,6 +794,48 @@ if [[ "$IS_HUMAN_APPROVAL" -eq 1 ]]; then
   r_sup="$(printf '%s' "$(record_field supersedes)" | tr '[:upper:]' '[:lower:]')"
   if ! printf '%s\n' "$APPROVABLE_HOLDS" | tr ' ' '\n' | grep -Fxq -- "$r_sup"; then
     refuse bad-supersedes "human-approval record claims to lift hold '${r_sup:-<missing>}', which no approval may lift (approvable: ${APPROVABLE_HOLDS}) — human_only, info and unknown holds are absolute (DR-072 §3)."
+  fi
+fi
+
+# ── #3326: an open declared blocker is a HOLD, not a build ───────────────────
+# ROOT CAUSE: the ranker (scripts/lib/issue-rank.ts) knew the `Blocked by #N` /
+# `Depends on #N` / native blockedBy edges but called them informational, and this
+# gate - the one pre-dispatch refusal point - never asked. SPEC-136's build tasks were
+# all filed `agent-ready` at once and the drain dispatched dependents beside their
+# prerequisites; eleven agents escalated "blocked on unmerged dependencies".
+#
+# The refusal leaves `agent-ready` in place and (via exit_declined, #2641) costs no
+# dispatch slot, so the issue dispatches on the first cycle after its last blocker
+# closes - no release step. The parser is issue-rank.ts's (scripts/open-blockers.ts
+# imports it); there is no second copy. Fail closed (invariant 2): if a blocker's
+# state cannot be read the answer is "unknown", which is a refusal, never a pass.
+# Checked last so a stale verdict or countermanding label keeps its own reason.
+if [[ -n "$BLOCKER_ISSUE" ]]; then
+  # Physical path (-P): a caller may reach this script through a symlinked scripts/ dir
+  # (the test fixtures do), and node_modules belongs to the real repo, not the link.
+  b_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+  b_repo="${BLOCKER_REPO:-${REPO-}}"
+  if [[ -z "$b_repo" ]]; then
+    refuse blocker-unknown "no repository named (BLOCKER_REPO), so whether the issue's declared blockers are open cannot be read - refusing rather than assuming none (#3326)"
+  fi
+  # The pinned runner, resolved from THIS script's location - never `npx tsx`, which
+  # looks in the caller's cwd and, run from outside the repo, would refuse every issue
+  # (same pattern as dispatch-issue.sh / drain-inbox.sh).
+  b_tsx="${b_dir}/../node_modules/.bin/tsx"
+  if [[ ! -x "$b_tsx" ]]; then
+    refuse blocker-unknown "no pinned tsx runner at ${b_tsx}, so the issue's declared blockers cannot be read - refusing rather than assuming none are open (#3326)"
+  fi
+  b_err="$(mktemp)"
+  b_rc=0
+  b_open="$("$b_tsx" "${b_dir}/open-blockers.ts" "$BLOCKER_ISSUE" "$b_repo" < "$BODY_FILE" 2>"$b_err")" || b_rc=$?
+  b_msg="$(head -c 300 "$b_err" | tr '\n' ' ')"
+  rm -f "$b_err"
+  if (( b_rc != 0 )); then
+    refuse blocker-unknown "the state of the issue's declared blockers could not be read (${b_msg:-exit ${b_rc}}) - refusing rather than assuming none are open; a blocker that was deleted or transferred never reads again, so edit the issue body to remove or correct its 'Blocked by' line (#3326)"
+  fi
+  if [[ -n "$b_open" ]]; then
+    b_list="$(printf '%s\n' "$b_open" | sed 's/^/#/' | paste -sd, - | sed 's/,/, /g')"
+    refuse blocked "declared blocker(s) still open: ${b_list} - held until they close; agent-ready stays in place and the issue dispatches on the first cycle after (#3326)"
   fi
 fi
 

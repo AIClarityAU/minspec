@@ -30,7 +30,9 @@
  *   - no patch fingerprint means no reuse at all.
  */
 import { describe, it, expect } from 'vitest';
+import * as crypto from 'crypto';
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- CJS script, no ESM export
 const GUARD = require('../../../.github/scripts/ai-review-guard.js');
 const { renderVoterRecord, parseVoterRecords, selectVotersToRun } = GUARD;
 
@@ -82,7 +84,6 @@ describe('renderVoterRecord / parseVoterRecords round-trip', () => {
     // renderVoterRecord cannot produce this, so the parser's own guard is the only thing
     // standing between a blank "verdict" and being counted as a survivor. Built by hand
     // with a CORRECT digest, so only the emptiness check can reject it.
-    const crypto = require('crypto');
     const payload = '   \n\t  ';
     const digest = crypto.createHash('sha256').update(payload, 'utf8').digest('hex');
     const rec = `voter-record:reviewer:${digest}:${Buffer.from(payload, 'utf8').toString('base64')}`;

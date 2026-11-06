@@ -79,9 +79,6 @@ function parsePatch(patch: string): DiffFileStat[] {
   const files: DiffFileStat[] = [];
   let cur: DiffFileStat | null = null;
 
-  const stripPrefix = (p: string): string =>
-    p.replace(/^a\//, '').replace(/^b\//, '').trim();
-
   const lines = patch.split('\n');
   for (const line of lines) {
     if (line.startsWith('diff --git ')) {

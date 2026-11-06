@@ -138,6 +138,10 @@ describe('approveSpec — lib boundary is the authoritative gate (no side effect
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-dr056-'));
+    // SPEC-096: an approval is recorded only in a folder that has opted in. With the
+    // marker present, the identity gate is the only thing these tests can be refused
+    // by, so a denial below is the approver gate's and not the opt-in gate's.
+    fs.mkdirSync(path.join(tmp, '.minspec'));
     fs.mkdirSync(path.join(tmp, 'specs'));
     specPath = path.join(tmp, 'specs', 'SPEC-007-thing.md');
     fs.writeFileSync(specPath, '---\nid: SPEC-007\ntier: T3\nstatus: specifying\n---\n# Thing\n');

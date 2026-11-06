@@ -3,6 +3,8 @@ import * as path from 'path';
 import type { ParsedSpec, SpecFrontmatter } from './spec';
 import { parseSpec, writeSpec } from './spec';
 import { PHASES } from './config';
+import { ensureDirectory } from './opt-in';
+import { restoreLineEndings } from './text-io';
 import type { ShardIdFile } from './spec-validator';
 
 /**
@@ -67,7 +69,11 @@ export function isSpecKitDirEntry(entryName: string): boolean {
  */
 export function splitSpecForSpecKit(spec: ParsedSpec): Record<SpecKitFile, ParsedSpec> {
   const shards: Record<SpecKitFile, ParsedSpec> = {
-    'spec.md': emptyShard(spec.frontmatter, spec.preamble),
+    // Only spec.md carries frontmatter on write (writeShard), so only it needs
+    // extraFrontmatter — without this, the flat→spec-kit migration direction
+    // silently dropped implements:/affects:/relates_to: just like the flat→flat
+    // one (#2324): writeSpec(shard) only re-emits what THIS object carries.
+    'spec.md': emptyShard(spec.frontmatter, spec.preamble, spec.extraFrontmatter),
     'plan.md': emptyShard(spec.frontmatter, ''),
     'tasks.md': emptyShard(spec.frontmatter, ''),
   };
@@ -80,13 +86,14 @@ export function splitSpecForSpecKit(spec: ParsedSpec): Record<SpecKitFile, Parse
   return shards;
 }
 
-function emptyShard(fm: SpecFrontmatter, preamble: string): ParsedSpec {
+function emptyShard(fm: SpecFrontmatter, preamble: string, extraFrontmatter?: readonly string[]): ParsedSpec {
   return {
     frontmatter: fm,
     preamble,
     sections: new Map<string, string>(),
     phaseSections: {},
     raw: '',
+    extraFrontmatter,
   };
 }
 
@@ -131,6 +138,11 @@ export function mergeSpecKitShards(shards: Partial<Record<SpecKitFile, ParsedSpe
     sections: merged,
     phaseSections: {},
     raw: '',
+    // spec.md is authoritative for frontmatter (see docstring), so its
+    // extraFrontmatter is too — carrying it through is what lets the
+    // spec-kit→flat migration direction round-trip implements:/affects:/
+    // relates_to: (#2324).
+    extraFrontmatter: specShard.extraFrontmatter,
   };
 }
 
@@ -258,10 +270,20 @@ export function readSpecKitDir(dirPath: string): ParsedSpec {
  * Write a ParsedSpec out to a spec-kit directory.
  * Creates the directory if needed. Only writes files that have content
  * (plan.md / tasks.md are skipped if empty), but spec.md is always written.
+ *
+ * Line endings (SPEC-095): each file is written in its own line endings when it exists, so
+ * a phase transition leaves a CRLF directory CRLF. One that does not exist yet is part of a
+ * layout migration and takes the endings of the spec it was migrated from (FR-5(a)), or is
+ * written LF when the spec was built in memory. Restoring against the files' concatenation
+ * instead would trade blank-line endings between files a write did not change.
  */
 export function writeSpecKitDir(dirPath: string, spec: ParsedSpec): void {
-  fs.mkdirSync(dirPath, { recursive: true });
+  ensureDirectory(dirPath); // SPEC-096 FR-4: never creates `.minspec/`
   const shards = splitSpecForSpecKit(spec);
+  const inOwnEndings = (filePath: string, content: string): string => {
+    if (fs.existsSync(filePath)) return restoreLineEndings(content, fs.readFileSync(filePath, 'utf-8'));
+    return spec.source === undefined ? content : restoreLineEndings(content, spec.source);
+  };
 
   for (const fileName of SPEC_KIT_FILES) {
     const shard = shards[fileName];
@@ -269,7 +291,7 @@ export function writeSpecKitDir(dirPath: string, spec: ParsedSpec): void {
     const filePath = path.join(dirPath, fileName);
 
     if (fileName === 'spec.md') {
-      fs.writeFileSync(filePath, content, 'utf-8');
+      fs.writeFileSync(filePath, inOwnEndings(filePath, content), 'utf-8');
       continue;
     }
 
@@ -277,7 +299,7 @@ export function writeSpecKitDir(dirPath: string, spec: ParsedSpec): void {
     if (content.trim() === '') {
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     } else {
-      fs.writeFileSync(filePath, content, 'utf-8');
+      fs.writeFileSync(filePath, inOwnEndings(filePath, content), 'utf-8');
     }
   }
 }

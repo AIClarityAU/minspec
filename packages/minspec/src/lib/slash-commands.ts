@@ -3,6 +3,8 @@ import * as path from 'path';
 import { detectTools, type DetectedTools } from './tool-detector';
 import { ASPECT_GUIDANCE } from './spec-validator';
 import { SPEC_STATUSES } from './spec';
+import { ensureDirectory } from './opt-in';
+import { prepareText, restoreLineEndings } from './text-io';
 
 /**
  * Spec Kit-compatible slash command surface.
@@ -141,7 +143,8 @@ const COMMAND_GUIDANCE: Record<SpecKitCommand, CommandGuidance> = {
     body:
       'Run the **Clarify** phase. Required for T4, optional for T2/T3, skipped for T1.\n\n' +
       'List concrete answerable questions blocking the plan. For each question add an answer or a follow-up task. Vague concerns belong in discussion, not here.\n\n' +
-      'Update the active spec\'s Clarify section. Arguments: $ARGUMENTS',
+      'Update the active spec\'s Clarify section.\n\n' +
+      '**When the last open question is answered or recorded (the final `Recorded selection:` line), set `phases.clarify: done` in the spec frontmatter in the same commit** (use `skipped` instead when the phase is deliberately skipped). The delegated approve gate does not read this field; it refuses (`clarify-open`) a spec whose "Decisions needed (Clarify)" section still lists unanswered decision items, so answer or record each one. Leave `status:` unchanged. Arguments: $ARGUMENTS',
   },
   plan: {
     description: 'Draft the technical approach for the active spec',
@@ -320,16 +323,20 @@ function stripUnmarkedLegacySlashSections(content: string): string {
  * duplicates accumulated by previous non-idempotent versions), strips any
  * orphaned markers and any unmarked legacy/duplicate heading sections, then
  * appends exactly one canonical block.
+ *
+ * Works on the LF form of `fileContent`, and the result is given back the line endings
+ * `fileContent` had (SPEC-095 FR-2/FR-3); an empty or missing file gets an LF section.
  */
 export function injectAgentsSlashSection(fileContent: string): string {
   const block = buildAgentsSlashCommandSection();
+  const text = prepareText(fileContent);
 
   const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const startRe = escapeRe(AGENTS_SLASH_SECTION_START);
   const endRe = escapeRe(AGENTS_SLASH_SECTION_END);
 
   // Remove all complete start..end blocks (non-greedy — handles N duplicates).
-  let stripped = fileContent.replace(new RegExp(`${startRe}[\\s\\S]*?${endRe}`, 'g'), '');
+  let stripped = text.replace(new RegExp(`${startRe}[\\s\\S]*?${endRe}`, 'g'), '');
   // Remove any orphaned markers not consumed by the block pattern above.
   stripped = stripped
     .replace(new RegExp(startRe, 'g'), '')
@@ -339,9 +346,9 @@ export function injectAgentsSlashSection(fileContent: string): string {
 
   const trimmed = stripped.trimEnd();
   if (trimmed.length === 0) {
-    return block + '\n';
+    return restoreLineEndings(block + '\n', fileContent);
   }
-  return trimmed + '\n\n' + block + '\n';
+  return restoreLineEndings(trimmed + '\n\n' + block + '\n', fileContent);
 }
 
 export interface GeneratedShims {
@@ -380,7 +387,7 @@ export function generateSlashCommandShims(
 
   if (tools.claude) {
     const dir = path.join(rootDir, '.claude', 'commands');
-    fs.mkdirSync(dir, { recursive: true });
+    ensureDirectory(dir); // SPEC-096 FR-4: the one directory operation
     for (const cmd of SPEC_KIT_COMMANDS) {
       const filePath = path.join(dir, `${slashCommandName(cmd)}.md`);
       if (!fs.existsSync(filePath)) {
@@ -392,7 +399,7 @@ export function generateSlashCommandShims(
 
   if (tools.cursor) {
     const dir = path.join(rootDir, '.cursor', 'rules');
-    fs.mkdirSync(dir, { recursive: true });
+    ensureDirectory(dir); // SPEC-096 FR-4: the one directory operation
     const filePath = path.join(dir, 'spec-kit-commands.mdc');
     if (!fs.existsSync(filePath)) {
       fs.writeFileSync(filePath, buildCursorShim(), 'utf-8');

@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { listSpecs, type SpecSummary } from '../lib/spec-catalog';
@@ -9,6 +10,7 @@ import { getApprovalStatus } from '../lib/approval';
 import { explicitTerminalOf, type ExplicitTerminal } from '../lib/lifecycle';
 import { folderForFile, resolveTargetFolder } from '../lib/resolve-folder';
 import { readShardIdFiles } from '../lib/spec-layout';
+import { readSpecTaskTally } from '../lib/artifact-graph';
 
 interface SpecNodeLike {
   readonly spec?: SpecSummary;
@@ -61,6 +63,12 @@ export async function validateSpecCommand(node?: SpecNodeLike): Promise<void> {
       // #439: sibling shard files (design.md/tasks.md/…) in this spec's directory,
       // so a diverging shard id is flagged as an error.
       siblingShardFiles: readShardIdFiles(path.dirname(spec.filePath)),
+      // #1751: implement.claimed-without-evidence — repo-relative existence check,
+      // resolved here (not inside spec-validator.ts, which is filesystem-free by
+      // design) against THIS workspace root.
+      pathExists: (relPath) => fs.existsSync(path.join(rootDir, relPath)),
+      // #1595: implement close-out rules - the same task reader the signpost uses.
+      taskTally: readSpecTaskTally(spec.filePath, parsed),
     });
   } catch (err) {
     vscode.window.showErrorMessage(

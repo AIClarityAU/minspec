@@ -17,6 +17,9 @@ let tmp: string;
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-store-'));
+  // SPEC-096: an approval is recorded only in a folder that has opted in. The
+  // stores used to create `.minspec/` themselves; the fixture now says so.
+  fs.mkdirSync(path.join(tmp, '.minspec'));
 });
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });

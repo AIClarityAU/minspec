@@ -4,6 +4,15 @@
 # (patch-hash re-attestation) could actually skip. #1839 records the fingerprint
 # this reads back.
 #
+# It also measures the verdict carry (#1688/DR-104, #2636): once the ai-review
+# workflow calls `planVerdictCarry`, a round can be CARRIED (the voters did not run;
+# a prior pass's verdict was reused) instead of REVIEWED. A carried round still posts
+# a completed `ai-review` check run, so without this split every carry would be
+# miscounted as a repeat review that "could be skipped" - when the voters never ran.
+# See the "carry-count" block below for what it reads and the one known gap (it
+# cannot, from check-run data alone, tell a moved-hunk no-op from a genuine new
+# patch - see that block's comment).
+#
 # Read-only. Makes no writes.
 #
 # Every correction below was MEASURED against the live API, not reasoned. An earlier
@@ -30,9 +39,9 @@
 #     are not N independent observations. Both are printed.
 #
 # KNOWN REMAINING BIAS 2: rows are de-duplicated with `sort -u` on the full
-# (timestamp, conclusion, slug, fingerprint) tuple, so two genuinely distinct runs that
-# coincide on all four fields collapse into one. That deletes a repeat, so it biases
-# DOWN, consistent with the floor-not-ceiling framing above.
+# (timestamp, conclusion, slug, fingerprint, title) tuple, so two genuinely distinct
+# runs that coincide on all five fields collapse into one. That deletes a repeat, so it
+# biases DOWN, consistent with the floor-not-ceiling framing above.
 #
 # KNOWN REMAINING BIAS 1, unfixable from this endpoint: history comes from
 # pulls/{n}/commits, which lists only CURRENTLY REACHABLE commits, so a force-push
@@ -92,17 +101,25 @@ echo "ai-review churn - $REPO, PRs updated since $SINCE"
 echo
 
 prs="$(gh_retry pr list --repo "$REPO" --state all --limit 400 \
-        --json number,updatedAt,title \
-        --jq "[.[] | select(.updatedAt >= \"${SINCE}\")] | .[] | \"\(.number)\t\(.title)\"")" \
+        --json number,updatedAt,title,labels \
+        --jq "[.[] | select(.updatedAt >= \"${SINCE}\")] | .[] | \"\(.number)\t\([.labels[].name] | any(. == \"ai-review:carried\"))\t\(.title)\"")" \
   || { echo "ERROR: gh pr list failed - refusing to report an empty measurement as a result." >&2; exit 1; }
 [[ -z "$prs" ]] && { echo "No PRs updated in the last $DAYS days."; exit 0; }
 
 tot=0; c_success=0; c_neutral=0; c_failure=0; c_other=0
 fp_runs=0; skippable=0; nofp=0; prs_seen=0; prs_with_skip=0; offslug=0
+# #2636: verdict-carry split. carry_reviewed/carry_carried/carry_nochange count ROUNDS
+# (one per completed check-run), read from the check-run's own title - see "carry-count"
+# below. carry_prs_with_label counts PULL REQUESTS currently wearing the disclosure
+# label, which is a CURRENT-STATE sanity check only (the label is mutable and reflects
+# only the latest round), never a per-round signal.
+carry_reviewed=0; carry_carried=0; carry_nochange=0
+carry_refused_incomplete=0; carry_refused_other=0; carry_prs_with_label=0
 report=""
 
-while IFS=$'\t' read -r pr title; do
+while IFS=$'\t' read -r pr has_label title; do
   [[ -z "$pr" ]] && continue
+  [[ "$has_label" == "true" ]] && carry_prs_with_label=$((carry_prs_with_label + 1))
   # The commits fetch records APIFAIL too. It previously did not: a failure here
   # emitted no SHAs, `rows` came back empty, and the PR was dropped by the `continue`
   # below with apifails still 0, so the refusal guard never fired and the rate was
@@ -133,7 +150,8 @@ while IFS=$'\t' read -r pr title; do
                     (.conclusion // "?"),
                     (.app.slug // "?"),
                     ( [ (.output.title // ""), (.output.summary // ""), (.output.text // "") ]
-                      | join("\n") | capture("patch-fingerprint:(?<fp>[0-9a-f]{64})").fp? // "-" )
+                      | join("\n") | capture("patch-fingerprint:(?<fp>[0-9a-f]{64})").fp? // "-" ),
+                    (.output.title // "")
                   ] | @tsv' 2>>"$ERRS")"; then
           if [[ -n "$out" ]]; then printf '%s\n' "$out" > "$cached"; else : > "$cached"; fi
         else
@@ -151,7 +169,9 @@ while IFS=$'\t' read -r pr title; do
   # >>> churn-count (executed verbatim by review-churn-count.test.ts)
   declare -A passed=()   # fingerprints a PRIOR passing run already covered
   pr_skip=0; pr_fp=0
-  while IFS=$'\t' read -r _ts concl slug fp; do
+  # _title is the 5th column #2636 added for the carry-count block below (it is unused
+  # here, and read with 4-field input - e.g. the test harness - leaves it empty).
+  while IFS=$'\t' read -r _ts concl slug fp _title; do
     [[ -z "${concl:-}" ]] && continue
     tot=$((tot + 1))
     case "$concl" in
@@ -174,6 +194,81 @@ while IFS=$'\t' read -r pr title; do
   done <<< "$rows"
   # <<< churn-count
   unset passed
+
+  # >>> carry-count (executed verbatim by review-churn-carry.test.ts, #2636)
+  #
+  # Reads $shas (this PR's commits, oldest first - the order pulls/{n}/commits returns
+  # them) and $SHACACHE (already populated by sha-emit above, one file per SHA, empty
+  # for a SHA with no completed ai-review run) to tell a CARRIED round from a REVIEWED
+  # one, and - within the reviewed ones - to tell how many reviewed a patch an earlier
+  # pass had already covered (the churn-count `skippable` definition, scoped to rounds
+  # the carry did NOT skip).
+  #
+  # Carried vs reviewed is read off the check-run's own TITLE
+  # (`planVerdictCarry`/`renderCarriedComment` in ai-review-guard.js append "verdict
+  # carried forward" to it - see DR-104 Decision 5), not off the `ai-review:carried`
+  # PULL REQUEST label: the label is mutable and reflects only the LATEST round, so a
+  # label-based read would misclassify every carried round that a later fresh review
+  # superseded. The title is written once per check-run and never changes, so it is the
+  # per-round signal; `carry_prs_with_label` above is the label-based figure, reported
+  # separately as a current-state sanity check, not folded into these counts.
+  #
+  # The refusal-reason split only covers what this instrument can tell MECHANICALLY from
+  # check-run data already in hand:
+  #   refused_incomplete  the immediately preceding commit has no completed ai-review
+  #                       round at all (DR-104 follow-up #2635's "push after a round
+  #                       that never completed").
+  #   refused_other       the preceding commit DID complete. This bundles the OTHER
+  #                       #2635 shape - moved hunks - with every other cause
+  #                       (`decideVerdictCarry` also refuses on a changed panel, a
+  #                       non-allowlisted or unreadable prior round, or the carry simply
+  #                       not being wired yet). Telling those apart needs the carry's
+  #                       own input hash (the diff AND the approval facts, position-
+  #                       SENSITIVE) recomputed from a checkout, which this read-only,
+  #                       API-only script does not have. Do not read this bucket as a
+  #                       moved-hunks count.
+  declare -A carry_earlier_pass=()
+  prev_round_complete=0
+  while IFS=$'\t' read -r sha; do
+    [[ -z "$sha" ]] && continue
+    cur_concl=""; cur_slug=""; cur_fp=""; cur_title=""; cur_ts=""
+    if [[ -s "$SHACACHE/$sha" ]]; then
+      # NOTE: the read variables here are named to avoid colliding with the outer
+      # per-PR loop's own $title (the PR's title, still needed below for the report
+      # line) and $concl/$slug/$fp (reused, harmlessly, by churn-count above) - only
+      # `title` would silently clobber something still live, so it alone is renamed.
+      while IFS=$'\t' read -r rts rconcl rslug rfp rtitle; do
+        [[ -z "${rconcl:-}" ]] && continue
+        # Most-recent-wins, same rule latestHeadRound applies in ai-review-guard.js.
+        if [[ -z "$cur_ts" || "$rts" > "$cur_ts" ]]; then
+          cur_ts="$rts"; cur_concl="$rconcl"; cur_slug="$rslug"; cur_fp="$rfp"; cur_title="$rtitle"
+        fi
+      done < "$SHACACHE/$sha"
+    fi
+    if [[ -n "$cur_concl" ]]; then
+      if [[ "$cur_title" == *"verdict carried forward"* ]]; then
+        carry_carried=$((carry_carried + 1))
+      else
+        carry_reviewed=$((carry_reviewed + 1))
+        if [[ "$cur_fp" != "-" && -n "${carry_earlier_pass[$cur_fp]:-}" ]]; then
+          carry_nochange=$((carry_nochange + 1))
+          if (( prev_round_complete )); then
+            carry_refused_other=$((carry_refused_other + 1))
+          else
+            carry_refused_incomplete=$((carry_refused_incomplete + 1))
+          fi
+        fi
+      fi
+      if [[ "$cur_concl" == "success" && "$cur_slug" == "$REVIEWER_SLUG" && "$cur_fp" != "-" ]]; then
+        carry_earlier_pass[$cur_fp]=1
+      fi
+      prev_round_complete=1
+    else
+      prev_round_complete=0
+    fi
+  done <<< "$shas"
+  unset carry_earlier_pass
+  # <<< carry-count
 
   if (( pr_skip > 0 )); then
     prs_with_skip=$((prs_with_skip + 1))
@@ -208,6 +303,15 @@ echo
 echo "carrying a fingerprint:            $fp_runs   <- denominator"
 echo "  ...patch already passed earlier: $skippable"
 echo "effective sample (PRs):            $prs_seen   ($prs_with_skip with a repeat)"
+echo
+echo "verdict-carry split (#2636 - zero unless planVerdictCarry has a caller in ai-review.yml):"
+echo "  reviewed (voters ran):            $carry_reviewed"
+echo "  carried (voters skipped):         $carry_carried"
+echo "    ...of which reviewed although an earlier pass already covered this patch: $carry_nochange"
+echo "       refused - prior round never completed:  $carry_refused_incomplete"
+echo "       refused - other reason (bundles moved hunks with every other cause - see"
+echo "                 the carry-count comment above; NOT a moved-hunks count on its own): $carry_refused_other"
+echo "  PRs currently wearing ai-review:carried:     $carry_prs_with_label   (current state, not a per-round count)"
 echo
 
 if (( apifails > 0 )); then
