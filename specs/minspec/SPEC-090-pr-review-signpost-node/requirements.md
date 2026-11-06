@@ -1,7 +1,7 @@
 ---
 id: SPEC-090
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — same epic as SPEC-012, which this spec extends
@@ -20,8 +20,8 @@ affects:
   - packages/minspec/src/commands/next-task.ts
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
