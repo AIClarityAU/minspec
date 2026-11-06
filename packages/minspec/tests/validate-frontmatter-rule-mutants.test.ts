@@ -66,6 +66,10 @@ const GOLDEN: Files = {
     '---\nid: SPEC-002\ntype: requirements\nstatus: new\ntier: T1\nepic: EPIC-001\n---\n\n' +
     '# Beta\n\n**Status:** New\n\nBody.\n',
   'packages/demo/src/limit.ts': '// This is a known limit of the demo (#12).\nexport const x = 1;\n',
+  // Rule 25 only runs when this file exists, so the golden control must carry it.
+  '.minspec/delegations.json': JSON.stringify({
+    delegations: [{ id: 'DLG-001', covers: ['spec-approval', 'engineering-dr-acceptance'] }],
+  }),
 };
 
 function writeTree(dir: string, files: Files): void {
@@ -300,6 +304,14 @@ const MUTANTS: Mutant[] = [
   },
   {
     rules: ['25'],
+    name: 'spec cites a delegation for an act its covers list omits',
+    severity: 'FAIL',
+    expect: /cites DLG-001 for "recorded", an act its covers list omits/,
+    mutate: (f) =>
+      replaceOnce(f, SPEC1, '\nBody.\n', '\nAn agent session recorded each option, under delegation DLG-001.\n'),
+  },
+  {
+    rules: ['26'],
     name: 'DR frontmatter with a retired field spelling',
     severity: 'FAIL',
     expect: /DR frontmatter — field `approved-by` is a retired spelling/,

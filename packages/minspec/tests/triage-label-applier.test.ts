@@ -14,6 +14,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { spawnSync } from 'child_process';
 import { APP, FOUNDER, provenanceAnswer } from './helpers/agent-launch-harness';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite spawns bash children via a spawnSync wrapper per assertion, which the widened shell-timeout gate
+// now counts; on vitest's 5s default it can queue past the limit under load. Must be at
+// module scope (#1399).
+useShellTimeout();
 
 const ROOT = path.resolve(__dirname, '../../..');
 const TRIAGE = path.join(ROOT, 'scripts/triage-inbox.sh');

@@ -123,6 +123,12 @@ export interface DrainFixture {
    */
   heldPrs?: number | 'fail';
   /**
+   * Real held-PR rows (#3570): the stub runs the drain's own `--jq` expression over these
+   * with jq, so a test pins WHICH pull requests the count includes. Takes precedence over
+   * a numeric `heldPrs`.
+   */
+  heldRows?: { head: string; files: string[] | null }[];
+  /**
    * Specs on the tree the drain runs from whose frontmatter `status:` is `new` or
    * `specifying` (#3344): drafts that merged without an approval. A number writes that
    * many under `specs/`, beside approved ones and one whose BODY mentions the status, so
@@ -290,6 +296,15 @@ function build(f: DrainFixture): Built {
     );
   }
 
+  if (f.heldRows) {
+    fs.writeFileSync(
+      path.join(dir, 'held-rows.json'),
+      JSON.stringify(
+        f.heldRows.map((r) => ({ headRefName: r.head, files: r.files === null ? null : r.files.map((p) => ({ path: p })) })),
+      ),
+    );
+  }
+
   queue('ready', f.ready);
   queue('specify', f.specify);
   queue('inbox', f.inbox);
@@ -331,7 +346,9 @@ if [[ "$1" == "issue" && "$2" == "view" ]]; then
 fi
 if [[ "$1" == "pr" && "$2" == "list" && "$label" == "needs-human-review" ]]; then
   echo "pr list --label needs-human-review" >> "${dir}/held-asked"
-  ${f.heldPrs === 'fail' ? 'echo "HTTP 502: Bad Gateway (https://api.github.com/graphql)" >&2; exit 1' : `echo ${f.heldPrs ?? 0}; exit 0`}
+  ${f.heldRows ? `expr=""; prev=""
+  for a in "$@"; do [[ "$prev" == "--jq" ]] && expr="$a"; prev="$a"; done
+  jq -r "$expr" "${dir}/held-rows.json"; exit $?` : f.heldPrs === 'fail' ? 'echo "HTTP 502: Bad Gateway (https://api.github.com/graphql)" >&2; exit 1' : `echo ${f.heldPrs ?? 0}; exit 0`}
 fi
 if [[ "$1" == "pr" && "$2" == "list" && " $* " == *" --state open "* ]]; then
   # Honour --limit the way gh does (default 30), and answer in the row shape the drain's
