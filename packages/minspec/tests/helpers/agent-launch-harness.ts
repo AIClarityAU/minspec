@@ -260,6 +260,9 @@ token=absent; [[ -n "\${GH_TOKEN:-}" ]] && token=present
 wrote() { printf '%s token=%s\\n' "$1" "$token" >> "$dir/gh-writes.log"; }
 case "$noun $verb" in
   "api user")
+    # An unresolved own login skips the remediate sweep before any agent (#3592), so that
+    # caller opts in to a resolved login; every other caller keeps the 403 an App token gets.
+    if [[ -n "\${STUB_GH_LOGIN:-}" ]]; then echo "\$STUB_GH_LOGIN"; exit 0; fi
     echo '{"message":"Resource not accessible by integration","status":"403"}'
     exit 1 ;;
   "api graphql")
@@ -1201,7 +1204,7 @@ export function runRemediate(opts: RemediateOptions = {}): RemediateRun {
     cwd: repo,
     encoding: 'utf-8',
     // One launch: an escalation is not retried on a second model.
-    env: hermeticEnv(dir, bin, { MINSPEC_ESCALATE_RETRY_OFF: '1', MINSPEC_REMEDIATE_AUTHOR_LOGINS: 'fixture-operator', ...opts.env }),
+    env: hermeticEnv(dir, bin, { MINSPEC_ESCALATE_RETRY_OFF: '1', STUB_GH_LOGIN: 'fixture-operator', ...opts.env }),
   });
   return { ...collect(dir, r), worktree, branch, origin };
 }
