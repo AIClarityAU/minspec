@@ -691,6 +691,32 @@ describe('T3 regression (#3466): a gate hold that has already cleared does not s
   });
 });
 
+describe('T3 regression (#3466 review): a text signal in a cleared gate-hold cycle keeps the #2233 path', () => {
+  // QUOTA_PAUSE_CAUSE stays `gate` when an in-flight build reports a real usage-limit notice
+  // after the gate held; if the meter then shows room, the short rest must not cover it.
+  const fresh = () => fs.writeFileSync(quotaFile, JSON.stringify({
+    observed_at: nowSec(), used_percentage: 50, resets_at: nowSec() + 2000,
+    seven_day_percentage: 20, seven_day_resets_at: nowSec() + 400000,
+  }));
+
+  it('cleared gate + usage-limit text this cycle: NOT the short rest, routed to the text-signal path', () => {
+    fresh();
+    const r = run(['--quota-gate-sleep', '1']);
+    expect(r.code).toBe(0);
+    expect(r.out.split(/\s+/)[1]).toBe('text-signal');
+  });
+
+  it('CONTROL: same reading, no text signal: the short rest', () => {
+    fresh();
+    expect(run(['--quota-gate-sleep', '0']).out.split(/\s+/)[1]).toBe('cleared');
+  });
+
+  it('text seen but the gate still defers: held (the gate keeps its own rest, fail closed)', () => {
+    fs.writeFileSync(quotaFile, JSON.stringify({ observed_at: nowSec(), used_percentage: 95, resets_at: nowSec() + 600 }));
+    expect(run(['--quota-gate-sleep', '1']).out.split(/\s+/)[1]).toBe('held');
+  });
+});
+
 describe('T3 regression (#2233): a text-only signal that a fresh meter contradicts does not sleep to the reset', () => {
   // Measured 2026-09-30. A false match on the word "quota" (19:03) paused the drain; the
   // last in-flight build finished at 19:15:54, and the drain then slept 17061s "to the
