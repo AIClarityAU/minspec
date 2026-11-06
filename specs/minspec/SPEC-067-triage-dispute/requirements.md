@@ -68,15 +68,20 @@ wrong, and in which direction.
 **A consequence of `affects:`, disclosed rather than left implicit.** This spec's
 frontmatter declares `scripts/dispatch-ready-check.sh` and `scripts/triage-inbox.sh`
 under `affects:`. That declaration is what arms `scripts/hooks/spec-gate.py`'s freeze on
-those two files (`spec-gate.py:349-350` folds `implements:` and `affects:` into one
-owned set with **no existence filter**, and `.sh` is a gated extension per
-`_SRC_EXT_RE`, `spec-gate.py:285`) — and the gate arms by **phase position, not
-approval**: the moment this spec's current phase moves past `clarify` into `plan`
-(`spec-gate.py:487-488`), both files are frozen for **any** `Edit`/`Write`/`MultiEdit`,
-by anyone, anywhere in the repo — not only edits made "for" this spec — for as long as
-SPEC-067 remains unapproved. This is the intended shape of the gate: its own docstring
-names the principle "DOC-BEFORE-*CODE*, NOT doc-before-doc" and attributes it to DR-047
-§3's doc-before-code precedent (`spec-gate.py:368`, echoed at `:11,15,32,34,431`). But
+those two files (the `for key in ("implements", "affects")` loop — currently
+`spec-gate.py:362-364` — folds both lists into one owned set with **no existence
+filter**, and `.sh` is a gated extension per `_SRC_EXT_RE`, currently
+`spec-gate.py:293-295`) — and the gate arms by **phase position, not approval**: the
+moment this spec's current phase moves past `clarify` into `plan` (the
+`phase_intent_status` check, currently `spec-gate.py:499-501`), both files are frozen
+for **any** `Edit`/`Write`/`MultiEdit`, by anyone, anywhere in the repo — not only edits
+made "for" this spec — for as long as SPEC-067 remains unapproved. This is the intended
+shape of the gate: its own docstring names the principle "DOC-BEFORE-*CODE*, NOT
+doc-before-doc" and attributes it to DR-047 §3's doc-before-code precedent (currently
+`spec-gate.py:380`, echoed in the module docstring at `:35` and at `:11,16,309,444` —
+these are line numbers, not symbol-anchored, because the phrase is prose rather than a
+named symbol; if they have drifted again, grep `doc-before-code`/`doc-before-doc`
+case-insensitively over the file rather than trust the numbers). But
 because both files are shared, actively-maintained scripts, the practical effect is a
 repo-wide freeze on them while this spec sits unapproved past Clarify. The freeze lifts
 on approval, or if `clarify:` itself is rolled back off `done` (rolling `plan:` alone
