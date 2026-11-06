@@ -47,6 +47,7 @@
 #   scripts/drain-inbox.sh --quota-cap                      # "open|closed 7d U% vs C%; 5h U% vs C% | <gate>", 0 / 42
 #   scripts/drain-inbox.sh --quota-sleep                    # secs to wait for the window
 #   scripts/drain-inbox.sh --quota-signal-sleep [<streak>]  # "<secs> <verdict> <meter>" after a TEXT signal
+#   scripts/drain-inbox.sh --quota-gate-sleep               # "<secs> <cleared|held> <meter>" after the gate deferred (#3466)
 #
 # Env knobs (all optional):
 #   MINSPEC_DRAIN_CONTINUOUS=0     — force pure one-shot even on --auto/--continuous
@@ -408,6 +409,10 @@ QUOTA_CONTRADICT_MAX="${MINSPEC_QUOTA_CONTRADICT_MAX:-1}"
 # child's text alone). QUOTA_CONTRADICTED_STREAK counts contradicted signals since the
 # last clean cycle.
 QUOTA_PAUSE_CAUSE=""
+# 1 once any child's usage-limit TEXT was seen this cycle, whatever QUOTA_PAUSE_CAUSE says: the
+# cause keeps an earlier `gate` (the `:-signal` assignments never overwrite it), so on its own
+# it cannot tell a gate hold from a gate hold PLUS a real limit notice. Reset at cycle start.
+QUOTA_TEXT_SEEN=0
 QUOTA_CONTRADICTED_STREAK=0
 # Neither configuration nor loop state: where _quota_cap and _quota_admit_wait leave
 # their answers. They are asked some twenty times in a row when the gate works out how
@@ -1840,7 +1845,7 @@ sweep_open_prs() {
         fi
         if is_quota <<<"$rout"; then
           echo "[drain] Claude usage-limit signal while remediating PR #$pr — pausing this cycle (will back off, not fail)."
-          QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
+          QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"; QUOTA_TEXT_SEEN=1
           return 42
         fi
       done
@@ -2155,6 +2160,9 @@ run_cycle() {
   # runs before ensure_fresh_run_dir so a deferred cycle costs nothing at all —
   # no git, no gh, no dispatch. Returning 42 reuses the existing quota-pause arm
   # in run_loop, which sleeps and retries rather than counting a failure.
+  # QUOTA_TEXT_SEEN is per-cycle: a text signal this cycle routes the rest to the
+  # #2233 path. Reset BEFORE the gate, so a gate hold never reads last cycle's value.
+  QUOTA_TEXT_SEEN=0
   if ! quota_verdict=$(quota_gate); then
     echo "[drain] $quota_verdict"
     QUOTA_PAUSE_CAUSE="gate"
@@ -2698,7 +2706,7 @@ run_cycle() {
       [[ "${verdict:1:1}" == "1" ]] && saw_quota=1
       if (( saw_quota )); then
         echo "[drain] Claude usage-limit signal while dispatching #$n — pausing this cycle (will back off, not fail)."
-        QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
+        QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"; QUOTA_TEXT_SEEN=1
         return 42
       fi
       [[ "$(_breaker_decide "$ac_halt" "$ac_outcomes")" == "halt" ]] && { announce_halt; break; }
@@ -2815,7 +2823,7 @@ run_cycle() {
       book_dispatch "$n" "$outcome" "${verdict:0:1}"
       if [[ "${verdict:1:1}" == "1" ]]; then
         saw_quota=1
-        QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
+        QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"; QUOTA_TEXT_SEEN=1
       fi
 
       # A quota signal or a tripped breaker stops us LAUNCHING more, but never
@@ -3707,6 +3715,47 @@ quota_signal_backoff_sleep() {
   esac
 }
 
+# quota_gate_sleep_decision: the rest after quota_gate itself deferred (#3466). Prints
+# "<secs> <cleared|held> <the meter's own verdict>". Pure: reads QUOTA_FILE only.
+#   cleared — the gate NOW admits (another producer refreshed the reading while in-flight
+#             work drained, e.g. after a defer:stale): the hold is over, rest QUOTA_SLEEP_MIN.
+#             Sleeping to the 5h reset here would be wrong: _quota_sleep_plan reads "room on
+#             the meter" as "a text signal sent us", which is only false when no usage-limit
+#             text was seen this cycle. With text seen (QUOTA_TEXT_SEEN=1 / $1=1) the verdict is
+#             `text-signal` and quota_gate_backoff_sleep hands the rest to the #2233 path.
+#   held    — the gate still defers, stale or missing included: quota_sleep_secs, as before.
+quota_gate_sleep_decision() {
+  local meter secs text_seen="${1:-0}"
+  if meter=$(_quota_meter_admits); then
+    if [[ "$text_seen" == "1" ]]; then
+      printf '0 text-signal %s\n' "$meter"
+      return 0
+    fi
+    secs="$QUOTA_SLEEP_MIN"
+    [[ "$secs" =~ ^[0-9]+$ ]] || secs=60
+    printf '%d cleared %s\n' "$secs" "$meter"
+  else
+    printf '%d held %s\n' "$(quota_sleep_secs)" "$meter"
+  fi
+}
+
+# quota_gate_backoff_sleep: the rc=42 rest when quota_gate itself deferred. The gate is
+# asked again first, because the reading can have moved during the wait for in-flight work.
+quota_gate_backoff_sleep() {
+  local decision secs verdict meter
+  decision=$(quota_gate_sleep_decision "$QUOTA_TEXT_SEEN")
+  read -r secs verdict meter <<<"$decision"
+  if [[ "$verdict" == "text-signal" ]]; then
+    echo "[drain] quota hold cleared (${meter}) but a usage-limit notice arrived this cycle — taking the text-signal path, not the short rest (#2233, #3466)."
+    quota_signal_backoff_sleep
+  elif [[ "$verdict" == "cleared" ]]; then
+    echo "[drain] quota hold already cleared (${meter}) — resting ${secs}s, not sleeping to the published reset (#3466)."
+    wait_interval "$secs"
+  else
+    quota_backoff_sleep
+  fi
+}
+
 # quota_health: one line, once per loop, saying whether admission control is actually
 # SEEING DATA. A STALE reading, or a MISSING one whose bootstrap allowance is
 # exhausted, correctly HOLDS the gate shut (defers every cycle, #1775) rather than
@@ -4041,7 +4090,7 @@ run_loop() {
         if [[ "$QUOTA_PAUSE_CAUSE" == "signal" ]]; then
           quota_signal_backoff_sleep
         else
-          quota_backoff_sleep
+          quota_gate_backoff_sleep
         fi
         ;;
       *)
@@ -4124,6 +4173,11 @@ case "$1" in
     # "<secs> <contradicted|overruled|confirmed> <quota_gate's verdict>". Offline,
     # reads QUOTA_FILE only, and never spends a bootstrap admit.
     quota_signal_sleep_decision "${2:-0}"; exit 0
+    ;;
+  --quota-gate-sleep)
+    # Pure seam (#3466): the rest after quota_gate itself deferred. Prints
+    # "<secs> <cleared|held|text-signal> <quota_gate's verdict>"; optional arg <text_seen 0|1>. Offline, reads QUOTA_FILE only.
+    quota_gate_sleep_decision "${2:-0}"; exit 0
     ;;
   --session-alive)
     # Pure seam: is the session (or any pid) still alive?
