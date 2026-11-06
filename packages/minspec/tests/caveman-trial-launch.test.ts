@@ -1,7 +1,7 @@
 /**
- * Caveman trial (queue item cav1, 2026-10-18 to 2026-10-25): the drain's build, fix and
- * remediation agents carry the caveman ruleset at the level in MINSPEC_CAVEMAN_MODE
- * (default `full`), and turning it off is that one value.
+ * Caveman trial (queue item cav1, started 2026-10-18, ended 2026-11-02 after failing its
+ * rework bar, #3534): the drain's build, fix and remediation agents carry the caveman
+ * ruleset only when MINSPEC_CAVEMAN_MODE names a level (default `off`).
  *
  * Why an appended system prompt and not the plugin: `--setting-sources project,local`
  * drops user scope so the plugin hook never runs for a drain agent, a process-env level
@@ -44,6 +44,8 @@ function fakeHome(withHook: boolean): string {
   return home;
 }
 
+const FULL = { MINSPEC_CAVEMAN_MODE: 'full' };
+
 function init(home: string, env: Record<string, string | undefined>) {
   const r = spawnSync(
     'bash',
@@ -55,9 +57,16 @@ function init(home: string, env: Record<string, string | undefined>) {
 }
 
 describe('caveman trial: AGENT_CAVEMAN_ARGS', () => {
-  it('defaults to full and appends the ruleset as a system prompt', () => {
+  it('is off by default (trial ended, #3534): no args, no stderr noise', () => {
+    const r = init(fakeHome(true), {});
+    expect(r.status).toBe(0);
+    expect(r.count).toBe(0);
+    expect(r.stderr).toBe('');
+  });
+
+  it('full appends the ruleset as a system prompt', () => {
     const home = fakeHome(true);
-    const r = init(home, {});
+    const r = init(home, FULL);
     expect(r.status).toBe(0);
     expect(r.count).toBe(2);
     expect(r.args).toContain('--append-system-prompt');
@@ -65,7 +74,7 @@ describe('caveman trial: AGENT_CAVEMAN_ARGS', () => {
   });
 
   it('names the machine-parsed markers as exempt from terse style', () => {
-    const r = init(fakeHome(true), {});
+    const r = init(fakeHome(true), FULL);
     for (const m of ['ESCALATE:', 'Root cause:', 'DEEPER:', 'Closes #N', 'commit subjects']) {
       expect(r.args).toContain(m);
     }
@@ -82,12 +91,12 @@ describe('caveman trial: AGENT_CAVEMAN_ARGS', () => {
 
   it('never touches the shared ~/.claude/.caveman-active flag interactive sessions read', () => {
     const home = fakeHome(true);
-    init(home, {});
+    init(home, FULL);
     expect(fs.existsSync(path.join(home, '.claude/.caveman-active'))).toBe(false);
   });
 
   it('no caveman plugin installed at all (CI, an adopter): no args and no stderr noise', () => {
-    const r = init(fakeHome(false), {});
+    const r = init(fakeHome(false), FULL);
     expect(r.count).toBe(0);
     expect(r.stderr).toBe('');
   });
@@ -95,7 +104,7 @@ describe('caveman trial: AGENT_CAVEMAN_ARGS', () => {
   it('fails visible, not silent: an installed plugin with no usable hook launches without caveman and says so', () => {
     const home = fakeHome(false);
     fs.mkdirSync(path.join(home, '.claude/plugins/cache/caveman/caveman/abc123'), { recursive: true });
-    const r = init(home, {});
+    const r = init(home, FULL);
     expect(r.count).toBe(0);
     expect(r.stderr).toContain('running without caveman');
   });
@@ -104,7 +113,7 @@ describe('caveman trial: AGENT_CAVEMAN_ARGS', () => {
     const home = fakeHome(true);
     const hook = path.join(home, '.claude/plugins/cache/caveman/caveman/abc123/hooks/caveman-activate.js');
     fs.writeFileSync(hook, "process.stdout.write('something else');\n");
-    const r = init(home, {});
+    const r = init(home, FULL);
     expect(r.count).toBe(0);
     expect(r.stderr).toContain('did not report level');
   });
