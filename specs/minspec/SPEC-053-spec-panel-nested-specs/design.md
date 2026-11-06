@@ -17,6 +17,10 @@ the decisions D-1, DQ-NEW-A, DQ-NEW-B and D-2 are settled there. This document i
 **Base:** every `file:line` below is `origin/main` at `d43f235a`. Some citations in
 requirements.md have drifted: `listSpecsShallow()` is now `spec-manager.ts:437` (was `:408`),
 `migrateLayout()` is `:639` (was `:616`), and its `findSpecEntry` call is `:650` (was `:621`).
+Re-read at `efaaa006`: every symbol below still exists and lines have moved a few more
+(`migrateLayout()` is now `:648`). SPEC-095 Slice 1 (CRLF round trip) added line-ending restoring
+to the flat branch of `migrateLayout()`; it reads `entry` and the sources, not `specsDir`, so the
+contract below is unaffected. `tasks.md` therefore names symbols, not lines.
 **Dependency budget:** zero new dependencies.
 
 ## Measured on a prototype
@@ -32,19 +36,20 @@ suites were repointed, and a probe test was added:
 | Nested `SPEC-NNN-*.md` and nested `SPEC-NNN-*/requirements.md`, flat to spec-kit to flat | byte-identical to the original |
 | Trust model over a nested fixture | `rework` lists the nested ids; the shallow listing on main returned only the one top-level spec |
 
-The same probe produced PQ1 to PQ5 at the end; each quotes its measurement. PQ6 and PQ7 are traced
-from the code, not the probe.
+The same probe produced PQ1 to PQ5 under Plan Questions; each quotes its measurement. PQ6 and PQ7
+are traced from the code, not the probe.
 
 ## Components and seams
 
 | # | File | Change | Serves |
 |---|---|---|---|
 | 1 | `packages/minspec/src/views/spec-panel.ts` | `:7` becomes `import { listSpecs, type SpecSummary } from '../lib/spec-catalog'`; `:110` types `specs` as `SpecSummary[]`; `:112` calls `listSpecs(rootDir)`. Nothing else in `buildTrustModel()` (`:102-144`) changes. | FR-1, FR-2 |
-| 2 | `packages/minspec/src/lib/spec-manager.ts` | Add `import { listSpecs } from './spec-catalog'` after the `./spec-layout` import (`:18-23`). Delete `listSpecsShallow()` (`:432-485`) and `SPEC_FILE_RE` (`:90`, read only at `:461`). Add the two private helpers in Contracts beside `entryDisplayPath` (`:281-283`). In `migrateLayout()`: `:645` lists with `listSpecs(rootDir)`; `:650-651` (`findSpecEntry`, then `continue`) become `const entry = entryFromSummaryPath(summary.filePath)`; `:659` and `:671` join onto `entryParentDir(entry)` instead of `specsDir`. Both collision guards (`:660-667`, `:672-679`) and write-all-then-delete (`:687-694`) are unchanged. | FR-1, FR-3, D-1, DQ-NEW-A, DQ-NEW-B |
+| 2 | `packages/minspec/src/lib/spec-manager.ts` | Add `import { listSpecs } from './spec-catalog'` after the `./spec-layout` import (`:18-23`). Delete `listSpecsShallow()` (`:432-485`) (`SPEC_FILE_RE`, `:90`, stays: PQ6(b)'s same-id check reads it). Add the two private helpers in Contracts beside `entryDisplayPath` (`:281-283`). In `migrateLayout()`: `:645` lists with `listSpecs(rootDir)`; `:650-651` (`findSpecEntry`, then `continue`) become `const entry = entryFromSummaryPath(summary.filePath)`; `:659` and `:671` join onto `entryParentDir(entry)` instead of `specsDir`. Both collision guards (`:660-667`, `:672-679`) and write-all-then-delete (`:687-694`) are unchanged; after a flat entry is written for spec-kit, a same-id sibling file in its directory returns main's `success: false` result (PQ6). | FR-1, FR-3, FR-5, D-1, DQ-NEW-A, DQ-NEW-B |
 | 3 | same file, comments | `:52-53` (`SpecSummary`) says the optional fields stay unset outside `listSpecs()`, e.g. by `getSpec()`'s `buildSummary` (`:501`), dropping the deleted name. The `migrateLayout()` doc (`:630-638`) gains one sentence: each spec is rewritten in the directory that already holds it. | AC-5a, AC-5 |
 | 4 | `packages/minspec/src/lib/artifact-graph.ts:195-198` | Delete the "Beware the near-namesake" sentence; it exists only to name the deleted function. | AC-5a |
 | 5 | `packages/minspec/src/lib/config.ts:30-34` | Add to the `SpecsLayout` doc: both values describe the per-spec representation, not the depth of the tree, and a spec may sit under a product directory (`specs/<product>/...`). | AC-5b |
 | 6 | tests | See Tests. | FR-4, FR-5, AC-1..AC-4, AC-6 |
+| 7 | `packages/minspec/src/lib/spec-catalog.ts` | In `listSpecs()`, key `byId` and `rolesById` on the id plus the entry's location segment, per the Decisions section on PQ1. Add the file path as a sort tie-break, because readdir order is not stable and two entries can now share an id. | AC-6 |
 
 `spec-catalog.ts:7` imports `SpecSummary` back from `spec-manager.ts` with `import type`, which
 the cycle gate erases (`import-cycle-check.ts:243-274`). Seam 2's new import is therefore the only
@@ -77,7 +82,7 @@ Where a spec lands (`s` is `slugify(title)`, as today):
 |---|---|---|
 | `specs/<p>/SPEC-NNN-x.md` | spec-kit | `specs/<p>/NNN-s/` |
 | `specs/<p>/NNN-x/spec.md` | flat | `specs/<p>/SPEC-NNN-s.md` |
-| `specs/<p>/SPEC-NNN-x/requirements.md` (FR-4's fixture) | spec-kit | `specs/<p>/SPEC-NNN-x/NNN-s/` as the contract writes it - not settled by DQ-NEW-B (PQ2) |
+| `specs/<p>/SPEC-NNN-x/requirements.md` (FR-4's fixture) | spec-kit | `specs/<p>/SPEC-NNN-x/NNN-s/`, with any `design.md` and `tasks.md` left in place (PQ2) |
 | `specs/<p>/SPEC-NNN-x/requirements.md` | flat | skipped, already flat by shape (`:652`) |
 | any entry directly in `specs/` | either | where it lands today |
 
@@ -107,10 +112,12 @@ cases land in two existing suites, both real fs with no `fs` mock:
 
 | Case | Asserts | For | Red on main |
 |---|---|---|---|
-| listing | FR-4's fixture `specs/p/SPEC-007-x/requirements.md` is in `listSpecs()` | AC-1 | no, see PQ5 |
-| trust chart | `new SpecPanel().show(fixture)` gives `rework` an entry `SPEC-007`; a `status: superseded` nested fixture gets a `wasted` bar (label: PQ3); fixture bytes unchanged | AC-2, SPEC-017 FR-11 | yes |
+| listing | FR-4's fixture `specs/p/SPEC-007-x/requirements.md` is in `listSpecs()` | AC-1 | no (PQ5) |
+| trust chart | `new SpecPanel().show(fixture)` gives `rework` an entry `SPEC-007`; a `status: superseded` nested fixture gets a `wasted` bar whose label starts with its id on FR-4's shape (PQ3); fixture bytes unchanged | AC-2, SPEC-017 FR-11 | yes |
 | migration | for both nested shapes, `migrateLayout(root, 'spec-kit')` counts the spec, the new representation is under `specs/p/`, and `specs/` still lists only `p`; then `'flat'` gives back the frontmatter and every section byte-for-byte | AC-3, INV-2 | yes |
-| duplicate id | `specs/a/SPEC-001-*/requirements.md` and `specs/b/SPEC-001-*/requirements.md`, through the trust chart and migration | AC-6 | expected outcome: PQ1 |
+| duplicate id | `specs/a/SPEC-001-*/requirements.md` and `specs/b/SPEC-001-*/requirements.md`: two `rework` entries, `migrated: 2`, each landing under its own product (PQ1) | AC-6 | yes |
+| same id, one directory | top-level `SPEC-001-a.md` and `SPEC-001-b.md`: `success: false, migrated: 1` and warning `Target directory already exists: SPEC-001-<slug>`, exactly as on main (PQ6) | FR-5 | no: the case pins today's output |
+| split spec | `specs/p/SPEC-010-split/{requirements,design,tasks}.md` to spec-kit: `migrated: 1`, the new directory exists inside the feature directory, `design.md` and `tasks.md` unchanged, and `listSpecs()` reports one entry with `hasDesignFile` and `hasTasksFile` true (PQ2) | FR-3 | yes |
 
 **Repoints.** In `spec-manager.test.ts`, the 12 calls (`:290`, `:298`, `:311`, `:315`, `:325`,
 `:334`, `:345`, `:356`, `:370`, `:610`, `:690`, `:720`) call `listSpecs(x)`. The four that pass a
@@ -135,15 +142,21 @@ AC-5a requires it.
 
 ## Build order
 
-1. The nested-coverage tests commit (red on main for the trust-chart and migration cases).
-2. The listing-swap commit: seams 1 to 5 and the repoints. Both callers move in the commit that
-   deletes `listSpecsShallow()`, because splitting them leaves the tree uncompilable.
-3. The duplicate-id case lands once PQ1 and PQ6 are answered, and any sibling handling once PQ2 is.
-4. The PR body carries D-2's line: "re-run *Migrate Layout* if you ran it before this fix".
+`tasks.md` holds the order. Each task is one pull request, its tests written red first in the same
+run.
+
+1. The listing key (PQ1), which nothing else needs but the duplicate-id cases do.
+2. The trust-chart repoint.
+3. The migration repoint and the in-place write path. Its pull request carries D-2's line: "re-run
+   *Migrate Layout* if you ran it before this fix".
+4. The deletion of `listSpecsShallow()`, once neither caller uses it, with the test repoints and the
+   comment sweep. An earlier draft moved both callers in the deleting commit; moving them first keeps
+   every step compiling and each pull request small.
 
 ## Plan Questions
 
-Each one is **NOT decided - needs the founder via Clarify.**
+These were open when this Plan was drafted. Each is now answered in [Decisions](#decisions); the
+text below stays as the evidence for that answer.
 
 **PQ1 - AC-6's test-only branch cannot pass, so how should the collapse be keyed?** Measured: with
 `specs/a/SPEC-001-x/requirements.md` and `specs/b/SPEC-001-y/requirements.md`, `listSpecs()`
@@ -206,7 +219,7 @@ main returns `[SPEC-002, SPEC-001]`, and `listSpecs()` returns `[SPEC-001, SPEC-
 name (`spec-manager.ts:461`), and it sorts by id (`spec-catalog.ts:161`) where the shallow walk
 sorted directory entries (`spec-manager.ts:444`). Every repointed assertion and the
 `migrateLayout()` suite pass unchanged, but pure flat trees are not unaffected in general: one
-whose two top-level files share an `id` regresses from a visible failure to a silent one (PQ6).
+whose two top-level files share an `id` would regress from a visible failure to a silent one unless the write path keeps its refusal (PQ6).
 - (a) **(rec)** Accept it: FR-2 requires parity with `listSpecs()`, and D-1 chose it. Cost: a
   top-level tree mixing flat and spec-kit specs sees its bars reordered, and a top-level spec file
   not named `SPEC-NNN-*.md` newly appears in the chart and is newly migrated.
@@ -223,7 +236,7 @@ nested spec, so any test calling it is green on main.
 - (b) Add a case asserting that `spec-manager.ts` no longer exports `listSpecsShallow`. Cost: a
   source-shape assertion, which stays green if a caller regains a shallow walk under another name.
 
-**PQ6 - Two same-id files in one directory regress from a visible failure to a silent success.**
+**PQ6 - Two same-id files in one directory would regress from a visible failure to a silent success.**
 Nothing rejects them: `spec-validator.ts` carries no duplicate-id rule. Traced from the code, not
 measured on the prototype. For top-level `SPEC-001-a.md` and `SPEC-001-b.md`, both match
 `SPEC_FILE_RE` (`spec-manager.ts:90`), so `listSpecsShallow()` returns both (`:460-478`);
@@ -234,14 +247,14 @@ result is `success: true`, the other is skipped with no warning, and the chart l
 a top-level tree, so it is FR-5's "identical trust-chart and migration output", and the omission is
 AC-6's class. PQ1 does not cover it: both files sit directly in `specsDir`, so PQ1(a) keys both on
 the id alone, and so does AC-6's `product` + `id` branch.
-- (a) **(rec)** Treat it as malformed input outside FR-5's flat-layout case: pin the new behaviour
-  in the duplicate-id case and state the carve-out, rather than add code. Cost: such a tree
-  silently migrates one file and drops the other from the chart where main refused visibly - a
-  silent omission of the class this spec exists to close, and FR-5's "identical" needs the
-  exception written down.
-- (b) Keep the visible failure: `migrateLayout()` re-scans for a second file carrying a listed id
-  and returns `success: false`. Cost: a new scan and a refusal the requirements do not name, in the
-  write path this design otherwise leaves alone.
+- (a) Treat it as malformed input outside FR-5's flat-layout case and pin the new behaviour. Cost:
+  such a tree silently migrates one file and drops the other from the chart where main refused
+  visibly - a silent omission of the class this spec exists to close, a breach of approved FR-5's
+  "identical" and of constitution invariant 2 (found by the architect on this plan's review).
+- (b) **(rec)** Keep the visible failure: after writing a flat spec's directory, `migrateLayout()`
+  looks for a second file in the entry's own directory carrying the same id and returns what main
+  returns. Cost: a small scan in the write path this design otherwise leaves alone, and
+  `SPEC_FILE_RE`, which D-1 would otherwise delete, stays for this check.
 - (c) Reject it at the source with a duplicate-id rule in `spec-validator.ts`. Cost: a new
   validation rule outside this spec, which still does not change what `migrateLayout()` does to a
   tree that already holds one.
@@ -258,13 +271,80 @@ requirement.
 - (b) Add the same clarification to both descriptions. Cost: user-visible copy changes, which no AC
   asks for and FR-5 does not cover.
 
+## Decisions
+
+Each choice below was **chosen by the planning agent on its recommendation; not a founder
+decision.** All seven can be undone in under a day: each is code or a test in a pull request, with
+no stored data or adopter contract changed, and a tree the command has already rewritten is in git.
+None of them edits requirements.md. Two (PQ4, PQ5) record how an approved sentence is read
+where the code cannot meet it literally; the founder can overturn any of them.
+
+**PQ1 - chosen: (a), key on the id plus the entry's location segment.** It is the only option that
+turns AC-6 green without weakening it, and AC-6 and the requirements' Out-of-scope exception both
+name this branch. Checked at `efaaa006`: no id spans two first segments under `specs/`, so nothing
+changes in this repo. The five other callers tolerate a repeat: `SpecNode` sets no tree-item `id`, so
+two rows do not clash, and `approve.ts`, `approve-active.ts` and `validate.ts` act on `filePath`.
+Rejected: (b), because a `design.md` with no `product:` splits from its own requirements; (c),
+because it keeps the silent omission AC-6 exists to close.
+*If global ids are later confirmed* (SPEC-227 DQ-1, a recorded selection that is unconfirmed; that
+spec is `specifying`): the choice holds with no rework. Any tree passing the global uniqueness gate
+has one location per id, so the new key groups exactly as the bare id does, and AC-6's test still
+passes because it builds its duplicate in a fixture. A legacy tree that still holds a duplicate shows
+both, which is the right result under either id rule. This spec does not touch `nextSpecId()`. What
+SPEC-227 would change is requirements.md's text on per-product ids, through that spec's own decision
+record and a fresh approval.
+
+**PQ2 - chosen: (a), write inside the feature directory and leave the siblings.** FR-3 says nested
+specs MUST migrate, which rules out a refusal, and this keeps every byte while staying inside
+SPEC-040's round trip. Nothing is orphaned: the siblings keep their `id:`, so `listSpecs()` still links
+them to the spec. Rejected: (b), because it contradicts FR-3 for this repo's own layout; (c), because
+it adds a conversion needing its own lossless proof. Accepted cost: the spec spans two
+representations after a spec-kit migration, and the completion message does not say so. It is left
+alone because the message reports a true count and `migrate.ts` shows no warning on success.
+Separate limit, not decided here: Migrate Layout does not move approval sidecars, so widening its
+reach widens that loss (#3441 Migrate Layout leaves approval sidecars behind).
+
+**PQ3 - chosen: (a), leave the label code alone.** On FR-4's fixture, which AC-2 is given, the label
+is `SPEC-NNN-x`, so the bar does carry the id and the test asserts that prefix. Rejected: (b), because
+it changes flat-layout labels, which FR-5 forbids. Accepted cost: a nested spec-kit bar reads
+`spec.md`, as a top-level one already does.
+
+**PQ4 - chosen: (a), accept `listSpecs()`'s selection and order.** FR-2 requires parity with
+`listSpecs()` and D-1 chose it, so FR-5's "identical" is read as covering the output for specs both
+walks select. Every repointed assertion passes unchanged. Rejected: (b), because a second selection
+rule is the shape D-1 rejected. Accepted cost: a mixed top-level tree sees bars reordered, and a
+top-level spec file not named `SPEC-NNN-*.md` newly appears.
+
+**PQ5 - chosen: (a), the callers carry the red-to-green pair.** AC-1's assertion stays as a
+`listSpecs()` case. Its "red on main" clause cannot hold for a function that already recurses, and the
+trust-chart and migration cases prove the fix where it actually lands. Rejected: (b), because a
+source-shape assertion stays green if a caller regains a shallow walk under another name.
+
+**PQ6 - chosen: (b), keep today's visible failure for two same-id files in one directory.** FR-5
+says a flat-layout tree sees identical migration output, and constitution invariant 2 forbids turning
+a visible failure into a silent pass. Today (traced at `spec-manager.ts:633-667`): the first file
+migrates, the second resolves to the same entry through `findSpecEntry()`, finds the directory
+just written, and the call returns `success: false` with `Target directory already exists:
+<dirName>` and `migrated` counting the first. After the swap to `listSpecs()` one entry per id
+survives, so the check is made explicit: right after a flat entry is written for spec-kit, a
+sibling `.md` file in the same directory whose frontmatter `id` equals the entry's, other than the
+entry's own file, returns that same result. The unlisted file stays byte-identical at its path.
+Rejected: (a), the first draft's choice (silent `success: true, migrated: 1`, a carve-out from
+FR-5, flagged by the architect review); (c), because it leaves `migrateLayout()`'s behaviour
+unchanged. Accepted cost: a small scan in the write path, and `SPEC_FILE_RE` kept
+for that check alone.
+
+**PQ7 - chosen: (a), leave the QuickPick alone.** `(one file per spec)` already says per-spec, and
+AC-5b names only `SpecsLayout`. Rejected: (b), because no AC asks for the copy change. Accepted cost:
+the string still reads as a root-level path.
+
 ## What this design does not do
 
 - Touch `findSpecEntry()` or `getSpec()`. They are out of scope, tracked as #1452 (`getSpec`
   blind to product-nested specs).
-- Change `lib/spec-catalog.ts`, unless PQ1 is answered (a) or (b).
-- Change `commands/migrate.ts`, pending PQ7. Whether its QuickPick descriptions need AC-5b's
-  clarification is not settled here.
+- Change `lib/spec-catalog.ts` beyond the listing key (seam 7).
+- Change `commands/migrate.ts` (PQ7).
+- Move approval sidecars during migration (#3441 Migrate Layout leaves approval sidecars behind).
 - Edit DR-064 or SPEC-040's documents, which still mention `listSpecsShallow`. They record what
   was true, they are not comments or exported surface, and SPEC-040's approved files are
   hash-locked.
