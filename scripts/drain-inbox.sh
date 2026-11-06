@@ -1963,25 +1963,36 @@ DRAIN_SPECIFY="${MINSPEC_DRAIN_SPECIFY:-1}"
 # 2026-10-18, the last at 62). Every spec draft is withheld from auto-merge as
 # approval-or-acceptance, so writing more while that many already wait on a human spends
 # quota on work nothing can land. With the switch on, each cycle counts the drain's own
-# open pull requests held for a human (`needs-human-review` on an `agent/issue-*`
-# branch) and leaves the spec-writing queue alone while that count is at or above this
+# open spec-draft pull requests held for a human (`needs-human-review` on an
+# `agent/issue-*` branch, a file under specs/, the rest under specs/ or docs/decisions/; build PRs are not
+# counted, #3570) and leaves the spec-writing queue alone while that count is at or above this
 # cap. Builds, triage and remediation are untouched. Anything but a whole number is read
 # as 0, which pauses spec-writing: the reading that spends nothing.
 SPECIFY_MAX_HELD="${MINSPEC_DRAIN_SPECIFY_MAX_HELD:-10}"
 
-# _held_drain_prs <varname> — count the drain's open pull requests held for a human INTO
-# a named variable. Returns gh's status: a failed read is not a count of zero, and the
+# _held_drain_prs <varname> — count the drain's open SPEC-DRAFT pull requests held for a
+# human (#3570: a specs/ file, rest under specs/ or docs/decisions/) INTO a named variable. Returns gh's status: a failed read is not a count of zero, and the
 # caller pauses spec-writing on it rather than guess (invariant 2).
 _held_drain_prs() {
   local -n _held_out="$1"
   local _held_val _held_rc=0
+  # Only SPEC DRAFTS count (#3570): a pull request with AT LEAST ONE file under specs/ and
+  # every file under specs/ or docs/decisions/ (a draft ships its decision record and
+  # INDEX.md beside it, e.g. #3217; those must still count). A PR touching only
+  # docs/decisions/ has no spec file, so it is NOT a draft and is not counted. A held machinery build is waiting on a merge path, not on a spec decision, and
+  # counting it paused spec-writing behind 44 builds. A null `files` makes jq fail, which
+  # fails the read closed rather than counting 0.
   _held_val=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit 1000 \
-    --json headRefName --jq '[.[] | select(.headRefName | startswith("agent/issue-"))] | length') || _held_rc=$?
+    --json headRefName,files --jq '[.[] | select(.headRefName | startswith("agent/issue-"))
+      | select((.files | map(.path)) as $p
+          | ($p | any(startswith("specs/"))) and ($p | all(startswith("specs/") or startswith("docs/decisions/"))))] | length') || _held_rc=$?
   if (( _held_rc != 0 )) && gh_bot_reauth_read; then   # dead credential: re-mint in this shell, retry once (#3400)
     echo "[drain] the held-PR count failed and the credential was stale — re-minted, retrying once." >&2
     _held_rc=0
     _held_val=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit 1000 \
-      --json headRefName --jq '[.[] | select(.headRefName | startswith("agent/issue-"))] | length') || _held_rc=$?
+      --json headRefName,files --jq '[.[] | select(.headRefName | startswith("agent/issue-"))
+      | select((.files | map(.path)) as $p
+          | ($p | any(startswith("specs/"))) and ($p | all(startswith("specs/") or startswith("docs/decisions/"))))] | length') || _held_rc=$?
   fi
   if (( _held_rc != 0 )); then return "$_held_rc"; fi
   [[ "$_held_val" =~ ^[0-9]+$ ]] || return 1
