@@ -2,21 +2,25 @@
 id: SPEC-209
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals/. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - concurrent multi-session coordination; a peer sweep re-sending another session's pending items is a cross-session coordination path
 aspects: [hitl, action-items, cross-session, autonomy, no-silent-gate, blast-radius, tier-0, offline, determinism, never-wrong]
 depends_on: [DR-086]  # the stop list whose classes define what "human-only" means here
 relates_to: [SPEC-044, SPEC-027, SPEC-054, DR-072, DR-076, DR-003, "#1857", "#1236", "#1235", "#1816", "#2056"]
-# Ownership (SPEC-038) is deliberately NOT declared yet. Which files this spec creates
-# depends on Clarify D2 (where the parser lives) and D4 (whether any act-site refusal is
-# built here). Declare implements:/affects: in Plan, BEFORE approval mints a hash -
-# adding them afterwards voids it.
+# Ownership (SPEC-038) follows the recorded Clarify answers: D2 puts the parser and validator
+# (FR-5, FR-6) in packages/shared, D4 builds no act-site refusal, so the only other new file is
+# the FR-7 command-line entry. D3 puts the convention text (FR-8, FR-9) in this repo's CLAUDE.md.
+# Declared before approval mints a hash: adding a path afterwards voids it.
+implements: [packages/shared/src/action-items.ts, packages/shared/tests/action-items.test.ts, scripts/action-items.ts]  # all NEW
+# Files this spec MODIFIES (not owns): packages/shared/src/index.ts, CLAUDE.md - the barrel export, and the "Human action items" section (D3).
+# Listed here and not under affects:, because the spec-gate freezes every affects: file of an
+# unapproved spec past Clarify for all sessions (#3234).
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -215,7 +219,14 @@ that backstop.
 
 ## Decisions needed (Clarify)
 
+All 6 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 ### D1 - What the tag looks like
+
+**Recorded selection: Option (a),** `[human]` / `[agent]` immediately after ➡️: a fixed position in
+plain ASCII that one regex reads and that still reads naturally.
 
 - **a** `[human]` / `[agent]` immediately after ➡️ **(rec)** - fixed position, plain ASCII,
   one regex, still reads naturally. Cost: two extra words on every line the founder reads.
@@ -226,6 +237,9 @@ that backstop.
 
 ### D2 - Where the parser lives
 
+**Recorded selection: Option (a),** `packages/shared` (`@aiclarity/shared`), which is Tier 0, already
+holds pure parsers and is usable from both scripts and the extension.
+
 - **a** `packages/shared` (`@aiclarity/shared`) **(rec)** - Tier 0, no vscode, already
   holds pure parsers (`project-prefix.ts`), usable from scripts and the extension. Cost: it
   ships inside the extension bundle even if only dev-time scripts use it.
@@ -233,6 +247,9 @@ that backstop.
   backstop, if it lands in the extension, would need a second copy.
 
 ### D3 - Who gets the convention text
+
+**Recorded selection: Option (a),** this repo only, as a project-specific CLAUDE.md section beside
+"Merge asks in THIS repo", following the merge-funnel precedent.
 
 - **a** This repo only, as a project-specific CLAUDE.md section beside "Merge asks in THIS
   repo" **(rec)** - the problem needs peer sessions, which solo adopters do not run, and it
@@ -242,6 +259,9 @@ that backstop.
   adopter's ➡️ lines gain a tag for a consumer most of them will never have.
 
 ### D4 - Which act-site refusals, if any, this spec builds
+
+**Recorded selection: Option (a),** no act-site refusal here; one issue per unwitnessed act class,
+so each refusal gets its own design.
 
 The issue's own conclusion is that the safety boundary belongs where the act happens. Of
 the four acts in #1857, `--admin` merge already has one and the other three do not.
@@ -257,6 +277,9 @@ the four acts in #1857, `--admin` merge already has one and the other three do n
 
 ### D5 - How a receiving session knows the sender is not the human (FR-11)
 
+**Recorded selection: Option (a),** treat any instruction whose text says it comes from another
+session as non-human, and state that FR-11 is model-trusted; it is buildable now.
+
 - **a** Treat any instruction whose text says it comes from another session as non-human,
   and state that FR-11 is model-trusted **(rec)** - buildable now. Cost: a sender that does
   not say so is treated as the human.
@@ -265,6 +288,9 @@ the four acts in #1857, `--admin` merge already has one and the other three do n
   exists (I have not verified either way); FR-11 waits on that research.
 
 ### D6 - Two values or three
+
+**Recorded selection: Option (a),** two values, human-only and agent-ok, matching the issue and
+FR-2's default.
 
 - **a** Two: human-only and agent-ok **(rec)** - matches the issue and FR-2's default.
   Cost: "the human decides, then an agent executes" and "only the human can physically do

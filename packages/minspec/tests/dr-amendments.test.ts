@@ -27,7 +27,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { validateDrAmendments, type DrAmendmentGap } from '../src/lib/adr-manager';
+import { validateDrAmendments, validatePendingDrAmendments, type DrAmendmentGap } from '../src/lib/adr-manager';
 
 describe('validateDrAmendments()', () => {
   let dir: string;
@@ -429,5 +429,42 @@ describe('validateDrAmendments()', () => {
     drFm('DR-049', 'accepted', 'supersedes_partial: [DR-044]  # the ownership clause only');
     drFm('DR-081', 'accepted', 'supersedes_partial: [DR-076, DR-047]');
     expect(run()).toEqual([]);
+  });
+});
+
+describe('validatePendingDrAmendments() — proposed-source advisory (#3106)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-drpend-'));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const dr = (id: string, status: string, fmExtra = '', body = ''): void => {
+    fs.writeFileSync(
+      path.join(dir, `${id}.md`),
+      `---\nid: ${id}\nstatus: ${status}\n${fmExtra}date: 2026-08-05\ntitle: ${id}\n---\n\n# ${id}\n\n${body}\n`,
+    );
+  };
+
+  it('flags a proposed supersedes_partial whose target does not mention it; accepted gate stays silent', () => {
+    dr('DR-001', 'accepted', '', 'Original.');
+    dr('DR-002', 'proposed', 'supersedes_partial: [DR-001]\n');
+    expect(validatePendingDrAmendments(dir)).toMatchObject([
+      { source: 'DR-002', target: 'DR-001', relation: 'supersedes_partial' },
+    ]);
+    expect(validateDrAmendments(dir)).toHaveLength(0);
+  });
+
+  it('is silent once the target carries the note', () => {
+    dr('DR-001', 'accepted', '', 'Amended by DR-002 (on acceptance).');
+    dr('DR-002', 'proposed', 'supersedes_partial: [DR-001]\n');
+    expect(validatePendingDrAmendments(dir)).toHaveLength(0);
+  });
+
+  it('ignores accepted sources', () => {
+    dr('DR-001', 'accepted', '', 'Original.');
+    dr('DR-002', 'accepted', 'supersedes_partial: [DR-001]\n');
+    expect(validatePendingDrAmendments(dir)).toHaveLength(0);
   });
 });

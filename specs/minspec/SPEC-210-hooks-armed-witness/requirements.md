@@ -8,6 +8,12 @@ epic: EPIC-009  # Team Readiness - guardrails a shared repo must carry; the scaf
 aspects: [git-hooks, core-hooksPath, secret-scanning, no-silent-gate, second-witness, harness, blast-radius, headless-clone]
 depends_on: [DR-037, DR-066]
 relates_to: ["#1863", "#1186", "#1620", "#1850", "#2671", "#1277", "#1809", SPEC-033]  # #1277 and #1809 have specs on unmerged branches only, so they are cited by issue
+# Ownership (SPEC-038): the one new module is the FR-1 predicate every witness calls. The
+# session-start hook (FR-2) ships as a template string, so it lands in existing files.
+implements: [packages/minspec/src/lib/hooks-armed.ts, packages/minspec/tests/hooks-armed.test.ts]  # all NEW
+# Files this spec MODIFIES (not owns): packages/minspec/src/lib/hook-templates.ts, packages/minspec/src/lib/claude-settings.ts, packages/minspec/src/lib/scaffold.ts, packages/minspec/src/extension.ts, packages/minspec/src/lib/ruleset-advisor.ts, packages/minspec/src/lib/template-registry.ts - FR-2 template + registration, FR-4 ensureHooksPath, FR-5 activation, FR-6 advisor, FR-7 guidance text.
+# Listed here and not under affects:, because the spec-gate freezes every affects: file of an
+# unapproved spec past Clarify for all sessions (#3234).
 phases:
   specify: done
   clarify: pending
@@ -196,6 +202,10 @@ mocked config read), run with a control that shows the check fails when the defe
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are resolved: an agent session recorded each option this document already
+recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
+chose them; they are ratified only by approval of this spec.
+
 - **D1. Should the session-start witness repair as well as warn?**
   - **(a) Warn only (rec).** It matches the issue's recommendation ("assert the post-condition
     rather than adding another installer") and minspec's own #2671 witness, and a session
@@ -205,18 +215,24 @@ mocked config read), run with a control that shows the check fails when the defe
     It closes the window for agent sessions immediately. Cost: a session start writes git config
     with no click. That is the same silent-side-effect installer shape the root cause names,
     one step earlier.
+  **Recorded selection: Option (a),** warn only, matching the issue's recommendation to assert the
+  post-condition rather than add another installer.
 - **D2. Should adopters who already ran the ruleset advisory be re-offered `gitleaks`?**
   - **(a) Re-offer once, on the next refresh, as a separately dismissible offer (rec).** The two
     repos in the issue get the gate without hand-editing a ruleset. Cost: one more toast for
     every existing adopter, including ones who deliberately leave secret scanning advisory.
   - (b) New inits only. No new prompt. Cost: every existing adopter, including both repos in
     the issue, keeps a non-gating CI witness until someone notices.
+  **Recorded selection: Option (a),** re-offer once, on the next refresh, as a separately
+  dismissible offer, so existing adopters get the gate without hand-editing a ruleset.
 - **D3. Root `package.json` with a `prepare` script (the issue's alternative): rejected
   (rec).** Recorded so the reader can overturn it. It ties arming to someone running
   `npm install`, which CI and headless clones also skip (the same assumption, moved one step
   back), and it puts a Node manifest into non-Node adopter repos. Cost of rejecting: a Node
   adopter who always runs `npm install` would have been armed with no session-start hook at
   all.
+  **Recorded selection: rejected, as recommended,** arming would still depend on someone
+  running `npm install`, which CI and headless clones skip.
 
 ## Alternatives considered
 

@@ -56,6 +56,8 @@ import { BOT_ACTOR, evaluateDelegation, parseDelegations, type Delegation, type 
 import { actForPath, frontmatterField } from './approval-actor';
 import { readContentPullRequest } from './content-pr';
 import { readRepeatFixShare, utcToday } from './repeat-fix-share';
+import { openClarifyDetail } from './clarify-open';
+import { specNotApprovable } from './delegated-approval';
 
 /** The commit identity of `minspec-sdd[bot]` (the App's bot user). */
 export const BOT_EMAIL = '299695933+minspec-sdd[bot]@users.noreply.github.com';
@@ -104,6 +106,11 @@ export interface CallerDeps {
   readonly approve: (call: ApproveCall) => CliRun;
   readonly repeatFixShare: (repoRoot: string, base: string) => number | undefined;
   readonly contentPullRequest: (repoRoot: string, base: string, rel: string) => number | undefined;
+  /**
+   * The CLI's own `specNotApprovable`, on the base's bytes: the reason the CLI would deny
+   * this spec, or undefined. Throws when it cannot be evaluated.
+   */
+  readonly notApprovable: (repoRoot: string, rel: string, content: string) => string | undefined;
   readonly today: () => string;
 }
 
@@ -393,6 +400,30 @@ export function runCaller(opts: CallerOptions, deps: CallerDeps): CallerReport {
       if (isTerminalSpecStatus(status as SpecStatus)) continue;
     } else if (status !== 'proposed') {
       continue;
+    }
+    if (act === 'spec-approval') {
+      // Same shared check the CLI applies (#3059): refuse visibly before any GitHub read.
+      const open = openClarifyDetail(content);
+      if (open !== undefined) {
+        skip(artifact, 'clarify-open', open);
+        continue;
+      }
+      // The rest of the CLI's refusal (incomplete spec, ownership not declared for the
+      // advance), asked here too. Without it a refused spec stayed a candidate, took a
+      // --max slot every run, and was denied again each time (304 denials, 2026-10-26).
+      // Config and paths resolve under repoRoot, the CLI under the recording worktree: this
+      // only ever adds a refusal, and the CLI still judges every spec it admits.
+      let unready: string | undefined;
+      try {
+        unready = deps.notApprovable(repoRoot, artifact, content);
+      } catch (err) {
+        skip(artifact, 'approvability-unknown', `the approvability check could not run: ${String(err).split('\n')[0]}`);
+        continue;
+      }
+      if (unready !== undefined) {
+        skip(artifact, 'spec-not-approvable', unready);
+        continue;
+      }
     }
     const tier = frontmatterField(content, 'tier');
     if (tier === undefined || !TIERS.includes(tier as Tier)) {
@@ -743,6 +774,7 @@ export const REAL_DEPS: CallerDeps = {
   approve: realApprove,
   repeatFixShare: (root, base) => readRepeatFixShare(root, base).share,
   contentPullRequest: (root, base, rel) => readContentPullRequest(root, base, rel),
+  notApprovable: (root, rel, content) => specNotApprovable(root, path.join(root, rel), content),
   today: utcToday,
 };
 

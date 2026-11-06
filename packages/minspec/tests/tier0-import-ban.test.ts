@@ -50,8 +50,9 @@ const PACKAGES_DIR = path.join(REPO_ROOT, 'packages');
  *     invariant 1).
  *   - shared:  `@aiclarity/shared` — cross-package contract types, documented
  *     in CLAUDE.md as "Tier-0 shared: contract types (no vscode/network)".
+ *   - core:    `@aiclarity/minspec-core` — the headless bundle (SPEC-136); no network by design.
  */
-const TIER0_BANNED_ROOTS = ['minspec', 'shared'];
+const TIER0_BANNED_ROOTS = ['minspec', 'shared', 'core'];
 
 /**
  * Workspace packages with a `src/` tree that are deliberately EXEMPT from the
