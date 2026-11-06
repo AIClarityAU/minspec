@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-282-egress-guard-verified-generated-files/requirements.md",
+  "specHash": "c9e8f8bcb3bdaa4f1174af551b96b15b442b64fb96b2d3cc6f7db01249f4efe9",
+  "approvedAt": "2026-11-02T12:29:06.859Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:fix/3390-clarify-wording",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3391#issuecomment-6571380443"
+}
