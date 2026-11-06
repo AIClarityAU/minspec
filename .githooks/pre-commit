@@ -406,10 +406,17 @@ if [ "${DR_INDEX_GATE_OFF:-}" != "1" ] && \
       *"validation error(s)"*|*"validation passed"*) ;;
       *)
         echo "" >&2
-        echo "✖ validate gate: the validator exited non-zero without reporting a result." >&2
-        echo "  No summary line, so its FAIL set cannot be trusted as complete — this is a" >&2
-        echo "  broken validator, not a clean commit. Failing closed (#1483 review)." >&2
-        echo "  Override: DR_INDEX_GATE_OFF=1 git commit ..." >&2
+        # #1416: "the check ran and said no" and "the check never ran" are different
+        # failures. This is the second: nothing was validated, so do NOT blame the
+        # author's content and do NOT offer DR_INDEX_GATE_OFF (a bypass of a gate
+        # that was never consulted). Still fails closed (invariant 2).
+        echo "✖ validate gate: the validator COULD NOT RUN — your content was not validated." >&2
+        echo "  It exited non-zero without reporting a result (the output above shows why;" >&2
+        echo "  usually MODULE_NOT_FOUND in a fresh worktree with no node_modules, but a" >&2
+        echo "  crash or syntax error introduced by this commit can look the same)." >&2
+        echo "  If the output above shows MODULE_NOT_FOUND, run \`npm install\` in this" >&2
+        echo "  worktree and commit again; otherwise fix the error it names." >&2
+        echo "  Failing closed (#1483 review, #1416); the validator never reported on your content." >&2
         fail=1
         exit $fail
         ;;
