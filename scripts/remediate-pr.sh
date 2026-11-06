@@ -411,12 +411,13 @@ rerun_decision() {
 #   3. AUTHORSHIP — the counter only accepts comments written by this automation's own
 #      login, so a human's or the reviewer bot's comment can never be charged.
 # Each layer alone is bypassable; together, cross-counting is unreachable. If layer 3
-# cannot be applied (no resolvable login) the counter falls back to ANY author and can
-# only OVER-count — for the two BUDGET counters that caps sooner, never un-bounds the
-# loop. The one place over-counting is the DANGEROUS direction is the cap-notice dedup
-# (a phantom CAPPED_MARKER would suppress the "needs a human" notice — a silent gate),
-# so that decision lives in cap_notice_decision() below, which refuses to dedup at all
-# unless authorship is provable.
+# cannot be applied (no resolvable login) the counter reports 0 (#3592): it used to fall
+# back to ANY author, which charged a human's or the reviewer's comments to the budget and
+# tripped the cap early, labelling green PRs needs-human-review. Counting nothing would
+# un-bound the loop, so the caller (below) refuses to spend an agent at all while the login
+# is unresolved — a visible skip, retried next sweep. The cap-notice dedup (a phantom
+# CAPPED_MARKER would suppress the "needs a human" notice — a silent gate) lives in
+# cap_notice_decision() below, which refuses to dedup unless authorship is provable.
 ATTEMPT_MARKER="<!-- minspec-auto-remediation -->"
 CRASH_MARKER="<!-- minspec-remediate-crash -->"
 CAPPED_MARKER="<!-- minspec-remediate-capped -->"
@@ -460,8 +461,9 @@ sanitize_comment_body() { printf '%s' "${1-}" | sed -e 's/<!--/<!- -/g' -e 's/--
 
 # Count the comments the runaway guard charges to $1.
 #   $2 — the `gh pr view --json comments` JSON.
-#   $3 — CSV of author logins to accept; EMPTY means "any author" (the degraded,
-#        deliberately over-counting direction).
+#   $3 — CSV of author logins to accept; EMPTY (or naming nobody) counts NOTHING (#3592):
+#        an unprovable author is never charged. Callers must not spend budget-bounded
+#        work on a 0 that came from an empty allowlist.
 # A comment counts only when the marker is the LAST non-whitespace text of its body —
 # the one position post_marked_comment ever writes one. Fail-soft: any jq/parse failure
 # yields 0 and the caller proceeds, as before.
@@ -481,20 +483,21 @@ count_markers_json() {
       | split(",")
       | map(sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "") | ascii_downcase | sub("\\[bot\\]$"; ""))
       | map(select(length > 0))) as $allow
-    | [ .comments[]?
+    | if ($allow | length) == 0 then [] else
+      [ .comments[]?
         | (((.author.login) // "") | ascii_downcase | sub("\\[bot\\]$"; "")) as $login
-        | select(($allow | length) == 0 or (($allow | index($login)) != null))
+        | select(($allow | index($login)) != null)
         | ((.body // "") | sub("[[:space:]]+$"; ""))
         | select(endswith($m))
-      ] | length' <<<"$json" 2>/dev/null) || out=""
+      ] end | length' <<<"$json" 2>/dev/null) || out=""
   [[ "$out" =~ ^[0-9]+$ ]] || out=0
   printf '%s\n' "$out"
 }
 
 # Is authorship PROVABLE from this allowlist — i.e. does it name at least one login?
 # Deliberately not `[[ -n "$csv" ]]`: after the trim above, a value like `" , "` is a
-# non-empty STRING that names nobody, and count_markers_json degrades it to any-author.
-# Treating that as provable would let the cap-notice dedup below run on an any-author
+# non-empty STRING that names nobody, and count_markers_json counts nothing for it.
+# Treating that as provable would let the cap-notice dedup below run on an unprovable
 # count — the exact silent gate it exists to prevent. One character that is neither
 # whitespace nor a comma is necessary and sufficient for a surviving element.
 # It must ALSO look like a GitHub login (#3037): a `gh api user` 403 body printed on stdout
@@ -963,19 +966,24 @@ if [[ "$ACTION" == agent-* || "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "
   # "Attempt 1/2" forever. Realistic, not contrived — a GITHUB_TOKEN sweep posting as
   # `github-actions[bot]` while the operator configured `minspec-sdd[bot]`.
   #
-  # Budget counters must only ever degrade toward OVER-counting (cap sooner: annoying but
-  # safe). UNDER-counting un-bounds the loop, so an unresolved identity falls all the way
-  # back to any-author rather than trusting an operator string we cannot corroborate.
-  SELF_LOGIN=$(resolve_self_login)  # empty on any failure: authors_provable is false for empty, which routes to any-author counting and always-post (the safe direction, documented above)
+  # Budget counters must never count a comment whose author is unprovable (#3592): the old
+  # any-author fallback charged humans' and bots' comments, so the cap tripped early and
+  # green PRs got needs-human-review. Counting nothing would un-bound the loop. So:
+  #   - login resolved           → it, widened by MINSPEC_REMEDIATE_AUTHOR_LOGINS;
+  #   - unresolved (an App installation token cannot call `gh api user`, #3037) → ONLY the
+  #     operator-declared MINSPEC_REMEDIATE_AUTHOR_LOGINS, if it names a login (explicit
+  #     configuration, not a guess);
+  #   - neither                  → spend NO agent and add NO label this sweep: say so out
+  #     loud and retry next sweep (fail closed, visibly — nothing merges, nothing loops).
+  SELF_LOGIN=$(resolve_self_login)  # empty on any failure
   if authors_provable "$SELF_LOGIN"; then
     AUTHOR_ALLOW="${SELF_LOGIN}${MINSPEC_REMEDIATE_AUTHOR_LOGINS:+,${MINSPEC_REMEDIATE_AUTHOR_LOGINS}}"
+  elif authors_provable "${MINSPEC_REMEDIATE_AUTHOR_LOGINS:-}"; then
+    AUTHOR_ALLOW="${MINSPEC_REMEDIATE_AUTHOR_LOGINS}"
+    echo "  NOTE: could not resolve this token's login (\`gh api user\` failed) — counting marker comments from the operator-declared MINSPEC_REMEDIATE_AUTHOR_LOGINS only." >&2
   else
-    # Say so out loud rather than degrade quietly. Any-author can only over-count, never
-    # un-bound the loop — and the cap notice below stops deduplicating altogether, which
-    # is the safe direction for IT (a repeated notice is noise; a missing one is a silent
-    # gate). The two consumers of "is authorship provable" have opposite safe directions.
-    AUTHOR_ALLOW=""
-    echo "  NOTE: could not resolve this token's login (\`gh api user\` failed) — counting marker comments from ANY author this sweep (MINSPEC_REMEDIATE_AUTHOR_LOGINS widens a resolved identity, it cannot replace one)." >&2
+    echo "  NOTE: could not resolve this token's login (\`gh api user\` failed) and MINSPEC_REMEDIATE_AUTHOR_LOGINS names no login — remediation budgets cannot be counted, so no agent runs and no label is added this sweep; retrying next sweep." >&2
+    exit 0
   fi
   # One API read, three local counts. A comment is charged to a budget only when the
   # marker is the terminal text of a body this automation authored, so no comment can

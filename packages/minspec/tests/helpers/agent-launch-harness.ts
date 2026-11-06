@@ -1201,7 +1201,7 @@ export function runRemediate(opts: RemediateOptions = {}): RemediateRun {
     cwd: repo,
     encoding: 'utf-8',
     // One launch: an escalation is not retried on a second model.
-    env: hermeticEnv(dir, bin, { MINSPEC_ESCALATE_RETRY_OFF: '1', ...opts.env }),
+    env: hermeticEnv(dir, bin, { MINSPEC_ESCALATE_RETRY_OFF: '1', MINSPEC_REMEDIATE_AUTHOR_LOGINS: 'fixture-operator', ...opts.env }),
   });
   return { ...collect(dir, r), worktree, branch, origin };
 }
