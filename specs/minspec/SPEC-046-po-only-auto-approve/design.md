@@ -247,7 +247,63 @@ All of 1–5 land in **one PR** (TS + shared + Python together) or parity tests 
 - **Migrate clarify:** migrate-approvals records are `kind:'migrated'` (WARN, counts as
   satisfied per FR-5) and never collapse to `'human'`.
 
+## Re-verification against main before Tasks (2026-10-28)
+
+The anchors above are from the August snapshot. They were re-read on `origin/main` at
+`7430af21` before [tasks.md](./tasks.md) was written; tasks.md cites the current lines. Six
+findings change how the work is split. None changes a requirement.
+
+1. **`spec-gate.py` does not run in CI.** It is the agent-session PreToolUse hook
+   (`scripts/hooks/spec-gate.sh` wraps it; `packages/minspec/tests/spec-gate.test.ts:28`
+   drives it), and no workflow under `.github/workflows/` invokes it. The "CI (`spec-gate.py`)"
+   layer of INV-5 therefore does not exist yet as a place. It is built as a
+   `--policy-authorship <base> <head>` mode of `spec-gate.py`, run by a new step in
+   `ready-to-merge.yml` from the **base** checkout, so a pull request cannot edit the checker
+   that judges it. The same Python function backs the pre-commit layer, so the two layers
+   share one predicate (a duplicated predicate drifts). Rejected: a separate Node checker,
+   which would be a third copy of the rule.
+2. **The merge-lane layer already exists, three times.** `.minspec/config.json` is withheld
+   from native auto-merge by `scripts/dispatch-issue.sh` mandate 2 (`:368-374`) and stop-classed
+   `edits-the-autonomy-rules` (`:489`); the delegated merge refuses `.minspec/`
+   (`scripts/lib/delegated-merge.ts:27`); docs-lane's corpus excludes `.minspec/` (mandate 2's
+   own note). Tasks pin this with a test rather than build a fourth copy. A missing withhold
+   found by that test is a `DEEPER:` stop, not a silent pass.
+3. **Two committed sidecars carry a bot `approvedBy`.** Delegated approvals (DLG-001) write
+   `approvedBy: "minspec-sdd[bot]"` with `actor` and `basis: "delegation:DLG-001"` (for
+   example `.minspec/approvals/docs/decisions/DR-113.md.json`). INV-6's read backstop must use
+   exactly `checkApprover`'s denylist (`packages/minspec/src/lib/approval.ts:402-409`, `:447`),
+   which lists the App's noreply emails and not the bare login, so those records stay valid.
+   Widening the backstop to bare `[bot]` logins would silently un-approve every delegated
+   record; the record-validity task carries a regression test over every committed sidecar.
+   Their absent `kind` back-fills to `'human'`, which here means "neither auto nor migrated",
+   not "a person"; the actor is carried by `actor`/`basis`, validated by
+   `scripts/lib/approval-actor.ts`.
+4. **CQ-8's single source for `CURRENT_POLICY_SCHEMA_VERSION`.** It is an exported constant in
+   `packages/shared/src/next-task.ts` (already in `affects:`), re-exported by
+   `audience-policy.ts`. `spec-gate.py` reads the literal from that file with one anchored
+   pattern; if the pattern does not match exactly once, Python resolves every audience to
+   `human` (fail safe toward review), and a vitest parity case asserts the value Python reads
+   equals the TS import. Rejected: a new `packages/shared` JSON file, which no ownership list
+   declares.
+5. **"All of 1-5 land in one PR" is replaced by a dark-until-enabled order.** Nothing can
+   resolve `auto` until a `.minspec/config.json` carries an `audiences` block, and no config
+   does. So the TS state, the gate routing and the Python twin can land as separate pull
+   requests without a reachable TS/Python disagreement, provided the policy-authorship gate
+   lands **before** the resolver, so the first config that could enable `auto` already meets
+   the gate. Enabling `auto` in any repo is a human config edit and is not a task of this
+   spec.
+6. **Reach.** All three INV-5 layers are this repository's files; the scaffolded hook and
+   workflow templates in `template-registry.ts` are unchanged, so an adopter repo gets the
+   resolver with no authorship gate. Tracked as #3288 (policy-authorship gate covers this repo
+   only); its answer may add a condition to the resolver task before that task merges.
+
+Owner ack (CQ-9, #955): the tasks that edit `approval.ts` and `approval-store.ts` (owned by
+SPEC-041) carry that note into their pull requests.
+
 ## Open decisions
+
+All five below were decided after this Plan, in requirements.md *Clarifications*
+(CQ-1, CQ-2, CQ-3, CQ-4, CQ-5); they are kept as the Plan wrote them.
 
 - Terminal-collapse cue: distinct marker for auto-advanced terminal specs vs accept RD-1
   erasure (recommend a cheap tooltip line — preserves honesty).
