@@ -37,6 +37,7 @@
 # Testable decision seams (pure — no gh/git/claude; used by the loop + unit tests):
 #   scripts/drain-inbox.sh --session-alive <pid>            # exit 0 alive / 1 gone
 #   scripts/drain-inbox.sh --should-continue <pid> <epoch>  # exit 0 continue / 1 stop
+#   scripts/drain-inbox.sh --self-drift <start-hash>        # exit 0 script differs from <start-hash> / 1 same (#3397)
 #   scripts/drain-inbox.sh --paused                         # exit 0 paused / 1 not (#1187)
 #   scripts/drain-inbox.sh --zai-key-note                   # where the z.ai key comes from (never its value; zaikey23)
 #   scripts/drain-inbox.sh --unlaned    (<json on stdin)    # issue numbers carrying no lane label (#3355)
@@ -1643,7 +1644,16 @@ arm_delegated_spec_merges() {
         break
       fi
       gh_err=$(tr '\n' ' ' < "$errfile" 2>/dev/null | cut -c1-500 || true)  # swallow-ok: diagnostic text only; the failure itself is reported below
-      (( attempt == 1 )) && sleep "${MINSPEC_DRAIN_DELEGATED_MERGE_RETRY_SLEEP:-5}"
+      # A failed read is the authoritative sign of a dead credential (#3400): this step runs
+      # after an hour-long cycle's first reads, so the bot token is often stale here. Re-mint
+      # in THIS shell (the next read, every later step and every child inherit it), exactly
+      # as _read_queue does; the retry then runs at once. A broker that hands back the same
+      # token re-mints nothing, and the plain sleep-and-retry below stays as it was.
+      if gh_bot_reauth_read; then
+        echo "[drain] the delegated-merge read (label ${label}) failed and the credential was stale — re-minted, retrying." >&2
+      elif (( attempt == 1 )); then
+        sleep "${MINSPEC_DRAIN_DELEGATED_MERGE_RETRY_SLEEP:-5}"
+      fi
     done
     if (( rc != 0 )); then
       [[ "$errfile" == /dev/null ]] || rm -f "$errfile"
@@ -1760,8 +1770,14 @@ sweep_open_prs() {
     # saw half of a 61-PR pile. One row per open PR, drafts included, so the count below
     # is the count gh RETURNED and can be compared with the limit.
     local pr_limit="${MINSPEC_DRAIN_PR_SWEEP_LIMIT:-500}"
+    local open_rc=0
     open_rows=$(gh pr list --repo "$REPO" --state open --limit "$pr_limit" --json number,isDraft \
-      --jq '.[] | "\(.number) \(.isDraft)"' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
+      --jq '.[] | "\(.number) \(.isDraft)"' 2>/dev/null) || open_rc=$?
+    if (( open_rc != 0 )) && gh_bot_reauth_read; then   # dead credential: re-mint in this shell, retry once (#3400)
+      echo "[drain] the open-PR list failed and the credential was stale — re-minted, retrying once." >&2
+      open_rows=$(gh pr list --repo "$REPO" --state open --limit "$pr_limit" --json number,isDraft \
+        --jq '.[] | "\(.number) \(.isDraft)"' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
+    fi
     open_count=0
     [[ -n "$open_rows" ]] && open_count=$(printf '%s\n' "$open_rows" | wc -l | tr -d ' ')
     # Fail closed (#2975): a read that came back exactly at the limit may have been cut
@@ -1942,20 +1958,37 @@ DRAIN_SPECIFY="${MINSPEC_DRAIN_SPECIFY:-1}"
 # 2026-10-18, the last at 62). Every spec draft is withheld from auto-merge as
 # approval-or-acceptance, so writing more while that many already wait on a human spends
 # quota on work nothing can land. With the switch on, each cycle counts the drain's own
-# open pull requests held for a human (`needs-human-review` on an `agent/issue-*`
-# branch) and leaves the spec-writing queue alone while that count is at or above this
+# open spec-draft pull requests held for a human (`needs-human-review` on an
+# `agent/issue-*` branch, a file under specs/, the rest under specs/ or docs/decisions/; build PRs are not
+# counted, #3570) and leaves the spec-writing queue alone while that count is at or above this
 # cap. Builds, triage and remediation are untouched. Anything but a whole number is read
 # as 0, which pauses spec-writing: the reading that spends nothing.
 SPECIFY_MAX_HELD="${MINSPEC_DRAIN_SPECIFY_MAX_HELD:-10}"
 
-# _held_drain_prs <varname> — count the drain's open pull requests held for a human INTO
-# a named variable. Returns gh's status: a failed read is not a count of zero, and the
+# _held_drain_prs <varname> — count the drain's open SPEC-DRAFT pull requests held for a
+# human (#3570: a specs/ file, rest under specs/ or docs/decisions/) INTO a named variable. Returns gh's status: a failed read is not a count of zero, and the
 # caller pauses spec-writing on it rather than guess (invariant 2).
 _held_drain_prs() {
   local -n _held_out="$1"
   local _held_val _held_rc=0
+  # Only SPEC DRAFTS count (#3570): a pull request with AT LEAST ONE file under specs/ and
+  # every file under specs/ or docs/decisions/ (a draft ships its decision record and
+  # INDEX.md beside it, e.g. #3217; those must still count). A PR touching only
+  # docs/decisions/ has no spec file, so it is NOT a draft and is not counted. A held machinery build is waiting on a merge path, not on a spec decision, and
+  # counting it paused spec-writing behind 44 builds. A null `files` makes jq fail, which
+  # fails the read closed rather than counting 0.
   _held_val=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit 1000 \
-    --json headRefName --jq '[.[] | select(.headRefName | startswith("agent/issue-"))] | length') || _held_rc=$?
+    --json headRefName,files --jq '[.[] | select(.headRefName | startswith("agent/issue-"))
+      | select((.files | map(.path)) as $p
+          | ($p | any(startswith("specs/"))) and ($p | all(startswith("specs/") or startswith("docs/decisions/"))))] | length') || _held_rc=$?
+  if (( _held_rc != 0 )) && gh_bot_reauth_read; then   # dead credential: re-mint in this shell, retry once (#3400)
+    echo "[drain] the held-PR count failed and the credential was stale — re-minted, retrying once." >&2
+    _held_rc=0
+    _held_val=$(gh pr list --repo "$REPO" --state open --label needs-human-review --limit 1000 \
+      --json headRefName,files --jq '[.[] | select(.headRefName | startswith("agent/issue-"))
+      | select((.files | map(.path)) as $p
+          | ($p | any(startswith("specs/"))) and ($p | all(startswith("specs/") or startswith("docs/decisions/"))))] | length') || _held_rc=$?
+  fi
   if (( _held_rc != 0 )); then return "$_held_rc"; fi
   [[ "$_held_val" =~ ^[0-9]+$ ]] || return 1
   _held_out="$_held_val"
@@ -2027,12 +2060,19 @@ _specify_only() {
 _pr_claims() {
   local -n _claims_out="$1"
   local _claims_val _claims_rc=0
-  _claims_val=$(gh pr list --repo "$REPO" --state open --limit 1000 \
-    --json number,body,closingIssuesReferences --jq '
+  local _claims_jq='
       .[] | .number as $pr
       | ([(.closingIssuesReferences // [])[].number]
          + [(.body // "") | match("(?i)\\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\\s*:?\\s+#([0-9]+)"; "g").captures[0].string | tonumber])
-      | unique[] | "\($pr) \(.)"') || _claims_rc=$?
+      | unique[] | "\($pr) \(.)"'
+  _claims_val=$(gh pr list --repo "$REPO" --state open --limit 1000 \
+    --json number,body,closingIssuesReferences --jq "$_claims_jq") || _claims_rc=$?
+  if (( _claims_rc != 0 )) && gh_bot_reauth_read; then   # dead credential: re-mint in this shell, retry once (#3400)
+    echo "[drain] the open-PR claims read failed and the credential was stale — re-minted, retrying once." >&2
+    _claims_rc=0
+    _claims_val=$(gh pr list --repo "$REPO" --state open --limit 1000 \
+      --json number,body,closingIssuesReferences --jq "$_claims_jq") || _claims_rc=$?
+  fi
   if (( _claims_rc != 0 )); then return "$_claims_rc"; fi
   _claims_out="$_claims_val"
 }
@@ -2962,9 +3002,11 @@ _quota_read() {
 # would be parsed as an admission verdict. The producer's stdout and stderr are
 # captured into a variable (never printed raw), and every diagnostic goes to stderr.
 #
-# It cannot admit anything. On any failure the reading is left exactly as it was and
-# the stale / no-reading arms below still fail closed — this only ever makes a
-# reading fresher, never a verdict weaker.
+# It cannot admit anything. A failed refresh does not make the verdict weaker: the
+# producer is not guaranteed to leave the reading as it found it (it may change or
+# remove it, or leave it unreadable), and whatever is left is judged by the stale /
+# no-reading arms below, which still fail closed. This only ever makes a reading
+# fresher, never a verdict weaker.
 #
 # `_quota_try_refresh force` skips the age check, and ONLY the age check (#2233). A
 # usage-limit text signal is judged against the meter, and a reading taken BEFORE the
@@ -3017,7 +3059,12 @@ _quota_try_refresh() {
   else
     why="exit 0 but the reading did not move"
   fi
-  out=$(printf '%s' "$out" | tr -s '[:space:][:cntrl:]' ' ' | cut -c1-200)
+  # The producer's LAST non-blank line, not its first: a traceback ends with the exception
+  # line, which is the part that says what failed. Then one line, at most 200 characters.
+  out=$(printf '%s\n' "$out" | awk 'NF { last = $0 } END { printf "%s", last }' | tr -s '[:space:][:cntrl:]' ' ' | cut -c1-200)
+  # Trim the edges a squeezed run of whitespace leaves, so an empty excerpt stays empty
+  # (the producer-said clause keys on non-empty) and none ends with a stray space.
+  out="${out# }"; out="${out% }"
   # Say only what is true of the reading AFTER the attempt; the decision stays the gate's.
   local tail
   if [[ -z "$after" ]]; then
@@ -3775,6 +3822,22 @@ wait_interval() {
 # unreadable parent — is "not paused", so a drain nobody paused behaves as before.
 drain_paused() { [[ -e "$PAUSE_FILE" ]]; }
 
+# lock_held: exit 0 iff the singleton lock file holds THIS loop's own PID (#2241).
+# BASHPID, not $$: the loop is a backgrounded subshell (see the acquire block below).
+lock_held() { [[ "$(cat "$LOCK" 2>/dev/null || true)" == "$BASHPID" ]]; }  # swallow-ok: an unreadable lock reads as empty, which is "not ours"
+
+# lock_release: remove the lock only if it still names this loop (#2241). The EXIT trap and
+# the SIGTERM handler used to `rm -f "$LOCK"` unconditionally, so a loop that had lost its
+# lock (or never held it) deleted the file a DIFFERENT live loop held, and the next
+# --auto start saw no lock and launched a second concurrent loop.
+lock_release() {
+  if lock_held; then
+    rm -f "$LOCK"
+  else
+    echo "[drain] not releasing $LOCK — it no longer names this loop (pid $BASHPID); leaving the current holder's lock alone."
+  fi
+}
+
 # _drain_on_signal <SIGNAL> <exit-code>: the loop's SIGTERM handler (#1187).
 # Says why it stopped, TERMs the children it started (a dispatch's own EXIT trap then
 # releases its lease), drops the lock, and exits. Idempotent: a second SIGTERM while
@@ -3786,7 +3849,8 @@ _drain_on_signal() {
   kids="$(jobs -p 2>/dev/null || true)"  # swallow-ok: no jobs is the common case
   # shellcheck disable=SC2086
   [[ -z "$kids" ]] || kill -TERM $kids 2>/dev/null || true
-  rm -f "$LOCK"
+  lock_release
+  trap - EXIT  # the lock is already handled; a second lock_release would log a phantom holder
   exit "$2"
 }
 
@@ -3811,14 +3875,39 @@ zai_key_note() {
   )
 }
 
+# self_hash: sha256 of THIS script as it is on disk now; empty when unreadable (#3397).
+# bash parses the loop's functions once at process start, so a merged fix to this file
+# stays inert in a running loop. The freshness check on the run directory covers only the
+# helpers the loop calls, not the loop's own functions. MINSPEC_DRAIN_SELF is a test seam.
+DRAIN_SELF="${MINSPEC_DRAIN_SELF:-${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")}"
+self_hash() {
+  local out
+  if out="$(sha256sum "$DRAIN_SELF" 2>/dev/null)"; then printf '%s\n' "${out%% *}"; fi
+}
+
+# self_drifted <start-hash>: exit 0 iff the script on disk is not the one this process
+# loaded. An unreadable script counts as drifted: fail closed, never silently keep running
+# code that can no longer be compared. An empty <start-hash> means the comparison was
+# never possible (the caller already warned), so it reports not drifted.
+self_drifted() {
+  local start="$1" now
+  [[ -n "$start" ]] || return 1
+  now="$(self_hash)"
+  [[ "$now" != "$start" ]]
+}
+
 # run_loop: the session-scoped continuous scheduler. Repeats run_cycle until the
 # session ends, the wall-clock cap is hit, freshness fails persistently, or too
 # many consecutive cycle errors accrue. Quota signals pause-and-retry; a single
 # cycle error never kills the loop (log + continue).
 run_loop() {
-  local deadline consec=0 rc
+  local deadline consec=0 rc start_hash
   local LOOP_PAUSED=false
   deadline=$(( $(date +%s) + MAX_LIFETIME ))
+  start_hash="$(self_hash)"
+  if [[ -z "$start_hash" ]]; then
+    echo "[drain] WARNING: cannot hash $DRAIN_SELF — a merged fix to this script will NOT end this loop; restart it by hand to pick one up (#3397)." >&2
+  fi
   echo "[drain] continuous loop started (session=$SESSION_PID$(session_anchor_note), interval=${INTERVAL}s, quota_backoff=${QUOTA_BACKOFF}s, max_lifetime=${MAX_LIFETIME}s)."
   echo "[drain] quota gate — $(quota_health)"
   zai_key_note
@@ -3826,8 +3915,20 @@ run_loop() {
     if ! session_alive "$SESSION_PID"; then
       echo "[drain] session $SESSION_PID ended — stopping loop (drain dies with the session)."; break
     fi
+    # Singleton check (#2241): a loop that no longer holds the lock must not keep
+    # dispatching beside the loop that does. Exit rather than race it on one queue.
+    if ! lock_held; then
+      echo "[drain] lock $LOCK no longer names this loop (pid $BASHPID; holder: $(cat "$LOCK" 2>/dev/null || echo none)) — stopping loop so two loops never dispatch from one queue (#2241)."; break
+    fi
     if (( $(date +%s) >= deadline )); then
       echo "[drain] max lifetime (${MAX_LIFETIME}s) reached — stopping loop (backstop cap)."; break
+    fi
+
+    # Code drift (#3397): the functions this loop runs were parsed at start. When the script
+    # on disk differs, end the loop so drain-service.sh starts the new code. Checked between
+    # cycles, so a cycle in flight finishes first.
+    if self_drifted "$start_hash"; then
+      echo "[drain] $DRAIN_SELF changed (or became unreadable) since this loop started — stopping so the supervisor starts the new code (#3397)."; break
     fi
 
     # Pause (#1187): checked HERE, between cycles, so a cycle in flight always finishes.
@@ -3967,6 +4068,11 @@ case "$1" in
     if (( $(date +%s) >= _deadline )); then echo "max-lifetime reached"; exit 1; fi
     if ! session_alive "$_pid"; then echo "session $_pid ended"; exit 1; fi
     echo "continue"; exit 0
+    ;;
+  --self-drift)
+    # Pure seam (#3397): with a hash, exit 0 iff this script differs from it; bare, print the current hash.
+    if [[ -z "${2:-}" ]]; then self_hash; exit 0; fi
+    if self_drifted "$2"; then echo "drifted"; exit 0; else echo "same"; exit 1; fi
     ;;
   --zai-key-note)
     # Pure seam (zaikey23): the startup line naming the z.ai key's SOURCE. Never its value.
@@ -4160,8 +4266,16 @@ fi
   # session and spawn a second concurrent loop (double-dispatch / quota abuse).
   # $BASHPID is this subshell's own PID (== $DRAIN_PID), i.e. the long-lived loop
   # the reclaim's `kill -0` must actually probe. (ai-review #676: BLOCKING/HIGH.)
-  echo "$BASHPID" > "$LOCK"
-  trap 'rm -f "$LOCK"' EXIT
+  # Atomic acquire (#2241): noclobber makes the create fail if another loop won the
+  # check-then-write window above, instead of overwriting its lock. The EXIT trap is
+  # installed only AFTER acquiring, and releases only a lock that still names us.
+  set -C
+  if ! echo "$BASHPID" > "$LOCK" 2>/dev/null; then
+    echo "[drain] lost the lock race — $LOCK is held by PID $(cat "$LOCK" 2>/dev/null || echo '?'); exiting without dispatching."
+    exit 0
+  fi
+  set +C
+  trap lock_release EXIT
   trap '_drain_on_signal SIGTERM 143' TERM
 
   if $CONTINUOUS; then
