@@ -438,6 +438,12 @@ _LEASE_TICKER_PID=""
 lease_start_renew_ticker() {
   local item="${1:?lease_start_renew_ticker needs an item}"
   [[ -z "$_LEASE_TICKER_PID" ]] || return 0    # idempotent — exactly one ticker per dispatch
+  # Private hand-back channel for a token a renewal re-mints inside the ticker (#3501).
+  # mktemp makes it 0600. It is made HERE, in the parent, and removed by
+  # lease_stop_renew_ticker: a library must not set an exit trap of its own (the caller's
+  # one trap would be replaced; see dispatch-outcome-status.test.ts), so teardown rides the
+  # stop function the caller's trap already calls.
+  _LEASE_TOKEN_HAND="$(mktemp)" || _LEASE_TOKEN_HAND=""
   (
     # fd 3 keeps the REAL stderr reachable after the next redirect silences fd 2 on
     # THIS subshell. The only thing fd 2 would otherwise carry from here is bash's own
@@ -455,10 +461,6 @@ lease_start_renew_ticker() {
     # interval), the renewal's own stderr (lease_renew's reason line, #2299 gap 2), and
     # this loop's FAILED report.
     exec 3>&2 2>/dev/null
-    # Private hand-back channel for a token a renewal re-mints inside its subshell (#3501).
-    # mktemp makes it 0600; it is read and emptied each tick and removed at teardown.
-    _LEASE_TOKEN_HAND="$(mktemp)" || _LEASE_TOKEN_HAND=""
-    [[ -z "$_LEASE_TOKEN_HAND" ]] || trap 'rm -f "$_LEASE_TOKEN_HAND"' EXIT
     while sleep "$LEASE_RENEW_SECS" 2>&3; do
       _lease_rc=0
       ( lease_renew "$item" ) 2>&3 >/dev/null || _lease_rc=$?
@@ -487,6 +489,8 @@ lease_stop_renew_ticker() {
   kill "$_LEASE_TICKER_PID" 2>/dev/null || true
   wait "$_LEASE_TICKER_PID" 2>/dev/null || true
   _LEASE_TICKER_PID=""
+  [[ -z "${_LEASE_TOKEN_HAND:-}" ]] || rm -f "$_LEASE_TOKEN_HAND"
+  _LEASE_TOKEN_HAND=""
   return 0
 }
 
