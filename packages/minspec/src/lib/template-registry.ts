@@ -2211,7 +2211,14 @@ def main():
 
         if is_spec:
             spec_id = clean_frontmatter_value(fm.get("id", ""))
-            if not spec_id:
+            if not spec_id and content.startswith("---") and not FM_RE.match(content):
+                # Opened but never closed: an id line may be present yet
+                # unreadable, so "missing" alone would misdescribe it (#3595).
+                sys.stderr.write(
+                    "FAIL " + norm + ": missing or invalid \`id: SPEC-NNN\` frontmatter (block not terminated)\\n"
+                )
+                errors += 1
+            elif not spec_id:
                 sys.stderr.write(
                     "FAIL " + norm + ": missing \`id: SPEC-NNN\` frontmatter\\n"
                 )
