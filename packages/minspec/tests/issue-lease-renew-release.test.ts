@@ -489,7 +489,7 @@ describe('lease renew survives a token that died under the ticker (#3501)', () =
         'LEASE_RENEW_SECS=0.1',
         holdDead,
         `lease_start_renew_ticker ${ITEM} >/dev/null 2>"$ERR"`,
-        `for _ in $(seq 1 100); do grep -q PATCH "$FAKE_GH_LOG" 2>/dev/null && break; sleep 0.1; done`,
+        `for _ in $(seq 1 100); do [ "$(grep -c PATCH "$FAKE_GH_LOG" 2>/dev/null)" -ge 2 ] && break; sleep 0.1; done`,
         'lease_stop_renew_ticker',
         'sleep 0.3',
       ].join('\n'),
@@ -497,8 +497,13 @@ describe('lease renew survives a token that died under the ticker (#3501)', () =
       [errFile],
     );
     const err = fs.existsSync(errFile) ? fs.readFileSync(errFile, 'utf-8') : '';
-    expect(writes().length, `${r.stderr}\n${err}`).toBeGreaterThanOrEqual(1);
+    expect(writes().length, `${r.stderr}\n${err}`).toBeGreaterThanOrEqual(2);
     expect(writes()[0]).toEqual(['PATCH', `repos/${REPO}/issues/comments/${IDS.own}`]);
     expect(err).not.toMatch(FAILED);
+    // The re-mint happened in a renewal subshell; the ticker must carry the fresh token
+    // back, so ONLY the first tick sees the dead token. A second tick that re-mints again
+    // shows the bug title is merely hidden per tick.
+    expect(err.match(/Bad credentials/g) ?? []).toHaveLength(1);
+    expect(err.match(/succeeded after a token re-mint/g) ?? []).toHaveLength(1);
   });
 });
