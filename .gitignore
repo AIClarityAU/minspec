@@ -145,3 +145,6 @@ sites/scroogellm.com/
 # not do. Cross-clone recovery is already handled without it (classifyBaseline surfaces
 # 'unrecoverable', and #701 walks the spec's own history).
 .minspec/snapshots/
+
+# Session scratch dirs (#3100): a rescue/junk sweep once pushed these to a public origin.
+.scratch*/
