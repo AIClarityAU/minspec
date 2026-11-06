@@ -6,7 +6,17 @@ tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness
 depends_on: [SPEC-026]  # reuses SessionPresenceRecord, liveness/staleness, sessionId, atomic-write idiom, .minspec/sessions/
-relates_to: [DR-051]  # inherits the docs-on-main / worktree enforcement this spec itself is authored under
+relates_to: [DR-051, SPEC-077]  # DR-051: inherits the docs-on-main / worktree enforcement this spec itself is authored under. SPEC-077 (idle-wake economics): its Part A conforms to this mailbox's pull-only inbox check by construction; keeping it that way is this spec's own constraint to hold (SPEC-077 Follow-up 2, #2209), not something SPEC-077 can enforce from outside.
+# Ownership declared in the same amendment that stales the 2026-07-14 approval, so the
+# re-approval that amendment already needs covers it (SPEC-038 FR-3, spec-to-code ownership).
+# Without it that re-approval is refused: approving advances `plan` to in-progress, the state
+# `ownership.implements.missing` fires on, and this repository sets `ownershipDeclaration:
+# error`. Both paths are the files Traceability marks as new. The two it marks as modified
+# (scaffold.ts and the CLAUDE.md template) are left out of the optional `affects:` on purpose:
+# the spec gate blocks an `affects:` path exactly as it blocks an `implements:` one (SPEC-038
+# FR-2) while the declaring spec's approval is stale, so listing them would freeze shared
+# files for unrelated work from the moment this amendment lands until the re-approval does.
+implements: [packages/minspec/src/lib/mailbox.ts, packages/minspec/tests/mailbox.test.ts]
 phases:
   specify: done
   clarify: done   # 2 gating decisions resolved by Paul Harvey 2026-07-01 (see Resolved Clarifications)
@@ -103,6 +113,8 @@ it is scoped to unblock *faster*, not to decide *who wins* (FR-13 already decide
   turn, before beginning new edits, an agent checks its OWN inbox
   (`.minspec/sessions/mailbox/<my-sessionId>/*.json`) once. This rides the *existing*
   per-turn presence check (SPEC-026 FR-9/etiquette) — no new timer, no continuous polling.
+  **Pull-only, permanently (INV-7):** this is not just today's implementation choice — no
+  future revision of this FR may add a transport that starts a turn in an idle session.
 - For each unexpired, unanswered request naming a path in the agent's own
   `fileAllowlist`:
   - If the agent has genuinely finished with that path (it would remove it from its
@@ -204,6 +216,18 @@ it is scoped to unblock *faster*, not to decide *who wins* (FR-13 already decide
 - **INV-6 (fail-soft).** A malformed or unreadable mailbox message is skipped (treated as
   absent/DEAD), never thrown — a corrupt inbox must not crash the etiquette check or
   block the agent's turn.
+- **INV-7 (pull-only, no wake — SPEC-077 Follow-up 2, #2209).** This mailbox must never gain
+  a transport that starts a turn in an otherwise-idle session — no new timer, no continuous
+  polling, no push/notify delivery of any kind. FR-3's inbox check stays exactly what it is
+  today: read once at the start of a turn the session was already having for its own
+  reasons. This is what lets SPEC-077 (idle-wake economics) treat this mailbox as conforming
+  to its Part A (deferring non-urgent automated wakes) *by construction* rather than by
+  enforcement — SPEC-077 cannot check this spec's behavior from outside, so the obligation is
+  recorded here, on the producing side (see SPEC-077's Out of Scope, "Enforcing anything
+  inside SPEC-027"). If a future need for urgency arises, the answer is an optional message
+  field — e.g. an `urgent: boolean` on `MailboxMessage`, or a body-text convention — mirroring
+  SPEC-077 FR-3's `[urgent]` marker, never a new wake transport. Adding such a field is
+  already licensed without migration by Costly to Refactor #1 below.
 
 ## Acceptance Criteria
 
@@ -235,7 +259,10 @@ it is scoped to unblock *faster*, not to decide *who wins* (FR-13 already decide
   peer's own claim mutation does. (FR-6, INV-1)
 - [ ] **Zero git noise, offline** — no mailbox file ever committed; no network calls.
   (INV-4, INV-5)
-- [ ] **T0 discipline** — INV-1..INV-6 each have a test that fails against pre-change code
+- [ ] **No wake transport, ever** — a static/structural check confirms the inbox check stays
+  turn-start-only: no `setInterval`/`setTimeout` polling loop, no file-watcher, no push
+  delivery mechanism anywhere in `mailbox.ts` or its call sites. (INV-7)
+- [ ] **T0 discipline** — INV-1..INV-7 each have a test that fails against pre-change code
   and passes after — written before implementation.
 
 ## Costly to Refactor
@@ -270,6 +297,9 @@ it is scoped to unblock *faster*, not to decide *who wins* (FR-13 already decide
   expires unread is simply dead — no retry, no escalation beyond falling to HITL (FR-4).
 - **A UI surface for the mailbox.** No status-bar/Quick-Pick element for messages in this
   spec; SPEC-026 FR-16's existing HITL surface is reused as-is for the fallback case.
+- **Any push/wake transport for delivery, now or later.** See INV-7. Urgency, if ever
+  needed, is a message-field addition (mirroring SPEC-077 FR-3's `[urgent]` marker), not a
+  new delivery channel — a deliberate, permanent exclusion, not an oversight to revisit.
 
 ## Traceability
 
@@ -282,9 +312,12 @@ it is scoped to unblock *faster*, not to decide *who wins* (FR-13 already decide
 - **Authored under:** [DR-051](../../../docs/decisions/DR-051.md) — this is a
   review-needing approvable (new spec), so it is authored in a worktree on a review
   branch → PR, not direct-to-`main`.
+- **Constrained by:** SPEC-077 (idle-wake economics) Follow-up 2 (#2209) — SPEC-077's Part A
+  relies on this mailbox never starting a turn in an idle session; INV-7 above is this
+  spec's own record of that constraint, since SPEC-077 cannot enforce it from outside.
 - **Files to modify (allowlist for implementation agents):**
   - `packages/minspec/src/lib/mailbox.ts` (new — message read/write/prune, reuses
     SPEC-026's liveness helper and atomic-write pattern)
   - `packages/minspec/src/lib/scaffold.ts` (add `.minspec/sessions/mailbox/` gitignore entry)
   - CLAUDE.md template (extend Concurrent-Session Etiquette with the per-turn inbox check)
-  - `packages/minspec/tests/mailbox.test.ts` (new — INV-1..6 T0 tests)
+  - `packages/minspec/tests/mailbox.test.ts` (new — INV-1..7 T0 tests)
