@@ -52,6 +52,7 @@ import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold'
 import { drsMissingPlainTerms } from './lib/dr-required-sections';
 import { walkFilesByExt as glob, walkOptionalRoot as safeGlob } from './lib/corpus-walk';
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
+import { checkDrFrontmatterClosedSet } from './lib/dr-closed-set';
 import { checkDeclaredSpecIds } from './lib/spec-id-collision';
 import { findWrongDelegationCitations, isCorrectedSpec, type Delegation } from './lib/delegation-citation';
 import {
@@ -490,6 +491,29 @@ try {
     `Spec-id uniqueness check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
       'Rule 18 validated NOTHING this run; do not read the green as a collision-free corpus.',
   );
+}
+
+// Rule 26 (FATAL, #1641): decision-record frontmatter closed set. The spec side has
+// CLOSED_SET_FIELDS; a DR `status:` was only compared to INDEX.md (Rule 8), never to a
+// legal value set. Asserts `status` is present and legal, and rejects retired field
+// spellings (append-only alias table in scripts/lib/dr-closed-set.ts). Not a silent
+// catch (invariant 2): a listing/read/check error FAILS the gate closed (per-file isolation); a zero-file scan is flagged.
+{
+  const drFiles = listCorpus('Rule 26', resolveDecisionsDir(), '.md', true);
+  const drs: { file: string; content: string }[] = [];
+  eachFile('Rule 26', drFiles, true, (file) => {
+    drs.push({ file: relative(ROOT, file), content: readFileSync(file, 'utf-8') });
+  });
+  if (drFiles.length === 0) {
+    warn('Rule 26 scanned 0 DR files; do not read the green as a clean register.');
+  }
+  try {
+    for (const d of checkDrFrontmatterClosedSet(drs)) {
+      fail(join(ROOT, d.file), `DR frontmatter — ${d.message}`);
+    }
+  } catch (err) {
+    reportUnrunnable('Rule 26', 'the DR frontmatter closed-set check could not run', err, true, resolveDecisionsDir());
+  }
 }
 
 // Rule 8 (FATAL): INDEX.md status must match each DR's frontmatter status
