@@ -447,4 +447,38 @@ if [ "${DR_INDEX_GATE_OFF:-}" != "1" ] && \
   fi
 fi
 
+# ── generated-template gate (#3546) ──────────────────────────────────────────
+# scripts/gen-ci-templates.mjs copies a fixed set of source files word for word into
+# ci-review-templates.ts / hook-templates.ts. Editing one without re-running the
+# generator leaves the committed copy stale, and until now only CI caught it.
+# When a staged path is a generator source (or one of its outputs), run
+# `--check` and fail with the regenerate command. Fails CLOSED: if the source list
+# cannot be read the commit is blocked, never silently passed (invariant 2).
+# Bypass: GEN_CI_TEMPLATES_GATE_OFF=1 git commit ...
+if [ "${GEN_CI_TEMPLATES_GATE_OFF:-}" != "1" ] && [ -f scripts/gen-ci-templates.mjs ]; then
+  if gen_paths="$(node --input-type=module -e "
+    const m = await import('./scripts/gen-ci-templates.mjs');
+    console.log([...m.CI_TEMPLATE_SOURCE_PATHS, ...m.CI_TEMPLATE_OUTPUT_PATHS].join('\\n'));
+  " 2>&1)"; then
+    # Capture first: `git diff | grep -q` under pipefail can SIGPIPE (141) when grep exits
+    # on its first match with output still pending, silently skipping the gate.
+    gen_paths="$(printf '%s\nscripts/gen-ci-templates.mjs' "$gen_paths")"
+    staged_list="$(git diff --cached --name-only)"
+    if grep -qxFf <(printf '%s\n' "$gen_paths") <<<"$staged_list"; then
+      if ! gen_out="$(node scripts/gen-ci-templates.mjs --check 2>&1)"; then
+        printf '%s\n' "$gen_out" >&2
+        echo "✖ generated-template gate: a staged path is a gen-ci-templates source and the" >&2
+        echo "  embedded copy is stale. Run: node scripts/gen-ci-templates.mjs  (then git add the output)" >&2
+        echo "  Override: GEN_CI_TEMPLATES_GATE_OFF=1 git commit ..." >&2
+        fail=1
+      fi
+    fi
+  else
+    printf '%s\n' "$gen_paths" >&2
+    echo "✖ generated-template gate: could not read the generator's source list. Failing closed." >&2
+    echo "  Override: GEN_CI_TEMPLATES_GATE_OFF=1 git commit ..." >&2
+    fail=1
+  fi
+fi
+
 exit $fail
