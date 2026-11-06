@@ -93,6 +93,10 @@ lease_self_sid() {
   # the sid then changes mid-life and the session stops matching its own claim (#3502).
   # `comm` (field 2) may contain spaces/parens, so strip through the LAST ')' first;
   # field 22 is then the 20th remaining field.
+  # `local IFS` is load-bearing: the word split below must not depend on the caller's
+  # IFS (a script that sets IFS=$'\n\t' would otherwise get ONE field, an empty
+  # starttime, and every sid would collapse to sid-<pid>-0).
+  local IFS=$' \t\n'
   local pid="$$" starttime="" statline rest
   if statline="$(cat "/proc/$pid/stat" 2>/dev/null)"; then
     rest="${statline##*) }"

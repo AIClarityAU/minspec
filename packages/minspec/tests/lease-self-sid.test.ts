@@ -85,6 +85,17 @@ describe('lease_self_sid (#2132)', () => {
     expect(sid).toBe(`sid-${pid}-${ticks}`);
   });
 
+  it('is unaffected by a caller that sets IFS to newline/tab before sourcing (#3502)', () => {
+    // With IFS=$'\n\t' a naive `set -- $rest` yields one field, so field 22 reads empty
+    // and every sid degrades to sid-<pid>-0 (two sessions match on PID reuse).
+    const out = run(
+      `IFS=$'\\n\\t'; s="$(lease_self_sid)"; l="$(cat /proc/$$/stat)"; r="\${l##*) }"; t="$(IFS=$' \\t\\n'; set -- $r; echo "\${20}")"; echo "$s|$$|$t"`
+    );
+    const [sid, pid, ticks] = out.split('|');
+    expect(ticks).toMatch(/^[1-9]\d*$/);
+    expect(sid).toBe(`sid-${pid}-${ticks}`);
+  });
+
   it('is unaffected by a comm containing spaces and parens', () => {
     // comm comes from the executable's file name, so run bash via a symlink named
     // like a hostile comm; a naive split on spaces would mis-index field 22.
