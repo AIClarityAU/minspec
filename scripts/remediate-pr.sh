@@ -374,6 +374,27 @@ checks_in_flight() {
          | if length > 0 then "yes" else "no" end' <<<"$1"
 }
 
+# is_deterministic_drift_log: reads a failed-run log on stdin; exit 0 when it carries the
+# generated-file drift verdict (#3546). That failure is deterministic: it fails the same way on
+# every rerun, so spending the one free rerun on it only delays the remediation agent a sweep.
+is_deterministic_drift_log() {
+  grep -qF 'stale — drifted'
+}
+
+# drop_drift_run_ids <run_ids_newline_separated> → the ids whose failed log is NOT drift.
+# A log that cannot be fetched keeps its id (fail toward the rerun, never toward skipping).
+drop_drift_run_ids() {
+  local id log
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    if log=$(gh run view "$id" --repo "$REPO" --log-failed 2>/dev/null) && is_deterministic_drift_log <<<"$log"; then
+      echo "  Run $id failed on generated-file drift (#3546) — a rerun cannot clear it; straight to remediation." >&2
+      continue
+    fi
+    printf '%s\n' "$id"
+  done <<<"$1"
+}
+
 # rerun_decision <rerun_markers_already_posted> <run_ids_newline_separated>
 #   → rerun | agent
 # Rerun only when it has not been tried on this PR AND there is a run to rerun. Any
@@ -634,6 +655,10 @@ if [[ "${1:-}" == "--derive-failed-runs" ]]; then
 fi
 if [[ "${1:-}" == "--content-push-allowed" ]]; then
   content_push_allowed "${2:-}" "${3:-}"
+  exit 0
+fi
+if [[ "${1:-}" == "--is-drift-log" ]]; then
+  is_deterministic_drift_log && echo yes || echo no
   exit 0
 fi
 if [[ "${1:-}" == "--rerun-decision" ]]; then
@@ -1081,6 +1106,7 @@ if [[ "$ACTION" == agent-* || "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "
       RERUN_NOTICE='A required check or the review is red on this delegated-approval PR. Re-running the failed jobs and the review once: a fault outside this PR (rate limit, network) clears on rerun. No agent edits this branch. If it is still red on the next sweep, it is labelled `needs-human-review`.'
     else
       FAILED_RUN_IDS=$(derive_failed_run_ids "$PR_JSON")
+      FAILED_RUN_IDS=$(drop_drift_run_ids "$FAILED_RUN_IDS")
       RERUN_NOTICE='A required check is red. Before spending a remediation agent, re-running the failed jobs once: a fault outside this PR (rate limit, network) clears on rerun. If the check is still red on the next sweep, remediation proceeds.'
     fi
     if [[ "$(rerun_decision "$RERUNS" "$FAILED_RUN_IDS")" == "rerun" ]]; then
