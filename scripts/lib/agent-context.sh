@@ -77,6 +77,22 @@ if [[ -n "$MINSPEC_AGENT_SETTING_SOURCES" ]]; then
   AGENT_CONTEXT_ARGS=(--setting-sources "$MINSPEC_AGENT_SETTING_SOURCES")
 fi
 
+# ══ Lesson-hook pilot wiring (#3082) ═════════════════════════════════════════
+# `--setting-sources project,local` drops the USER-level PreToolUse lesson hook, so a
+# dispatched session never received a lesson at its trigger. `--settings <json>` loads
+# alongside `--setting-sources` (measured 2026-10-25 with `claude -p --model haiku`: a hook
+# given only via --settings fired), so the hook is passed inline, limited by LESSON_ONLY to
+# the ten hook-only-pilot lessons (five served by the hook alone, five as the control).
+# A second --settings flag REPLACES the first (measured), so a launcher that adds its own
+# must merge this entry into its JSON instead.
+# Kill-switch: MINSPEC_LESSON_HOOK=off. Skipped when the hook file is absent (CI, an adopter),
+# and when user scope is restored (the user-level hook then loads itself).
+MINSPEC_LESSON_HOOK_ONLY="f-rcdd-mech-not.md,f-conv-form-became-measurement.md,f-base-update-scope.md,f-chec-orig.md,f-refe-befo-stat.md,f-poll-revi.md,f-chec-back.md,f-load-suit.md,f-work-fals-gree.md,f-trace-both-arms.md"
+if [[ "${MINSPEC_LESSON_HOOK-on}" != "off" && -n "$MINSPEC_AGENT_SETTING_SOURCES" \
+      && "$MINSPEC_AGENT_SETTING_SOURCES" != *user* && -f "${HOME-}/.claude/hooks/lesson-hook.py" ]]; then
+  AGENT_CONTEXT_ARGS+=(--settings "{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash|Edit|Write\",\"hooks\":[{\"type\":\"command\",\"command\":\"LESSON_ONLY=${MINSPEC_LESSON_HOOK_ONLY} python3 -I \$HOME/.claude/hooks/lesson-hook.py --json\",\"timeout\":2}]}]}}")
+fi
+
 # ══ Caveman trial (queue item cav1, 2026-10-18 to 2026-10-25) ═══════════════
 # One-week trial of the caveman plugin's terse output style on AUTOMATED sessions only
 # (the drain's build, fix and remediation agents). Interactive sessions and the
