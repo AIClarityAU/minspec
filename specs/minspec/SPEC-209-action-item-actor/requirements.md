@@ -2,7 +2,7 @@
 id: SPEC-209
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals/. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - concurrent multi-session coordination; a peer sweep re-sending another session's pending items is a cross-session coordination path
@@ -19,8 +19,8 @@ implements: [packages/shared/src/action-items.ts, packages/shared/tests/action-i
 # unapproved spec past Clarify for all sessions (#3234).
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

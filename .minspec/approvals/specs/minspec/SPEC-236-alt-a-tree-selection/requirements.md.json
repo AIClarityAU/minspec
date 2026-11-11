@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-236-alt-a-tree-selection/requirements.md",
+  "specHash": "2b60123d4194d037e2f0235344c4501e686d9ee0f9f11b9f4deeb3c1846a8345",
+  "approvedAt": "2026-10-31T08:50:21.090Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-b",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3181#issuecomment-6541017306"
+}
