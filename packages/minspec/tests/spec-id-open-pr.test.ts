@@ -22,6 +22,7 @@ import {
   decideSpecIdCollision,
   nextFreeSpecId,
   specDirFromPath,
+  vacatedSpecDirsFromPrFiles,
 } from '../../../scripts/lib/spec-id-claims';
 import { useShellTimeout } from './helpers/shell-timeout';
 
@@ -84,6 +85,45 @@ describe('pure — decideSpecIdCollision', () => {
       otherPrs: [{ pr: 3122, dirs: [D(248, 'a')] }, { pr: 3124, dirs: [D(249, 'b')] }],
     });
     expect(v.nextFreeId).toBe('SPEC-250');
+  });
+
+  it('a slug rename vacates its old directory, so it is not a clash with itself (#1327)', () => {
+    const entries = [
+      { filename: `${D(232, 'new')}/requirements.md`, status: 'renamed', previous_filename: `${D(232, 'old')}/requirements.md` },
+    ];
+    const subject = { pr: 3153, dirs: [D(232, 'new')], vacatedDirs: vacatedSpecDirsFromPrFiles(entries, 'specs') };
+    expect(subject.vacatedDirs).toEqual([D(232, 'old')]);
+    expect(decideSpecIdCollision({ baseRef: 'main', baseDirs: [D(232, 'old')], subject, otherPrs: [] }).ok).toBe(true);
+  });
+
+  it('only moving requirements.md vacates: a sibling leaving keeps the id declared (#1327)', () => {
+    const entries = [
+      { filename: `${D(232, 'new')}/design.md`, status: 'renamed', previous_filename: `${D(232, 'old')}/design.md` },
+      { filename: `${D(100, 'x')}/tasks.md`, status: 'removed' },
+      { filename: 'docs/old/requirements.md', status: 'removed' },
+    ];
+    expect(vacatedSpecDirsFromPrFiles(entries, 'specs')).toEqual([]);
+    const v = decideSpecIdCollision({
+      baseRef: 'main',
+      baseDirs: [D(232, 'old')],
+      subject: { pr: 3153, dirs: [D(232, 'new')], vacatedDirs: [] },
+      otherPrs: [],
+    });
+    expect(v.ok).toBe(false);
+  });
+
+  it('a deleted requirements.md vacates its directory, and a replacement id can be reused (#1327)', () => {
+    const entries = [
+      { filename: `${D(232, 'old')}/requirements.md`, status: 'removed' },
+      { filename: `${D(232, 'new')}/requirements.md`, status: 'added' },
+    ];
+    const v = decideSpecIdCollision({
+      baseRef: 'main',
+      baseDirs: [D(232, 'old')],
+      subject: { pr: 3153, dirs: [D(232, 'new')], vacatedDirs: vacatedSpecDirsFromPrFiles(entries, 'specs') },
+      otherPrs: [],
+    });
+    expect(v.ok).toBe(true);
   });
 
   it('extending an already-merged spec directory is not a collision', () => {
