@@ -1,7 +1,7 @@
 ---
 id: SPEC-262
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a status surface must not report "clear" while work remains
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan, after the root cause
   is reproduced (FR-1) and Decisions D1-D3 are answered.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -139,6 +139,18 @@ voip's frontmatter alone would repeat the #2370 pattern (fix the instance, leave
 - Editing voip-sms-inbox content (a data edit there is not the fix).
 
 ## Decisions needed (Clarify)
+
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers (DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
+- **D1 - Recorded selection: Option (a),** "clear" means nothing open in the human queue AND no
+  non-terminal spec with open work; agent-only work shows "nothing for you; agent work remains".
+- **D2 - Recorded selection: Option (a),** a plan-phase task ranks in the `pending` class, below
+  approvals, above corruption-free idle.
+- **D3 - Recorded selection: Option (a),** a done spec with a stale approval never blocks "clear";
+  #2519 owns the approval repair.
 
 **D1 - What may "clear" claim?**
 - (a) **(rec)** "Clear" means nothing open in the human queue AND no non-terminal spec with
