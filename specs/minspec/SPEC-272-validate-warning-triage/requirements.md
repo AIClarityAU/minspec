@@ -1,7 +1,7 @@
 ---
 id: SPEC-272
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a validator warning that stays on every run teaches readers to skip the validator
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. The work edits four existing specs' own files plus (maybe) a validator
   rule; which of those this spec owns is decided at Plan, after Decisions D1-D2.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
