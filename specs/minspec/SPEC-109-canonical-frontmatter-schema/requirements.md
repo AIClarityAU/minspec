@@ -1,7 +1,7 @@
 ---
 id: SPEC-109
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — DR-025 (canonical frontmatter schema) lives here
@@ -15,9 +15,9 @@ implements: [packages/minspec/src/lib/spec-frontmatter-schema.ts, packages/minsp
 # specs/*/SPEC-*/requirements.md and specs/minspec/requirements.md for the file names).
 affects: [packages/minspec/src/lib/spec.ts, packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/spec-manager.ts, packages/minspec/src/lib/spec-layout.ts, packages/minspec/src/lib/scaffold.ts, packages/minspec/src/views/frontmatter-completion.ts, packages/minspec/src/views/spec-panel.ts, scripts/validate-frontmatter.ts, specs/minspec/design.md]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

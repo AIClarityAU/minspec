@@ -321,6 +321,9 @@ describe('dispatch-issue.sh: native auto-merge deny-by-default (behavioral seam)
       // same reason again. Sourcing it spawns nothing; only an arm actually asking
       // `autonomy_may_merge` runs the TypeScript, and this seam asks nothing.
       fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/autonomy.sh'), path.join(root, 'scripts', 'lib', 'autonomy.sh'));
+      // dispatch-issue.sh sources lib/issue-branch.sh (#3452 existing-branch handling) at
+      // startup — same reason: a missing lib aborts the source before the seam runs.
+      fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/issue-branch.sh'), path.join(root, 'scripts', 'lib', 'issue-branch.sh'));
       fs.writeFileSync(path.join(root, '.minspec', 'config.json'), JSON.stringify({ version: 1 })); // no autoMerge
       expect(check({}, root)).toEqual({ code: 1, out: 'off' });
     } finally {
