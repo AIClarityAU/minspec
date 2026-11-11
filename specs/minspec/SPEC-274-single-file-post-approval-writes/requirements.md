@@ -1,7 +1,7 @@
 ---
 id: SPEC-274
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - an approval voided by recording progress is a false "needs re-approval" signpost
@@ -13,9 +13,9 @@ implements_reason: >-
   Clarify answers are recorded (D1-D3, all Option A). Which files this spec owns is still
   decided at Plan; every candidate file is listed under Context.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
