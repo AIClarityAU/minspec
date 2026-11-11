@@ -120,7 +120,7 @@
 # decide and describe; the launcher that calls them prints the refusal, naming the issue,
 # and chooses its exit.
 #
-# Sourced, not executed. It defines functions and does nothing else. The two functions
+# Sourced, not executed. It defines functions and does nothing else. The functions
 # that read from GitHub do so through gh_bot_graphql_read (lib/gh-bot.sh): a query, never
 # a mutation, and a missing reader is a refusal like any other unreadable answer.
 
@@ -343,6 +343,100 @@ dispatch_issue_gate() {
     return 1
   fi
   dispatch_issue_provenance_check "$provenance" "$view"
+}
+
+# dispatch_issue_label_events_query: the newest hundred label applications on an issue,
+# each with who made it. GitHub returns them oldest first, and `last` keeps the newest, so
+# an application older than those hundred is simply not an answer about the current one.
+dispatch_issue_label_events_query() {
+  cat <<GQL
+query(\$owner: String!, \$name: String!, \$number: Int!) {
+  repository(owner: \$owner, name: \$name) {
+    issue(number: \$number) {
+      timelineItems(itemTypes: [LABELED_EVENT], last: 100) {
+        totalCount
+        nodes { ... on LabeledEvent { createdAt label { name } actor { $(_dispatch_actor_fields) } } }
+      }
+    }
+  }
+}
+GQL
+}
+
+# dispatch_issue_label_applier_check <label-events-json> <label>
+#
+#   <label-events-json>  GitHub's answer to dispatch_issue_label_events_query.
+#   <label>              the label's exact name.
+#
+# Prints ONE line and returns:
+#   0  who applied it most recently, as "<login> (<kind> <id>)", who is on the list.
+#   1  why not, worded to follow "<label> is not honoured: ".
+#
+# The text gate above says nothing about labels: anyone GitHub lets apply a label can put
+# one on an issue a listed account wrote. So a label that widens what an agent may do is
+# only believed when the account that applied it is on the same list (DR-118). Only the
+# MOST RECENT application counts: removing a label and applying it again replaces whoever
+# applied it before, so an older application by a listed account vouches for nothing.
+#
+# Anything that is not one well-formed answer naming a listed account is a refusal.
+dispatch_issue_label_applier_check() {
+  local events="${1-}" label="${2-}" listed out unreadable='who applied it could not be read, and what cannot be read is never trusted'
+  if [[ -z "$label" ]] || ! listed="$(_dispatch_trusted_identities_json 2>/dev/null)" || [[ -z "$listed" ]]; then
+    printf '%s\n' "$unreadable"
+    return 1
+  fi
+  out=""
+  if ! out="$(jq -rn --argjson listed "$listed" --arg label "$label" --arg unreadable "$unreadable" \
+        --slurpfile answers <(printf '%s' "$events") \
+        "$(_dispatch_gate_jq_defs)"'
+      def no($why): "no\t" + $why;
+      if ($answers | length) != 1 then no($unreadable)
+      else $answers[0] as $p
+        | if ($p | type) != "object" or (($p | has("errors")) and $p.errors != null and $p.errors != []) then no($unreadable)
+          else (try $p.data.repository.issue.timelineItems catch null) as $t
+            | if ($t | type) != "object" or ($t.totalCount | type) != "number" or ($t.nodes | type) != "array"
+                 or ($t.nodes | length) != ([$t.totalCount, 100] | min)
+                 or any($t.nodes[]; type != "object" or ((try .label.name catch null) | type) != "string")
+              then no($unreadable)
+              else [ $t.nodes[] | select(.label.name == $label) ] as $m
+                | if ($m | length) == 0 then no("no application of it is among the newest label events")
+                  elif ($m[-1].actor | key) == null then no($unreadable)
+                  elif ($m[-1].actor | listed | not)
+                  then no("it was last applied by \($m[-1].actor | shown), who is not on the dispatch author list")
+                  else "ok\t\($m[-1].actor.login | tostring | printable) (\($m[-1].actor | key | sub(":"; " ")))"
+                  end
+              end
+          end
+      end' 2>/dev/null)"; then
+    out=""
+  fi
+  # Exactly one line, and one of the two answers. Anything else is not an answer.
+  if [[ "$out" == *$'\n'* ]]; then out=""; fi
+  case "$out" in
+    $'ok\t'*) printf '%s\n' "${out#$'ok\t'}"; return 0 ;;
+    $'no\t'*) printf '%s\n' "${out#$'no\t'}"; return 1 ;;
+  esac
+  printf '%s\n' "$unreadable"
+  return 1
+}
+
+# dispatch_issue_label_gate <owner/repo> <issue-number> <label>
+#
+# Was this label last applied by a listed account? Reads the label events from GitHub.
+# Prints one line and returns exactly as dispatch_issue_label_applier_check does. A read
+# that fails is a refusal that says so.
+dispatch_issue_label_gate() {
+  local repo="${1-}" issue="${2-}" label="${3-}" events
+  if [[ "$repo" != */* || ! "$issue" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' 'who applied it could not be read, and what cannot be read is never trusted'
+    return 1
+  fi
+  if ! events="$(_dispatch_graphql_read -f query="$(dispatch_issue_label_events_query)" \
+        -f owner="${repo%%/*}" -f name="${repo#*/}" -F number="$issue")"; then
+    printf '%s\n' 'who applied it could not be read from GitHub, and what cannot be read is never trusted'
+    return 1
+  fi
+  dispatch_issue_label_applier_check "$events" "$label"
 }
 
 # dispatch_pr_comments_query: the newest hundred comments on a pull request, each with
