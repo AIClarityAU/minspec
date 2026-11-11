@@ -13,6 +13,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+useShellTimeout();
 
 const LIB = path.resolve(__dirname, '../../../scripts/lib/provision-worktree-modules.sh');
 const LAUNCH_ENV = path.resolve(__dirname, '../../../scripts/lib/agent-context.sh');
