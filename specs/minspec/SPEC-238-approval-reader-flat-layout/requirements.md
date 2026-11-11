@@ -1,7 +1,7 @@
 ---
 id: SPEC-238
 type: requirements
-status: specifying
+status: planning
 tier: T2
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a false "UNSAFE to merge" verdict is a false signpost
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan, after Decision D1
   (where the reader lives).
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
