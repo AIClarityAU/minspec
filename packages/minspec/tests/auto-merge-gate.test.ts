@@ -57,6 +57,11 @@ import { decideAutoMerge } from '../src/lib/auto-merge';
 import type { ChangedFile } from '../src/lib/consequence-analyzers';
 import type { ClassificationSignal } from '../src/lib/classifier';
 import type { ReviewSignalsInput } from '@aiclarity/shared';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite's own `q()` wrapper around execFileSync builds a real git repo
+// across several calls; the literal call-site count alone understates it.
+useShellTimeout();
 
 // ─── Factories ───────────────────────────────────────────────────────────────
 

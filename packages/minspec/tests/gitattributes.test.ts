@@ -23,6 +23,13 @@ import {
   generateHarnessFiles,
   refreshHarnessFiles,
 } from '../src/lib/scaffold';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: the end-to-end describe below runs its own `run()` wrapper around
+// execFileSync eight times (git init/config/add/commit/checkout) — plenty to
+// flake on vitest's 5s default under load even though the suite passed in
+// isolation. Must be at module scope (#1399) — see helpers/shell-timeout.ts.
+useShellTimeout();
 
 describe('ensureGitattributesEntries()', () => {
   let tmpDir: string;
