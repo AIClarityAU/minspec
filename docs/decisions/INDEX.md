@@ -941,7 +941,7 @@ The bot records delegated spec approvals, and no rule lets anything but the foun
 
 ## [DR-121 — Plan artifacts merge on AI review once their spec is approved, through the delegated lane, under the delegated-approval merge lane's pins](DR-121.md)
 
-*Status: proposed · Date: 2026-11-06*
+*Status: accepted · Date: 2026-11-06*
 
 <!-- dr-summary:DR-121 auto=a299007d3188 -->
 _No summary available._
