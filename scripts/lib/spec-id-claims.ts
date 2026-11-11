@@ -13,6 +13,9 @@
  * across every open PR); `checkDeclaredSpecIds` already forces id and directory to agree
  * on every tree that passes validation.
  *
+ * CI reaches this through `check-dr-id-collision.ts` (#1327), which `dr-id-collision.yml`
+ * already runs on every pull request; `check-spec-id-collision.ts` is the by-hand entry.
+ *
  * Pure: no fs, no network. The network read lives in the dev-time scripts that call it —
  * nothing under `packages/` imports this (constitution invariant 1, DR-004).
  */
@@ -23,6 +26,8 @@ import { canonicalSpecId, specIdFromPath } from './spec-id-collision';
 export interface SpecPrFileEntry {
   filename: string;
   status: string;
+  /** Set by the REST files API on a rename; the GraphQL listing does not carry it. */
+  previous_filename?: string;
 }
 
 /** The spec directories one pull request adds. */
@@ -30,6 +35,12 @@ export interface SpecPrClaims {
   pr: number;
   /** Repo-relative spec directories, e.g. `specs/minspec/SPEC-232-slug`. */
   dirs: string[];
+  /**
+   * Base spec directories this PR moves or deletes `requirements.md` out of (#1327). Such
+   * a directory stops declaring its id once the PR lands, so a slug rename is not a clash
+   * with itself. Only the subject's is read.
+   */
+  vacatedDirs?: string[];
 }
 
 /** Statuses that INTRODUCE a path (a rename's `filename` is the NEW name). */
@@ -59,6 +70,24 @@ export function claimedSpecDirsFromPrFiles(entries: SpecPrFileEntry[], specsDir:
       .filter((e) => CLAIMING_STATUSES.has(e.status.toLowerCase()) && e.filename.startsWith(prefix))
       .map((e) => e.filename),
   );
+}
+
+/**
+ * The spec directories a PR's file list takes `requirements.md` out of (#1327).
+ *
+ * Keyed on `requirements.md` because that file is what declares the id (Rule 18 reads
+ * nothing else). Moving only a `design.md` leaves the old directory declaring its id, so
+ * that is still a real clash.
+ */
+export function vacatedSpecDirsFromPrFiles(entries: SpecPrFileEntry[], specsDir: string): string[] {
+  const prefix = specsDir.replace(/\/+$/, '') + '/';
+  const gone = entries.flatMap((e) => {
+    const status = e.status.toLowerCase();
+    if (status === 'removed') return [e.filename];
+    if (status === 'renamed' && e.previous_filename) return [e.previous_filename];
+    return [];
+  });
+  return specDirsFromPaths(gone.filter((f) => f.startsWith(prefix) && f.endsWith('/requirements.md')));
 }
 
 /** The highest numeric id among `ids`, 0 when none parse. */
@@ -126,10 +155,13 @@ export interface SpecIdVerdict {
  * - Two open PRs on one id: the one opened later (higher number) yields, so exactly one
  *   of a pair is told to move (mirrors the DR gate and SPEC-227 FR-10).
  * - The same directory on both sides is not a collision (extra files in one spec).
+ * - A base directory the subject vacates holds no id once it lands (a slug rename).
  */
 export function decideSpecIdCollision(input: SpecIdCollisionInput): SpecIdVerdict {
+  const vacated = new Set(input.subject.vacatedDirs ?? []);
   const baseById = new Map<string, string>();
   for (const d of input.baseDirs) {
+    if (vacated.has(d)) continue;
     const id = specIdFromPath(`${d}/x`);
     if (id !== undefined && !baseById.has(id)) baseById.set(id, d);
   }
