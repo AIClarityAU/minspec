@@ -520,6 +520,20 @@ describe('remediate-pr.sh rerun-first gate (#3042)', () => {
     expect(decide('0', '')).toBe('agent');
   });
 
+  // #3546 — generated-file drift fails identically on every rerun: never spend the free rerun on it.
+  function isDriftLog(log: string): string {
+    return execFileSync('bash', [SCRIPT, '--is-drift-log'], { encoding: 'utf-8', input: log }).trim();
+  }
+
+  it('a failed log carrying the generated-file drift verdict is recognised, so rerun-first skips it (#3546)', () => {
+    expect(isDriftLog('FAIL packages/minspec/src/lib/ci-review-templates.ts: stale — drifted from its on-disk sources (#678). Run: node scripts/gen-ci-templates.mjs\n')).toBe('yes');
+  });
+
+  it('an unrelated failed log (rate limit) is not drift and still gets its rerun (#3546)', () => {
+    expect(isDriftLog('HttpError: API rate limit exceeded\n')).toBe('no');
+    expect(isDriftLog('')).toBe('no');
+  });
+
   it('an unreadable marker count fails toward the old behaviour, never an endless rerun', () => {
     expect(decide('', '123456')).toBe('agent');
     expect(decide('x', '123456')).toBe('agent');
