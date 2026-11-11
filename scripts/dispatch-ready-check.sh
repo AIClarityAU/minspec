@@ -685,7 +685,7 @@ fi
 # `needs-human-review`. Either alone would close the hole; both together mean a
 # single missed label write cannot reopen it (constitution invariant 2 — no required
 # check hinging on a single producer).
-for gate in needs-review needs-info needs-human-review agent-quarantined agent-done agent-escalated; do
+for gate in needs-review needs-info needs-human-review agent-quarantined agent-done agent-escalated agent-crashed; do
   if has_label "$gate"; then
     refuse countermanded "countermanding label '${gate}' present (re-triaged / quarantined since drain)"
   fi
