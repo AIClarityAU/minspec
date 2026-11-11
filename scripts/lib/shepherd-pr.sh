@@ -161,7 +161,7 @@ shepherd_decide() {
 # ── Pure seam dispatch ────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--decide" ]]; then
   shift
-  if [[ $# -ne 9 && $# -ne 10 ]]; then
+  if [[ $# -ne 9 && $# -ne 10 ]] || [[ $# -eq 10 && "${10}" != "yes" && "${10}" != "no" ]]; then
     echo "Usage: shepherd-pr.sh --decide <action> <merged> <holds> <attempts> <max_attempts> <elapsed_secs> <max_secs> <checks_pending> <automerge_armed> [<human_held>]" >&2
     exit 2
   fi

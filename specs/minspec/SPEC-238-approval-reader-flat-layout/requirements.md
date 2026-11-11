@@ -1,7 +1,7 @@
 ---
 id: SPEC-238
 type: requirements
-status: specifying
+status: planning
 tier: T2
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a false "UNSAFE to merge" verdict is a false signpost
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan, after Decision D1
   (where the reader lives).
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -109,8 +109,20 @@ new consent surface (invariant 1).
 
 ## Decisions needed (Clarify)
 
+All 2 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and
+engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted
+it. It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and
+that approval may overturn it.
+
 **D1. Where does the fix live?** The reader (`cos.py`) is machine-local and unversioned, so
 a spec here cannot change it directly.
+
+**Recorded selection: Option (a),** land a versioned reader inside this repo that reuses
+`canonical.py:spec_hash`, with the fixtures of AC-1..6 as its tests, and have `cos.py`
+delegate to it.
+
 - (a) **(rec)** Land a versioned reader inside this repo (e.g. under `scripts/`) that reuses
   `canonical.py:spec_hash`, with the fixtures of AC-1..6 as its tests, and have `cos.py`
   delegate to it. Cost: a new maintained surface, and `cos.py` still needs a one-time manual
@@ -122,6 +134,9 @@ a spec here cannot change it directly.
 `UNKNOWN`. Cost: any consumer parsing the literal `UNKNOWN` breaks (loudly, which is
 fail-closed). (b) Keep `UNKNOWN` as an umbrella with a sub-reason. Cost: a consumer that
 matches only the umbrella still cannot tell the two apart, which is the defect.
+
+**Recorded selection: Option (a),** rename to `UNREADABLE` / `UNRESOLVED` and drop
+`UNKNOWN`.
 
 ## Follow-ups (tracked)
 
