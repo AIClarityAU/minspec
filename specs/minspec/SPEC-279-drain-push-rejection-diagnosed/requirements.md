@@ -1,7 +1,7 @@
 ---
 id: SPEC-279
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a finished dispatch must never be reported done when its work was never published
@@ -14,9 +14,9 @@ implements_reason: >-
   this spec will own is still decided at Plan; no recorded option names a new file, so implements
   stays none.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
