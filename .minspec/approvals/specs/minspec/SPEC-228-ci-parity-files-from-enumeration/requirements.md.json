@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-228-ci-parity-files-from-enumeration/requirements.md",
+  "specHash": "28b15f595c372d3703abf268bda9ac6f4fdbcfeb352f9020ca370e44f413f6b4",
+  "approvedAt": "2026-11-02T17:19:09.413Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-settle-1031",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3399#issuecomment-6537247262"
+}
