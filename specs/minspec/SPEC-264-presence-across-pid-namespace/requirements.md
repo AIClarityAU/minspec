@@ -1,7 +1,7 @@
 ---
 id: SPEC-264
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - concurrent multi-session coordination; the epic DR-065 (presence-gated fast-forward) belongs to
@@ -16,9 +16,9 @@ implements_reason: >-
   (record shape and isRecordLive, only if D1 (a) or (b)), and
   packages/minspec/tests/presence-sync-parity.test.ts.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
