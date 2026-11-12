@@ -1,7 +1,7 @@
 ---
 id: SPEC-258
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline (same epic as SPEC-074, whose matcher this reuses)
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   This spec modifies files another spec owns (see affects:) and creates none of its own.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
