@@ -1,11 +1,12 @@
 #!/usr/bin/env -S npx tsx
 /**
- * check-script-binaries.ts — every binary a package.json script runs must come from a
- * declared (dev)dependency, not from an undeclared network `npx` fetch (#979).
+ * check-script-binaries.ts — every binary a script in the ROOT package.json runs must come
+ * from a declared (dev)dependency, not from an undeclared network `npx` fetch (#979).
+ * Workspace manifests under `packages/` are not read (see scripts/lib/script-binaries.ts).
  *
  *   npx tsx scripts/check-script-binaries.ts
  *
- * Exit 0 = all script binaries resolve to declared packages. Exit 1 = an undeclared binary,
+ * Exit 0 = all root script binaries resolve to declared packages. Exit 1 = an undeclared binary,
  * OR the check could not do its job (no package.json, or declared packages not installed).
  * Fail closed: an uninstalled dependency is RED, never a silent pass.
  *

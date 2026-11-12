@@ -1,6 +1,11 @@
 /**
- * script-binaries.ts — pure decision logic for the "every package.json script binary is
+ * script-binaries.ts — pure decision logic for the "every ROOT package.json script binary is
  * declared" gate (#979).
+ *
+ * Scope: the repository-root `package.json` only. Workspace manifests (each `package.json`
+ * under `packages/`) are NOT read; a workspace script such as packages/broker's `npx tsx ...`
+ * resolves the tool hoisted from the root devDependencies, and this gate checks that root
+ * declaration, not the workspace manifest's own.
  *
  * Root cause it guards: `npx tsx ...` resolves over the network when `tsx` is not a declared
  * dependency, so a gate can run on whatever version the registry serves (or fail air-gapped,
@@ -73,7 +78,8 @@ export interface RepoScriptBinariesResult {
 const readJson = (p: string): Record<string, unknown> => JSON.parse(readFileSync(p, 'utf-8'));
 
 /**
- * Reads `<root>/package.json` and the installed declared packages under `<root>/node_modules`.
+ * Reads `<root>/package.json` (the root manifest only; workspace manifests are not read) and
+ * the installed declared packages under `<root>/node_modules`.
  * Fail closed: a missing package.json or an uninstalled declared package is an ERROR, never a
  * silent pass — removing `tsx` from devDependencies while `npx tsx` stays in a script is
  * reported as an undeclared binary, and a declared-but-uninstalled package as not installed.

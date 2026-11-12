@@ -34,7 +34,7 @@ describe('#979 findUndeclaredBinaries', () => {
 describe('#979 repo scripts (T0)', () => {
   // In-process, no `tsx` spawn: a witness that needed tsx to run could not see tsx removed
   // (the earlier `if (!existsSync(tsx)) return;` passed silently in exactly that case).
-  it('every script binary in the real package.json is declared and installed', () => {
+  it('every script binary in the real ROOT package.json is declared and installed (workspace manifests are out of scope)', () => {
     const r = checkRepoScriptBinaries(REPO_ROOT);
     expect(r.errors).toEqual([]);
     expect(r.scriptCount).toBeGreaterThan(0);
