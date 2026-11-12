@@ -8,6 +8,10 @@ epic: EPIC-003  # SDD Core Methodology - the ai-review merge gate (same epic as 
 aspects: [ai-review, review-convergence, tokens, no-silent-gate, prompt-injection, provenance]
 relates_to: [SPEC-182, DR-097, DR-104, DR-110, DR-060, DR-063, DR-033]
 affects: [.github/workflows/ai-review.yml, .github/scripts/ai-review-guard.js, scripts/review-branch.sh, scripts/roles/]  # ai-review-retry.yml is named by the issue but needs no change - see FR-2
+implements: none
+implements_reason: >-
+  Owned files are decided at Plan; none are claimed before then, so no shared file is frozen
+  early by a spec whose design is not fixed yet.
 phases:
   specify: in-progress
   clarify: pending
@@ -19,8 +23,8 @@ phases:
 # MinSpec - ai-review round cap and convergent re-review (Requirements)
 
 > **This is a SPECIFICATION ONLY.** No code, workflow, script, or test is created by the
-> dispatch that produced it. A human reads this spec, resolves the questions under
-> [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it through the
+> dispatch that produced it. Its
+> [Decisions needed (Clarify)](#decisions-needed-clarify) are resolved and it is approved through the
 > normal spec-approval gate before anything is built.
 
 Materializes **#2984** - *"ai-review: round cap (reconsider approach after 3) and
@@ -236,6 +240,11 @@ has no entry on round caps or prior-finding feedback (searched: "round", "loop",
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). These answers
+bind once this spec is approved, by a human or a covered delegation, and not before.
+
 ### DQ-1 - Is the round cap worth building now?
 
 The automated lane is already capped at 2 fix attempts (3 reviews), so the cap only changes
@@ -248,6 +257,8 @@ behaviour for rounds driven by interactive sessions or humans.
 - **Option C - build FR-8..FR-12 only; ship FR-4 with default `0` (off).** *Cost:* the
   convergence change is the larger and riskier half, so this keeps most of the cost and drops
   the cheap part.
+
+**Recorded selection: Option A,** build it with cap 3, after AC-9's measurement shows any PR above 3. An agent session copied this document's (rec) option; no human chose this item.
 
 ### DQ-2 - What does "review only the diff since the last reviewed head" mean?
 
@@ -263,6 +274,8 @@ behaviour for rounds driven by interactive sessions or humans.
   already posted.** Cheapest. *Cost:* no convergence effect on the voters, fuzzy text
   matching (findings have no ids), and no token saving.
 
+**Recorded selection: Option A,** the full diff is still reviewed; prior findings plus the inter-round delta are added as context. An agent session copied this document's (rec) option; no human chose this item.
+
 ### DQ-3 - How is a capped PR flagged?
 
 - **Option A - a plain label outside the `ai-review:` namespace (e.g. `review-loop`), no
@@ -273,6 +286,8 @@ behaviour for rounds driven by interactive sessions or humans.
   still driving - against tenet 1.
 - **Option C - comment and check-run title only.** *Cost:* not queryable across PRs, which
   is the one thing a flag is for.
+
+**Recorded selection: Option A,** a plain label outside the `ai-review:` namespace (for example `review-loop`), no summons. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Test
 

@@ -8,6 +8,9 @@ epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline
 aspects: [agent-dispatch, quota, creator-shepherd, no-silent-gate, tier-0]
 relates_to: [SPEC-074, SPEC-044, DR-063, DR-084, DR-076]
 affects: [scripts/dispatch-issue.sh]  # OWNED by SPEC-044 via implements: — this spec modifies the creator-shepherd's fix launch and its caller, never owns the file. The matcher is SPEC-074's; this spec adds no pattern anywhere.
+implements: none
+implements_reason: >-
+  This spec modifies files another spec owns (see affects:) and creates none of its own.
 phases:
   specify: in-progress
   clarify: pending
@@ -19,8 +22,8 @@ phases:
 # MinSpec — Classify a provider quota wall in the creator-shepherd's fix agent (Requirements)
 
 > **This is a SPECIFICATION ONLY.** No code, script, or test is created by the dispatch
-> that produced it. A human reads this spec, resolves the questions under
-> [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it through the
+> that produced it. Its
+> [Decisions needed (Clarify)](#decisions-needed-clarify) are resolved and it is approved through the
 > normal spec-approval gate before anything is built.
 
 Materializes **#2422** — *"a quota wall in the creator-shepherd's fix agent hands the PR
@@ -202,6 +205,16 @@ is proposed.
   repo that opts in via `.minspec/`.
 
 ## Decisions needed (Clarify)
+
+All 3 decisions are answered: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers (DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). These answers
+bind once this spec is approved, by a human or a covered delegation, and not before.
+
+- **DQ-A - Recorded selection: Option 1,** comment only: no `needs-human-review`, the shepherd stops.
+- **DQ-B - Recorded selection: Option 1,** land after SPEC-074's slice that exposes the matcher seam.
+- **DQ-C - Recorded selection: Option 1,** approve now and make the Plan's first step the AC-1
+  base-red run, which is defined as a refutation test.
 
 ### DQ-A — what a quota-stopped fix attempt leaves behind on the PR
 

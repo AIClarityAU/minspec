@@ -1,7 +1,7 @@
 ---
 id: SPEC-295
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - same epic as DR-082 (bot identity) and DR-050 (consented gh)
@@ -10,12 +10,12 @@ depends_on: []
 relates_to: ["#2995", "#995", "#1355", "#2243", "SPEC-050", "SPEC-039", "#2978", "DR-050", "DR-074", "DR-082", "DR-098", "DR-108"]
 implements: none
 implements_reason: >-
-  Specify phase only. Which files this spec will own is decided at Plan, after Decisions
+  Which files this spec will own is decided at Plan, after Decisions
   D1-D4. Expected surface is listed under "Measured state", none of it claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -23,8 +23,8 @@ phases:
 # SPEC-295: An approval pull request is opened by an identity the target repo lets the founder approve
 
 > **This is a SPECIFICATION ONLY.** Written for issue
-> [#2995](https://github.com/AIClarityAU/minspec/issues/2995). Nothing is built until a human
-> reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
+> [#2995](https://github.com/AIClarityAU/minspec/issues/2995). Nothing is built until its
+> [Decisions needed (Clarify)](#decisions-needed-clarify) are resolved and it is approved.
 >
 > Design rests on: **DR-050** (shelling the user's own `gh` on consent; its Amendment
 > 2026-07-01 makes a read of the repo's own rulesets autonomous), **DR-082** (agent GitHub
@@ -164,6 +164,11 @@ agent act, and does not let any identity approve on the founder's behalf.
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are answered: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). These answers
+bind once this spec is approved, by a human or a covered delegation, and not before.
+
 - **D1 Who opens the PR when the founder cannot be its author.**
   - (a) **(rec)** The extension pushes and stops; the dev-time runner (already holding the
     bot identity via DR-082's wrapper) opens the PR for branches that pass FR-7. The
@@ -180,11 +185,13 @@ agent act, and does not let any identity approve on the founder's behalf.
     ruleset's purpose and conflicts with DR-108 (no approval on the founder's behalf).
   - (d) Ask the founder to add a bypass or lower the count on each such repo. Cost: weakens
     the repo's protection and is a per-repo manual step; MinSpec cannot do it for him.
+  **Recorded selection: Option (a),** the extension pushes and stops; the dev-time runner opens the PR for branches that pass FR-7. An agent session copied this document's (rec) option; no human chose this item.
 - **D2 `unknown` behaviour.** (a) **(rec)** Open as the founder (today's behaviour) with a
   visible warning in the toast and PR body that the review rule could not be read. Cost: a
   failed probe on memory-fabric reproduces PR 64 once more, but visibly. (b) Fail closed:
   push only, open nothing, until the rule can be read. Cost: an offline or 403 probe leaves a
   pushed branch with no PR on every repo, including ones that would have merged fine.
+  **Recorded selection: Option (a),** on `unknown`, open as the founder (today's behaviour) with a visible warning in the toast and PR body. An agent session copied this document's (rec) option; no human chose this item.
 - **D3 `require_last_push_approval`.** Whether the bot opener also re-pushes (needs a new
   commit, since re-pushing the same SHA is not a new push; this changes the head SHA the
   founder approved and so must preserve the approved bytes exactly). (a) **(rec)** Refuse
@@ -192,10 +199,12 @@ agent act, and does not let any identity approve on the founder's behalf.
   stays manual. (b) Bot makes an empty commit on top; cost: adds a non-founder commit to
   every approval branch and complicates the hash-to-commit binding. The issue does not say
   whether memory-fabric sets this flag (unverified).
+  **Recorded selection: Option (a),** refuse visibly and tell the founder the repo needs a non-founder pusher. An agent session copied this document's (rec) option; no human chose this item.
 - **D4 Scope of callers.** Whether `push-docs-lane.ts` (SPEC-039) also gets FR-1 to FR-10.
   (a) **(rec)** Yes, both callers of `openPullRequest`; cost: SPEC-039's preflight ordering
   (`approval-pr.ts:816-824`) must be kept, so the probe runs before its worktree mutation.
   (b) Approval flow only; cost: docs-lane PRs on such repos keep the defect.
+  **Recorded selection: Option (a),** yes, both callers of `openPullRequest` get FR-1 to FR-10. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Out of scope
 
