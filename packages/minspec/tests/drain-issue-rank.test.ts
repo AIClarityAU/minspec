@@ -152,6 +152,9 @@ function runBlock(ranker: string | null, cred: Cred = {}): { out: string; status
     'REPO="AIClarityAU/minspec"',
     'reconcile_labels() { :; }',
     'TRIAGE=/bin/true',
+    // The #3344 pile count reads specs/ beside the scripts REMEDIATE names; an empty one
+    // here, so spec-writing is decided by what each test is about, not this repo's corpus.
+    `REMEDIATE=${JSON.stringify(path.join(tmp, 'scripts', 'remediate-pr.sh'))}; mkdir -p ${JSON.stringify(path.join(tmp, 'specs'))} ${JSON.stringify(path.join(tmp, 'scripts'))}`,
     'gh_bot_warm_read() { if [[ -n "${STUB_WARM:-}" ]]; then export GH_TOKEN="$STUB_WARM"; fi; return 0; }',
     'gh_bot_reauth_read() { if [[ -n "${STUB_REAUTH:-}" && "${GH_TOKEN:-}" != "$STUB_REAUTH" ]]; then export GH_TOKEN="$STUB_REAUTH"; return 0; fi; return 1; }',
     'run_cycle() {',
