@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-213-agent-sessions-stay-in-container/requirements.md",
+  "specHash": "7bda06473accc562be67b9b593e05afa2dbf92ac1777275c41d91be1574b86d2",
+  "approvedAt": "2026-11-12T20:01:34.054Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "e350318ffb1e733f4da294a77ad784e1e9dc024e"
+}
