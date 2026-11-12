@@ -54,7 +54,7 @@ lifted, group 1 goes first; group 3 then waits on SPEC-014's renderer, group 4 o
 - [ ] **1.2** (FR2 label, FR8, INV-graceful-degrade) Prerequisites: 1.1.
   `packages/shared/src/ref-detect.ts` - `CardStatus`, `ApprovableFacts`, `ApprovableLookup`, `RefCard`,
   `buildRefCard`, as contracted in design.md.
-  Test, same file: `found` gives `full`, `code-only` gives `degraded` with no title or status field,
+  Test, same file: `found` gives `full`, `code-only` gives `degraded` with no status field (and a `title` only when the lookup carries one),
   `not-found` gives `null`; `SPEC-19` and `SPEC-019` get one label, the catalog id (PQ11), and each
   keeps its own `token`.
   *Done when:* green.
@@ -145,8 +145,8 @@ supply one.
   lozenge; `Windows SP1`, prose `G7` do not.
   *Done when:* green, with `ref-detect.ts` still holding no paragraph vocabulary.
 - [ ] **4.2** (FR5 degrade, OQ2, R3) Prerequisites: 1.5, 4.1. `packages/minspec/src/lib/ref-cards.ts` - load
-  the prefix table; a cross-project ref gives `code-only` with a URL from its Repo column. Test:
-  `packages/minspec/tests/ref-cards.test.ts` - `SCR#204`, `MIN/SP19`, an unknown code stays plain text;
+  the prefix table; a cross-project ref gives `code-only` with a URL from its Repo column AND a title (FR5: code + title; code-only is not compliant). The title source is the open item Slice C's design owns (design.md OQ2): name it before starting this task. Test:
+  `packages/minspec/tests/ref-cards.test.ts` - `SCR#204`, `MIN/SP19` each carry a title; an unknown code stays plain text;
   no path outside the root is read.
   *Done when:* green.
 

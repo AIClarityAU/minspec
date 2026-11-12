@@ -64,7 +64,7 @@ Four slices, ordered by real dependencies, not preference:
 |---|---|---|---|
 | **A - detect + resolve + card model (local v1 refs)** | FR1 (v1, local: `SPEC-014`, `DR-053`, `EPIC-002`, `#500`), FR4, FR5 (local targets), FR7 target, FR8 | `ref-detect.ts` (Tier-0 scanner), `ref-cards.ts` (fs adapter), the AC1 corpus harness, and the host-independent T0 tests (INV-keyboard's belongs to Slice B). `#N` with N >= 13 gets a code-only degraded card (PQ1, PQ3). | Nothing. |
 | **B - lozenge + card render** | FR2, FR3, FR7 nav, FR8 render | `ref-lozenge-html.ts` and the `ref:open` handler (no host needed), then the mount and the webview keyboard wiring. | The mount only: SPEC-014's extracted prose renderer. |
-| **C - v2 grammar + cross-project** | FR1 (`MIN/SP19`, `SP19/FR3`, `SCR#204`), FR9, AC1b sigil, FR5's cross-project degrade | Widen the scanner to the DR-053 v2 token, paragraph segments, `INV-<slug>` / `G-<n>` and the `[[…]]` sigil, against #679's resolver; wire `.minspec/project-prefixes.md` into the lookup. **Not specified by this design:** it gives no span shapes for v2, the sigil, `INV-<slug>` or `G-<n>`, and no resolver contract. Tasks must not treat Slice C as specified; it is planned against #679's resolver once that exists. | [#679](https://github.com/AIClarityAU/minspec/issues/679) (the `project-prefix` v2 grammar update, which is also the table's wiring predecessor) |
+| **C - v2 grammar + cross-project** | FR1 (`MIN/SP19`, `SP19/FR3`, `SCR#204`), FR9, AC1b sigil, FR5's cross-project degrade | Widen the scanner to the DR-053 v2 token, paragraph segments, `INV-<slug>` / `G-<n>` and the `[[…]]` sigil, against #679's resolver; wire `.minspec/project-prefixes.md` into the lookup. **Owns the open item "title source for cross-project cards" (OQ2):** FR5 needs code + title, so Slice C must name an offline title source before a cross-project card ships. **Not specified by this design:** it gives no span shapes for v2, the sigil, `INV-<slug>` or `G-<n>`, and no resolver contract. Tasks must not treat Slice C as specified; it is planned against #679's resolver once that exists. | [#679](https://github.com/AIClarityAU/minspec/issues/679) (the `project-prefix` v2 grammar update, which is also the table's wiring predecessor) |
 | **D - authoring guidance** | FR6 | Tell the authoring LLM to stop restating another approvable's status. | Slice B shipped (R4) |
 
 Slice A is the load-bearing floor and is also the part the requirements flag as
@@ -83,6 +83,8 @@ in "Detection contract, measured", unless stated.
 
 **Requirements questions**
 
+- **Why OQ1 and OQ2 are settled here.** requirements.md left both open for the design to settle, so
+  the plan settles them at plan level. Nothing below is founder-approved text; requirements.md is unchanged.
 - **OQ1 - summary source and hash boundary. Chosen: derive the summary at render time and
   store it nowhere new; no `summary:` field.** A spec's summary is the first paragraph under
   the first of these headings: One-Sentence Scope, Scope, In plain terms, Summary, Context
@@ -102,11 +104,15 @@ in "Detection contract, measured", unless stated.
   a human can change with no re-review. *Rejected: a human-frozen `summary:`.* Cost: 158
   hand-written summaries and R2 unmitigated.
 - **OQ2 - cross-project cards offline. Chosen: no sibling-repo read; a cross-project ref gets
-  a code-only degraded card (Slice C).** No title, no status, so nothing on the card can be
-  wrong. Activating it opens a GitHub URL built from the table's Repo column (the issue for
-  `SCR#204`, the repo for `MIN/SP19`), so R3's "still links" holds. *Why:* no local store
-  holds another repo's titles, and any sibling read needs the out-of-root bound PQ8 asks for.
-  This falls short of FR5's "code + title" because that title has no offline source. *Rejected:
+  a degraded card of code + title, with no status (Slice C).** FR5 requires "code + title", so a
+  code-only card is NOT FR5-compliant and is not what this design chooses. No status, so nothing on
+  the card can be wrong. Activating it opens a GitHub URL built from the table's Repo column (the
+  issue for `SCR#204`, the repo for `MIN/SP19`), so R3's "still links" holds. **Open item owned by
+  Slice C: the title source for cross-project cards.** It must be offline and named by Slice C's
+  design, for example the DR-053 / #679 resolver's registry or a cached title. This design does
+  not name one, because no local store in this repo holds another repo's titles. Until Slice C
+  settles it, cross-project refs are unreachable (see `lookupApprovable`), so no code-only
+  cross-project card ships. Any sibling read needs the out-of-root bound PQ8 asks for. *Rejected:
   a sibling-repo read.* Cost: a new path bound, and cards that differ by machine. It stays
   additive later.
 - **OQ4 - where "don't restate status" lives. Chosen: the authoring guidance in
@@ -137,8 +143,10 @@ in "Detection contract, measured", unless stated.
 - **PQ2 - "Windows SP1". Chosen: Slice C refuses a v2 span whose preceding word is `Windows`.**
   *Why:* it removes the one known wrong target for one word in the scanner. *Rejected: accept
   it as residual.* Cost: a known wrong card, on the document that names the collision.
-- **PQ3 - issues have no offline card source. Chosen: a code-only degraded card, the same
-  shape as OQ2's.** The lozenge shows `#500`; its card says no details are available offline;
+- **PQ3 - issues have no offline card source. Chosen: a code-only degraded card (local issues
+  only; not OQ2's cross-project card, which carries a title).** FR5's degrade rule covers a
+  cross-project target in an unavailable repo, not a local issue, so FR5 does not require a title
+  here; the shortfall is against FR3 and is recorded below. The lozenge shows `#500`; its card says no details are available offline;
   activating it opens the issue on GitHub, with the slug from the local git remote
   (`githubSlug`, git-remotes.ts). With no GitHub remote it is plain text (FR8). *Why:* the
   requirements' Out of Scope line bans network in the status path, so a card holding issue
@@ -474,11 +482,13 @@ export type ApprovableLookup =
   /** A target that exists locally: everything a full card needs. */
   | { readonly outcome: 'found'; readonly facts: ApprovableFacts }
   /**
-   * PQ3 and OQ2: the target has no offline source, so code only. The variant has no title and
-   * no status field, so a blank or guessed one cannot be expressed. `url` is what activation
-   * opens. Slices A-B produce it for local issues; Slice C adds cross-project refs.
+   * PQ3 and OQ2: the target has no offline status. The variant has no status field, so a blank or
+   * guessed one cannot be expressed. `url` is what activation opens. Slices A-B produce it for
+   * local issues, which have no title (PQ3). Slice C adds cross-project refs, which FR5 requires
+   * to carry `title`; the title source is Slice-C-pending (OQ2), so a cross-project ref must not
+   * produce this variant without one.
    */
-  | { readonly outcome: 'code-only'; readonly id: string; readonly url: string }
+  | { readonly outcome: 'code-only'; readonly id: string; readonly url: string; readonly title?: string }
   /** Anything else: unknown prefix, missing file, or an issue ref with no GitHub remote. */
   | { readonly outcome: 'not-found' };
 
@@ -505,7 +515,8 @@ export type RefCard =
     }
   | {
       /**
-       * PQ3 and OQ2: code only. There is no title or status field on this variant.
+       * PQ3 and OQ2: no status field on this variant. `title` is absent for a local issue (PQ3)
+       * and required for a cross-project card (FR5 "code + title"; source is Slice-C-pending, OQ2).
        */
       readonly variant: 'degraded';
       readonly reason: 'no-offline-source';
@@ -515,6 +526,8 @@ export type RefCard =
       readonly token: string;
       /** What activation opens. */
       readonly url: string;
+      /** Absent for a local issue (PQ3). Required for cross-project (FR5); source is Slice-C-pending (OQ2). */
+      readonly title?: string;
     };
 
 /**
@@ -534,7 +547,8 @@ export function buildRefCard(ref: DetectedRef, lookup: ApprovableLookup): RefCar
  *   'local', an issue               -> 'code-only' with the issue's URL when githubSlug is set,
  *                                      else 'not-found' (PQ3)
  *   'unknown-prefix'                -> 'not-found' (FR8; every prefixed ref, the map being empty)
- *   'cross-project'                 -> unreachable until Slice C wires the table; then 'code-only' (OQ2)
+ *   'cross-project'                 -> unreachable until Slice C wires the table and names a title source;
+ *                                      then 'code-only' WITH title (OQ2, FR5)
  *
  * Matching: an artifact matches when its id, read from listSpecs / listAdrs / listEpics, has
  * the form KIND-<digits> with KIND === resolution.kind and Number(<digits>) === resolution.num.
@@ -595,8 +609,9 @@ export function lookupApprovable(
   <span class="ms-card-status" data-status="implementing">implementing</span>
   <span class="ms-card-summary">…</span>
 </span>
-<!-- A 'degraded' card has no ms-card-title, ms-card-status or ms-card-summary; it holds one line
-     saying no details are available offline (PQ3, OQ2). ms-card-summary is omitted whenever
+<!-- A 'degraded' card has no ms-card-status or ms-card-summary. A local-issue card (PQ3) has no
+     ms-card-title and holds one line saying no details are available offline; a cross-project card
+     (OQ2, Slice C) shows ms-card-title per FR5, its source Slice-C-pending. ms-card-summary is omitted whenever
      summary is undefined (OQ1). A status whose source is 'none' shows that the file records no
      recognised status (PQ10). -->
 ```
@@ -1037,8 +1052,8 @@ founder. "Rec" below marks the option recommended before that choice was made.
   one never triggers re-review. A human-frozen field needs 158 hand-written summaries (59 specs,
   89 DRs and 10 epics at `a33d6d57`). The render-time derivation needs neither.
 - **OQ2 (from requirements) - decided above; two facts behind it.** (1) FR5 degrades an
-  unavailable target to "code + title only", but nothing in this repo holds another repo's
-  titles, so the degraded card is code only. (2) R3 says the degraded lozenge "still links" and
+  unavailable target to "code + title only", and nothing in this repo holds another repo's
+  titles, so the title source is an open item owned by Slice C, not a code-only answer. (2) R3 says the degraded lozenge "still links" and
   FR7 says activating navigates, and an absent repo offers no local target, so the `degraded`
   variant carries a `url`.
 - **OQ3 (from requirements) - the interim is confirmed by dependency, not by preference.**
