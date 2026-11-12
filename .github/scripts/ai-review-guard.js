@@ -582,10 +582,14 @@ function parsePatchFingerprint(text) {
 }
 
 // The review protocol's control tokens. Named here so this module has ONE definition
-// instead of two, and so a cross-file test can pin them against the other sites that
-// hardcode the same literals - scripts/review-decide.sh, scripts/review-branch.sh and
-// .github/workflows/ai-review.yml. They cannot be IMPORTED there (two of the three are
-// bash), so a shared constant cannot be the mechanism; the test is (#2163 review).
+// instead of two. The other sites that hardcode the same literals -
+// scripts/review-decide.sh, scripts/review-branch.sh and .github/workflows/ai-review.yml -
+// cannot IMPORT them (two of the three are bash), so a shared constant cannot be the
+// mechanism; a cross-file test that reads those files is (#2163 review). One case per
+// (site, token) pins them, for example:
+//   ai-review-guard.test.js: "review protocol tokens: scripts/review-decide.sh still uses REVIEW_VERDICT_BEGIN"
+//   ai-review-guard.test.js: "review protocol tokens: scripts/review-branch.sh still uses REVIEW_UNAVAILABLE"
+//   ai-review-guard.test.js: "review protocol tokens: .github/workflows/ai-review.yml still uses REVIEW_VERDICT_END"
 const VERDICT_BEGIN_TOKEN = 'REVIEW_VERDICT_BEGIN';
 const VERDICT_END_TOKEN = 'REVIEW_VERDICT_END';
 const UNAVAILABLE_TOKEN = 'REVIEW_UNAVAILABLE';
@@ -714,8 +718,10 @@ function parseVoterRecords(text) {
  * reuse happened "within ONE head SHA" while the code compared only the patch
  * fingerprint and never looked at `head_sha` - so it reused across commits whenever the
  * diff matched, which IS the base-moved case #1840 was closed over, justified by a
- * sentence saying it was not. Three voters caught it; the diff's own test reused across
- * two SHAs and proved it.
+ * sentence saying it was not. Three voters caught it; the first version's own test fed
+ * runs on two different SHAs, asserted reuse across them, and so proved the defect. What
+ * pins the fix now:
+ *   ai-review-guard.test.js: "selectVotersToRun: refuses to reuse a record from a DIFFERENT head SHA, same patch or not"
  *
  * The fix narrows the CODE to the claim rather than widening the claim to the code,
  * because the claim is what makes the feature safe and the narrowing costs nothing:
@@ -731,7 +737,10 @@ function parseVoterRecords(text) {
  * Among candidates on that SHA, the MOST RECENT wins, by `checkRunTime` - the same
  * ordering verifyHeadPassCheckRun uses, so a re-run's fresher record supersedes an
  * earlier one. Caller array order is deliberately NOT load-bearing: it was, and the
- * test asserting recency passed only because the fixture happened to be ordered.
+ * first recency check passed only because its fixture happened to be ordered. Pinned now,
+ * with the fixture ordered oldest first and then reversed:
+ *   ai-review-guard.test.js: "selectVotersToRun: reuses the MOST RECENT record on this head, by timestamp not array order"
+ *   ai-review-guard.test.js: "selectVotersToRun: is order-independent: the same inputs reversed give the same answer"
  */
 function selectVotersToRun({ roles, checkRuns, patchHash, allowlist, headSha } = {}) {
   const wanted = Array.isArray(roles) ? roles.slice() : [];
@@ -914,7 +923,10 @@ function findReattestableVerdict({ checkRuns, patchHash, allowlist } = {}) {
 // NOT BOUND, AND SAID SO: project context the reviewer CLI loads by convention
 // (CLAUDE.md and the like) and every other file in the base checkout. They are the
 // same class as "the base moved" above. PANEL_KEY_PATHS is the review machinery the
-// scripts name explicitly, and a test pins it to what review-branch.sh reads.
+// scripts name explicitly. No shipped test checks that list against what
+// review-branch.sh actually reads; what is pinned is narrower - a listing that cannot be
+// read, or lacks a required path, yields no key, so nothing carries:
+//   ai-review-guard.test.js: "#1688 panel key: an unreadable or incomplete listing yields NO key, so nothing carries"
 
 /** The disclosure label a carried verdict wears. NOT a verdict label (see VERDICT_LABELS). */
 const CARRIED = 'ai-review:carried';

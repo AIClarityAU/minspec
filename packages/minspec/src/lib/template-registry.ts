@@ -2771,8 +2771,10 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
     // the same machinery that syncs the guard, so they cannot drift apart again.
     //
     // Its own runtime dependencies — ai-review.yml and docs-lane.yml, which it reads to
-    // pin the shipped `run:` block and the hold pattern — are already managed templates,
-    // so the scaffolded set stays dependency-closed (managed-script-dependencies.test.ts).
+    // pin the shipped `run:` block and the hold pattern, and scripts/review-decide.sh and
+    // scripts/review-branch.sh, which it reads to pin the review protocol tokens (SPEC-211)
+    // — are already managed templates, so the scaffolded set stays dependency-closed
+    // (managed-script-dependencies.test.ts).
     name: 'ai-review-guard-test',
     outputPath: '.github/scripts/ai-review-guard.test.js',
     commentStyle: 'slash',
