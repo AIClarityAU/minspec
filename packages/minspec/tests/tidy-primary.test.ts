@@ -162,6 +162,53 @@ function buildSubfolderFixture(): { primary: string; sub: string } {
   return { primary, sub };
 }
 
+// #2472 — core.autocrlf=true: working copy is CRLF, blob is LF.
+describe('classifyPrimary — line-ending conversion (#2472)', () => {
+  function build(autocrlf: boolean): string {
+    const bare = makeTmpDir('minspec-tidy-bare-crlf-');
+    runGit(['init', '--bare', '-b', 'main'], bare);
+    const seed = makeTmpDir('minspec-tidy-seed-crlf-');
+    initRepo(seed);
+    runGit(['remote', 'add', 'origin', bare], seed);
+    write(seed, 'doc.md', 'one\ntwo\n');
+    commitAll(seed, 'initial');
+    runGit(['push', '-u', 'origin', 'main'], seed);
+
+    const clone = makeTmpDir('minspec-tidy-clone-crlf-');
+    runGit(['clone', '-c', `core.autocrlf=${autocrlf}`, bare, clone], os.tmpdir());
+    runGit(['config', 'user.email', 'test@minspec.test'], clone);
+    runGit(['config', 'user.name', 'MinSpec Test'], clone);
+
+    write(seed, 'doc.md', 'one\ntwo\nthree\n');
+    commitAll(seed, 'add a line');
+    runGit(['push', 'origin', 'main'], seed);
+    runGit(['fetch', 'origin'], clone);
+
+    // Working copy in the clone's native line-ending form, same text as origin.
+    write(clone, 'doc.md', autocrlf ? 'one\r\ntwo\r\nthree\r\n' : 'one\ntwo\nthree\n');
+    return clone;
+  }
+
+  it('classifies a CRLF working copy identical to origin as REDUNDANT under core.autocrlf=true', () => {
+    const result = classifyPrimary(build(true));
+    expect(result!.redundant.map((c) => c.path)).toEqual(['doc.md']);
+    expect(result!.orphans).toEqual([]);
+  });
+
+  it('still classifies a plain LF checkout as REDUNDANT', () => {
+    const result = classifyPrimary(build(false));
+    expect(result!.redundant.map((c) => c.path)).toEqual(['doc.md']);
+  });
+
+  it('keeps a CRLF working copy whose text differs from origin as ORPHAN', () => {
+    const clone = build(true);
+    write(clone, 'doc.md', 'one\r\ntwo\r\nDIFFERENT\r\n');
+    const result = classifyPrimary(clone);
+    expect(result!.orphans.map((c) => c.path)).toEqual(['doc.md']);
+    expect(result!.redundant).toEqual([]);
+  });
+});
+
 // ─── parsePorcelainZ (unit) ──────────────────────────────────────────────────
 
 describe('parsePorcelainZ', () => {
