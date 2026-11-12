@@ -324,6 +324,9 @@ describe('dispatch-issue.sh: native auto-merge deny-by-default (behavioral seam)
       // lib/issue-lease.sh sources lib/dispatch-author-gate.sh (#3161 trust filter) — same
       // reason once more.
       fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/dispatch-author-gate.sh'), path.join(root, 'scripts', 'lib', 'dispatch-author-gate.sh'));
+      // dispatch-issue.sh sources lib/issue-branch.sh (#3452 existing-branch handling) at
+      // startup — same reason: a missing lib aborts the source before the seam runs.
+      fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/issue-branch.sh'), path.join(root, 'scripts', 'lib', 'issue-branch.sh'));
       fs.writeFileSync(path.join(root, '.minspec', 'config.json'), JSON.stringify({ version: 1 })); // no autoMerge
       expect(check({}, root)).toEqual({ code: 1, out: 'off' });
     } finally {

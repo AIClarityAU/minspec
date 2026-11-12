@@ -1,7 +1,7 @@
 ---
 id: SPEC-081
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — the spec→code ownership contract (SPEC-038's sibling)
@@ -15,9 +15,9 @@ relates_to: [SPEC-038, SPEC-061, SPEC-059, SPEC-070, SPEC-051, SPEC-022, DR-088,
 implements: [packages/minspec/tests/ownership-arming-signal.test.ts]
 affects: [packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/template-registry.ts, scripts/hooks/spec-gate.py, scripts/validate-frontmatter.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

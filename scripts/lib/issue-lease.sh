@@ -88,8 +88,24 @@ SHIPPED_MARKER='<!-- minspec-shipped -->'
 lease_self_sid() {
   if [[ -n "${MINSPEC_LEASE_SID:-}" ]]; then printf '%s' "$MINSPEC_LEASE_SID"; return 0; fi
   if [[ -n "${MINSPEC_SESSION_ID:-}" ]]; then printf '%s' "$MINSPEC_SESSION_ID"; return 0; fi
-  local pid="$$" starttime
-  starttime="$(stat -c '%Y' "/proc/$pid" 2>/dev/null)" || starttime=""
+  # starttime = field 22 of /proc/PID/stat (clock ticks since boot, fixed for the
+  # process's life). NOT `stat -c %Y /proc/PID`: that is the mtime of the procfs inode,
+  # stamped when the kernel instantiates it on first access, so it equals "first time
+  # anyone looked" and is re-minted if the inode is evicted under memory pressure —
+  # the sid then changes mid-life and the session stops matching its own claim (#3502).
+  # `comm` (field 2) may contain spaces/parens, so strip through the LAST ')' first;
+  # field 22 is then the 20th remaining field.
+  # `local IFS` is load-bearing: the word split below must not depend on the caller's
+  # IFS (a script that sets IFS=$'\n\t' would otherwise get ONE field, an empty
+  # starttime, and every sid would collapse to sid-<pid>-0).
+  local IFS=$' \t\n'
+  local pid="$$" starttime="" statline rest
+  if statline="$(cat "/proc/$pid/stat" 2>/dev/null)"; then
+    rest="${statline##*) }"
+    # shellcheck disable=SC2086
+    set -- $rest
+    starttime="${20:-}"
+  fi
   printf 'sid-%s-%s' "$pid" "${starttime:-0}"
 }
 
@@ -311,8 +327,18 @@ lease_claim_body() {
 # ANY gh/parse error return non-zero (the caller maps that to enum_complete=0 → INV-6
 # stand-down). serverOrder = the comment's server-assigned monotonic id.
 lease_read_claims() {
-  local item="${1:?lease_read_claims needs an item}" raw
-  raw="$(gh api --paginate "repos/${MINSPEC_LEASE_REPO}/issues/${item}/comments" 2>/dev/null)" || return 1
+  local item="${1:?lease_read_claims needs an item}" raw errf err_txt rc=0
+  # Keep gh's own stderr and REPORT it on failure (#3501): it was discarded, so a dead
+  # token (HTTP 401) and a network fault printed the same guess. Stdout stays the claims
+  # JSON; the reason goes to this function's stderr, which no caller captures into data.
+  errf="$(mktemp)" || { echo "lease: reading the claims on #${item} failed: mktemp could not create a scratch file" >&2; return 1; }
+  raw="$(gh api --paginate "repos/${MINSPEC_LEASE_REPO}/issues/${item}/comments" 2>"$errf")" || rc=$?
+  err_txt="$(cat "$errf" 2>/dev/null)"  # swallow-ok: read only to PRINT the diagnosis; rc is the verdict
+  rm -f "$errf"
+  if (( rc != 0 )); then
+    echo "lease: reading the claims on #${item} failed (gh exit ${rc}): ${err_txt:-no detail from gh}" >&2
+    return 1
+  fi
   # gh --paginate concatenates JSON arrays; jq -s . re-wraps them, then flatten.
   printf '%s' "$raw" | jq -s -c --arg m "<!-- ${CLAIM_MARKER}:" '
     [ .[][] | select(.body | contains($m))
@@ -376,9 +402,29 @@ lease_renew() {
   # Going through lease_read_claims is also what makes "the read itself failed"
   # (network/auth; gh/jq returned nonzero) distinguishable from "the read succeeded and
   # our claim just is not in it" (deleted, or never posted).
+  #
+  # A failed read is an OBSERVATION that the token may be dead (#3501): a ticker inherits
+  # GH_TOKEN at fork and the age check dates it from first sight, not from minting, so a
+  # token the broker cached can die ~35 min before the age re-mint. Re-mint on the
+  # failure and retry ONCE; gh_bot_reauth_read returns non-zero when no different
+  # credential was obtained, in which case a retry is guaranteed to fail again.
   if ! claims="$(lease_read_claims "$item")"; then
-    echo "lease: cannot renew the claim on #${item}: could not read claims (gh api error; network or auth)." >&2
-    return 1
+    local _reminted=0
+    if gh_bot_reauth_read; then
+      _reminted=1
+      # The ticker runs this in a subshell, so the fresh token would die with it and every
+      # later tick would 401 again. Hand it back through the ticker's private 0600 file
+      # (never stdout/stderr); the ticker adopts it in its own shell.
+      if [[ -n "${_LEASE_TOKEN_HAND:-}" && -n "${GH_TOKEN:-}" ]]; then
+        printf '%s' "$GH_TOKEN" > "$_LEASE_TOKEN_HAND" 2>/dev/null || true  # swallow-ok: a lost hand-back only costs one more re-mint next tick
+      fi
+    fi
+    if (( _reminted )) && claims="$(lease_read_claims "$item")"; then
+      echo "lease: read of the claims on #${item} succeeded after a token re-mint." >&2
+    else
+      echo "lease: cannot renew the claim on #${item}: could not read claims (reason above; re-mint did not help)." >&2
+      return 1
+    fi
   fi
 
   local cid claimed
@@ -483,6 +529,12 @@ _LEASE_TICKER_PID=""
 lease_start_renew_ticker() {
   local item="${1:?lease_start_renew_ticker needs an item}"
   [[ -z "$_LEASE_TICKER_PID" ]] || return 0    # idempotent — exactly one ticker per dispatch
+  # Private hand-back channel for a token a renewal re-mints inside the ticker (#3501).
+  # mktemp makes it 0600. It is made HERE, in the parent, and removed by
+  # lease_stop_renew_ticker: a library must not set an exit trap of its own (the caller's
+  # one trap would be replaced; see dispatch-outcome-status.test.ts), so teardown rides the
+  # stop function the caller's trap already calls.
+  _LEASE_TOKEN_HAND="$(mktemp)" || _LEASE_TOKEN_HAND=""
   (
     # fd 3 keeps the REAL stderr reachable after the next redirect silences fd 2 on
     # THIS subshell. The only thing fd 2 would otherwise carry from here is bash's own
@@ -503,6 +555,14 @@ lease_start_renew_ticker() {
     while sleep "$LEASE_RENEW_SECS" 2>&3; do
       _lease_rc=0
       ( lease_renew "$item" ) 2>&3 >/dev/null || _lease_rc=$?
+      if [[ -n "$_LEASE_TOKEN_HAND" && -s "$_LEASE_TOKEN_HAND" ]]; then
+        _lease_tok="$(cat "$_LEASE_TOKEN_HAND")"
+        : > "$_LEASE_TOKEN_HAND"
+        # _gh_bot_adopt keeps the ownership stamp in step with the token.
+        if declare -F _gh_bot_adopt >/dev/null; then _gh_bot_adopt "$_lease_tok" >/dev/null || true  # swallow-ok: returns "changed" status, not failure
+        else export GH_TOKEN="$_lease_tok"; fi
+        _lease_tok=""
+      fi
       (( _lease_rc == 0 || _lease_rc == 143 )) && continue
       echo "lease: renewal of the claim on #${item} FAILED (exit ${_lease_rc}); heartbeat not written. The claim lapses ${LEASE_TTL_SECS}s after its last successful renewal, and this session then no longer holds it." >&3
     done
@@ -520,6 +580,8 @@ lease_stop_renew_ticker() {
   kill "$_LEASE_TICKER_PID" 2>/dev/null || true
   wait "$_LEASE_TICKER_PID" 2>/dev/null || true
   _LEASE_TICKER_PID=""
+  [[ -z "${_LEASE_TOKEN_HAND:-}" ]] || rm -f "$_LEASE_TOKEN_HAND"
+  _LEASE_TOKEN_HAND=""
   return 0
 }
 

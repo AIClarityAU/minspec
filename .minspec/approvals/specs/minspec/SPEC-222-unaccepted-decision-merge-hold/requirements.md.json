@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-222-unaccepted-decision-merge-hold/requirements.md",
+  "specHash": "a636f8bf46bf59d55dc80cca63ec45535be77bcf7feb7ddb95617d6e72dd8a4f",
+  "approvedAt": "2026-10-31T06:03:47.597Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/specifying-1025",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3083#issuecomment-6537527421"
+}
