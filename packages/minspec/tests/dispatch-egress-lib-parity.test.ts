@@ -20,6 +20,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite spawns real child processes per assertion (the shell-timeout-coverage
+// gate now counts calls through local wrappers); module scope per #1399.
+useShellTimeout();
 
 // Locate scripts/ from the repo (or worktree) root — same helper the sibling
 // dispatch-issue.sh tests use.

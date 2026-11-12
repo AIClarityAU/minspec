@@ -7,7 +7,7 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — a refresh that cannot fix the problem must say so, not report success
 aspects: [harness-refresh, provenance, signpost, tier-0, fail-closed, supply-chain]
 relates_to: [DR-092, SPEC-068, SPEC-060, SPEC-079, DR-003, DR-066]
-# Deliberately NO implements:/affects: yet. The one plausible target file
+# Deliberately no owned files (implements: none) and no affects: yet. The one plausible target file
 # (harness-provenance.ts, or wherever the `level`-verdict message ends up) is owned by
 # SPEC-068's own `implements:`, and SPEC-068 is `plan: in-progress` — unbuilt, its shape
 # still moving. Declaring `affects:` on a file that does not exist yet, while DQ-1 below
@@ -15,6 +15,10 @@ relates_to: [DR-092, SPEC-068, SPEC-060, SPEC-079, DR-003, DR-066]
 # built as its own increment, would arm the spec-gate over a target neither spec has
 # settled (the SPEC-053 blast-radius problem SPEC-060 names for the same reason). Ownership
 # is deferred to Plan, once DQ-1 resolves.
+implements: none
+implements_reason: >-
+  Owned files are decided at Plan; none are claimed before then, so no shared file is frozen
+  early by a spec whose design is not fixed yet.
 phases:
   specify: in-progress
   clarify: pending
@@ -26,8 +30,8 @@ phases:
 # SPEC-082: A guaranteed-no-op refresh must say it cannot fix external drift, not report success
 
 > **This is a SPECIFICATION ONLY.** No code, script, or test is created by the dispatch
-> that produced it. A human reads this spec, resolves
-> **[Decisions needed (Clarify)](#decisions-needed-clarify)**, and approves it through the
+> that produced it. Its
+> **[Decisions needed (Clarify)](#decisions-needed-clarify)** are resolved and it is approved through the
 > normal spec-approval gate before anything is built.
 
 Materializes **[#1492](https://github.com/AIClarityAU/minspec/issues/1492)** — running
@@ -201,6 +205,17 @@ no new stored value. It only changes what is said about a fact SPEC-068 already 
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered; each is ratified only by approval of this spec. DQ-1 has a selection recorded from the answer to
+task-queue item c082 (2026-10-27: "Fold in (Recommended)"), an answer the queue attributes to the
+founder. A queue answer is not consent and is not verified here: DR-108 (delegated approval) section
+4 holds that a queue item cannot carry consent, because any session can write the queue. DQ-2 and
+DQ-3 carry the (rec) option an agent session copied; no human chose them (each says so). Delegation
+DLG-001 (DR-108) made none of these selections and covers spec approval and engineering-DR
+acceptance only. An agent-recorded selection carries no consent, whoever prompted it. It is ratified
+only by approval of this spec, the founder's or the bot's under DLG-001, and that approval may
+overturn it. DQ-1's fold amends SPEC-068's FR-4/FR-5; this record changes nothing in SPEC-068, whose
+amendment and re-approval are separate acts.
+
 - **DQ-1 — Fold into SPEC-068, or ship as this spec's own increment?** SPEC-068 is
   `plan: in-progress` — unbuilt — and FR-1 here is a small, natural extension of its own
   FR-4/FR-5 (the four-verdict report). Building it as a second spec against the same
@@ -215,6 +230,13 @@ no new stored value. It only changes what is said about a fact SPEC-068 already 
   SPEC-082 standalone) is fully independent but duplicates "where is the `level` message
   owned" the way SPEC-079 DQ-3 flagged for a different pair of specs.
 
+  **Recorded selection: fold FR-1–FR-3 into SPEC-068** as an amendment to its FR-4/FR-5,
+  with SPEC-082 standing only as the traceability anchor for #1492. Source: the answer to
+  task-queue item c082, 2026-10-27 ("Fold in (Recommended)"). A queue answer is not consent
+  (DR-108 section 4), so this selection is unverified and binds only if this spec is approved with it in place, by the
+  founder or by the bot under DLG-001. SPEC-068 is already approved, so the amendment needs its
+  re-approval; this record does not edit SPEC-068.
+
 - **DQ-2 — Does FR-1's message apply to every `level` refresh, or only when asked?** The
   common case for `level` is a healthy repo that is genuinely current — printing "this
   build is not ahead" on every such run risks reading as alarming noise rather than
@@ -227,6 +249,11 @@ no new stored value. It only changes what is said about a fact SPEC-068 already 
   spec is for (mid-incident, reading a failing downstream gate) has one more step between
   them and the answer unless the base message is inviting enough to prompt it.
 
+  **Recorded selection: always print the short epoch/build-identity line,** keeping the
+  stronger "may not resolve an external check" framing behind a `--verbose` or equivalent
+  diagnostic flag. An agent session copied this document's (rec) option; no human chose this
+  item.
+
 - **DQ-3 — Does this spec need its own DR?** No new irreversible choice is made here — the
   epoch comparison, the provenance record, and the fail-closed direction are all DR-092's
   decision; this spec only changes report text for one already-decided verdict.
@@ -234,6 +261,10 @@ no new stored value. It only changes what is said about a fact SPEC-068 already 
   convention for the same situation) — unless DQ-1 resolves to *not* folding and instead
   widens FR-2's remedy language into something that reaches the network, at which point
   that widening would need its own DR under DR-050's consent framing.
+
+  **Recorded selection: no DR required,** recorded explicitly; this holds unless DQ-1
+  resolves to not folding and FR-2's remedy then reaches the network. An agent session
+  copied this document's (rec) option; no human chose this item.
 
 ## Out of Scope
 

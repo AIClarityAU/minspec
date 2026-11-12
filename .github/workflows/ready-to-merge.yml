@@ -195,6 +195,25 @@ jobs:
               return;
             }
 
+            // ── #3015 — bounded retry on GitHub API rate limits (fail closed) ──
+            // Every workflow in the repo shares this installation's request budget, so
+            // a burst of PR updates can exhaust it mid-run. Retry ONLY rate-limit
+            // failures, honouring the wait GitHub names; anything else, or a limit that
+            // outlasts the budget, still throws and the gate stays red. A base guard
+            // that predates #3015 lacks the helper: call straight through, as before.
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+            const withRetry =
+              typeof guard.withRateLimitRetry === 'function'
+                ? (what, fn) =>
+                    guard.withRateLimitRetry(fn, {
+                      sleep,
+                      onRetry: ({ attempt, waitMs }) =>
+                        core.info(
+                          `${what}: rate-limited (attempt ${attempt}), waiting ${Math.ceil(waitMs / 1000)}s`,
+                        ),
+                    })
+                : (what, fn) => fn();
+
             const action = context.payload.action;
             const labels = (pr.labels || []).map((l) => l.name);
             // The just-added label (labeled events) and the actor who added it.
@@ -245,14 +264,16 @@ jobs:
                 // this commit has more rounds than one page holds, the guard says the
                 // listing is not the whole list, `headRound` stays incomplete, and the
                 // strip below is what it always was. Never unwrap `.check_runs` here.
-                const headListing = await github.rest.checks.listForRef({
-                  owner,
-                  repo,
-                  ref: pr.head.sha,
-                  check_name: guard.CHECK_NAME,
-                  filter: 'all',
-                  per_page: guard.CHECK_RUNS_PAGE_SIZE,
-                });
+                const headListing = await withRetry('ai-review rounds read', () =>
+                  github.rest.checks.listForRef({
+                    owner,
+                    repo,
+                    ref: pr.head.sha,
+                    check_name: guard.CHECK_NAME,
+                    filter: 'all',
+                    per_page: guard.CHECK_RUNS_PAGE_SIZE,
+                  }),
+                );
                 headRound = guard.latestHeadRound({
                   listing: headListing.data,
                   allowlist,
@@ -281,21 +302,26 @@ jobs:
             if (labels.includes(guard.PASS) && !provenance.revert && !staleness.strip) {
               // (1) Head commit timestamp — the recency reference.
               let headCommittedAt = null;
+              let headReadError = null; // #3015 — a failed read is reported as one
               try {
-                const { data: head } = await github.rest.repos.getCommit({
-                  owner,
-                  repo,
-                  ref: pr.head.sha,
-                });
+                const { data: head } = await withRetry('head commit read', () =>
+                  github.rest.repos.getCommit({
+                    owner,
+                    repo,
+                    ref: pr.head.sha,
+                  }),
+                );
                 headCommittedAt =
                   head.commit && head.commit.committer && head.commit.committer.date;
               } catch (e) {
+                headReadError = e;
                 core.warning(`could not read head commit ${pr.head.sha}: ${e.message}`);
               }
 
               // (2) Who LAST applied ai-review:pass, and when.
               let labelActor = null;
               let labelAppliedAt = null;
+              let timelineReadError = null; // #3015
               if (action === 'labeled' && addedLabel === guard.PASS) {
                 // This very event applied the pass: use the GitHub-signed sender
                 // and now() — authoritative, and avoids eventual-consistency lag
@@ -305,12 +331,14 @@ jobs:
                 labelAppliedAt = new Date().toISOString();
               } else {
                 try {
-                  const events = await github.paginate(github.rest.issues.listEvents, {
-                    owner,
-                    repo,
-                    issue_number: pr.number,
-                    per_page: 100,
-                  });
+                  const events = await withRetry('label timeline read', () =>
+                    github.paginate(github.rest.issues.listEvents, {
+                      owner,
+                      repo,
+                      issue_number: pr.number,
+                      per_page: 100,
+                    }),
+                  );
                   const lastPass = events
                     .filter(
                       (ev) => ev.event === 'labeled' && ev.label && ev.label.name === guard.PASS,
@@ -322,15 +350,20 @@ jobs:
                     labelAppliedAt = lastPass.created_at;
                   }
                 } catch (e) {
+                  timelineReadError = e;
                   core.warning(`could not read PR label timeline: ${e.message}`);
                 }
               }
 
+              // The read errors only change the REASON text (a guard that predates
+              // #3015 ignores them); they can never make an unverified pass verify.
               passProvenance = guard.verifyPassProvenance({
                 labelActor,
                 labelAppliedAt,
                 headCommittedAt,
                 allowlist,
+                timelineReadError,
+                headReadError,
               });
             }
 
@@ -361,22 +394,28 @@ jobs:
               !staleness.strip
             ) {
               try {
-                const statuses = await github.paginate(
-                  github.rest.repos.listCommitStatusesForRef,
-                  { owner, repo, ref: pr.head.sha, per_page: 100 },
+                const statuses = await withRetry('head statuses read', () =>
+                  github.paginate(github.rest.repos.listCommitStatusesForRef, {
+                    owner,
+                    repo,
+                    ref: pr.head.sha,
+                    per_page: 100,
+                  }),
                 );
                 if (typeof guard.verifyHeadPassWitness === 'function') {
                   // #810 — also read the head's check-runs. Filtered by name at the
                   // API so a busy head doesn't paginate needlessly; the guard
                   // re-checks the name, the `head_sha`, the completion/conclusion
                   // and the posting App's identity itself (never trusts this query).
-                  const checkRuns = await github.paginate(github.rest.checks.listForRef, {
-                    owner,
-                    repo,
-                    ref: pr.head.sha,
-                    check_name: guard.CHECK_NAME,
-                    per_page: 100,
-                  });
+                  const checkRuns = await withRetry('head check-runs read', () =>
+                    github.paginate(github.rest.checks.listForRef, {
+                      owner,
+                      repo,
+                      ref: pr.head.sha,
+                      check_name: guard.CHECK_NAME,
+                      per_page: 100,
+                    }),
+                  );
                   headStatus = guard.verifyHeadPassWitness({
                     statuses,
                     checkRuns,
@@ -394,7 +433,10 @@ jobs:
                 headStatus = {
                   verified: false,
                   reason:
-                    'could not read the head commit statuses/check-runs to bind the pass (#466/#810)',
+                    typeof guard.isRateLimitError === 'function' &&
+                    (e.rateLimited === true || guard.isRateLimitError(e))
+                      ? guard.readFailureReason('the head witnesses', e)
+                      : 'could not read the head commit statuses/check-runs to bind the pass (#466/#810)',
                 };
               }
             }
@@ -411,14 +453,18 @@ jobs:
             // ── Post the authoritative gate status FIRST (fail closed) ─────
             // Derived from the decided effective label set + provenance check, so
             // even if the label removal below fails, the gate is already correct.
-            await github.rest.repos.createCommitStatus({
-              owner,
-              repo,
-              sha: pr.head.sha,
-              state: status.state,
-              context: 'ready-to-merge',
-              description: status.description,
-            });
+            // #3015 — retried like the reads: a rate-limited POST killed the run with
+            // no status posted at all (PR 2659, PR 2799).
+            await withRetry('ready-to-merge status post', () =>
+              github.rest.repos.createCommitStatus({
+                owner,
+                repo,
+                sha: pr.head.sha,
+                state: status.state,
+                context: 'ready-to-merge',
+                description: status.description,
+              }),
+            );
             core.info(
               `ready-to-merge=${status.state} on ${pr.head.sha} — ${status.description} ` +
                 `(action=${action}, labels=[${labels.join(', ')}], ` +
