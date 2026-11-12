@@ -305,7 +305,12 @@ difference from the table above explained by name.
 
 ## Decisions needed (Clarify)
 
-The draft proceeds on each recommendation below. FR-4 and FR-8 are written to them.
+All 2 decisions are answered with the option this document recommends. These are the agent's
+recommended selections, recorded by an agent session (minspec-sdd[bot]) on 2026-11-12 under the
+founder's decision on queue item c1106au (outside this repo) that agent-recorded recommended Clarify
+selections count as Clarify done for T3 specs. That decision is cited as context, not as consent
+recorded here: no human chose any single option, and DLG-001 made none of them (it covers approval
+only). They bind once this spec is approved. FR-4 and FR-8 are written to them.
 
 **D1 - What if an in-flight pull request's checks never finish?** The record defines in flight as up to date with checks not finished, and it
 says a pull request failing a condition never blocks the rest, but it does not say what happens to a check that hangs. Nothing would fire and nothing would be red.
@@ -316,12 +321,16 @@ says a pull request failing a condition never blocks the rest, but it does not s
 - (b) A ceiling that turns the run red and stops the lane. Visible, but one hung check stops every approval.
 - (c) No ceiling. Cheapest to build, and it is a silent stall.
 
+**Recorded selection: Option (a)** - agent's recommended selection (c1106au).
+
 **D2 - Does `needs-human-review` refuse?** Section 1 item 3 names a hand-off comment and does not name this label, which `ai-review.yml` and the shepherd both apply
 when asking for a human. Today only #3089 has it, and #3089 is refused anyway.
 
 - **(a) Refuse on the label** **(rec)**: it can only refuse more than the record does, and it stops the lane from taking a pull request an automation has handed to a human. **Cost:** a stale
   label strands one pull request until someone removes it, visible by name in the run summary.
 - (b) Read only what the record names. Less to maintain, and it merges a pull request whose label is asking for a human.
+
+**Recorded selection: Option (a)** - agent's recommended selection (c1106au).
 
 ## Rejected alternatives (DR-086 section 4)
 
