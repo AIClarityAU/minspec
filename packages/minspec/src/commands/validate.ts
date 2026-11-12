@@ -9,7 +9,7 @@ import { epicRefSet } from '../lib/epic-manager';
 import { getApprovalStatus } from '../lib/approval';
 import { explicitTerminalOf, type ExplicitTerminal } from '../lib/lifecycle';
 import { folderForFile, resolveTargetFolder } from '../lib/resolve-folder';
-import { readShardIdFiles } from '../lib/spec-layout';
+import { readShardIdFiles, readSpecSetStatusFiles } from '../lib/spec-layout';
 import { readSpecTaskTally } from '../lib/artifact-graph';
 
 interface SpecNodeLike {
@@ -63,6 +63,9 @@ export async function validateSpecCommand(node?: SpecNodeLike): Promise<void> {
       // #439: sibling shard files (design.md/tasks.md/…) in this spec's directory,
       // so a diverging shard id is flagged as an error.
       siblingShardFiles: readShardIdFiles(path.dirname(spec.filePath)),
+      // SPEC-212 (#972): the spec-set's requirements/design/tasks texts, so a sibling
+      // whose literal `status:` lags requirements.md's is a warning.
+      specSetStatusFiles: readSpecSetStatusFiles(path.dirname(spec.filePath)),
       // #1751: implement.claimed-without-evidence — repo-relative existence check,
       // resolved here (not inside spec-validator.ts, which is filesystem-free by
       // design) against THIS workspace root.

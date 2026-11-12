@@ -4,8 +4,9 @@ import type { ParsedSpec, SpecFrontmatter } from './spec';
 import { parseSpec, writeSpec } from './spec';
 import { PHASES } from './config';
 import { ensureDirectory } from './opt-in';
-import { restoreLineEndings } from './text-io';
-import type { ShardIdFile } from './spec-validator';
+import { readDocumentText, restoreLineEndings } from './text-io';
+import type { ShardIdFile, SpecSetStatusFile } from './spec-validator';
+import { SPEC_SET_STATUS_FILE_NAMES } from './spec-validator';
 
 /**
  * Storage layout for a single spec on disk.
@@ -246,6 +247,51 @@ export function readShardIdFiles(dirPath: string): ShardIdFile[] {
       out.push({ fileName, id: fm.id });
     } catch {
       // unparseable shard — not this check's concern
+    }
+  }
+  return out;
+}
+
+/** A spec-set directory: `SPEC-` + digits + `-` + slug (SPEC-212 FR-1). */
+const SPEC_SET_DIR_RE = /^SPEC-\d+-/;
+
+/** lstat presence: a dangling or looping symlink is present (and then fails to read). */
+function isPresent(filePath: string): boolean {
+  try {
+    fs.lstatSync(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Read the requirements.md / design.md / tasks.md texts of one spec-set directory
+ * (SPEC-212, #972), feeding `validateSpecSetStatusAgreement` in spec-validator.ts, which
+ * is pure. This is the impure glue.
+ *
+ * - Returns `[]` unless the directory's basename is `SPEC-NNN-<slug>` and a
+ *   requirements.md is present in it (FR-1: a flat spec, or `specs/minspec/` holding
+ *   SPEC-001's flat set, is never grouped).
+ * - Each present file is read with `readDocumentText`, so a CRLF checkout reads as LF and
+ *   the frontmatter regex still matches.
+ * - Presence is `lstat`, not `existsSync`: a dangling symlink is a file the reader cannot
+ *   read, and must surface as one. A read that throws becomes
+ *   `{ fileName, raw: undefined, readError }`, reported downstream and never swallowed
+ *   (contrast `readShardIdFiles`, whose `catch {}` is safe only because its rule skips
+ *   id-less files by design). Invariant 2: a missing witness fails visibly.
+ */
+export function readSpecSetStatusFiles(dirPath: string): SpecSetStatusFile[] {
+  if (!SPEC_SET_DIR_RE.test(path.basename(dirPath))) return [];
+  if (!isPresent(path.join(dirPath, 'requirements.md'))) return [];
+  const out: SpecSetStatusFile[] = [];
+  for (const fileName of SPEC_SET_STATUS_FILE_NAMES) {
+    const filePath = path.join(dirPath, fileName);
+    if (!isPresent(filePath)) continue;
+    try {
+      out.push({ fileName, raw: readDocumentText(filePath) });
+    } catch (err) {
+      out.push({ fileName, raw: undefined, readError: err instanceof Error ? err.message : String(err) });
     }
   }
   return out;

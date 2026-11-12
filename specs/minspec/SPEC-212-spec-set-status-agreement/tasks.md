@@ -41,7 +41,7 @@ Shared rules for every task:
 
 ## 1 - The pure rule (FR-1, FR-2, FR-3, FR-5; AC-1 to AC-5)
 
-- [ ] **1.1** `packages/minspec/tests/spec-set-status-agreement.test.ts` (new) - T0 cases
+- [x] **1.1** `packages/minspec/tests/spec-set-status-agreement.test.ts` (new) - T0 cases
   against `validateSpecSetStatusAgreement`, built from in-memory `SpecSetStatusFile`
   fixtures (a `fm(status)` helper renders a minimal frontmatter block):
   - AC-1: requirements `implementing`, design `specifying` → one `status.spec-set.lag`
@@ -63,7 +63,7 @@ Shared rules for every task:
   - Severity: every violation in every case above is `'warning'`.
   *Done when:* the file runs RED on `origin/main` (import of the missing export fails),
   observed once before 1.2.
-- [ ] **1.2** `packages/minspec/src/lib/spec-validator.ts` - add `SpecSetStatusFile`,
+- [x] **1.2** `packages/minspec/src/lib/spec-validator.ts` - add `SpecSetStatusFile`,
   `SpecSetStatusResult`, `SPEC_SET_STATUS_FILE_NAMES`, the private `literalStatusOf`, and
   `validateSpecSetStatusAgreement` in a new section after `validateStatusMonotonicity`,
   exactly as design.md, *The rule*, specifies. Reuse `LIFECYCLE_RANK`,
@@ -74,7 +74,7 @@ Shared rules for every task:
 
 ## 2 - The reader (FR-1, FR-3)
 
-- [ ] **2.1** `packages/minspec/tests/spec-set-status-agreement.test.ts` - a second
+- [x] **2.1** `packages/minspec/tests/spec-set-status-agreement.test.ts` - a second
   `describe` against `readSpecSetStatusFiles` on temp-directory fixtures:
   - a fixture directory named `SPEC-` + a number + `-probe` (e.g. nine-hundred) with all three files → three entries, `raw` populated;
   - the same directory with no `requirements.md` → `[]`;
@@ -87,7 +87,7 @@ Shared rules for every task:
     took: assert `fs.readFileSync` on the path throws before asserting the reader's
     output, so the case cannot pass vacuously.
   *Done when:* RED before 2.2, green after.
-- [ ] **2.2** `packages/minspec/src/lib/spec-layout.ts` - add `readSpecSetStatusFiles`
+- [x] **2.2** `packages/minspec/src/lib/spec-layout.ts` - add `readSpecSetStatusFiles`
   after `readShardIdFiles` (design.md, *The reader*): `SPEC-NNN-` basename and
   `requirements.md` gate, `readDocumentText` for each present file, a thrown read captured
   as `readError`. Import `SPEC_SET_STATUS_FILE_NAMES` and the type from
@@ -97,14 +97,14 @@ Shared rules for every task:
 
 ## 3 - Both surfaces (FR-5)
 
-- [ ] **3.1** `packages/minspec/tests/validate-command.test.ts` - mock
+- [x] **3.1** `packages/minspec/tests/validate-command.test.ts` - mock
   `readSpecSetStatusFiles` beside the existing `readShardIdFiles` mock, and add a case
   asserting `validateSpec` receives `specSetStatusFiles` equal to the mock's return for
   the spec's directory (the shape of the existing `readShardIdFiles` case). Add one
   `validateSpec` case to `spec-set-status-agreement.test.ts`: with `specSetStatusFiles`
   holding a lagging set, the result carries the `status.spec-set.lag` warning and
   `complete` stays `true`; without the option, no such warning.
-- [ ] **3.2** `packages/minspec/src/lib/spec-validator.ts` - add `specSetStatusFiles` to
+- [x] **3.2** `packages/minspec/src/lib/spec-validator.ts` - add `specSetStatusFiles` to
   `ValidateSpecOptions` (doc comment in the `siblingShardFiles` no-false-positive pattern)
   and push the rule's violations in `validateSpec` beside step 5.
   `packages/minspec/src/commands/validate.ts` - pass

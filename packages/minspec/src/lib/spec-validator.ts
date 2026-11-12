@@ -731,6 +731,14 @@ export interface ValidateSpecOptions {
    */
   readonly siblingShardFiles?: readonly ShardIdFile[];
   /**
+   * The spec-set's requirements.md / design.md / tasks.md texts (SPEC-212, #972), read
+   * by `readSpecSetStatusFiles` in spec-layout.ts. When supplied, a sibling whose
+   * literal `status:` lags requirements.md's, or cannot be read, yields a WARNING. Omit
+   * to skip the check entirely: the same no-false-positive pattern as
+   * `siblingShardFiles` (a caller without directory access gets no false warning).
+   */
+  readonly specSetStatusFiles?: readonly SpecSetStatusFile[];
+  /**
    * Repo-relative-path existence check, for `implement.claimed-without-evidence`
    * (#1751). When supplied, a spec's declared `implements:` paths are checked
    * against it once `phases.implement` claims active/finished work; omit it to
@@ -1249,6 +1257,7 @@ export function validateSpec(
     explicitTerminal,
     knownArtifactRefs,
     siblingShardFiles,
+    specSetStatusFiles,
   } = options;
   const tier = spec.frontmatter.tier;
   const raw = spec.raw;
@@ -1421,6 +1430,13 @@ export function validateSpec(
     violations.push(...validateShardIdConsistency(siblingShardFiles).violations);
   }
 
+  // 5b. Spec-set literal status agreement (SPEC-212 / #972). WARNING only (DQ-3): a
+  //     design.md / tasks.md whose literal `status:` lags requirements.md's, or cannot
+  //     be read. Never changes `complete`.
+  if (specSetStatusFiles) {
+    violations.push(...validateSpecSetStatusAgreement(specSetStatusFiles).violations);
+  }
+
   const complete = !violations.some((v) => v.severity === 'error');
 
   return {
@@ -1564,7 +1580,7 @@ function cap(s: string): string {
 // reads DERIVED status (deriveStatus), never the literal `status:` line, so a stale
 // mirror can never produce a false monotonicity warning.
 //
-// Lifecycle order (the comparison): new < specifying < implementing < done. The
+// Lifecycle order (the comparison): new < specifying < planning < implementing < done. The
 // explicit terminals (archived / a future superseded) are NOT ranked here — they
 // are human acts orthogonal to the in-progress lane (INV-6), so an artifact in an
 // explicit terminal is excluded from the comparison rather than forced into the
@@ -1666,6 +1682,148 @@ export function validateStatusMonotonicity(
   }
 
   return { notSplitLayout: false, violations };
+}
+
+// ─── Spec-set literal status agreement (SPEC-212 / #972) ──────────────────────
+//
+// Inside one `SPEC-NNN-*/` spec-set, `status:` is authored per file, and the approve
+// command writes the new status to requirements.md only. Siblings keep whatever they
+// were drafted with, so every approval opens a gap and "may work proceed?" depends on
+// which file the reader opens. This rule flags a design.md / tasks.md whose LITERAL
+// status ranks strictly below requirements.md's.
+//
+// Two models of "status" sit next to each other here and must not be conflated (FR-5):
+//  - THIS rule (`status.spec-set.lag`) compares one file's LITERAL `status:` line with a
+//    sibling's literal line: the signpost a reader actually sees. Direction: sibling
+//    behind parent, the shape every approval creates.
+//  - `status.cross-artifact.regression` (#277, `validateStatusMonotonicity` above)
+//    compares DERIVED status (`deriveStatus`), and runs the opposite direction: parent
+//    behind child. A stale literal is invisible to it by design.
+//  - `status.mirror-drift` (`validateSpec`, SPEC-022 / SPEC-059) compares ONE file's
+//    literal line with that same file's own derivation, never with a sibling.
+//
+// The literal line is read raw (`rawFrontmatterField`), never through `parseSpec`,
+// because the parser coerces an absent or unknown status to `new`, which would make a
+// missing witness indistinguishable from a real `new` (SPEC-212 design.md, D2). A file
+// whose status cannot be read is reported as `status.spec-set.unreadable`, never skipped
+// (invariant 2: a missing witness fails visibly).
+//
+// Severity is WARNING for both ids (DQ-3): approving requirements.md legitimately opens
+// the lag until the siblings are bumped, so an error would red-gate every approval.
+// A sibling AHEAD of requirements.md passes (DQ-2), as does a terminal sibling under a
+// ranked requirements.md (D5). A terminal requirements.md (archived / superseded)
+// requires each sibling to carry the same terminal (FR-2).
+
+/** The files of a spec-set this rule reads, in report order (FR-1). */
+export const SPEC_SET_STATUS_FILE_NAMES = ['requirements.md', 'design.md', 'tasks.md'] as const;
+
+/** One file of a `SPEC-NNN-*` directory set, as read from disk (FR-1). */
+export interface SpecSetStatusFile {
+  /** Basename: 'requirements.md' | 'design.md' | 'tasks.md'. */
+  readonly fileName: string;
+  /** The file's text after prepareText (LF), or undefined when the read failed. */
+  readonly raw: string | undefined;
+  /** The read error's message, when raw is undefined. */
+  readonly readError?: string;
+}
+
+export interface SpecSetStatusResult {
+  /** true when the set has no requirements.md (FR-1): nothing is asserted. */
+  readonly notApplicable: boolean;
+  /** Always severity 'warning' (DQ-3). Empty when the set agrees. */
+  readonly violations: ValidationViolation[];
+}
+
+type LiteralStatus =
+  | { readonly kind: 'ok'; readonly status: SpecStatus }
+  | { readonly kind: 'unreadable'; readonly reason: string };
+
+/** Read one file's literal top-level `status:` value, or why it cannot be read. */
+function literalStatusOf(f: SpecSetStatusFile): LiteralStatus {
+  if (f.raw === undefined) {
+    return { kind: 'unreadable', reason: `the file could not be read (${f.readError ?? 'unknown error'})` };
+  }
+  if (!FRONTMATTER_BLOCK_RE.test(f.raw)) {
+    return { kind: 'unreadable', reason: 'it has no frontmatter block' };
+  }
+  const value = rawFrontmatterField(f.raw, 'status');
+  if (value === undefined) {
+    return { kind: 'unreadable', reason: 'its frontmatter has no "status:" line' };
+  }
+  if (!SPEC_STATUS_SET.has(value)) {
+    return { kind: 'unreadable', reason: `its "status:" value "${value}" is not a known status (${SPEC_STATUSES.join(', ')})` };
+  }
+  return { kind: 'ok', status: value as SpecStatus };
+}
+
+function unreadableViolation(fileName: string, reason: string): ValidationViolation {
+  return {
+    rule: 'status.spec-set.unreadable',
+    severity: 'warning',
+    message: `Cannot read ${fileName}'s status: ${reason}, so its agreement with the rest of the spec-set is unknown.`,
+    fixHint: `Give ${fileName} a frontmatter "status:" line with one of: ${SPEC_STATUSES.join(', ')}. Status is excluded from the approval hash, so this edit never voids an approval.`,
+  };
+}
+
+/**
+ * Validate that a `SPEC-NNN-*` spec-set's design.md and tasks.md do not carry a
+ * LITERAL `status:` behind requirements.md's (SPEC-212). Pure: no filesystem, no clock;
+ * `readSpecSetStatusFiles` (spec-layout.ts) assembles the input from disk.
+ *
+ * - No requirements.md entry → `notApplicable: true`, no violations (FR-1).
+ * - An unreadable status (failed read, no frontmatter, no `status:` line, unknown value)
+ *   → one `status.spec-set.unreadable` warning naming the file (FR-3). An unreadable
+ *   requirements.md leaves nothing to compare, so no lag is reported for any sibling.
+ * - Ranked requirements.md: a sibling ranked strictly lower → `status.spec-set.lag`
+ *   (FR-2). Ahead (DQ-2) or terminal (D5) passes.
+ * - Terminal requirements.md: a sibling whose status differs → `status.spec-set.lag`.
+ *
+ * See the section comment for how this differs from `status.cross-artifact.regression`
+ * and `status.mirror-drift`.
+ */
+export function validateSpecSetStatusAgreement(
+  files: readonly SpecSetStatusFile[],
+): SpecSetStatusResult {
+  const known = new Set<string>(SPEC_SET_STATUS_FILE_NAMES);
+  const setFiles = files.filter((f) => known.has(f.fileName));
+  const parent = setFiles.find((f) => f.fileName === 'requirements.md');
+  if (!parent) return { notApplicable: true, violations: [] };
+
+  const violations: ValidationViolation[] = [];
+  const parentStatus = literalStatusOf(parent);
+  if (parentStatus.kind === 'unreadable') {
+    violations.push(unreadableViolation(parent.fileName, parentStatus.reason));
+    return { notApplicable: false, violations };
+  }
+  const want = parentStatus.status;
+  const parentRank = LIFECYCLE_RANK[want];
+
+  for (const name of SPEC_SET_STATUS_FILE_NAMES) {
+    if (name === 'requirements.md') continue;
+    for (const sibling of setFiles.filter((f) => f.fileName === name)) {
+      const s = literalStatusOf(sibling);
+      if (s.kind === 'unreadable') {
+        violations.push(unreadableViolation(sibling.fileName, s.reason));
+        continue;
+      }
+      let lags: boolean;
+      if (parentRank === undefined) {
+        lags = s.status !== want; // terminal requirements.md: siblings carry the same terminal
+      } else {
+        const rank = LIFECYCLE_RANK[s.status];
+        lags = rank !== undefined && rank < parentRank; // ahead (DQ-2) or terminal (D5) passes
+      }
+      if (!lags) continue;
+      violations.push({
+        rule: 'status.spec-set.lag',
+        severity: 'warning',
+        message: `${sibling.fileName} says "status: ${s.status}" but requirements.md says "status: ${want}"; the spec-set gives two answers to "may work proceed?".`,
+        fixHint: `Set ${sibling.fileName}'s "status:" to "${want}" to match requirements.md. Status is excluded from the approval hash, so this edit never voids an approval. (DQ-1 recorded option A: every file keeps status; removing it from siblings is a separate spec.)`,
+      });
+    }
+  }
+
+  return { notApplicable: false, violations };
 }
 
 // ─── Shard id consistency (#439) ──────────────────────────────────────────────
