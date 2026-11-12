@@ -4,11 +4,12 @@ type: tasks
 # tier lives on requirements.md, the single tier-carrying approvable. A tier on a sibling
 # document is read by spec-gate.py as a second, unapproved spec. (SPEC-237 is T3.)
 # status and phases mirror requirements.md. This file has no approval record of its own:
-# only requirements.md is signed, so these two fields describe and never seal.
+# only requirements.md carries an approval record (sidecar under .minspec/approvals/), so
+# these two fields describe and never seal.
 status: planning
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - a voter that never answered must not read like one that had nothing to say
-relates_to: [SPEC-065, DR-079, DR-097, "#2126", "#2101", "#1120"]
+relates_to: [SPEC-065, DR-079, DR-097, "#2126", "#2101", "#1234", "#1157", "#1834", "#1925", "#2142", "#1120"]
 phases:
   specify: done
   clarify: done
@@ -47,7 +48,7 @@ Shared rules for every task:
 - [x] **0.1** Post the PP-1 result on #2126 (bot-attributed): run `36059728359` on head
   `964e4fb4`; both silent voters took the quota path, the PAYG failover also produced no
   verdict, and that leg's cause was not recorded anywhere. Done by the planning session:
-  #2126 comment `6829956403` (2026-11-13). Design.md, *What Plan measured*, finding 1.
+  #2126 comment `6829956403` (created 2026-11-12 UTC, per the GitHub API `created_at`). Design.md, *What Plan measured*, finding 1.
 
 ## 1 - Guard: classify, validate, render (FR-1, FR-2, FR-3, FR-4, FR-6; AC-1, AC-2)
 

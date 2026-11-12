@@ -4,11 +4,12 @@ type: design
 # tier lives on requirements.md, the single tier-carrying approvable. A tier on a sibling
 # document is read by spec-gate.py as a second, unapproved spec. (SPEC-237 is T3.)
 # status and phases mirror requirements.md. This file has no approval record of its own:
-# only requirements.md is signed, so these two fields describe and never seal.
+# only requirements.md carries an approval record (see the approval note in the opening
+# paragraph), so these two fields describe and never seal.
 status: planning
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - a voter that never answered must not read like one that had nothing to say
-relates_to: [SPEC-065, DR-079, DR-097, "#2126", "#2101", "#1234", "#1157", "#1834", "#1925", "#2142"]
+relates_to: [SPEC-065, DR-079, DR-097, "#2126", "#2101", "#1234", "#1157", "#1834", "#1925", "#2142", "#1120"]
 phases:
   specify: done
   clarify: done
@@ -19,8 +20,14 @@ phases:
 
 # SPEC-237 - Design: a silent ai-review voter names its reason (Plan)
 
-Plan for [requirements.md](requirements.md) (APPROVED; read, never edited by this Plan),
-built under the five recorded Clarify selections: D1 (a) sidecar file, D2 (a) keep
+Plan for [requirements.md](requirements.md) (read, never edited by this Plan). Approval
+record: approved by `minspec-sdd[bot]` on 2026-11-01 (21:14 UTC), per the sidecar
+`.minspec/approvals/specs/minspec/SPEC-237-silent-voter-named-reason/requirements.md.json`
+on `origin/main` (`specHash` `4dd788ac...`, which matches `specHash()` of `requirements.md`
+on `origin/main`; the sidecar's `basis` field is `delegation:DLG-001`). Its `status:` is
+`planning`, the phase after approval. The Clarify selections are as requirements.md's
+Decisions section words them (answered, not ratified); this Plan was built under
+them, the five recorded selections: D1 (a) sidecar file, D2 (a) keep
 `ai-review:changes` and add the headline, D3 (a) this spec owns all five placeholder
 copies, D4 yes (hints, total over the reason set), D5 no DR. Citations of "today" are
 against `origin/main` `5c580584`. New code is named by symbol, because its line numbers
