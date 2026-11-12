@@ -642,6 +642,13 @@ describe('python validate.py mirrors the Node validator core checks (#246)', () 
       expect(py.stderr).not.toContain('missing `id: SPEC-NNN`');
     });
 
+    it.skipIf(!hasPy)('#3595 — unterminated frontmatter keeps the "missing or invalid" wording adopters pin', () => {
+      writeSpec('specs/a/requirements.md', '---\nid: SPEC-001\nstatus: specifying\n# never closed\n');
+      const py = runValidatePy();
+      expect(py.code).toBe(1);
+      expect(py.stderr).toContain('missing or invalid `id: SPEC-NNN`');
+    });
+
     it.skipIf(!hasPy)('reports "missing", not "invalid", when the id key is absent entirely', () => {
       writeSpec('specs/spec-y/spec.md', '---\nstatus: specifying\n---\n# no id\n');
       const py = runValidatePy();
