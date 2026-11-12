@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-227-spec-id-sees-unmerged-claims/requirements.md",
+  "specHash": "50de2c8b0ad83aa5c25edabf8c06bb672ac3e6eaf38bc31130234721ac6ea964",
+  "approvedAt": "2026-11-12T20:01:44.260Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "dbcfd7ab4ad98cc024dbd589e19ae61c9111ccb6"
+}
