@@ -407,11 +407,58 @@ export function isCheckoutOccupied(
 }
 
 /**
- * FR-10 guard predicate — the live same-tree peers whose `fileAllowlist` overlaps
- * `paths` (repo-relative). Shares the FR-4 liveness core with the sync gate, so both
- * live here. Callers pass the paths about to be edited; a non-empty result is a
- * contention advisory. A peer with an empty allowlist, or a different worktreeRoot,
- * is never a contender (INV-10). `selfSessionId` (optional) excludes the caller.
+ * SPEC-026 D-P5 - the approvable corpus: the repo-relative directory prefixes whose
+ * files are approvables (specs, decisions, domain notes, epics). The FR-12 pre-commit
+ * backstop and the FR-15.2 approvable-on-main assertion act only on these paths, and
+ * FR-9's "declared work includes a code path" test is
+ * `fileAllowlist.length === 0 || fileAllowlist.some((p) => !isApprovableCorpusPath(p))`.
+ *
+ * `classifyApprovablePath` (`./approvable`) classifies by FILE NAME, not by corpus
+ * directory, so it cannot answer this question; hence a separate list. The pre-commit
+ * hook duplicates it as a shell `case` pattern with a tie-back comment, and the
+ * SPEC-026 FR-14 parity test asserts the two lists are equal - change BOTH or neither.
+ */
+export const APPROVABLE_CORPUS_PREFIXES: readonly string[] = Object.freeze([
+  'specs/',
+  'docs/decisions/',
+  'docs/domain/',
+  'docs/epics/',
+]);
+
+/**
+ * D-P5 - true iff repo-relative `repoRelPath` lies inside the approvable corpus.
+ * Separators are unified (`\` to `/`) and one leading `./` is dropped first; a path
+ * that merely STARTS with a corpus name (`specs-old/x.md`, `docs/decisionsX.md`) is
+ * not inside it, because every prefix ends in `/`. A bare corpus directory name with
+ * no trailing slash (`specs`) is not a file inside the corpus, so it is false.
+ */
+export function isApprovableCorpusPath(repoRelPath: string): boolean {
+  const norm = repoRelPath.replace(/\\/g, '/').replace(/^\.\//, '');
+  return APPROVABLE_CORPUS_PREFIXES.some((prefix) => norm.startsWith(prefix));
+}
+
+/** FR-10 result shape: one entry per (contended path, live peer) pair. */
+export interface ContendedPath {
+  /** The input path, exactly as the caller passed it. */
+  path: string;
+  /** The live same-tree peer whose non-empty allowlist covers `path`. */
+  peer: SessionPresenceRecord;
+}
+
+/**
+ * FR-10 guard predicate - for each of `paths` (repo-relative), every OTHER live
+ * same-tree session whose `fileAllowlist` covers it, as one `{ path, peer }` entry per
+ * contended (path, peer) pair. Liveness and coverage only: no arbitration (FR-13) and
+ * no corpus filter (the FR-12 backstop applies `isApprovableCorpusPath` itself), which
+ * is exactly the scope the FR-14 bash twin is held to. Shares the FR-4 liveness core
+ * with the sync gate, so both live here. A non-empty result is a contention advisory;
+ * it never blocks.
+ *
+ * Never a contender: self (`selfSessionId`), a dead or stale record, a record for a
+ * different worktree (`sameCheckout`), a record with an EMPTY allowlist (INV-10 - an
+ * unscoped session must not appear to lock the whole repo), and a corrupt record
+ * (skipped, never thrown on). Entries are ordered by input path, then by the order
+ * `readAllRecords` yields peers; callers that compare sets should sort.
  */
 export function contendingLiveSessions(
   rootDir: string,
@@ -419,21 +466,36 @@ export function contendingLiveSessions(
   paths: string[],
   selfSessionId?: string,
   now = Date.now(),
-): SessionPresenceRecord[] {
-  const out: SessionPresenceRecord[] = [];
+): ContendedPath[] {
+  const peers: SessionPresenceRecord[] = [];
   for (const { rec } of readAllRecords(rootDir)) {
-    if (!rec) continue;
+    if (!rec) continue; // corrupt ⇒ skipped (fail-open for an advisory)
     if (selfSessionId && rec.sessionId === selfSessionId) continue;
     if (!isRecordLive(rec, now)) continue;
     if (!sameCheckout(rec.worktreeRoot, worktreeRoot)) continue; // different tree ⇒ not a contender
-    if (rec.fileAllowlist.length === 0) continue; // empty allowlist ⇒ not a contender
-    if (paths.some((p) => isPathClaimed(rec.fileAllowlist, p))) out.push(rec);
+    if (rec.fileAllowlist.length === 0) continue; // empty allowlist ⇒ no claim (INV-10)
+    peers.push(rec);
+  }
+  const out: ContendedPath[] = [];
+  for (const p of paths) {
+    for (const peer of peers) {
+      if (isPathClaimed(peer.fileAllowlist, p)) out.push({ path: p, peer });
+    }
   }
   return out;
 }
 
-/** True if repo-relative `p` is covered by any allowlist entry (exact / dir-prefix). */
-function isPathClaimed(allowlist: string[], p: string): boolean {
+/**
+ * The coverage rule `contendingLiveSessions` applies, exported so the FR-14 parity
+ * test can name the rule the bash twin mirrors (design.md, *Coverage semantics*).
+ * True if repo-relative `p` is covered by any allowlist entry. Each entry is
+ * normalised (`\` to `/`, a trailing `/*` dropped, trailing slashes dropped); an entry
+ * that normalises to empty is skipped. Then `p` is covered if it equals the entry or
+ * starts with `entry/`. It is also covered when the entry sits UNDER `p`, which only
+ * matters for a directory `p`; staged paths are always files, so the bash twin need
+ * not implement that third rule. An empty allowlist covers nothing.
+ */
+export function isPathClaimed(allowlist: readonly string[], p: string): boolean {
   const norm = p.replace(/\\/g, '/').replace(/\/+$/, '');
   for (const raw of allowlist) {
     // Normalize: unify separators, drop a trailing `/*` glob, drop trailing slashes.
