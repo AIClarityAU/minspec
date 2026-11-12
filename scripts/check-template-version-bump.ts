@@ -5,8 +5,10 @@
  *
  *   npx tsx scripts/check-template-version-bump.ts [--base <ref>]
  *
- * Exit 0 = ok. Exit 1 = templates changed without a bump. Exit 2 = could not determine
- * (no base ref, git failure): visible, never a silent pass. Offline: local refs only.
+ * Exit 0 = ok. Exit 17 (VIOLATION_EXIT_CODE) = templates changed without a bump, the ONLY
+ * blocking code. Exit 2 = could not determine (no base ref, git failure): visible, never a
+ * silent pass. Any other non-zero (1 = crash / runner missing) is also "could not determine".
+ * `--head <ref>` checks that ref instead of HEAD (the pre-push hook passes each pushed sha). Offline: local refs only.
  * Wired into .githooks/pre-push and `npm run check:template-version`. LOCAL ONLY: CI does not
  * run it, and TEMPLATE_VERSION_GATE_OFF=1 skips the hook, so it is not an enforced merge gate.
  */
@@ -17,17 +19,24 @@ import {
   readVersion,
   TEMPLATE_CONTENT_FILES,
   VERSION_FILE,
+  VIOLATION_EXIT_CODE,
 } from './lib/template-version-bump';
 
 const git = (...args: string[]): string =>
   execFileSync('git', args, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+
+const argValue = (flag: string): string | undefined => {
+  const i = process.argv.indexOf(flag);
+  return i !== -1 ? process.argv[i + 1] : undefined;
+};
+const head = argValue('--head') || 'HEAD';
 
 function resolveBase(): string {
   const i = process.argv.indexOf('--base');
   const candidates = i !== -1 && process.argv[i + 1] ? [process.argv[i + 1]] : ['origin/main', 'main'];
   for (const ref of candidates) {
     try {
-      return git('merge-base', 'HEAD', ref).trim();
+      return git('merge-base', head, ref).trim();
     } catch {
       /* try next */
     }
@@ -37,7 +46,7 @@ function resolveBase(): string {
 
 try {
   const base = resolveBase();
-  const changed = git('diff', '--name-only', `${base}...HEAD`, '--', ...TEMPLATE_CONTENT_FILES)
+  const changed = git('diff', '--name-only', `${base}...${head}`, '--', ...TEMPLATE_CONTENT_FILES)
     .split('\n')
     .filter(Boolean);
   const show = (rev: string): string | null => {
@@ -50,11 +59,11 @@ try {
   const verdict = checkTemplateVersionBump(
     changed,
     readVersion(show(base) ?? ''),
-    readVersion(show('HEAD') ?? ''),
+    readVersion(show(head) ?? ''),
   );
   if (!verdict.ok) {
     console.error(`template-version-bump: ${verdict.message}`);
-    process.exit(1);
+    process.exit(VIOLATION_EXIT_CODE);
   }
   console.log(`template-version-bump: ok — ${verdict.message}`);
 } catch (error) {

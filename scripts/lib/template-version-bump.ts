@@ -22,6 +22,14 @@ export const TEMPLATE_CONTENT_FILES: readonly string[] = [
 
 export const VERSION_FILE = 'packages/minspec/package.json';
 
+/**
+ * Exit code the CLI uses ONLY for a proven violation. Deliberately not 1 (what npx and tsx
+ * return when the runner is missing or the script crashes) and not 2 ("could not
+ * determine"), so the pre-push hook can block on this code alone and warn on everything
+ * else. .githooks/pre-push hardcodes the same number; a test pins the two together.
+ */
+export const VIOLATION_EXIT_CODE = 17;
+
 export interface BumpVerdict {
   ok: boolean;
   touched: string[];
