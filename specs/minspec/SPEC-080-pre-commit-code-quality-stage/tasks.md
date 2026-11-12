@@ -43,13 +43,13 @@ Shared rules for every task:
 
 ## 1 - Stage 3 records its verdict instead of exiting (FR-6, INV-5; AC-5, AC-9)
 
-- [ ] **1.1** `packages/minspec/src/lib/template-registry.ts` - in `PRE_COMMIT_HOOK`, the
+- [x] **1.1** `packages/minspec/src/lib/template-registry.ts` - in `PRE_COMMIT_HOOK`, the
   Node and python tiers set `minspec_stage3_rc` instead of `exit $?`; the python tier and
   the shell tier run only while `minspec_stage3_rc` is empty; the hook ends with
   `exit "$minspec_stage3_rc"`. Update the doc comment above `PRE_COMMIT_HOOK` where it says
   "the propagated `exit $?` below" so it describes the captured code. Tier order, probes and
   messages are unchanged.
-- [ ] **1.2** `packages/minspec/tests/pre-commit-code-quality-stage.test.ts` (new, owned) -
+- [x] **1.2** `packages/minspec/tests/pre-commit-code-quality-stage.test.ts` (new, owned) -
   the harness (render, fixture repo, run with `sh`, `PATH` control, `pathWithout`) and the
   Stage-3 cases: AC-5's fixture (a staged spec with no `id:`) is refused; AC-9's two
   fixtures (shell tier with a `minspec:managed:` marker outside `.minspec/hooks/`; python tier
