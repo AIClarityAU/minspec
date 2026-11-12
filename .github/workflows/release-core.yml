@@ -6,10 +6,10 @@
 # bundler call the tests are to use) and attaches `minspec-core-<version>.cjs` plus
 # `minspec-core-<version>.cjs.sha256` to the release.
 #
-# Not yet runnable: packages/core/ (package.json, build.mjs, buildCore) is created by
-# SPEC-136 tasks 3-15 and does not exist when this file lands. Until it does, a `core-v*`
-# tag or a manual run fails closed at the version read. This file is dormant, not verified;
-# the task 16.1 dry run is to be done once packages/core/ lands.
+# packages/core/ (package.json, build.mjs, buildCore) now exists. This workflow has not
+# yet been verified end to end: the task 16.1 dry run (Actions > release-core > Run
+# workflow) is still to be done. A `core-v*` tag or a manual run fails closed at the
+# version read or the build if anything is wrong.
 #
 # The tag prefix `core-v` keeps this off the extension's own version tags (INV-3).
 # No DR-103 release workflow exists yet, so this is its own file; fold it in as a job
