@@ -8,12 +8,12 @@ type: tasks
 status: planning
 product: minspec
 epic: EPIC-003  # SDD Core Methodology
-relates_to: ["#2108", "#1317", "#1806", DR-003, SPEC-038]
+relates_to: ["#2108", "#1317", "#1806", "#1543", DR-003, SPEC-038]
 phases:
   specify: done
   clarify: done
-  plan: done
-  tasks: done
+  plan: in-progress
+  tasks: pending
   implement: pending
 ---
 
