@@ -27,6 +27,15 @@
  * recoverable only from history — so the second half compares the identity-bearing
  * frontmatter of every modified decision record across base and head.
  *
+ * ── It also carries the spec-id half (#1327) ─────────────────────────────────
+ * A duplicate SPEC id reached open PR #1302 with nothing to reject it. The decision
+ * existed (`lib/spec-id-claims.ts`, #3164) but no workflow ran it. This script is the one
+ * `dr-id-collision.yml` already runs on every PR with the right token, so the spec half
+ * runs here, and the job's red can therefore name a spec id. It reuses this script's
+ * subject and open-PR listings and `gh` runner rather than calling the by-hand
+ * `check-spec-id-collision.ts`: a second open-PR walk per run is the O(calls) cost that
+ * exhausted the rate limit in #3077.
+ *
  * ── FAIL CLOSED (DR-066, constitution invariant 2) ───────────────────────────
  * Every failure path here is a RED, never a green:
  *   • `gh` absent, unauthenticated, rate-limited, or erroring       → exit 1
@@ -65,6 +74,8 @@ import {
   type PrClaims,
   type PrFileEntry,
 } from './lib/dr-id-collision';
+import { baseSpecDirs, reportSpecIdVerdict, SpecIdGateError } from './lib/open-pr-spec-claims';
+import { claimedSpecDirsFromPrFiles, decideSpecIdCollision, vacatedSpecDirsFromPrFiles } from './lib/spec-id-claims';
 
 const ROOT = process.cwd();
 
@@ -247,20 +258,20 @@ function parseJsonRows(text: string, what: string): Record<string, unknown>[] {
 
 // ─── Repo reads ──────────────────────────────────────────────────────────────
 
-/** Decisions dir, repo-relative, from `.minspec/config.json` (default `docs/decisions`). */
-function resolveDecisionsDirRel(): string {
+/** A directory setting, repo-relative, from `.minspec/config.json`, else `fallback`. */
+function resolveConfiguredDirRel(key: 'decisionsDir' | 'specsDir', fallback: string): string {
   const configPath = join(ROOT, '.minspec', 'config.json');
   try {
     if (existsSync(configPath)) {
-      const cfg = JSON.parse(readFileSync(configPath, 'utf-8')) as { decisionsDir?: string };
-      if (typeof cfg.decisionsDir === 'string' && cfg.decisionsDir.trim()) {
-        return cfg.decisionsDir.trim().replace(/^\.\//, '').replace(/\/+$/, '');
+      const value = (JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>)[key];
+      if (typeof value === 'string' && value.trim()) {
+        return value.trim().replace(/^\.\//, '').replace(/\/+$/, '');
       }
     }
   } catch {
     // Malformed config — fall back to the default rather than guessing.
   }
-  return 'docs/decisions';
+  return fallback;
 }
 
 /** Every file a pull request touches, with its status. One API call. */
@@ -276,22 +287,29 @@ function prFileEntries(repo: string, pr: number): PrFileEntry[] {
   }));
 }
 
+/** One other open PR and every file it touches. */
+interface OtherPrFiles {
+  pr: number;
+  entries: PrFileEntry[];
+}
+
 /**
- * Every OTHER open PR's claims, in batched GraphQL pages (#3077).
+ * Every OTHER open PR's files, in batched GraphQL pages (#3077). Unfiltered, so one walk
+ * answers both the DR half and the spec half (#1327).
  *
  * One REST `pulls/N/files` call per open PR made a run cost O(open PRs) requests and
  * exhausted the installation rate limit. 50 PRs x their first 100 files per query is a
  * handful of calls. A PR with more than 100 files (`hasNextPage`) falls back to the
  * paginated REST listing for that one PR, so no claim is ever read from a truncated list.
  */
-function otherPrClaims(repo: string, subjectPr: number, decisionsDir: string): PrClaims[] {
+function otherPrFiles(repo: string, subjectPr: number): OtherPrFiles[] {
   const [owner, name] = repo.split('/');
   if (!owner || !name) throw new GateError(`--repo must be OWNER/NAME, got "${repo}"`);
   const query =
     'query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){' +
     'pullRequests(states:OPEN,first:50,after:$cursor){pageInfo{hasNextPage endCursor}' +
     'nodes{number files(first:100){pageInfo{hasNextPage} nodes{path changeType}}}}}}';
-  const claims: PrClaims[] = [];
+  const others: OtherPrFiles[] = [];
   let cursor: string | undefined;
   for (let page = 0; ; page++) {
     if (page > 200) throw new GateError('the open-PR GraphQL listing did not terminate after 200 pages.');
@@ -321,20 +339,20 @@ function otherPrClaims(repo: string, subjectPr: number, decisionsDir: string): P
       }
       if (number === subjectPr) continue;
       if (node.files.pageInfo?.hasNextPage !== false) {
-        claims.push({ pr: number, paths: claimedPathsFromPrFiles(prFileEntries(repo, number), decisionsDir) });
+        others.push({ pr: number, entries: prFileEntries(repo, number) });
         continue;
       }
       const entries: PrFileEntry[] = node.files.nodes.map((f: { path?: unknown; changeType?: unknown }) => ({
         filename: String(f.path ?? ''),
         status: String(f.changeType ?? '').toLowerCase(),
       }));
-      claims.push({ pr: number, paths: claimedPathsFromPrFiles(entries, decisionsDir) });
+      others.push({ pr: number, entries });
     }
     if (!prs.pageInfo.hasNextPage) break;
     cursor = String(prs.pageInfo.endCursor ?? '');
     if (!cursor) throw new GateError('the open-PR GraphQL listing said there was another page but gave no cursor.');
   }
-  return claims;
+  return others;
 }
 
 /**
@@ -488,7 +506,8 @@ function assertBaseListingPlausible(
 
 function main(): void {
   const args = parseArgs(process.argv.slice(2));
-  const decisionsDir = resolveDecisionsDirRel();
+  const decisionsDir = resolveConfiguredDirRel('decisionsDir', 'docs/decisions');
+  const specsDir = resolveConfiguredDirRel('specsDir', 'specs');
 
   // One file listing for the subject, read by BOTH halves: the paths it claims and
   // the records it edits in place are two views of the same payload.
@@ -497,7 +516,11 @@ function main(): void {
   const base = basePaths(args.repo, args.base, decisionsDir);
   assertBaseListingPlausible(args.base, decisionsDir, base, subject);
 
-  const others = otherPrClaims(args.repo, args.pr, decisionsDir);
+  const otherFiles = otherPrFiles(args.repo, args.pr);
+  const others: PrClaims[] = otherFiles.map((o) => ({
+    pr: o.pr,
+    paths: claimedPathsFromPrFiles(o.entries, decisionsDir),
+  }));
 
   const input: DrIdCollisionInput = {
     decisionsDir,
@@ -551,13 +574,27 @@ function main(): void {
     }
   }
 
-  if (!verdict.ok || !repurposing.ok) process.exitCode = 1;
+  // Read after the DR verdicts are printed, so a spec listing that cannot be read fails
+  // the run closed without hiding what the DR halves already found.
+  const specVerdict = decideSpecIdCollision({
+    baseRef: args.base,
+    baseDirs: baseSpecDirs(args.repo, args.base, specsDir, ghOrFail),
+    subject: {
+      pr: args.pr,
+      dirs: claimedSpecDirsFromPrFiles(entries, specsDir),
+      vacatedDirs: vacatedSpecDirsFromPrFiles(entries, specsDir),
+    },
+    otherPrs: otherFiles.map((o) => ({ pr: o.pr, dirs: claimedSpecDirsFromPrFiles(o.entries, specsDir) })),
+  });
+  reportSpecIdVerdict(specVerdict);
+
+  if (!verdict.ok || !repurposing.ok || !specVerdict.ok) process.exitCode = 1;
 }
 
 try {
   main();
 } catch (e) {
-  const why = e instanceof GateError ? e.message : `unexpected error: ${(e as Error).message}`;
+  const why = e instanceof GateError || e instanceof SpecIdGateError ? e.message : `unexpected error: ${(e as Error).message}`;
   console.error(`DR id collision check FAILED CLOSED — ${why}`);
   const limited = e instanceof RateLimitError;
   if (process.env.GITHUB_ACTIONS) {

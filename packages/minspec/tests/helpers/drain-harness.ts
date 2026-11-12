@@ -122,6 +122,21 @@ export interface DrainFixture {
    * predates the count keeps its spec-writing on.
    */
   heldPrs?: number | 'fail';
+  /**
+   * Real held-PR rows (#3570): the stub runs the drain's own `--jq` expression over these
+   * with jq, so a test pins WHICH pull requests the count includes. Takes precedence over
+   * a numeric `heldPrs`.
+   */
+  heldRows?: { head: string; files: string[] | null }[];
+  /**
+   * Specs on the tree the drain runs from whose frontmatter `status:` is `new` or
+   * `specifying` (#3344): drafts that merged without an approval. A number writes that
+   * many under `specs/`, beside approved ones and one whose BODY mentions the status, so
+   * only the frontmatter counts. `'missing'` leaves no `specs/` folder at all. Unset
+   * writes an empty `specs/`, so every fixture that predates the count keeps its
+   * spec-writing on.
+   */
+  pendingSpecs?: number | 'missing';
   /** The reading on disk when the drain starts. `null` = no file at all. */
   reading: Reading | null;
   /** What the meter reads once the dispatch of that issue has finished. */
@@ -142,7 +157,7 @@ export interface DrainFixture {
   /** The same for the remediation of that pull request. */
   remediateSays?: Record<number, string>;
   /**
-   * Issues whose dispatch FAILS: the stub prints an authentication error and exits 1
+   * Issues whose dispatch FAILS: the stub prints a non-auth error (a 401 now stops the cycle, #3176) and exits 1
    * without building anything. Such an issue is in `offered()` and not in `dispatched()`.
    */
   issueFails?: number[];
@@ -241,11 +256,30 @@ const lines = (file: string): string[] =>
 
 const numbers = (file: string): number[] => lines(file).map(Number);
 
+/**
+ * Writes `pending` specs at `status: specifying` (one of them `new`) under `specsDir`,
+ * plus approved specs and a planning spec whose body quotes `status: specifying`: noise
+ * that a count reading anything but the frontmatter would include (#3344).
+ */
+function writePendingSpecs(specsDir: string, pending: number): void {
+  fs.mkdirSync(specsDir, { recursive: true });
+  const spec = (n: number, status: string, body = '') => {
+    const d = path.join(specsDir, `SPEC-${900 + n}-fixture`);
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'requirements.md'), `---\nid: SPEC-${900 + n}\nstatus: ${status}\n---\n\n# Fixture\n${body}`);
+  };
+  for (let i = 0; i < pending; i++) spec(i, i === 0 ? 'new' : 'specifying');
+  spec(90, 'planning', '\nstatus: specifying\n');
+  spec(91, 'implementing');
+  spec(92, 'done');
+}
+
 function build(f: DrainFixture): Built {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'drain-harness-'));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   fs.mkdirSync(path.join(dir, 'root'));
+  if (f.pendingSpecs !== 'missing') writePendingSpecs(path.join(dir, 'specs', 'minspec'), f.pendingSpecs ?? 0);
   const quota = path.join(dir, 'quota.json');
   const logFile = path.join(dir, 'log');
   const stub = (name: string, body: string) =>
@@ -259,6 +293,15 @@ function build(f: DrainFixture): Built {
     throw new Error(
       'drain-harness: this fixture lists inbox issues, but scripts/drain-inbox.sh has no ' +
         'MINSPEC_DRAIN_TRIAGE seam, so the REAL triage script would run. Refusing.',
+    );
+  }
+
+  if (f.heldRows) {
+    fs.writeFileSync(
+      path.join(dir, 'held-rows.json'),
+      JSON.stringify(
+        f.heldRows.map((r) => ({ headRefName: r.head, files: r.files === null ? null : r.files.map((p) => ({ path: p })) })),
+      ),
     );
   }
 
@@ -303,7 +346,9 @@ if [[ "$1" == "issue" && "$2" == "view" ]]; then
 fi
 if [[ "$1" == "pr" && "$2" == "list" && "$label" == "needs-human-review" ]]; then
   echo "pr list --label needs-human-review" >> "${dir}/held-asked"
-  ${f.heldPrs === 'fail' ? 'echo "HTTP 502: Bad Gateway (https://api.github.com/graphql)" >&2; exit 1' : `echo ${f.heldPrs ?? 0}; exit 0`}
+  ${f.heldRows ? `expr=""; prev=""
+  for a in "$@"; do [[ "$prev" == "--jq" ]] && expr="$a"; prev="$a"; done
+  jq -r "$expr" "${dir}/held-rows.json"; exit $?` : f.heldPrs === 'fail' ? 'echo "HTTP 502: Bad Gateway (https://api.github.com/graphql)" >&2; exit 1' : `echo ${f.heldPrs ?? 0}; exit 0`}
 fi
 if [[ "$1" == "pr" && "$2" == "list" && " $* " == *" --state open "* ]]; then
   # Honour --limit the way gh does (default 30), and answer in the row shape the drain's
@@ -341,7 +386,7 @@ asked="\${MINSPEC_DISPATCH_OUTCOME_STATUS:-}"
 for v in $(compgen -v MINSPEC_DISPATCH_); do unset "$v"; done
 if [[ -f "${dir}/fails-issue.$1" ]]; then
   echo "Fetching issue #$1..."
-  echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2
+  echo "HTTP 500: upstream exploded (https://api.github.com/graphql)" >&2
   exit 1
 fi
 if [[ -f "${dir}/quiet-refusal.$1" ]]; then

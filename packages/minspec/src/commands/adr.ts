@@ -24,6 +24,7 @@ import {
   type ApprovalRecord,
 } from '../lib/approval';
 import { sidecarPath, writeRecord } from '../lib/approval-store';
+import { scopeIndexToDr } from '../lib/dr-index-scope';
 
 function decisionsDirOverride(): { decisionsDir: string } | undefined {
   const decisionsDir = vscode.workspace
@@ -215,7 +216,7 @@ async function pickAdr(
 }
 
 /** The DR's own frontmatter `tier:` (T1-T4), or undefined — never inferred (D10). */
-function declaredTier(filePath: string): string | undefined {
+export function declaredTier(filePath: string): string | undefined {
   try {
     const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(fs.readFileSync(filePath, 'utf-8'))?.[1] ?? '';
     return /^tier:[ \t]*(T[1-4])\b/m.exec(fm)?.[1];
@@ -329,18 +330,32 @@ async function applyStatus(
     // Only the Accept path opts in — a manual Set Status is not an approval, so
     // it leaves the change staged for the user to commit.
     let suffix = '';
+    let stranded = false;
     if (opts.commit && folder) {
       const indexPath = path.join(path.dirname(filePath), 'INDEX.md');
-      suffix = (
-        await commitApprovalIfEnabled(
-          folder,
-          sidecarAbs ? [filePath, indexPath, sidecarAbs] : [filePath, indexPath],
-          `chore(accept): ${id} → ${status}`,
-        )
-      ).suffix;
+      // #2021: the regen above rewrote EVERY row from disk; keep only this DR's so an
+      // unrelated DR's uncommitted status change cannot ride into this approval commit.
+      scopeIndexToDr(folder, indexPath, id);
+      const committed = await commitApprovalIfEnabled(
+        folder,
+        sidecarAbs ? [filePath, indexPath, sidecarAbs] : [filePath, indexPath],
+        `chore(accept): ${id} → ${status}`,
+      );
+      suffix = committed.suffix;
+      stranded = committed.stranded === true;
     }
 
-    vscode.window.showInformationMessage(`MinSpec: ${id} → ${status}${suffix}`);
+    // #1163: an acceptance that sits only in the working tree is invisible to everyone
+    // else and one discard from gone. Never report it with the plain success toast —
+    // a warning that states the state, so it cannot be mistaken for a landed acceptance.
+    if (stranded) {
+      vscode.window.showWarningMessage(
+        `MinSpec: ${id} → ${status}, but the acceptance is NOT committed${suffix} — ` +
+          `it exists only as an uncommitted edit in your working tree. Commit it on a branch to keep it.`,
+      );
+    } else {
+      vscode.window.showInformationMessage(`MinSpec: ${id} → ${status}${suffix}`);
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     vscode.window.showErrorMessage(`MinSpec: Failed to set status — ${message}`);

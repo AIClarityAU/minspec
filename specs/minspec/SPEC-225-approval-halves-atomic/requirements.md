@@ -100,20 +100,25 @@ gate (FR-2 to FR-4) as the enforcing part. Locating every copy is a plan-phase t
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended (item 2
-is the exception: its premise was false, see there). An
-agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
-on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
-chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
-(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
-context, not verified. No human chose any single item. Decisions 1 and 5 are left open
-(adopter reach, and no recommendation); this section stays open, and
-the spec is not ready to approve, until the founder answers.
+Decisions 3 and 4 record the option this document marks recommended. An agent session
+recorded them on 2026-10-27, acting on a standing instruction the founder gave on
+2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
+chief-of-staff proxy); no human chose those items. Decisions 1 and 5 record selections from
+the answers to task-queue items c225 and c225b (2026-10-28). Each queue answer is
+attributed to the founder but is unverified: DR-108 (delegated approval) section 4 holds
+that a queue item cannot carry consent, so none of these selections binds until the founder
+approves this spec's text with them in place. Decision 2 was recorded by an agent session
+from reading the code (it departs from the exemption option and no human chose it); this
+section stays open, and the spec is not ready to approve, until the founder confirms it.
 
 1. **Where the commit-time gate lives.**
 
-   **Not recorded:** Option A puts the gate in the generated adopter hook template, so it
-   reaches adopter repos. Needs the founder's answer.
+   **Recorded selection: A,** the gate goes in `.githooks/pre-commit` plus the generated
+   adopter hook template. Source: the answer to task-queue item c225, 2026-10-28 ("Yes
+   (Recommended)"), an answer the queue attributes to the founder. A queue answer is not
+   consent (DR-108 section 4), so this selection is unverified and binds only if the founder
+   approves this spec's text with it in place. The template ships to adopters, so the FR-9
+   opt-in guard applies.
 
    - A. `.githooks/pre-commit` plus the generated adopter hook template **(rec)**: catches it
      before the commit exists. Cost: the template ships to adopters, so it widens the
@@ -136,7 +141,7 @@ the spec is not ready to approve, until the founder answers.
    subject line is forgeable, and the only env var set is `DR_INDEX_GATE_OFF=1`, a different
    gate's switch), and the bash pre-commit hooks stay active in the recovery worktree, so an
    FR-2 hook gate would fire on that commit and pass. The one real split path is
-   `lib/approval-recover.ts:221-226`, which silently drops any listed path missing on disk
+   `lib/approval-recover.ts:211-220`, which silently drops any listed path missing on disk
    (`fs.existsSync`): a missing sidecar would commit the spec alone. Recovery should instead
    fail closed when any requested path is missing.
 3. **Which lifecycle fields count.** Use the canonicalization strip-list as the single source
@@ -154,5 +159,9 @@ the spec is not ready to approve, until the founder answers.
 5. **Scope of the commit message wording** for the project-external agent guidance: this repo
    can only change prose it holds. Whether the out-of-repo copy is updated is a human act.
 
-   **Not recorded:** no options and no recommendation are given, and updating the
-   out-of-repo copy is named a human act. Needs the founder's answer.
+   **Recorded selection: repo-only.** This spec changes only the prose this repo holds;
+   updating the out-of-repo copy stays a separate human act, outside this spec. Source: the
+   answer to task-queue item c225b, 2026-10-28 ("Repo-only (Recommended)"), an answer the
+   queue attributes to the founder. A queue answer is not consent (DR-108 section 4), so this
+   selection is unverified and binds only if the founder approves this spec's text with it
+   in place.
