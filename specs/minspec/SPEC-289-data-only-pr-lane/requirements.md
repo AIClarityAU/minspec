@@ -24,8 +24,8 @@ phases:
 # SPEC-289: Data-only pull requests are detected automatically and reviewed on a cheap lane
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2973 (founder queue item in13). Nothing
-> is built until a human reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify),
-> and approves it.
+> is built until its [Decisions needed (Clarify)](#decisions-needed-clarify) are resolved
+> and it is approved.
 >
 > Design rationale it rests on: DR-033 (consequence-hybrid gate: `ai-review:pass` gates merge),
 > DR-051 Option 2 (the docs lane, #575), DR-066 (fail closed). No DR is minted by this spec:
@@ -240,6 +240,15 @@ spend for that run, so the FR-0 comparison can be redone from logs after the cha
 
 ## Decisions needed (Clarify)
 
+Each decision below carries a recorded selection: the option this document recommends, copied
+by an agent session (minspec-sdd[bot]) on 2026-11-12. These are agent recommendations, not
+ratified answers, so Clarify stays open. No human chose any option, and DLG-001 (DR-108, the
+delegated-approval record) covers approval only, not Clarify selections. The founder's answer on
+operator queue item c1106au (outside this repo) is not a committed record, and DR-108 section 4
+says a queue item cannot carry consent, so it does not close Clarify here.
+D6's selection, if ratified, is a rule for Plan: if the FR-0 baseline shows the target bot pull requests
+spend zero tokens today, Plan returns this spec to Clarify with those numbers instead of building.
+
 **D1 - What is the default allowlist?**
 - **(a) Empty: lane off until the adopter names data paths (rec).** Zero risk of misclassifying
   code in a repo nobody looked at. Cost: adopters get no saving until they set the key, and most
@@ -247,6 +256,8 @@ spend for that run, so the FR-0 comparison can be redone from logs after the cha
 - (b) A conventional default (`fixtures/**`, `testdata/**`, `data/**` with extensions `csv tsv
   json ndjson jsonl yaml yml parquet`). Cost: a repo whose `data/loader.json` drives its build gets
   a cheap review on a behavioural change, the exact case #2973 says must not count as data.
+
+**Recorded selection: Option (a),** the default allowlist is empty; the lane is off until the adopter names data paths. An agent session copied this document's (rec) option; no human chose this item.
 
 **D2 - What does the cheap path run?** (The token decision.)
 - **(a) One reviewer voter with a data-lane prompt, other voters skipped (rec).** Roughly a
@@ -261,6 +272,8 @@ spend for that run, so the FR-0 comparison can be redone from logs after the cha
 - (c) The reviewer voter on a smaller model. Cost: adds a model-selection path to the shipped
   workflow, and a weaker model is still spend.
 
+**Recorded selection: Option (a),** one reviewer voter with a data-lane prompt, other voters skipped. An agent session copied this document's (rec) option; no human chose this item.
+
 **D3 - Does an eligible PR auto-merge?**
 - **(a) Yes, for authors who are repo members or an App bot the adopter lists; no for everyone
   else (rec).** Gets "automated data updates" off the founder's desk, matching the docs lane. Cost:
@@ -271,6 +284,8 @@ spend for that run, so the FR-0 comparison can be redone from logs after the cha
 - (c) Yes for every author. Cost: an outside contributor's data lands with no human ever seeing
   it; not recommended.
 
+**Recorded selection: Option (a),** an eligible PR auto-merges for repo members or an App bot the adopter lists, and not for anyone else. An agent session copied this document's (rec) option; no human chose this item.
+
 **D4 - Can a lockfile ever be data?**
 - **(a) No, never (rec).** A lockfile decides which third-party code runs; it is the supply chain,
   and the security voter exists for it. Cost: Dependabot or Renovate lockfile bumps, the most
@@ -278,6 +293,8 @@ spend for that run, so the FR-0 comparison can be redone from logs after the cha
   see FR-0.)
 - (b) Yes, if the adopter explicitly lists it. Cost: an adopter can switch off review of their
   supply chain with one config line.
+
+**Recorded selection: Option (a),** a lockfile is never data. An agent session copied this document's (rec) option; no human chose this item.
 
 **D5 - Is "not referenced by code" checked, or only path conventions?**
 - **(a) Path conventions plus the FR-4 denylist only (rec).** Pure, cheap, predictable. Cost: a
@@ -287,12 +304,16 @@ spend for that run, so the FR-0 comparison can be redone from logs after the cha
   Cost: a repo-wide scan per PR, false refusals on harmless references (a test that loads a
   fixture is code referencing data), and it still misses computed paths.
 
+**Recorded selection: Option (a),** path conventions plus the FR-4 denylist only. An agent session copied this document's (rec) option; no human chose this item.
+
 **D6 - If FR-0 shows the target bot PRs spend zero tokens today, what then?**
 - **(a) Return to Clarify with the numbers before Plan (rec).** The founder's goal was tokens; if
   the spend is already zero, the real cost is founder merge time, which is D3's question, not D2's.
   Cost: one more round-trip before any build.
 - (b) Build anyway for human-authored data PRs. Cost: may build a lane for a class that barely
   exists.
+
+**Recorded selection: Option (a),** return to Clarify with the FR-0 numbers before Plan. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Follow-ups (tracked)
 

@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-272-validate-warning-triage/requirements.md",
+  "specHash": "045ed071742dab818e4fdff3c1abe8b387f2faa9ae418758846e3d7e9532c914",
+  "approvedAt": "2026-11-02T02:52:49.879Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-on-rec-1028",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3229#issuecomment-6541165991"
+}

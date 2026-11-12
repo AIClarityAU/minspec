@@ -8,7 +8,9 @@ epic: EPIC-007  # Agent Execute - the dev-time autonomous build/merge pipeline (
 aspects: [autonomous-pipeline, drain, quota, fail-closed, no-silent-gate]
 depends_on: []
 relates_to: [SPEC-044, SPEC-074, SPEC-230, "#2586", "#1187", "#2573", "#2514"]
-implements: []
+implements: none
+implements_reason: >-
+  This spec modifies files another spec owns (see affects:) and creates none of its own.
 affects: [scripts/drain-inbox.sh]
 phases:
   specify: in-progress
@@ -20,8 +22,8 @@ phases:
 
 # SPEC-271: A quota cap that is SET for a window the reading does not report holds the drain
 
-> **This is a SPECIFICATION ONLY.** Written for issue #2586. Nothing is built until a
-> human resolves [Decisions needed (Clarify)](#decisions-needed-clarify) and approves it.
+> **This is a SPECIFICATION ONLY.** Written for issue #2586. Nothing is built until its
+> [Decisions needed (Clarify)](#decisions-needed-clarify) are resolved and it is approved.
 
 Issue: #2586 (a quota cap of 0 is not a pause: a reading with no weekly figure, or a 5h
 window that has reset, is admitted). Related: #1187 (no pause/resume knob), #2573 (cap
@@ -108,6 +110,16 @@ The explicit pause/resume marker of #1187 (see D2), the ramp (#2514), and wiring
 weekly figure into the wall parser.
 
 ## Decisions needed (Clarify)
+
+All 3 decisions are answered: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers (DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). These answers
+bind once this spec is approved, by a human or a covered delegation, and not before.
+
+- **D1 - Recorded selection: Option A,** under a set 5h cap, hold after a `window-reset` until a
+  fresh reading shows the new window.
+- **D2 - Recorded selection: fix the gate now** in this spec; the pause marker (#1187) stays separate.
+- **D3 - Recorded selection: no DR;** the change is reversible in under a day.
 
 **D1 — 5h `window-reset` under a SET 5h cap.** "Window reset" is not "window
 unreported": the old usage is stale, new usage is unknown.

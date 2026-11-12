@@ -8,6 +8,9 @@ epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline
 aspects: [agent-dispatch, escalation, no-silent-gate, measurement, autonomous-pipeline]
 relates_to: [SPEC-044, SPEC-062, SPEC-073, SPEC-074, DR-003, DR-033, DR-076]
 affects: [scripts/dispatch-issue.sh, scripts/remediate-pr.sh, scripts/drain-inbox.sh]  # dispatch-issue.sh and drain-inbox.sh are OWNED by SPEC-044 via implements: - this spec modifies them, never owns them (INV: one owner per file). Files this spec will own are named in Plan, not guessed here.
+implements: none
+implements_reason: >-
+  This spec modifies files another spec owns (see affects:) and creates none of its own.
 phases:
   specify: in-progress
   clarify: done
@@ -196,6 +199,10 @@ pipeline's false-success rate becomes a measured number instead of an unstateabl
   unavailable (FR-4).
 
 ## Decisions needed (Clarify)
+
+All 6 decisions are resolved: an agent session recorded each option this document
+already recommended, on 2026-10-18 (recorded earlier, not today). No human chose them; they
+are ratified only by approval of this spec.
 
 D1 to D6 each carry a **Recorded selection** line naming the option this document already
 recommended. An agent session wrote those lines on 2026-10-18, and no human chose them. This

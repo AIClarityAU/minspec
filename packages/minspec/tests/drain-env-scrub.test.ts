@@ -170,6 +170,8 @@ describe('every drain test file runs with the leak primed, or says why not', () 
       'Pure seams only (--is-quota, --session-alive, --should-continue, --resolve-session-pid). None reads a drain or quota knob.',
     'drain-reconcile.test.ts':
       'Runs the extracted reconciler block and --dispatch-alive. Neither reads a MINSPEC_DRAIN_ or MINSPEC_QUOTA_ knob.',
+    'drain-unlaned.test.ts':
+      'Pure seam only (--unlaned, jq over stdin). It reads no MINSPEC_DRAIN_ or MINSPEC_QUOTA_ knob and runs no gh call.',
   };
 
   const testsDir = __dirname;
