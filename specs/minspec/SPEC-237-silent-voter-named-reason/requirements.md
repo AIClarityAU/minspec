@@ -194,7 +194,7 @@ Each AC is red on today's code and green after the change.
   verdict" and name `reviewer, architect`. A control with three verdicts shows no such
   line.
 - **AC-5 (FR-7)** The managed-template parity test passes on the regenerated template.
-- **AC-6 (survivor reuse)** In `voter-survivor-reuse.test.ts`, a prior run whose
+- **AC-6 (survivor reuse)** In `voter-survivor-reuse.test.ts` (#2163 @ `1bc9e484`, since ported to `.github/scripts/ai-review-guard.test.js`), a prior run whose
   architect record is the new placeholder still selects the architect to re-run.
 
 ## Invariants this must not break
