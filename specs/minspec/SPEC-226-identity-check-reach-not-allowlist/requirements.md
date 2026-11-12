@@ -307,7 +307,12 @@ All cases run in `identity-boundary-check.test.sh`'s hermetic sandbox (temp `HOM
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered, not ratified: an agent session selected on 2026-10-25, for each, the option this document already recommended. No human chose them, and no delegation covers authoring Clarify answers. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted it. It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and that approval may overturn it. D-3 carries one condition: if Plan T0's candidate count shows option (a) cannot reach `PASS` within a few runs, Plan returns here instead of picking a cap that never holds.
+
 ### D-1: Where does the check's source of truth live?
+
+**Recorded selection: Option (a),** because keeping the check out of a repo agents open pull
+requests against stops an agent weakening its own guard through an auto-merged change.
 
 - **(a) Leave the check in the host-side claude-config repository, next to its test suite
   (rec).** The check polices agents, and keeping it out of a repo that agents open pull
@@ -322,6 +327,9 @@ All cases run in `identity-boundary-check.test.sh`'s hermetic sandbox (temp `HOM
 
 ### D-2: Is a dead token at rest a finding?
 
+**Recorded selection: Option (a),** because the property is whether an agent can obtain a
+live credential, and option (b) would make the check unable to pass in practice (INV-4).
+
 - **(a) No. It is `clean` for the verdict, and a `[note]` names the file (rec).** The
   property is "can an agent obtain a live user credential", and a token GitHub rejects
   cannot act. Cost: a revoked token left in a mode-`644` file never turns the banner red.
@@ -331,6 +339,9 @@ All cases run in `identity-boundary-check.test.sh`'s hermetic sandbox (temp `HOM
   good, so the check could never pass in practice. INV-4 forbids that.
 
 ### D-3: Session transcripts, and how many requests the sweep sends to GitHub
+
+**Recorded selection: Option (a),** because transcripts are agent-readable and option (b) would
+leave the biggest store of pasted secrets out of scope, which is the gap this issue is about.
 
 The sweep's roots include `~/.claude/projects/`, where every token ever printed in a session
 is kept. The candidate count there is unmeasured (see Measured).

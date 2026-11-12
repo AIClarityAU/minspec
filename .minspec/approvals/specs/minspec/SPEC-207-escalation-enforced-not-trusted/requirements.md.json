@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-207-escalation-enforced-not-trusted/requirements.md",
+  "specHash": "4497ead61f08015ba2afc35510bdb37fecc166b6a10906d3ba9e0a6ceba6cc1c",
+  "approvedAt": "2026-11-12T05:38:40.475Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-pile-1112a-implements",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3630#issuecomment-6815532762"
+}
