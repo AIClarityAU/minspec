@@ -107,9 +107,10 @@ chief-of-staff proxy); no human chose those items. Decisions 1 and 5 record sele
 the answers to task-queue items c225 and c225b (2026-10-28). Each queue answer is
 attributed to the founder but is unverified: DR-108 (delegated approval) section 4 holds
 that a queue item cannot carry consent, so none of these selections binds until the founder
-approves this spec's text with them in place. Decision 2 was recorded by an agent session
-from reading the code (it departs from the exemption option and no human chose it); this
-section stays open, and the spec is not ready to approve, until the founder confirms it.
+approves this spec's text with them in place. Decision 2 was first recorded by an agent
+session from reading the code; the founder then chose it himself on 2026-11-13 through
+task-queue item c225c (choice k, "keep: recovery fails closed, no exemption"). Decisions 3
+and 4 remain agent-recorded, so this section stays open until the founder confirms them.
 
 1. **Where the commit-time gate lives.**
 
@@ -132,9 +133,10 @@ section stays open, and the spec is not ready to approve, until the founder conf
    by an explicit marker, at the cost of one more trusted path to keep honest; or fix the
    producer.
 
-   **Recorded selection: no exemption; fix the producer so recovery fails closed.** An agent
-   session recorded this after reading the code at commit 4012113d; no human chose this item,
-   and it departs from the exemption option above. Evidence: `commands/approve.ts:398-402`
+   **Recorded selection: no exemption; fix the producer so recovery fails closed.** The
+   founder chose this himself on 2026-11-13 through task-queue item c225c (choice k, "keep:
+   recovery fails closed, no exemption"). It departs from the exemption option above. An
+   agent session had first recorded it after reading the code at commit 4012113d. Evidence: `commands/approve.ts:398-402`
    passes the spec path and the sidecar together, `lib/approval-recover.ts:273` stages
    exactly those paths and `:296` makes one commit, so recovery already lands both halves in
    one commit and satisfies FR-2. There is no recovery marker to key an exemption on (a
