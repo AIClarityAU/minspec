@@ -38,7 +38,7 @@ push (no `workflows` scope): the founder pushes and merges it. Group 6 is founde
 
 ## 1 - Foundations
 
-- [ ] **1.1** (INV-4, FR-3) `packages/minspec/src/lib/ruleset-advisor.ts` - add `export` to
+- [x] **1.1** (INV-4, FR-3) `packages/minspec/src/lib/ruleset-advisor.ts` - add `export` to
   `rulesetGuardsDefaultBranchChecks`, `extractRequiredContexts` and the `RulesetFull`
   interface. No body changes.
   Test (`describe('INV-4 exports')`): each helper is importable and behaves as today on a
@@ -46,7 +46,7 @@ push (no `workflows` scope): the founder pushes and merges it. Group 6 is founde
   `null`.
   *Done when:* green, and the existing ruleset-advisor tests and `npm run typecheck` pass
   unchanged.
-- [ ] **1.2** (FR-5, DQ-1, DQ-3, AC-6 data) `scripts/lib/gate-manifest.ts` (new, owned) - the
+- [x] **1.2** (FR-5, DQ-1, DQ-3, AC-6 data) `scripts/lib/gate-manifest.ts` (new, owned) - the
   `SignalMechanism`, `GateWitness`, `GateEntry` types, `GATE_MANIFEST` with the seven entries
   in design.md "The manifest", and `GATE_LABEL_PATTERNS`. No IO, no imports beyond types.
   Test (`describe('FR-5 manifest')`): `ready-to-merge` has two witnesses of different
