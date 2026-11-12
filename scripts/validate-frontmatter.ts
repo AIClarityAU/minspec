@@ -1004,7 +1004,7 @@ for (const file of closeFiles) {
   }
 }
 
-// Rule 25 (WARN, #3390): a Clarify block's wording is checked against the predicate that reads it.
+// Rule 27 (WARN, #3390): a Clarify block's wording is checked against the predicate that reads it.
 //
 // Several specs recorded every selection under "All N decisions are recorded". findOpenClarify
 // accepts only resolved/answered/decided and fails closed, so each read as open and delegated
