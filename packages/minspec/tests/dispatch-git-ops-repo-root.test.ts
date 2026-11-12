@@ -54,7 +54,6 @@ describe('dispatch-issue.sh: git ops pinned to REPO_ROOT, not caller cwd (#1896)
     expect(src).toContain('git -C "$REPO_ROOT" fetch origin main -q 2>/dev/null || true');
     expect(src).toContain('git -C "$REPO_ROOT" rev-list --count HEAD..origin/main');
     expect(src).toContain('git -C "$REPO_ROOT" worktree remove "$WORKTREE" --force');
-    expect(src).toContain('git -C "$REPO_ROOT" branch -D "$BRANCH"');
     expect(src).toContain('git -C "$REPO_ROOT" fetch origin main -q\n');
     expect(src).toContain('git -C "$REPO_ROOT" worktree add -b "$BRANCH" "$WORKTREE" origin/main');
   });

@@ -572,10 +572,11 @@ by the lower tiers — the same known limit the spec-frontmatter gate carries (#
 ### Deferred-work gate
 
 A commit message that defers work — "follow-up", "out of scope", "held back", "separate
-PR", "deferred" — must say where the deferred work went. Any of a tracked reference
-(\`#123\`), a \`Follow-ups: none\` line, or a note that nothing was deferred satisfies it. The
-check reads only the message text, so it needs no tracker and no network; \`Follow-ups: none\`
-is a complete answer for a project that keeps no issues at all.
+PR", "deferred" — must say where the deferred work went. Any of a \`Follow-ups: #123\` trailer
+(a dedicated trailer line; comma-separate several), a \`Follow-ups: none\` line, or a note that
+nothing was deferred satisfies it. A bare \`#123\` mentioned in the subject or in prose does not
+count (#1918). The check reads only the message text, so it needs no tracker and no network;
+\`Follow-ups: none\` is a complete answer for a project that keeps no issues at all.
 
 Work named in prose and nowhere else is lost the moment the commit scrolls out of view. The
 gate costs one line and turns a vanishing intention into either a tracked item or an
@@ -1055,10 +1056,13 @@ export function renderManagedFile(tpl: ManagedRegionTemplate): string {
  * must have a reachable red path and must NEVER conclude success without actually
  * validating. The step runs the highest-fidelity validator that is genuinely
  * present, letting its exit code gate the job:
- *   1. `npm run validate` — the full Node validator, when the repo defines it
- *      (minspec's own tree, and any JS repo that wires it up);
- *   2. `python3 .minspec/hooks/validate.py` — the portable DR-037 validator,
- *      scaffolded into every MinSpec-inited repo (stock python3, no install);
+ *   1. `python3 .minspec/hooks/validate.py` — the portable DR-037 validator,
+ *      scaffolded into every MinSpec-inited repo (stock python3, no install). It
+ *      ALWAYS runs when present: an npm `validate` script is a generic name that may
+ *      not be MinSpec's, so it never replaces this one (#2263);
+ *   2. `npm run validate` — the full Node validator, when the repo defines it
+ *      (minspec's own tree, and any JS repo that wires it up). Runs IN ADDITION to
+ *      (1), and alone when there is no validate.py;
  *   3. `@aiclarity/minspec-validator` — the published portable validator, once it
  *      exists and is resolvable (`--no-install` NEVER network-fetches, so an
  *      unclaimed scope can't be dependency-confusion-hijacked into CI).
@@ -1107,13 +1111,29 @@ jobs:
           # Run the highest-fidelity validator that is actually present and let its
           # exit code gate the job. Do NOT add a branch that exits 0 without a
           # validator having run — that was the AIClarityAU/minspec#811 always-green bug.
+          # An npm 'validate' script never replaces the portable validator: when
+          # .minspec/hooks/validate.py is present it always runs, and npm runs in addition.
+          # With no validate.py, an npm 'validate' script runs ALONE and its exit code gates
+          # the job (generic name, may belong to something else: see AIClarityAU/minspec#2263).
+          ran=0
+          if [ -f .minspec/hooks/validate.py ]; then
+            if ! command -v python3 >/dev/null 2>&1; then
+              echo "MinSpec SDD validation: .minspec/hooks/validate.py is present but python3 is not available." >&2
+              echo "A required check must fail closed (DR-066); it may never pass without validating." >&2
+              exit 1
+            fi
+            echo "MinSpec SDD validation: running 'python3 .minspec/hooks/validate.py' (portable validator)."
+            python3 .minspec/hooks/validate.py
+            ran=1
+          fi
           if [ -f package.json ] && node -e "process.exit((require('./package.json').scripts||{}).validate?0:1)" 2>/dev/null; then
             echo "MinSpec SDD validation: running 'npm run validate' (Node validator)."
             npm ci
             npm run validate
-          elif [ -f .minspec/hooks/validate.py ] && command -v python3 >/dev/null 2>&1; then
-            echo "MinSpec SDD validation: running 'python3 .minspec/hooks/validate.py' (portable validator)."
-            python3 .minspec/hooks/validate.py
+            ran=1
+          fi
+          if [ "$ran" = 1 ]; then
+            :
           elif npx --no-install @aiclarity/minspec-validator --version >/dev/null 2>&1; then
             echo "MinSpec SDD validation: running '@aiclarity/minspec-validator'."
             npx --no-install @aiclarity/minspec-validator
@@ -1203,9 +1223,10 @@ export const MINSPEC_HOOKS_DIR = '.minspec/hooks';
  * Fail direction, and it differs by CONDITION. A missing prerequisite fails OPEN — an
  * unreachable validator tier falls through (above), gitleaks is skipped when not installed,
  * the branch guard stands aside when the default branch cannot be determined. A hook-internal
- * ERROR fails CLOSED: \`set -u\` plus the propagated \`exit $?\` below, and no top-level
- * handler around validate.py's \`main()\`, so a tooling bug refuses the commit rather than
- * waving it through. Do not collapse the two — a gate that certifies while broken is the
+ * ERROR fails CLOSED: \`set -u\`, plus Stage 3 capturing the tier's exit code in
+ * \`minspec_stage3_rc\` and the hook ending with \`exit "$minspec_stage3_rc"\` (SPEC-080 FR-6),
+ * and no top-level handler around validate.py's \`main()\`, so a tooling bug refuses the
+ * commit rather than waving it through. Do not collapse the two — a gate that certifies while broken is the
  * invariant-2 violation, and this comment claimed exactly that until #1905.
  */
 const PRE_COMMIT_HOOK = `# MinSpec pre-commit gate (DR-037) — editor-independent SDD + secret gates.
@@ -1598,11 +1619,17 @@ minspec_shell_gate() {
   return 0
 }
 
+# Stage 3's verdict is CAPTURED, never exited on (SPEC-080 FR-6): the first tier
+# that runs records its exit code in minspec_stage3_rc, later tiers run only while
+# it is still empty, and the hook exits with it at the end. Tier order, probes and
+# messages are unchanged; only the control flow moved, so a stage can follow.
+minspec_stage3_rc=""
+
 # Node tier — ONLY when the validator is already resolvable (no network fetch).
 if command -v npx >/dev/null 2>&1 \\
    && npx --no-install @aiclarity/minspec-validator --version >/dev/null 2>&1; then
   npx --no-install @aiclarity/minspec-validator --pre-commit
-  exit $?
+  minspec_stage3_rc=$?
 fi
 
 # Python tier — ONLY when a candidate interpreter actually RUNS (#2400). A name
@@ -1616,7 +1643,7 @@ fi
 # spellings that matter across platforms: python3 (POSIX / most installs),
 # python (the python.org Windows installer ships python.exe, not python3.exe),
 # then the py launcher's -3 switch (bundled with python.org Windows installs).
-if [ -f "$hook_dir/validate.py" ]; then
+if [ -z "$minspec_stage3_rc" ] && [ -f "$hook_dir/validate.py" ]; then
   minspec_py=""
   for minspec_py_candidate in python3 python "py -3"; do
     # shellcheck disable=SC2086  # intentional word-split: "py -3" is launcher + flag.
@@ -1630,13 +1657,17 @@ if [ -f "$hook_dir/validate.py" ]; then
     # "no candidate could start at all" falls through to the shell tier below.
     # shellcheck disable=SC2086
     $minspec_py "$hook_dir/validate.py" --pre-commit
-    exit $?
+    minspec_stage3_rc=$?
   fi
 fi
 
-# Shell tier — always present.
-minspec_shell_gate
-exit $?`;
+# Shell tier — always present; runs when no higher tier did.
+if [ -z "$minspec_stage3_rc" ]; then
+  minspec_shell_gate
+  minspec_stage3_rc=$?
+fi
+
+exit "$minspec_stage3_rc"`;
 
 /**
  * Shell `commit-msg` hook (DR-037 / #247) — the RCDD root-cause gate (DR-003).
@@ -2191,7 +2222,14 @@ def main():
 
         if is_spec:
             spec_id = clean_frontmatter_value(fm.get("id", ""))
-            if not spec_id:
+            if not spec_id and content.startswith("---") and not FM_RE.match(content):
+                # Opened but never closed: an id line may be present yet
+                # unreadable, so "missing" alone would misdescribe it (#3595).
+                sys.stderr.write(
+                    "FAIL " + norm + ": missing or invalid \`id: SPEC-NNN\` frontmatter (block not terminated)\\n"
+                )
+                errors += 1
+            elif not spec_id:
                 sys.stderr.write(
                     "FAIL " + norm + ": missing \`id: SPEC-NNN\` frontmatter\\n"
                 )
