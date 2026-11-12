@@ -374,6 +374,27 @@ checks_in_flight() {
          | if length > 0 then "yes" else "no" end' <<<"$1"
 }
 
+# is_deterministic_drift_log: reads a failed-run log on stdin; exit 0 when it carries the
+# generated-file drift verdict (#3546). That failure is deterministic: it fails the same way on
+# every rerun, so spending the one free rerun on it only delays the remediation agent a sweep.
+is_deterministic_drift_log() {
+  grep -qF 'stale — drifted'
+}
+
+# drop_drift_run_ids <run_ids_newline_separated> → the ids whose failed log is NOT drift.
+# A log that cannot be fetched keeps its id (fail toward the rerun, never toward skipping).
+drop_drift_run_ids() {
+  local id log
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    if log=$(gh run view "$id" --repo "$REPO" --log-failed 2>/dev/null) && is_deterministic_drift_log <<<"$log"; then
+      echo "  Run $id failed on generated-file drift (#3546) — a rerun cannot clear it; straight to remediation." >&2
+      continue
+    fi
+    printf '%s\n' "$id"
+  done <<<"$1"
+}
+
 # rerun_decision <rerun_markers_already_posted> <run_ids_newline_separated>
 #   → rerun | agent
 # Rerun only when it has not been tried on this PR AND there is a run to rerun. Any
@@ -466,6 +487,7 @@ sanitize_comment_body() { printf '%s' "${1-}" | sed -e 's/<!--/<!- -/g' -e 's/--
 #   $3 — CSV of author logins to accept; EMPTY (or naming nobody) counts NOTHING (#3592):
 #        an unprovable author is never charged. Callers must not spend budget-bounded
 #        work on a 0 that came from an empty allowlist.
+#   $4 — optional body prefix; with it, an EMPTY allowlist counts by marker+prefix instead (#3054).
 # A comment counts only when the marker is the LAST non-whitespace text of its body —
 # the one position post_marked_comment ever writes one. Fail-soft: any jq/parse failure
 # yields 0 and the caller proceeds, as before.
@@ -479,18 +501,19 @@ sanitize_comment_body() { printf '%s' "${1-}" | sed -e 's/<!--/<!- -/g' -e 's/--
 # comment would have counted zero for the same reason. Both are the UN-BOUNDING
 # direction — those attempts spend no budget, the cap never trips, remediation loops.
 count_markers_json() {
-  local marker="$1" json="$2" authors="${3:-}" out
-  out=$(jq --arg m "$marker" --arg authors "$authors" '
+  local marker="$1" json="$2" authors="${3:-}" prefix="${4:-}" out
+  out=$(jq --arg m "$marker" --arg authors "$authors" --arg prefix "$prefix" '
     ($authors
       | split(",")
       | map(sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "") | ascii_downcase | sub("\\[bot\\]$"; ""))
       | map(select(length > 0))) as $allow
-    | if ($allow | length) == 0 then [] else
+    | if ($allow | length) == 0 and $prefix == "" then [] else
       [ .comments[]?
         | (((.author.login) // "") | ascii_downcase | sub("\\[bot\\]$"; "")) as $login
-        | select(($allow | index($login)) != null)
+        | select(($allow | length) == 0 or (($allow | index($login)) != null))
         | ((.body // "") | sub("[[:space:]]+$"; ""))
         | select(endswith($m))
+        | select($prefix == "" or startswith($prefix))
       ] end | length' <<<"$json" 2>/dev/null) || out=""
   [[ "$out" =~ ^[0-9]+$ ]] || out=0
   printf '%s\n' "$out"
@@ -577,10 +600,19 @@ resolve_author_identity() {
 # the PR over with a label and no message, the silent gate constitution invariant #2
 # forbids. So dedup is attempted ONLY when authorship is provable; otherwise this always
 # says `post`. A repeated notice is noise; a missing one is a silent gate.
+#
+# When authorship is NOT provable (an App installation token cannot `gh api user`, #3054),
+# the author filter is unavailable, so the dedup instead requires the body to OPEN with
+# the notice's own heading as well as END with the marker. A quote of the marker in a
+# review comment or diff hunk does not begin with that heading, so it cannot suppress
+# the notice; without this fallback the notice re-posted on every 20-minute sweep.
+CAP_NOTICE_HEADING="## 🛑 Auto-remediation capped"
 cap_notice_decision() {
   local authors="${1-}" json="${2-}" capped=0
   if authors_provable "$authors"; then
     capped=$(count_markers_json "$CAPPED_MARKER" "$json" "$authors")
+  else
+    capped=$(count_markers_json "$CAPPED_MARKER" "$json" "" "$CAP_NOTICE_HEADING")
   fi
   if [[ "${capped:-0}" -eq 0 ]]; then printf 'post\n'; else printf 'skip\n'; fi
 }
@@ -634,6 +666,10 @@ if [[ "${1:-}" == "--derive-failed-runs" ]]; then
 fi
 if [[ "${1:-}" == "--content-push-allowed" ]]; then
   content_push_allowed "${2:-}" "${3:-}"
+  exit 0
+fi
+if [[ "${1:-}" == "--is-drift-log" ]]; then
+  is_deterministic_drift_log && echo yes || echo no
   exit 0
 fi
 if [[ "${1:-}" == "--rerun-decision" ]]; then
@@ -1064,7 +1100,7 @@ if [[ "$ACTION" == agent-* || "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "
     # constitution invariant #2 hangs on, so it lives in the pure, tested
     # cap_notice_decision() seam above rather than inline here.
     if [[ "$(cap_notice_decision "$AUTHOR_ALLOW" "$COMMENTS_JSON")" == "post" ]]; then
-      post_marked_comment "$CAPPED_MARKER" "$(printf '## 🛑 Auto-remediation capped — needs a human\n\nThis PR hit an automated-remediation cap — **%s** — without clearing its gate, so automated attempts have stopped. It is labelled `needs-human-review`; a human needs to take it from here.' "$CAP_HIT")"
+      post_marked_comment "$CAPPED_MARKER" "$(printf '%s — needs a human\n\nThis PR hit an automated-remediation cap — **%s** — without clearing its gate, so automated attempts have stopped. It is labelled `needs-human-review`; a human needs to take it from here.' "$CAP_NOTICE_HEADING" "$CAP_HIT")"
     fi
     exit 0
   fi
@@ -1081,6 +1117,7 @@ if [[ "$ACTION" == agent-* || "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "
       RERUN_NOTICE='A required check or the review is red on this delegated-approval PR. Re-running the failed jobs and the review once: a fault outside this PR (rate limit, network) clears on rerun. No agent edits this branch. If it is still red on the next sweep, it is labelled `needs-human-review`.'
     else
       FAILED_RUN_IDS=$(derive_failed_run_ids "$PR_JSON")
+      FAILED_RUN_IDS=$(drop_drift_run_ids "$FAILED_RUN_IDS")
       RERUN_NOTICE='A required check is red. Before spending a remediation agent, re-running the failed jobs once: a fault outside this PR (rate limit, network) clears on rerun. If the check is still red on the next sweep, remediation proceeds.'
     fi
     if [[ "$(rerun_decision "$RERUNS" "$FAILED_RUN_IDS")" == "rerun" ]]; then
@@ -1349,6 +1386,9 @@ while true; do
       echo "  Pushed remediation ($SHA) to $BRANCH — CI will re-review PR #$PR."
     else
       echo "  WARNING: push failed for $BRANCH — worktree left at $WORKTREE for inspection." >&2
+      # #3583: a rejected push still spent an agent run, so it is charged as an attempt
+      # (else MAX_ATTEMPTS never trips and e.g. a .github/workflows/ PR retries forever).
+      post_marked_comment "$ATTEMPT_MARKER" "$(printf 'Auto-remediation produced a fix but the push to `%s` was rejected (for example the App lacks the `workflows` permission for changes under `.github/workflows/`). Nothing was published; this counts as an attempt. Left for a human; the worktree `%s` is kept for inspection.' "$BRANCH" "$WORKTREE")"
       exit 0
     fi
   else

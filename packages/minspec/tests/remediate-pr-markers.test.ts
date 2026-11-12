@@ -287,6 +287,7 @@ describe('remediate-pr.sh --cap-notice-decision: the "capped — needs a human" 
     return r.stdout.trim();
   };
 
+  const phantomFallback: Comment = { author: { login: 'reviewer' }, body: `quoted: ${CAPPED}` };
   const ourNotice: Comment = { author: { login: 'drain-operator' }, body: `## 🛑 capped\n${CAPPED}` };
   // A phantom: an ai-review comment quoting this file, ending with the capped marker.
   const phantomNotice: Comment = { author: { login: 'minspec-sdd[bot]' }, body: `quoting the diff:\n${CAPPED}` };
@@ -318,6 +319,19 @@ describe('remediate-pr.sh --cap-notice-decision: the "capped — needs a human" 
     // `" , "` passes `[[ -n … ]]` but survives the trim as zero logins.
     expect(decide([ourNotice], ' , ')).toBe('post');
     expect(decide([ourNotice], '   ')).toBe('post');
+  });
+
+  it('unprovable authorship: our own prior notice (heading + marker) still dedups (#3054)', () => {
+    const real: Comment = {
+      author: { login: 'minspec-sdd[bot]' },
+      body: `## 🛑 Auto-remediation capped — needs a human\n\nbody\n${CAPPED}`,
+    };
+    expect(decide([real])).toBe('skip');
+    expect(decide([real], ' , ')).toBe('skip');
+  });
+
+  it('unprovable authorship: a phantom quoting the marker without the heading still posts', () => {
+    expect(decide([phantomFallback])).toBe('post');
   });
 
   it('rejects a wrong arg count with a usage error', () => {
@@ -515,5 +529,17 @@ describe('remediate-pr.sh: a failed `gh api user` never becomes the author allow
     expect(countMarkers(ATTEMPT, marked, 'minspec-sdd[bot]')).toBe('2');
     const bot: Comment[] = [{ author: { login: 'minspec-sdd[bot]' }, body: `a\n${ATTEMPT}` }];
     expect(countMarkers(ATTEMPT, bot, 'minspec-sdd')).toBe('1');
+  });
+});
+
+describe('rejected push charges an attempt (#3583)', () => {
+  it('posts ATTEMPT_MARKER in the agent push-failure branch before exiting', () => {
+    const start = SRC.indexOf('Clean → push the new commits');
+    expect(start).toBeGreaterThan(-1);
+    const tail = SRC.slice(start);
+    const failIdx = tail.indexOf('WARNING: push failed for $BRANCH — worktree left at');
+    expect(failIdx).toBeGreaterThan(-1);
+    const branch = tail.slice(failIdx, tail.indexOf('exit 0', failIdx));
+    expect(branch).toContain('post_marked_comment "$ATTEMPT_MARKER"');
   });
 });

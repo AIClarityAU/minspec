@@ -469,6 +469,9 @@ try {
 //
 // The corpus was verified clean (50 specs, zero duplicates, zero id/directory mismatches)
 // before this shipped, so it goes green on landing.
+//
+// This rule reads one tree. The cross-PR witness is `lib/spec-id-claims.ts`, which CI runs
+// through scripts/check-dr-id-collision.ts in the `dr-id-collision` job (#1327).
 try {
   const specsRoot = join(ROOT, 'specs');
   const specFiles = safeGlob(specsRoot, '.md')
