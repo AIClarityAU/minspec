@@ -1223,9 +1223,10 @@ export const MINSPEC_HOOKS_DIR = '.minspec/hooks';
  * Fail direction, and it differs by CONDITION. A missing prerequisite fails OPEN — an
  * unreachable validator tier falls through (above), gitleaks is skipped when not installed,
  * the branch guard stands aside when the default branch cannot be determined. A hook-internal
- * ERROR fails CLOSED: \`set -u\` plus the propagated \`exit $?\` below, and no top-level
- * handler around validate.py's \`main()\`, so a tooling bug refuses the commit rather than
- * waving it through. Do not collapse the two — a gate that certifies while broken is the
+ * ERROR fails CLOSED: \`set -u\`, plus Stage 3 capturing the tier's exit code in
+ * \`minspec_stage3_rc\` and the hook ending with \`exit "$minspec_stage3_rc"\` (SPEC-080 FR-6),
+ * and no top-level handler around validate.py's \`main()\`, so a tooling bug refuses the
+ * commit rather than waving it through. Do not collapse the two — a gate that certifies while broken is the
  * invariant-2 violation, and this comment claimed exactly that until #1905.
  */
 const PRE_COMMIT_HOOK = `# MinSpec pre-commit gate (DR-037) — editor-independent SDD + secret gates.
@@ -1618,11 +1619,17 @@ minspec_shell_gate() {
   return 0
 }
 
+# Stage 3's verdict is CAPTURED, never exited on (SPEC-080 FR-6): the first tier
+# that runs records its exit code in minspec_stage3_rc, later tiers run only while
+# it is still empty, and the hook exits with it at the end. Tier order, probes and
+# messages are unchanged; only the control flow moved, so a stage can follow.
+minspec_stage3_rc=""
+
 # Node tier — ONLY when the validator is already resolvable (no network fetch).
 if command -v npx >/dev/null 2>&1 \\
    && npx --no-install @aiclarity/minspec-validator --version >/dev/null 2>&1; then
   npx --no-install @aiclarity/minspec-validator --pre-commit
-  exit $?
+  minspec_stage3_rc=$?
 fi
 
 # Python tier — ONLY when a candidate interpreter actually RUNS (#2400). A name
@@ -1636,7 +1643,7 @@ fi
 # spellings that matter across platforms: python3 (POSIX / most installs),
 # python (the python.org Windows installer ships python.exe, not python3.exe),
 # then the py launcher's -3 switch (bundled with python.org Windows installs).
-if [ -f "$hook_dir/validate.py" ]; then
+if [ -z "$minspec_stage3_rc" ] && [ -f "$hook_dir/validate.py" ]; then
   minspec_py=""
   for minspec_py_candidate in python3 python "py -3"; do
     # shellcheck disable=SC2086  # intentional word-split: "py -3" is launcher + flag.
@@ -1650,13 +1657,17 @@ if [ -f "$hook_dir/validate.py" ]; then
     # "no candidate could start at all" falls through to the shell tier below.
     # shellcheck disable=SC2086
     $minspec_py "$hook_dir/validate.py" --pre-commit
-    exit $?
+    minspec_stage3_rc=$?
   fi
 fi
 
-# Shell tier — always present.
-minspec_shell_gate
-exit $?`;
+# Shell tier — always present; runs when no higher tier did.
+if [ -z "$minspec_stage3_rc" ]; then
+  minspec_shell_gate
+  minspec_stage3_rc=$?
+fi
+
+exit "$minspec_stage3_rc"`;
 
 /**
  * Shell `commit-msg` hook (DR-037 / #247) — the RCDD root-cause gate (DR-003).
