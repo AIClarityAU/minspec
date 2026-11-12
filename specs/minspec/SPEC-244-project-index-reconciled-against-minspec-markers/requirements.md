@@ -164,12 +164,12 @@ appear in the chosen surface without the founder having to run anything.
 
 ## Decisions needed (Clarify)
 
-All 5 decisions are answered with the option this document recommends. These are the agent's
-recommended selections, recorded by an agent session (minspec-sdd[bot]) on 2026-11-12 under the
-founder's decision on queue item c1106au (outside this repo) that agent-recorded recommended Clarify
-selections count as Clarify done for T3 specs. That decision is cited as context, not as consent
-recorded here: no human chose any single option, and DLG-001 made none of them (it covers approval
-only). They bind once this spec is approved.
+Each decision below carries a recorded selection: the option this document recommends, copied
+by an agent session (minspec-sdd[bot]) on 2026-11-12. These are agent recommendations, not
+ratified answers, so Clarify stays open. No human chose any option, and DLG-001 (DR-108, the
+delegated-approval record) covers approval only, not Clarify selections. The founder's answer on
+operator queue item c1106au (outside this repo) is not a committed record, and DR-108 section 4
+says a queue item cannot carry consent, so it does not close Clarify here.
 
 **D1. Where does the check live?**
 - (a) A dev-time script in this repo's `scripts/` **(rec)**, beside `check-primaries-clean.sh`
@@ -181,7 +181,7 @@ only). They bind once this spec is approved.
 - (c) A MinSpec product command. Cost: widens the product surface with a feature about one
   person's directory layout, and scanning outside the open workspace strains invariant 3.
 
-**Recorded selection: Option (a)** - agent's recommended selection (c1106au).
+**Recorded selection: Option (a)** - agent's recommended selection, not ratified.
 
 **D2. What is the canonical "claimed" list?**
 - (a) The union of folders in every `*.code-workspace` directly under the scan root **(rec)**.
@@ -192,7 +192,7 @@ only). They bind once this spec is approved.
 - (c) A new machine-readable portfolio registry with status per project (priority / paused /
   parked). Cost: one more hand-kept list; it fixes ordering visibility but adds a fourth source.
 
-**Recorded selection: Option (a)** - agent's recommended selection (c1106au).
+**Recorded selection: Option (a)** - agent's recommended selection, not ratified.
 
 **D3. How is a deliberate omission recorded?**
 - (a) An exclusion file next to the workspace files (e.g. `~/code/.minspec-unlisted`), one
@@ -202,7 +202,7 @@ only). They bind once this spec is approved.
 - (c) No exclusion: every unlisted repository is reported forever. Cost: 10 permanent lines,
   which teaches readers to skip the output.
 
-**Recorded selection: Option (a)** - agent's recommended selection (c1106au).
+**Recorded selection: Option (a)** - agent's recommended selection, not ratified.
 
 **D4. Where is it surfaced?**
 - (a) One summary line plus names in this repo's SessionStart hook output **(rec)**. Cost: a
@@ -211,7 +211,7 @@ only). They bind once this spec is approved.
   describes recurs.
 - (c) The drain loop's periodic report. Cost: visible only while a drain runs.
 
-**Recorded selection: Option (a)** - agent's recommended selection (c1106au).
+**Recorded selection: Option (a)** - agent's recommended selection, not ratified.
 
 **D5. Are the prose repo-mapping tables reconciled too?**
 - (a) No - reconcile workspace files only; add the voip-sms-inbox row as a one-time data fix
@@ -219,7 +219,7 @@ only). They bind once this spec is approved.
 - (b) Yes - parse the markdown tables and require each priority project to have a row. Cost:
   a parser over prose, which breaks on any re-format, and needs D2(c) to know "priority".
 
-**Recorded selection: Option (a)** - agent's recommended selection (c1106au).
+**Recorded selection: Option (a)** - agent's recommended selection, not ratified.
 
 ## Follow-ups (tracked)
 

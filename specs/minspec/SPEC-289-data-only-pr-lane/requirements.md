@@ -240,13 +240,13 @@ spend for that run, so the FR-0 comparison can be redone from logs after the cha
 
 ## Decisions needed (Clarify)
 
-All 6 decisions are answered with the option this document recommends. These are the agent's
-recommended selections, recorded by an agent session (minspec-sdd[bot]) on 2026-11-12 under the
-founder's decision on queue item c1106au (outside this repo) that agent-recorded recommended Clarify
-selections count as Clarify done for T3 specs. That decision is cited as context, not as consent
-recorded here: no human chose any single option, and DLG-001 made none of them (it covers approval
-only). They bind once this spec is approved.
-D6's selection is a rule for Plan: if the FR-0 baseline shows the target bot pull requests
+Each decision below carries a recorded selection: the option this document recommends, copied
+by an agent session (minspec-sdd[bot]) on 2026-11-12. These are agent recommendations, not
+ratified answers, so Clarify stays open. No human chose any option, and DLG-001 (DR-108, the
+delegated-approval record) covers approval only, not Clarify selections. The founder's answer on
+operator queue item c1106au (outside this repo) is not a committed record, and DR-108 section 4
+says a queue item cannot carry consent, so it does not close Clarify here.
+D6's selection, if ratified, is a rule for Plan: if the FR-0 baseline shows the target bot pull requests
 spend zero tokens today, Plan returns this spec to Clarify with those numbers instead of building.
 
 **D1 - What is the default allowlist?**
