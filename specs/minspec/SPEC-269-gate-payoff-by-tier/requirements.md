@@ -1,7 +1,7 @@
 ---
 id: SPEC-269
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - whether the per-tier ceremony pays for itself
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   Specify phase only. The files this spec will own are decided at Plan, after Decisions D1-D5.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

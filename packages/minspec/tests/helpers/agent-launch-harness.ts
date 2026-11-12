@@ -260,7 +260,14 @@ token=absent; [[ -n "\${GH_TOKEN:-}" ]] && token=present
 wrote() { printf '%s token=%s\\n' "$1" "$token" >> "$dir/gh-writes.log"; }
 case "$noun $verb" in
   "api user")
+    # Default: the 403 an App installation token gets, body on stdout as the real gh prints
+    # it — the drain's production shape (#3037, #3592). STUB_GH_LOGIN answers as a user
+    # token instead; STUB_GH_USER_ERROR fails some other way (a 401, a network error), so
+    # no identity can be established at all.
+    if [[ -n "\${STUB_GH_LOGIN:-}" ]]; then echo "\$STUB_GH_LOGIN"; exit 0; fi
+    if [[ -n "\${STUB_GH_USER_ERROR:-}" ]]; then echo "\$STUB_GH_USER_ERROR" >&2; exit 1; fi
     echo '{"message":"Resource not accessible by integration","status":"403"}'
+    echo 'gh: Resource not accessible by integration (HTTP 403)' >&2
     exit 1 ;;
   "api graphql")
     [[ "$query" == mutation* ]] && wrote "api graphql-mutation"
@@ -1201,6 +1208,8 @@ export function runRemediate(opts: RemediateOptions = {}): RemediateRun {
     cwd: repo,
     encoding: 'utf-8',
     // One launch: an escalation is not retried on a second model.
+    // No STUB_GH_LOGIN by default: `gh api user` answers the App installation token's 403,
+    // the identity the drain really runs under (#3592).
     env: hermeticEnv(dir, bin, { MINSPEC_ESCALATE_RETRY_OFF: '1', ...opts.env }),
   });
   return { ...collect(dir, r), worktree, branch, origin };

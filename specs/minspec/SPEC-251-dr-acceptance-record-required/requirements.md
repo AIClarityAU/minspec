@@ -7,6 +7,10 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a human act needs a witness the agent cannot forge
 aspects: [approval, dr-acceptance, ai-review, no-silent-gate, enforce-dont-trust]
 relates_to: [SPEC-225, SPEC-041, DR-081, DR-056, DR-108, DR-003, "#2153", "#1066", "#2810"]
+implements: none
+implements_reason: >-
+  Owned files are decided at Plan; none are claimed before then, so no shared file is frozen
+  early by a spec whose design is not fixed yet.
 phases:
   specify: in-progress
   clarify: pending
@@ -92,8 +96,9 @@ chooses it; amendment acceptance inside an accepted DR (#3016, already reported 
 ## Decisions needed (Clarify)
 
 All 4 decisions are resolved: an agent session recorded each option this document already
-recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
-chose them; they are ratified only by approval of this spec.
+recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). They are
+ratified only by approval of this spec.
 
 - **D1 - Where the gate lives.**
   (a) Extend `scripts/approval-integrity.ts` with a "flip requires record" rule **(rec)**:
