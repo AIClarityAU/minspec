@@ -316,6 +316,17 @@ const MUTANTS: Mutant[] = [
     severity: 'FAIL',
     expect: /DR frontmatter — field `approved-by` is a retired spelling/,
     mutate: (f) => replaceOnce(f, 'docs/decisions/DR-001.md', 'date: 2026-01-01\n---', 'date: 2026-01-01\napproved-by: x\n---'),
+  },  {
+    rules: ['27'],
+    name: 'spec-set design.md status lags its requirements.md (SPEC-212)',
+    severity: 'WARN',
+    expect: /spec-set-status specs\/demo\/SPEC-001-alpha: design\.md says "status: new" but requirements\.md says "status: specifying"/,
+    mutate: (f) => {
+      replaceOnce(f, SPEC1, 'status: new\n', 'status: specifying\n');
+      replaceOnce(f, SPEC1, '**Status:** New', '**Status:** Specifying');
+      f['specs/demo/SPEC-001-alpha/design.md'] =
+        '---\nid: SPEC-001\ntype: design\nstatus: new\nepic: EPIC-001\n---\n\n# Alpha - Design\n\nBody.\n';
+    },
   },
 ];
 

@@ -111,7 +111,7 @@ Shared rules for every task:
   `specSetStatusFiles: readSpecSetStatusFiles(path.dirname(spec.filePath))`.
   `packages/minspec/src/commands/approve.ts` is NOT changed (design.md, D3).
   *Done when:* 3.1 is green.
-- [ ] **3.3** `packages/minspec/tests/validate-frontmatter-spec-set-status.test.ts` (new) -
+- [x] **3.3** `packages/minspec/tests/validate-frontmatter-spec-set-status.test.ts` (new) -
   subprocess cases against `scripts/validate-frontmatter.ts`, using the harness shape of
   `validate-frontmatter-annotation-skip.test.ts` (absolute `tsx` from
   `node_modules/.bin`, temp repo cwd): a fixture with one lagging fixture set (a `SPEC-` + number + `-probe` directory)
@@ -120,23 +120,23 @@ Shared rules for every task:
   an unreadable line rather than nothing. Control: the agreeing fixture with its
   `design.md` status edited to lag flips to one warning, so the "no line" case is not
   passing because the rule never ran.
-- [ ] **3.4** `scripts/validate-frontmatter.ts` - add Rule 27 after Rule 7 (design.md,
+- [x] **3.4** `scripts/validate-frontmatter.ts` - add Rule 27 after Rule 7 (design.md,
   *Surface 2*), with the rule comment naming #972 and SPEC-212 and stating it is the same
   pair of functions the command calls. *Done when:* 3.3 is green.
 
 ## 4 - Backfill so the rule ships clean (FR-4; AC-6)
 
-- [ ] **4.1** Run `npm run validate 2>&1 | grep 'spec-set-status'` on the branch. Its lines
+- [x] **4.1** Run `npm run validate 2>&1 | grep 'spec-set-status'` on the branch. Its lines
   are the backfill list; compare with design.md, *Backfill*, and follow the run, not the
   table. Before editing, list open pull requests that touch those paths
   (`gh pr list --repo AIClarityAU/minspec --state open --json number,files`) and note any
   overlap in the pull request body (design.md, R3).
-- [ ] **4.2** Before editing, record `specHash()` (`@aiclarity/shared`) of every file in
+- [x] **4.2** Before editing, record `specHash()` (`@aiclarity/shared`) of every file in
   the list and of each set's `requirements.md`. Edit only the `status:` line of each
   listed sibling to its `requirements.md` value. Recompute: every hash is unchanged, and
   `getApprovalStatus` for each set's `requirements.md` is unchanged. Put the before/after
   table in the pull request body (AC-6).
-- [ ] **4.3** `npm run validate` passes, prints zero `spec-set-status` lines, and its
+- [x] **4.3** `npm run validate` passes, prints zero `spec-set-status` lines, and its
   non-fatal warning count is the pre-backfill count minus the backfilled files (measured,
   not assumed: the count before task 4.2 and after are both in the pull request body).
   *Done when:* AC-6 holds and the full suite is green.

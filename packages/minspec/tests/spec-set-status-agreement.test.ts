@@ -317,6 +317,34 @@ describe('readSpecSetStatusFiles (SPEC-212, fs reader)', () => {
     expect(design!.readError).toBeTruthy();
     expect(rules(validateSpecSetStatusAgreement(out).violations)).toEqual([UNREADABLE]);
   });
+
+  it('reports a set whose files cannot even be stat-ed (EACCES), rather than treating them as absent', () => {
+    const dir = mkSet('SPEC-900-probe', { 'requirements.md': fm('implementing'), 'design.md': fm('specifying') });
+    // Read but not search: lstat of every child throws EACCES.
+    fs.chmodSync(dir, 0o666);
+    try {
+      // Prove the fault took (chmod is inert for root), so the case cannot pass vacuously.
+      let code: string | undefined;
+      try {
+        fs.lstatSync(path.join(dir, 'requirements.md'));
+      } catch (err) {
+        code = (err as NodeJS.ErrnoException).code;
+      }
+      if (code !== 'EACCES') {
+        throw new Error(`fixture inert: lstat under a 0666 directory gave ${code ?? 'success'}, not EACCES (running as root?)`);
+      }
+
+      const out = readSpecSetStatusFiles(dir);
+      // isPresent() once read EACCES as "absent", so the whole set returned [] and the
+      // rule saw nothing: a missing witness passing silently (FR-3, invariant 2).
+      expect(out.length).toBeGreaterThan(0);
+      const vs = validateSpecSetStatusAgreement(out).violations;
+      expect(rules(vs)).toEqual([UNREADABLE]);
+      expect(vs[0].message).toContain('requirements.md');
+    } finally {
+      fs.chmodSync(dir, 0o755);
+    }
+  });
 });
 
 describe('validateSpec - specSetStatusFiles option (SPEC-212 FR-5)', () => {

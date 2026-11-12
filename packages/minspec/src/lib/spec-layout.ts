@@ -255,13 +255,20 @@ export function readShardIdFiles(dirPath: string): ShardIdFile[] {
 /** A spec-set directory: `SPEC-` + digits + `-` + slug (SPEC-212 FR-1). */
 const SPEC_SET_DIR_RE = /^SPEC-\d+-/;
 
-/** lstat presence: a dangling or looping symlink is present (and then fails to read). */
+/**
+ * lstat presence: a dangling or looping symlink is present (and then fails to read).
+ * Only ENOENT / ENOTDIR mean absent. Any other lstat error (EACCES on an unsearchable
+ * directory, EIO) counts as present, so the read that follows fails and is reported as
+ * an unreadable witness (SPEC-212 FR-3, constitution invariant 2) instead of the file
+ * silently dropping out of the set.
+ */
 function isPresent(filePath: string): boolean {
   try {
     fs.lstatSync(filePath);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return !(code === 'ENOENT' || code === 'ENOTDIR');
   }
 }
 

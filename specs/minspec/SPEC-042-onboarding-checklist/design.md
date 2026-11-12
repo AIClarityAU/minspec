@@ -6,7 +6,7 @@ type: design
 # the real state. Kept ONLY because spec-validator.ts:525 marks `status` required
 # UNCONDITIONALLY (unlike `tier`:529, which is requiredWhen: isPrimarySpec). Dropping it here
 # is the right end-state (#972) but needs that schema change first — a code fix, not a doc edit.
-status: specifying
+status: planning
 product: minspec
 epic: EPIC-003  # SDD Core — onboarding front door (see notes re: dedicated onboarding epic)
 ---
