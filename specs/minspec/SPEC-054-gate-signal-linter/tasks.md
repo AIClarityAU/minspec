@@ -66,7 +66,7 @@ push (no `workflows` scope): the founder pushes and merges it. Group 6 is founde
 
 All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
 
-- [ ] **2.1** (FR-1 write predicate, DQ-7) `isGateSignalWrite` for shell text: status
+- [x] **2.1** (FR-1 write predicate, DQ-7) `isGateSignalWrite` for shell text: status
   (`gh api .../statuses/`), check-run writes (`.../check-runs` with `-X POST|PATCH`,
   `--method`, or any `-f`/`-F`/`--input`), label writes (`gh pr|issue edit` with
   `--add-label`/`--remove-label`) whose label matches `GATE_LABEL_PATTERNS` or is a variable.
@@ -74,7 +74,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   does not; `gh label create "ai-review:pass"` does not (the DQ-7 narrower predicate);
   `--remove-label agent-ready` does not; `--add-label "$LABEL"` does.
   *Done when:* green.
-- [ ] **2.2** (FR-1 unobserved/unsurfaced, FR-6 corollary, DQ-7, AC-1, AC-2) the shell
+- [x] **2.2** (FR-1 unobserved/unsurfaced, FR-6 corollary, DQ-7, AC-1, AC-2) the shell
   exit-status model of design.md: `errexit` and `pipefail` per unit, continuation joining, and the
   classification table, with the surfacing-forms constant.
   Test (`describe('FR-1 shell model')`): AC-1, `gh api .../statuses/... || true` is
@@ -91,7 +91,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   --add-label ready-to-merge && echo done` (write non-final in an `&&` list) is unobserved, while
   `echo go && gh pr edit --add-label ready-to-merge` (write last) is ok.
   *Done when:* green.
-- [ ] **2.3** (FR-1 inputs, P1) workflow extraction: line-based `run:` and `actions/github-script`
+- [x] **2.3** (FR-1 inputs, P1) workflow extraction: line-based `run:` and `actions/github-script`
   `script:` blocks with source line mapping, each step's `shell:` applied to the unit's initial
   `errexit`.
   Test (`describe('FR-1 workflow extraction')`): literal, strip-literal and folded block forms
@@ -99,7 +99,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   `errexit` off; `shell: bash` keeps it; an unrecognised block shape throws the scanner's
   could-not-run error rather than returning no units.
   *Done when:* green.
-- [ ] **2.4** (FR-1 JavaScript) the JavaScript model of design.md, via the `typescript`
+- [x] **2.4** (FR-1 JavaScript) the JavaScript model of design.md, via the `typescript`
   compiler API: awaited-not-caught is ok, floating promise is unobserved, `.catch` and
   `try/catch` handlers judged by the JavaScript surfacing forms or a rethrow, one level of
   same-block helper followed.
@@ -108,7 +108,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   `catch (e) { core.warning(...) }` is ok; `catch (e) { if (!isBenign(e)) throw e; }` is ok;
   `catch (e) { console.log(e) }` is unsurfaced; `issues.createLabel` is not a write.
   *Done when:* green.
-- [ ] **2.5** (FR-2, DQ-2, AC-3) annotations: `gate-signal-allow: <reason>` on the line
+- [x] **2.5** (FR-2, DQ-2, AC-3) annotations: `gate-signal-allow: <reason>` on the line
   immediately above, `#` or `//` leader; bare and orphan annotations are findings; the waiver
   summary renderer, which always renders, including `0 waivers honoured`.
   Test (`describe('FR-2 annotations')`): AC-3, the AC-1 fixture with a reasoned annotation
@@ -119,7 +119,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
 
 ## 3 - FR-1 entry point and the FR-3 checker
 
-- [ ] **3.1** (FR-1 IO, FR-7, AC-1 exit, AC-8) the IO entry of `scripts/check-gate-signals.ts`
+- [x] **3.1** (FR-1 IO, FR-7, AC-1 exit, AC-8) the IO entry of `scripts/check-gate-signals.ts`
   under a main guard (walk, read, print, exit 0/1/2, fail closed on unreadable file or zero
   workflows walked; `ci-review-templates.ts` and tests excluded), and `package.json` script
   `"check:gate-signals": "npx tsx scripts/check-gate-signals.ts"` with an optional `--root`
@@ -129,7 +129,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   AC-8 static audit, `check-gate-signals.ts` and `gate-manifest.ts` import no `child_process`,
   `node:http`, `node:https`, `fetch(` or `octokit`.
   *Done when:* green.
-- [ ] **3.2** (AC-4) the real-file regression. Test (`describe('AC-4 #810 regression')`): a
+- [x] **3.2** (AC-4) the real-file regression. Test (`describe('AC-4 #810 regression')`): a
   fixture of the pre-#854 `gh api "repos/$REPO/statuses/$SHA" ... || true` line is a finding;
   run on the real `.github/workflows/ai-review.yml`, the scanner reports nothing for the line
   holding `statuses/$PR_HEAD_SHA` nor for either `-X POST "repos/$REPO/check-runs"` line
