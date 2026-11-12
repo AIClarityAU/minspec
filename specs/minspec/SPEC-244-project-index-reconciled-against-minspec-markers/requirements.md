@@ -23,8 +23,8 @@ phases:
 # SPEC-244: The founder's project index is reconciled against the repositories that actually carry `.minspec/`, so a missing project is a visible discrepancy, not silence
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2179 (voip-sms-inbox absent from every
-> canonical index). Nothing is built until a human reads it, reviews
-> [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
+> canonical index). Nothing is built until its
+> [Decisions needed (Clarify)](#decisions-needed-clarify) are answered and it is approved.
 > No decision record: every choice here is reversible in under a day (the global register's ADR filter).
 
 ## In plain terms

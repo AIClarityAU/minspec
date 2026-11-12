@@ -24,8 +24,8 @@ phases:
 # SPEC-289: Data-only pull requests are detected automatically and reviewed on a cheap lane
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2973 (founder queue item in13). Nothing
-> is built until a human reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify),
-> and approves it.
+> is built until its [Decisions needed (Clarify)](#decisions-needed-clarify) are resolved
+> and it is approved.
 >
 > Design rationale it rests on: DR-033 (consequence-hybrid gate: `ai-review:pass` gates merge),
 > DR-051 Option 2 (the docs lane, #575), DR-066 (fail closed). No DR is minted by this spec:
