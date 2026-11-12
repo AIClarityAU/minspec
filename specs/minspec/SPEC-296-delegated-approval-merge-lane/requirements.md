@@ -305,7 +305,12 @@ difference from the table above explained by name.
 
 ## Decisions needed (Clarify)
 
-The draft proceeds on each recommendation below. FR-4 and FR-8 are written to them.
+Each decision below carries a recorded selection: the option this document recommends, copied
+by an agent session (minspec-sdd[bot]) on 2026-11-12. These are agent recommendations, not
+ratified answers, so Clarify stays open. No human chose any option, and DLG-001 (DR-108, the
+delegated-approval record) covers approval only, not Clarify selections. The founder's answer on
+operator queue item c1106au (outside this repo) is not a committed record, and DR-108 section 4
+says a queue item cannot carry consent, so it does not close Clarify here. FR-4 and FR-8 are written to these recommendations.
 
 **D1 - What if an in-flight pull request's checks never finish?** The record defines in flight as up to date with checks not finished, and it
 says a pull request failing a condition never blocks the rest, but it does not say what happens to a check that hangs. Nothing would fire and nothing would be red.
@@ -316,12 +321,16 @@ says a pull request failing a condition never blocks the rest, but it does not s
 - (b) A ceiling that turns the run red and stops the lane. Visible, but one hung check stops every approval.
 - (c) No ceiling. Cheapest to build, and it is a silent stall.
 
+**Recorded selection: Option (a)** - agent's recommended selection, not ratified.
+
 **D2 - Does `needs-human-review` refuse?** Section 1 item 3 names a hand-off comment and does not name this label, which `ai-review.yml` and the shepherd both apply
 when asking for a human. Today only #3089 has it, and #3089 is refused anyway.
 
 - **(a) Refuse on the label** **(rec)**: it can only refuse more than the record does, and it stops the lane from taking a pull request an automation has handed to a human. **Cost:** a stale
   label strands one pull request until someone removes it, visible by name in the run summary.
 - (b) Read only what the record names. Less to maintain, and it merges a pull request whose label is asking for a human.
+
+**Recorded selection: Option (a)** - agent's recommended selection, not ratified.
 
 ## Rejected alternatives (DR-086 section 4)
 

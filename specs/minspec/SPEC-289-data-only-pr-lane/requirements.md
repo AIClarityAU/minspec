@@ -24,8 +24,8 @@ phases:
 # SPEC-289: Data-only pull requests are detected automatically and reviewed on a cheap lane
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2973 (founder queue item in13). Nothing
-> is built until a human reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify),
-> and approves it.
+> is built until its [Decisions needed (Clarify)](#decisions-needed-clarify) are resolved
+> and it is approved.
 >
 > Design rationale it rests on: DR-033 (consequence-hybrid gate: `ai-review:pass` gates merge),
 > DR-051 Option 2 (the docs lane, #575), DR-066 (fail closed). No DR is minted by this spec:
@@ -240,11 +240,14 @@ spend for that run, so the FR-0 comparison can be redone from logs after the cha
 
 ## Decisions needed (Clarify)
 
-5 of 6 decisions are answered, not ratified: an agent session selected, for each, the option this document
-already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). D6 is recorded but not closed: its
-selection returns the spec to Clarify with the FR-0 numbers before Plan, so it stays open until those numbers
-are in. This spec is unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+Each decision below carries a recorded selection: the option this document recommends, copied
+by an agent session (minspec-sdd[bot]) on 2026-11-12. These are agent recommendations, not
+ratified answers, so Clarify stays open. No human chose any option, and DLG-001 (DR-108, the
+delegated-approval record) covers approval only, not Clarify selections. The founder's answer on
+operator queue item c1106au (outside this repo) is not a committed record, and DR-108 section 4
+says a queue item cannot carry consent, so it does not close Clarify here.
+D6's selection, if ratified, is a rule for Plan: if the FR-0 baseline shows the target bot pull requests
+spend zero tokens today, Plan returns this spec to Clarify with those numbers instead of building.
 
 **D1 - What is the default allowlist?**
 - **(a) Empty: lane off until the adopter names data paths (rec).** Zero risk of misclassifying
