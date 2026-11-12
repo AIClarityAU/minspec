@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-097-watcher-config-source/requirements.md",
+  "specHash": "47b583dbacd9a5dfe31b06478c77d65ac115e32a4f19e1453f91efe862356942",
+  "approvedAt": "2026-10-25T05:52:50.617Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:agent/issue-153",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/2542#issuecomment-6393963858"
+}
