@@ -10,7 +10,7 @@ depends_on: []
 relates_to: ["#2815", "#2814", "#2597", "#358", "#479", "#616", "#652", "#678", "#750", "#871", DR-008]
 implements: none
 implements_reason: >-
-  Clarify answers are recorded but not ratified (D1-D3, all option (a)). The files this spec will
+  Clarify answers are recorded, binding once this spec is approved (D1-D3, all option (a)). The files this spec will
   own (expected: scripts/lib/agent-egress.sh and its tests, both existing) are still fixed at
   Plan, so implements stays none.
 phases:
@@ -24,8 +24,8 @@ phases:
 # SPEC-282: The egress guard verifies generated template files instead of entropy-scanning their base64
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2815 (egress guard blocks every drain build
-> that regenerates `ci-review-templates.ts`). Nothing is built until a human reads it, resolves
-> [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it. The change touches the
+> that regenerates `ci-review-templates.ts`). Nothing is built until its
+> [Decisions needed (Clarify)](#decisions-needed-clarify) are resolved and it is approved. The change touches the
 > security guard on the drain's publish path, so it is machinery: the founder reviews and merges it.
 
 ## In plain terms
@@ -195,10 +195,10 @@ Recorded here because this repo runs in act mode (DR-086 §4) and nobody sees th
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are answered, not ratified: an agent session selected, for each, the option this document
+All 3 decisions are answered: an agent session selected, for each, the option this document
 already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). These answers
+bind once this spec is approved, by a human or a covered delegation, and not before.
 
 - **D1 - Recorded selection: Option (a),** every commit that touches a generated path verifies
   (FR-3).
