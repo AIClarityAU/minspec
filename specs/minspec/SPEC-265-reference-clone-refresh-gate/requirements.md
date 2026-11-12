@@ -10,9 +10,9 @@ depends_on: []
 relates_to: ["#2846", "#2705", "#230", "#231", "#232"]
 implements: none
 implements_reason: >-
-  Specify phase only. The files this spec will own (a hook script under scripts/hooks/, a
-  registry file, a settings.json entry, a scheduled lag check) are fixed at Plan, after the
-  Clarify decisions D1-D5 are answered.
+  Clarify answers are recorded, binding once this spec is approved (D1-D5, all option (a)). The files this spec will
+  own (a hook script under scripts/hooks/, a registry file, a settings.json entry, a scheduled lag
+  check) are still fixed at Plan; no recorded option names them by path, so implements stays none.
 phases:
   specify: in-progress
   clarify: pending
@@ -24,8 +24,8 @@ phases:
 # SPEC-265: Reference clones are refreshed before an agent relies on them - a gate, not a remembered rule
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2846 (refresh reference repos before
-> use). Nothing is built until a human reads it, answers
-> [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it. No decision record
+> use). Nothing is built until its
+> [Decisions needed (Clarify)](#decisions-needed-clarify) are answered and it is approved. No decision record
 > is created: every choice here is a hook and a config file, undone in well under a day
 > (the "cannot be undone in under a day" decision-record filter).
 
@@ -199,6 +199,22 @@ hook; the missing witness for vendored copies is any recorded comparison against
 - **#231 reviewed-bump rule.** Vendored files change only by a deliberate, reviewed sync.
 
 ## Decisions needed (Clarify)
+
+All 5 decisions are answered: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). These answers
+bind once this spec is approved, by a human or a covered delegation, and not before.
+
+- **D1 - Recorded selection: Option (a),** if #2705 is a scheduled lag check, fold FR-10..FR-13
+  into it and cut half 2 from this spec.
+- **D2 - Recorded selection: Option (a),** a clone older than 6 hours is refetched before a read.
+- **D3 - Recorded selection: Option (a),** when a refresh fails or is skipped, the read is
+  allowed, with the FR-7 warning stating the clone's age.
+- **D4 - Recorded selection: Option (a),** the lag check is a weekly scheduled GitHub Actions
+  workflow in this repo, with a threshold of 50 mapped-path commits or 90 days.
+- **D5 - Recorded selection: Option (a),** the hook is registered in this repo's
+  `.claude/settings.json` only; package-manager dependency updates are out of scope here (a
+  separate issue), as the recommendation says.
 
 - **D1 - Does #2705 already own half 2?** This dispatch could not read #2705.
   - (a) **(rec)** If #2705 is a scheduled lag check, fold FR-10..FR-13 into it and cut half 2

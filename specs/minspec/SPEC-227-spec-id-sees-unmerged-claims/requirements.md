@@ -279,22 +279,34 @@ collision was settled by the "cheapest to fix" answer, case by case, with no rul
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended. An
-agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
-on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
-chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
-(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
-context, not verified. No human chose any single item. DQ-1 and DQ-3 are left open (a
-re-approval of an approved spec, and a required-check change); this section stays open, and
-the spec is not ready to approve, until the founder answers. DQ-5 was added on 2026-10-27
-from #2185, after that instruction; it sets a convention for people, so it is left open
-too.
+DQ-1 and DQ-3 have selections recorded from the answer to task-queue item c227 (2026-10-27:
+"Both (Recommended)"), an answer the queue attributes to the founder. A queue answer is not
+consent and is not verified here: DR-108 (delegated approval) section 4 holds that a queue
+item cannot carry consent, because any session can write the queue. Those selections
+therefore bind nothing on their own. They bind only if the founder approves this spec with
+them in its text; that approval, not this record, is the consent act, and it may overturn
+them. DQ-2 and DQ-4 carry the (rec) option an agent session copied; no human chose them
+(each says so). Delegation DLG-001 (DR-108) made none of these selections. DQ-5 has a
+selection recorded from the answer to task-queue item c227q5 (2026-10-28: "Cheapest fix"),
+on option (b), which is NOT the (rec) option; the same unverified-queue-answer caveat
+applies, and FR-10 needs rewriting in Clarify before Plan.
+This section stays open, and the spec is not ready to approve, until the founder confirms
+DQ-2 and DQ-4 and approves the text with the DQ-5 selection in place.
 
 ### DQ-1 - Per-product id ranges contradict the global uniqueness gate
 
-**Not recorded:** option (a) needs SPEC-053's text updated, and SPEC-053 is already approved
-(`status: planning`, approval record committed), so it forces a re-approval; it also ends
-the per-product id ranges adopters may rely on. Needs the founder's answer.
+**Recorded selection: (a),** allocate globally and keep the `product` parameter only for
+attribution. Source: the answer to task-queue item c227, 2026-10-27 ("Both
+(Recommended)": global ids). A queue answer is not consent (DR-108 section 4), so this
+selection is unverified and binds only if the founder approves this spec's text with it in
+place. SPEC-053's text then needs an update and a fresh approval; this record does not edit
+SPEC-053.
+
+**A DR is required before implementation.** Option (a) ends the per-product id ranges
+adopters may rely on and forces SPEC-053's re-approval, which cannot be undone in a day once
+adopters allocate under it (the DR-359 filter). Its rationale goes in one decision record,
+written before this spec's Plan completes and so before any implementation; SPEC-053's
+amendment cites the same DR. The DR is not drafted by this record.
 
 `nextSpecId(specsDir, product)` scopes the max to one product (#57, SPEC-053), so a new
 product starts at SPEC-001. Rule 18 checks uniqueness **across all products**
@@ -325,8 +337,11 @@ session copied this document's (rec) option; no human chose this item.
 
 ### DQ-3 - Make `spec-id-collision` a required check?
 
-**Not recorded:** option (a) makes `spec-id-collision` a required check, which is a ruleset
-change. Needs the founder's answer.
+**Recorded selection: (a),** make `spec-id-collision` a required check once it has run green
+on open PRs for a week. Source: the answer to task-queue item c227, 2026-10-27 ("Both
+(Recommended)": required collision check). A queue answer is not consent (DR-108 section
+4), so this selection is unverified and binds only if the founder approves this spec's text
+with it in place. The ruleset edit itself is a separate act; this record makes none.
 
 The DR twin is still advisory: a workflow cannot make itself required.
 
@@ -352,8 +367,14 @@ blindness. Its CI gate exists; its offline allocator does not see branches eithe
 
 ### DQ-5 - Which claimant renumbers when two specs already share an id? (#2185)
 
-**Not recorded:** this sets a convention people follow, not only gate behaviour, and it
-arrived after the 2026-10-26 instruction. Needs the founder's answer.
+**Recorded selection: (b),** cheapest to fix wins: whichever claimant is cheaper to
+renumber renumbers. Source: the answer to task-queue item c227q5, 2026-10-28 ("Cheapest
+fix"), an answer the queue attributes to the founder. It is NOT this document's (rec)
+option, which was (a). The founder accepted the stated cost: a judgement is needed each
+time and the gate cannot apply it. A queue answer is not consent (DR-108 section 4), so this
+selection is unverified and binds only if the founder approves this spec's text with it in
+place. FR-10 therefore needs rewriting in Clarify before Plan, as the closing paragraph of
+this decision says; this record does not edit FR-10.
 
 FR-10 fixes the gate's answer (lower PR number keeps the id). The open question is whether
 that is also the rule for a clash found any other way - by hand, by the FR-8 command, or
