@@ -6,10 +6,10 @@ import { readSpecFile } from '../lib/spec';
 import { loadConfig } from '../lib/config';
 import { validateSpec } from '../lib/spec-validator';
 import { epicRefSet } from '../lib/epic-manager';
-import { getApprovalStatus } from '../lib/approval';
+import { getApprovalRecord, getApprovalStatus } from '../lib/approval';
 import { explicitTerminalOf, type ExplicitTerminal } from '../lib/lifecycle';
 import { folderForFile, resolveTargetFolder } from '../lib/resolve-folder';
-import { readShardIdFiles, readSpecSetStatusFiles } from '../lib/spec-layout';
+import { readShardIdFiles, readSpecSetStatusFiles, specSetApprovalSubject } from '../lib/spec-layout';
 import { readSpecTaskTally } from '../lib/artifact-graph';
 
 interface SpecNodeLike {
@@ -54,7 +54,13 @@ export async function validateSpecCommand(node?: SpecNodeLike): Promise<void> {
     // warn on drift. The explicit terminals (`archived`, `superseded`) are human
     // acts read from the literal status via the one shared resolver (#1520);
     // everything else is derived from {phases, approval}.
-    const approvalState = getApprovalStatus(rootDir, spec.filePath);
+    // SPEC-212 x SPEC-059: an unsigned design.md/tasks.md in a SPEC-NNN set is judged by
+    // its requirements.md's record, so mirror-drift and spec-set agreement ask for the
+    // same literal. A shard with its own record keeps it.
+    const approvalSubject = getApprovalRecord(rootDir, spec.filePath) === undefined
+      ? specSetApprovalSubject(spec.filePath)
+      : spec.filePath;
+    const approvalState = getApprovalStatus(rootDir, approvalSubject);
     const explicitTerminal: ExplicitTerminal = explicitTerminalOf(parsed.frontmatter.status);
     result = validateSpec(parsed, loadConfig(rootDir), {
       knownEpicRefs: epicRefSet(rootDir),

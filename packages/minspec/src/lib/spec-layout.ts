@@ -305,6 +305,32 @@ export function readSpecSetStatusFiles(dirPath: string): SpecSetStatusFile[] {
 }
 
 /**
+ * The file whose approval record a spec-set file's derived status is judged by
+ * (SPEC-212, interaction with SPEC-059's `status.mirror-drift`).
+ *
+ * In a `SPEC-NNN-<slug>/` set only `requirements.md` is signed, and the set's status is
+ * requirements.md's (SPEC-212 FR-2). A `design.md` or `tasks.md` judged by its own
+ * (absent) record would always derive `specifying`, so the mirror-drift rule would warn on
+ * every sibling SPEC-212 asks to agree with an approved requirements.md, and the reverse.
+ * SPEC-059's design ("Known tension") names the reconciliation: derive a shard from its
+ * parent's approval record. This returns that parent path for such a shard, and
+ * `filePath` unchanged for everything else (requirements.md itself, a flat spec,
+ * a file outside a SPEC-NNN set, or a set with no requirements.md).
+ *
+ * The caller still prefers the shard's OWN record when one exists (SPEC-001's and
+ * SPEC-019's signed design.md): this is the fallback for an unsigned shard only, so it
+ * never makes a file read as approved unless its spec-set's requirements.md is approved.
+ */
+export function specSetApprovalSubject(filePath: string): string {
+  const fileName = path.basename(filePath);
+  if (fileName !== 'design.md' && fileName !== 'tasks.md') return filePath;
+  const dir = path.dirname(filePath);
+  if (!SPEC_SET_DIR_RE.test(path.basename(dir))) return filePath;
+  const parent = path.join(dir, 'requirements.md');
+  return fs.existsSync(parent) ? parent : filePath;
+}
+
+/**
  * Read a spec-kit directory into a single ParsedSpec.
  * Missing files are tolerated — only spec.md is required.
  */

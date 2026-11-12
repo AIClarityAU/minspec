@@ -19,7 +19,7 @@ import {
   SPEC_SET_STATUS_FILE_NAMES,
 } from '../src/lib/spec-validator';
 import type { SpecSetStatusFile, ValidationViolation } from '../src/lib/spec-validator';
-import { readSpecSetStatusFiles } from '../src/lib/spec-layout';
+import { readSpecSetStatusFiles, specSetApprovalSubject } from '../src/lib/spec-layout';
 import { parseSpec } from '../src/lib/spec';
 import { DEFAULT_CONFIG } from '../src/lib/config';
 
@@ -373,5 +373,47 @@ describe('validateSpec - specSetStatusFiles option (SPEC-212 FR-5)', () => {
       specSetStatusFiles: set('implementing', 'implementing', 'implementing'),
     });
     expect(r.violations).toEqual(base.violations);
+  });
+});
+
+describe('specSetApprovalSubject (SPEC-212 x SPEC-059: the record a shard is judged by)', () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-set-subject-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const mk = (dirName: string, names: string[]): string => {
+    const dir = path.join(root, dirName);
+    fs.mkdirSync(dir, { recursive: true });
+    for (const n of names) fs.writeFileSync(path.join(dir, n), fm('planning'));
+    return dir;
+  };
+
+  it('maps design.md and tasks.md of a SPEC-NNN set to its requirements.md', () => {
+    const dir = mk('SPEC-900-probe', ['requirements.md', 'design.md', 'tasks.md']);
+    const parent = path.join(dir, 'requirements.md');
+    expect(specSetApprovalSubject(path.join(dir, 'design.md'))).toBe(parent);
+    expect(specSetApprovalSubject(path.join(dir, 'tasks.md'))).toBe(parent);
+  });
+
+  it('leaves requirements.md itself, and any other file name, unchanged', () => {
+    const dir = mk('SPEC-900-probe', ['requirements.md', 'notes.md']);
+    expect(specSetApprovalSubject(path.join(dir, 'requirements.md'))).toBe(path.join(dir, 'requirements.md'));
+    expect(specSetApprovalSubject(path.join(dir, 'notes.md'))).toBe(path.join(dir, 'notes.md'));
+  });
+
+  it('leaves a shard unchanged when its set has no requirements.md (no parent to borrow)', () => {
+    const dir = mk('SPEC-900-probe', ['design.md']);
+    expect(specSetApprovalSubject(path.join(dir, 'design.md'))).toBe(path.join(dir, 'design.md'));
+  });
+
+  it('leaves a shard outside a SPEC-NNN-* directory unchanged (FR-1: flat sets are never grouped)', () => {
+    const dir = mk('minspec', ['requirements.md', 'design.md']);
+    expect(specSetApprovalSubject(path.join(dir, 'design.md'))).toBe(path.join(dir, 'design.md'));
   });
 });
