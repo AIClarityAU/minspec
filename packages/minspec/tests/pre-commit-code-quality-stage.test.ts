@@ -8,8 +8,9 @@
  * Harness (design.md, *Test plan*): render `PRE_COMMIT_HOOK` with
  * `renderManagedFile`, write it into a fresh `git init` fixture as
  * `.minspec/hooks/pre-commit`, stage fixture files, and run the hook with `sh`
- * under a caller-controlled `PATH`. `pathWithout(tool)` drops every PATH entry
- * holding that tool, and asserts `command -v <tool>` then fails, so an "absent"
+ * under a caller-controlled `PATH`. `pathWithout(tool)` mirrors every PATH entry
+ * holding that tool without it (never drops the entry, which on CI also holds sh
+ * and git, #3676), and asserts `command -v <tool>` then fails, so an "absent"
  * case can never pass vacuously because the tool was still reachable.
  *
  * Every hook run sets `npm_config_offline=true` and an empty `npm_config_cache`,
@@ -25,6 +26,7 @@ import { execFileSync, spawnSync } from 'child_process';
 
 import { MANAGED_REGION_TEMPLATES, renderManagedFile } from '../src/lib/template-registry';
 import { useShellTimeout } from './helpers/shell-timeout';
+import { pathWithoutTools, resolvableOn } from './helpers/path-without-tool';
 
 useShellTimeout();
 
@@ -66,34 +68,16 @@ function renderHook(): string {
 }
 
 /** Is `tool` resolvable as a command under `pathEnv`? */
-function resolvable(tool: string, pathEnv: string): boolean {
-  const r = spawnSync('sh', ['-c', `command -v ${tool}`], {
-    encoding: 'utf8',
-    env: { ...process.env, PATH: pathEnv },
-  });
-  return r.status === 0;
-}
+const resolvable = resolvableOn;
 
 /**
- * `pathEnv` with every entry that holds an executable named `tool` removed.
- * Asserts the tool is then unresolvable: an "absent" case built on a PATH that
- * still reaches the tool would pass for the wrong reason.
+ * `pathEnv` with `tool` made unresolvable and every other command kept: a
+ * directory holding the tool is replaced by a mirror without it, never dropped,
+ * because on CI shellcheck shares /usr/bin with sh and git (#3676). Asserts the
+ * tool is then unresolvable, so an "absent" case cannot pass for the wrong reason.
  */
 function pathWithout(tool: string, pathEnv: string = process.env.PATH ?? ''): string {
-  const kept = pathEnv.split(path.delimiter).filter((dir) => {
-    if (!dir) return false;
-    try {
-      fs.accessSync(path.join(dir, tool), fs.constants.X_OK);
-      return false;
-    } catch {
-      return true;
-    }
-  });
-  const out = kept.join(path.delimiter);
-  if (resolvable(tool, out)) {
-    throw new Error(`pathWithout(${tool}): still resolvable after filtering PATH`);
-  }
-  return out;
+  return pathWithoutTools([tool], pathEnv, scratch);
 }
 
 /** Base PATH for every case: gitleaks removed so Stage 2 is a fixed, offline advisory. */

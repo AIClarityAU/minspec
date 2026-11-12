@@ -32,6 +32,7 @@ import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import { generateHarnessFiles } from '../src/lib/scaffold';
 import { useShellTimeout } from './helpers/shell-timeout';
+import { pathWithoutTools } from './helpers/path-without-tool';
 
 // #1285: spawns real git + node + gitleaks children.
 useShellTimeout();
@@ -135,24 +136,20 @@ describe('the scaffolded harness passes the gates it scaffolds', () => {
   });
 
   it('AC-13: with both tools absent the scaffold still commits, and both are reported SKIPPED, never passed', () => {
-    const kept = PATH_NOW.split(path.delimiter).filter((d) => {
-      if (!d) return false;
-      return !['shellcheck', 'actionlint'].some((t) => {
-        try {
-          fs.accessSync(path.join(d, t), fs.constants.X_OK);
-          return true;
-        } catch {
-          return false;
-        }
-      });
-    });
-    const without = kept.join(path.delimiter);
-    expect(resolvable('shellcheck', without)).toBe(false);
-    expect(resolvable('actionlint', without)).toBe(false);
-    const r = commitScaffold(without);
-    expect(r.status, r.out).toBe(0);
-    expect(r.out).toMatch(/MinSpec quality: shellcheck SKIPPED/);
-    expect(r.out).toMatch(/MinSpec quality: actionlint SKIPPED/);
-    expect(r.out).not.toMatch(/MinSpec quality: (shellcheck|actionlint) passed/);
+    // Mirror, never drop, a directory holding a tool: on CI shellcheck shares
+    // /usr/bin with sh and git, and dropping it left git unable to run (#3676).
+    const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-ac13-path-'));
+    try {
+      const without = pathWithoutTools(['shellcheck', 'actionlint'], PATH_NOW, scratch);
+      expect(resolvable('shellcheck', without)).toBe(false);
+      expect(resolvable('actionlint', without)).toBe(false);
+      const r = commitScaffold(without);
+      expect(r.status, r.out).toBe(0);
+      expect(r.out).toMatch(/MinSpec quality: shellcheck SKIPPED/);
+      expect(r.out).toMatch(/MinSpec quality: actionlint SKIPPED/);
+      expect(r.out).not.toMatch(/MinSpec quality: (shellcheck|actionlint) passed/);
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
   });
 });
