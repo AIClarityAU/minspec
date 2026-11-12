@@ -7,6 +7,8 @@
  *
  * Branch-level, not per-commit: a branch touching templates twice needs ONE bump, so the
  * rule compares the branch tip with its merge-base rather than demanding a bump per commit.
+ *
+ * Runs locally only (pre-push hook, `npm run check:template-version`); no CI job calls it.
  */
 
 /** Sources of every scaffolded artifact's content. A change to any alters what an install renders. */

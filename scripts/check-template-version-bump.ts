@@ -7,7 +7,8 @@
  *
  * Exit 0 = ok. Exit 1 = templates changed without a bump. Exit 2 = could not determine
  * (no base ref, git failure): visible, never a silent pass. Offline: local refs only.
- * Wired into .githooks/pre-push and `npm run check:template-version`.
+ * Wired into .githooks/pre-push and `npm run check:template-version`. LOCAL ONLY: CI does not
+ * run it, and TEMPLATE_VERSION_GATE_OFF=1 skips the hook, so it is not an enforced merge gate.
  */
 import { execFileSync } from 'node:child_process';
 
