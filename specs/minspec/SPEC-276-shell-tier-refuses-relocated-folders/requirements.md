@@ -1,7 +1,7 @@
 ---
 id: SPEC-276
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a gate that checks a folder the project does not use passes silently
@@ -14,9 +14,9 @@ implements_reason: >-
   files this spec will own is still decided at Plan; no recorded option names a new file, so
   implements stays none.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
