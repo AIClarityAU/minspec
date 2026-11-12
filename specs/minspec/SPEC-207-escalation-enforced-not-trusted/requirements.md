@@ -1,7 +1,7 @@
 ---
 id: SPEC-207
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline (dispatch-issue.sh's run-outcome handling lives here)
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   This spec modifies files another spec owns (see affects:) and creates none of its own.
 phases:
-  specify: in-progress
+  specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
