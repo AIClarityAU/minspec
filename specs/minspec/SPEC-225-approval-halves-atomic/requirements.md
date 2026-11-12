@@ -108,9 +108,12 @@ the answers to task-queue items c225 and c225b (2026-10-28). Each queue answer i
 attributed to the founder but is unverified: DR-108 (delegated approval) section 4 holds
 that a queue item cannot carry consent, so none of these selections binds until the founder
 approves this spec's text with them in place. Decision 2 was first recorded by an agent
-session from reading the code; the founder then chose it himself on 2026-11-13 through
-task-queue item c225c (choice k, "keep: recovery fails closed, no exemption"). Decisions 3
-and 4 remain agent-recorded, so this section stays open until the founder confirms them.
+session from reading the code. The founder's answer to it was recorded from task-queue item
+c225c on 2026-11-12 UTC (2026-11-13 AEDT): "keep: recovery fails closed, no exemption". That
+answer carries the same status as the others: under DR-108 section 4 it becomes binding when
+the founder approves this spec, not before. It gives Decision 2's recommended answer the
+founder's stated preference. Decisions 2, 3 and 4 therefore stay open until the founder's
+approval confirms them; 3 and 4 remain agent-recorded.
 
 1. **Where the commit-time gate lives.**
 
@@ -134,8 +137,9 @@ and 4 remain agent-recorded, so this section stays open until the founder confir
    producer.
 
    **Recorded selection: no exemption; fix the producer so recovery fails closed.** The
-   founder chose this himself on 2026-11-13 through task-queue item c225c (choice k, "keep:
-   recovery fails closed, no exemption"). It departs from the exemption option above. An
+   founder's answer, recorded from task-queue item c225c on 2026-11-12 UTC (2026-11-13
+   AEDT): "keep: recovery fails closed, no exemption". Per DR-108 section 4 it binds only
+   when the founder approves this spec, not before. It departs from the exemption option above. An
    agent session had first recorded it after reading the code at commit 4012113d. Evidence: `commands/approve.ts:398-402`
    passes the spec path and the sidecar together, `lib/approval-recover.ts:273` stages
    exactly those paths and `:296` makes one commit, so recovery already lands both halves in
