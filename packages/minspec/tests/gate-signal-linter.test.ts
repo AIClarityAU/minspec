@@ -32,6 +32,14 @@ import {
   shellUnitFromScript,
   type WriteSite,
 } from '../../../scripts/check-gate-signals';
+import {
+  SELF_CONTEXTS,
+  evaluateWitnesses,
+  readRequiredContexts,
+  runAudit,
+} from '../../../scripts/audit-gate-witnesses';
+import type { GateEntry } from '../../../scripts/lib/gate-manifest';
+import type { CommandResult } from '../src/lib/ruleset-advisor';
 
 const REPO = join(__dirname, '../../..');
 const GUARD = '.github/scripts/ai-review-guard.js';
@@ -767,5 +775,275 @@ describe('AC-4 #810 regression', () => {
       expect(r.sites.find((s) => s.line === n)?.verdict, `line ${n}`).toBe('ok');
       expect(findingLines.has(n), `line ${n}`).toBe(false);
     }
+  });
+});
+
+// ── FR-3 ─────────────────────────────────────────────────────────────────────
+
+const witness = (mechanism: 'status' | 'check-run' | 'label', signal = 'x') => ({
+  workflow: '.github/workflows/ci.yml',
+  job: 'j',
+  mechanism,
+  signal,
+  permission: 'checks:write' as const,
+  app: 'github-actions[bot]',
+});
+
+describe('FR-3 evaluate', () => {
+  it('SELF_CONTEXTS is lint and gate-witnesses', () => {
+    expect([...SELF_CONTEXTS]).toEqual(['lint', 'gate-witnesses']);
+  });
+
+  it('AC-5: a required context with one witness and no failClosed is a finding', () => {
+    const manifest: GateEntry[] = [{ context: 'solo', witnesses: [witness('check-run')] }];
+    const r = evaluateWitnesses(['solo'], manifest, []);
+    expect(r.findings).toEqual([expect.objectContaining({ context: 'solo', kind: 'single witness (AC-5)' })]);
+  });
+
+  it('AC-6: ready-to-merge passes against the real GATE_MANIFEST', () => {
+    const r = evaluateWitnesses(['ready-to-merge'], GATE_MANIFEST, []);
+    expect(r.findings).toEqual([]);
+    expect(r.honoured).toEqual([]);
+  });
+
+  it('two witnesses of the same mechanism fail', () => {
+    const manifest: GateEntry[] = [
+      { context: 'twin', witnesses: [witness('check-run', 'a'), witness('check-run', 'b')] },
+    ];
+    expect(evaluateWitnesses(['twin'], manifest, []).findings.map((f) => f.kind)).toEqual(['single witness (AC-5)']);
+  });
+
+  it('a required context missing from the manifest is a finding', () => {
+    const r = evaluateWitnesses(['ghost'], GATE_MANIFEST, []);
+    expect(r.findings).toEqual([expect.objectContaining({ context: 'ghost', kind: 'no manifest entry' })]);
+  });
+
+  it('a single witness with a valid failClosed is honoured and reported', () => {
+    const r = evaluateWitnesses(['ai-review'], GATE_MANIFEST, []);
+    expect(r.findings).toEqual([]);
+    expect(r.honoured.map((h) => h.context)).toEqual(['ai-review']);
+  });
+
+  it('a failClosed with an empty reason or evidence is an invalid annotation', () => {
+    const manifest: GateEntry[] = [
+      { context: 'a', witnesses: [witness('check-run')], failClosed: { reason: ' ', evidence: 'ci.yml' } },
+      { context: 'b', witnesses: [witness('check-run')], failClosed: { reason: 'r', evidence: '' } },
+    ];
+    expect(evaluateWitnesses(['a', 'b'], manifest, []).findings.map((f) => f.kind)).toEqual([
+      'invalid fail-closed annotation',
+      'invalid fail-closed annotation',
+    ]);
+  });
+
+  it('AC-10: required lacking gate-witnesses yields not a required context, listing every observed context', () => {
+    const observed = ['lint', 'test', 'MinSpec SDD validation', 'ai-review', 'ready-to-merge', 'build'];
+    const r = evaluateWitnesses(observed, GATE_MANIFEST, SELF_CONTEXTS);
+    expect(r.findings).toHaveLength(1);
+    expect(r.findings[0]).toEqual(expect.objectContaining({ context: 'gate-witnesses', kind: 'not a required context' }));
+    for (const c of observed) expect(r.findings[0].detail).toContain(c);
+  });
+
+  it('an unrequired manifest entry is a notice, not a finding', () => {
+    const r = evaluateWitnesses(['ready-to-merge'], GATE_MANIFEST, []);
+    expect(r.findings).toEqual([]);
+    expect(r.notices.some((n) => n.includes('gate-witnesses'))).toBe(true);
+    expect(r.notices.some((n) => n.includes('ready-to-merge'))).toBe(false);
+  });
+});
+
+/** A fake `gh` that answers by the joined argument string. */
+function fakeRunner(table: Record<string, CommandResult | (() => never)>) {
+  const calls: string[] = [];
+  const run = async (cmd: string, args: string[]): Promise<CommandResult> => {
+    const key = `${cmd} ${args.join(' ')}`;
+    calls.push(key);
+    const hit = Object.entries(table).find(([k]) => key.endsWith(k));
+    if (!hit) return { code: 1, stdout: '', stderr: `unexpected call: ${key}` };
+    const v = hit[1];
+    return typeof v === 'function' ? v() : v;
+  };
+  return { run, calls };
+}
+
+const okJson = (v: unknown): CommandResult => ({ code: 0, stdout: JSON.stringify(v), stderr: '' });
+const guardingRuleset = (contexts: string[]) => ({
+  target: 'branch',
+  enforcement: 'active',
+  conditions: { ref_name: { include: ['~DEFAULT_BRANCH'] } },
+  rules: [{ type: 'required_status_checks', parameters: { required_status_checks: contexts.map((context) => ({ context })) } }],
+});
+const LIST = '/rulesets';
+
+describe('FR-3 read', () => {
+  const audit = async (table: Parameters<typeof fakeRunner>[0]) => {
+    const { run, calls } = fakeRunner(table);
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = await runAudit(['--repo', 'o/r'], {
+      env: {},
+      run,
+      io: { out: (s) => out.push(s), err: (s) => err.push(s) },
+    });
+    return { code, out: out.join('\n'), err: err.join('\n'), calls };
+  };
+
+  it('the list call exits non-zero: exit 2 with gh stderr printed', async () => {
+    const r = await audit({ [LIST]: { code: 1, stdout: '', stderr: 'HTTP 403: Resource not accessible' } });
+    expect(r.code).toBe(2);
+    expect(r.err).toContain('HTTP 403: Resource not accessible');
+  });
+
+  it('the list call cannot be spawned: exit 2', async () => {
+    const r = await audit({
+      [LIST]: () => {
+        throw new Error('spawn gh ENOENT');
+      },
+    });
+    expect(r.code).toBe(2);
+    expect(r.err).toContain('ENOENT');
+  });
+
+  it('the list is not JSON: exit 2', async () => {
+    expect((await audit({ [LIST]: { code: 0, stdout: '<html>', stderr: '' } })).code).toBe(2);
+  });
+
+  it('the list is JSON but not an array: exit 2', async () => {
+    expect((await audit({ [LIST]: okJson({ message: 'nope' }) })).code).toBe(2);
+  });
+
+  it('one candidate detail GET fails: exit 2, not skipped', async () => {
+    const r = await audit({
+      [LIST]: okJson([
+        { id: 1, target: 'branch', enforcement: 'active' },
+        { id: 2, target: 'branch', enforcement: 'active' },
+      ]),
+      '/rulesets/1': okJson(guardingRuleset(['lint', 'gate-witnesses'])),
+      '/rulesets/2': { code: 1, stdout: '', stderr: 'HTTP 502' },
+    });
+    expect(r.code).toBe(2);
+    expect(r.err).toContain('HTTP 502');
+  });
+
+  it('one detail is not JSON: exit 2', async () => {
+    const r = await audit({
+      [LIST]: okJson([{ id: 1, target: 'branch', enforcement: 'active' }]),
+      '/rulesets/1': { code: 0, stdout: '{', stderr: '' },
+    });
+    expect(r.code).toBe(2);
+  });
+
+  it('no guarding ruleset: a finding distinct from a read failure', async () => {
+    const r = await audit({
+      [LIST]: okJson([{ id: 1, target: 'branch', enforcement: 'active' }]),
+      '/rulesets/1': okJson({ ...guardingRuleset([]), rules: [{ type: 'deletion' }] }),
+    });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('no active branch ruleset requires status checks');
+  });
+
+  it('a guarding ruleset with zero contexts: a finding', async () => {
+    const r = await audit({
+      [LIST]: okJson([{ id: 1, target: 'branch', enforcement: 'active' }]),
+      '/rulesets/1': okJson(guardingRuleset([])),
+    });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('requires zero status-check contexts');
+  });
+
+  it('two guarding rulesets: contexts are unioned', async () => {
+    const { run } = fakeRunner({
+      [LIST]: okJson([
+        { id: 1, target: 'branch', enforcement: 'active' },
+        { id: 2, target: 'branch', enforcement: 'evaluate' },
+      ]),
+      '/rulesets/1': okJson(guardingRuleset(['lint', 'test'])),
+      '/rulesets/2': okJson(guardingRuleset(['test', 'build'])),
+    });
+    const r = await readRequiredContexts('o', 'r', run);
+    expect(r).toEqual({ ok: true, contexts: ['lint', 'test', 'build'] });
+  });
+
+  it('a disabled ruleset, a tag ruleset and a non-numeric id are skipped (never fetched)', async () => {
+    const { run, calls } = fakeRunner({
+      [LIST]: okJson([
+        { id: 1, target: 'branch', enforcement: 'active' },
+        { id: 2, target: 'branch', enforcement: 'disabled' },
+        { id: 3, target: 'tag', enforcement: 'active' },
+        { id: '4', target: 'branch', enforcement: 'active' },
+      ]),
+      '/rulesets/1': okJson(guardingRuleset(['lint'])),
+    });
+    expect(await readRequiredContexts('o', 'r', run)).toEqual({ ok: true, contexts: ['lint'] });
+    expect(calls.filter((c) => /rulesets\/\d/.test(c))).toEqual(['gh api repos/o/r/rulesets/1']);
+  });
+
+  it('paginated output (concatenated pages) is read in full', async () => {
+    const page1 = JSON.stringify([{ id: 1, target: 'branch', enforcement: 'active' }]);
+    const page2 = JSON.stringify([{ id: 2, target: 'branch', enforcement: 'active' }]);
+    const { run } = fakeRunner({
+      [LIST]: { code: 0, stdout: `${page1}\n${page2}`, stderr: '' },
+      '/rulesets/1': okJson(guardingRuleset(['lint'])),
+      '/rulesets/2': okJson(guardingRuleset(['build'])),
+    });
+    expect(await readRequiredContexts('o', 'r', run)).toEqual({ ok: true, contexts: ['lint', 'build'] });
+  });
+
+  it('a full passing run exits 0 and prints the required list and honoured fail-closed entries', async () => {
+    const all = ['lint', 'test', 'MinSpec SDD validation', 'ai-review', 'ready-to-merge', 'build', 'gate-witnesses'];
+    const r = await audit({
+      [LIST]: okJson([{ id: 1, target: 'branch', enforcement: 'active' }]),
+      '/rulesets/1': okJson(guardingRuleset(all)),
+    });
+    expect(r.code).toBe(0);
+    for (const c of all) expect(r.out).toContain(c);
+    expect(r.out).toMatch(/fail-closed entr(y|ies) honoured/);
+    expect(r.out).toContain('MinSpec SDD validation');
+  });
+
+  it('a read that succeeds with gate-witnesses not required exits 1 and prints the observed list (AC-9/AC-10 first run)', async () => {
+    const today = ['lint', 'test', 'MinSpec SDD validation', 'ai-review', 'ready-to-merge', 'build'];
+    const r = await audit({
+      [LIST]: okJson([{ id: 1, target: 'branch', enforcement: 'active' }]),
+      '/rulesets/1': okJson(guardingRuleset(today)),
+    });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('gate-witnesses: not a required context');
+    expect(r.err).toBe('');
+  });
+
+  it('the file imports both helpers from ruleset-advisor and has no ruleset rule-type literal of its own', () => {
+    const text = readFileSync(join(REPO, 'scripts/audit-gate-witnesses.ts'), 'utf8');
+    expect(text).toMatch(/import\s*\{[^}]*\brulesetGuardsDefaultBranchChecks\b[^}]*\}\s*from\s*'[^']*ruleset-advisor'/);
+    expect(text).toMatch(/import\s*\{[^}]*\bextractRequiredContexts\b[^}]*\}\s*from\s*'[^']*ruleset-advisor'/);
+    expect(text).not.toContain('required_status_checks');
+  });
+});
+
+describe('FR-7 separation', () => {
+  it('no lint, pretest or check:* script reaches audit-gate-witnesses', () => {
+    const pkg = JSON.parse(readFileSync(join(REPO, 'package.json'), 'utf8')) as { scripts: Record<string, string> };
+    for (const [name, body] of Object.entries(pkg.scripts)) {
+      if (name === 'lint' || name === 'pretest' || name.startsWith('check:')) {
+        expect(body, name).not.toContain('audit-gate-witnesses');
+      }
+    }
+    expect(pkg.scripts['audit:gate-witnesses']).toBe('npx tsx scripts/audit-gate-witnesses.ts');
+  });
+
+  it('with neither --repo nor GITHUB_REPOSITORY the entry exits 2', async () => {
+    const err: string[] = [];
+    const { run, calls } = fakeRunner({});
+    const code = await runAudit([], { env: {}, run, io: { out: () => {}, err: (s) => err.push(s) } });
+    expect(code).toBe(2);
+    expect(calls).toEqual([]);
+    expect(err.join('\n')).toMatch(/GITHUB_REPOSITORY/);
+  });
+
+  it('GITHUB_REPOSITORY is used when --repo is absent; a malformed repo exits 2', async () => {
+    const { run, calls } = fakeRunner({ [LIST]: { code: 1, stdout: '', stderr: 'x' } });
+    await runAudit([], { env: { GITHUB_REPOSITORY: 'own/name' }, run, io: { out: () => {}, err: () => {} } });
+    expect(calls[0]).toContain('repos/own/name/rulesets');
+    const bad = await runAudit(['--repo', 'noslash'], { env: {}, run, io: { out: () => {}, err: () => {} } });
+    expect(bad).toBe(2);
   });
 });

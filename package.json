@@ -19,6 +19,7 @@
     "check:cycles": "npx tsx scripts/check-import-cycles.ts",
     "check:swallowed-gate": "npx tsx scripts/check-swallowed-gate-signal.ts",
     "check:gate-signals": "npx tsx scripts/check-gate-signals.ts",
+    "audit:gate-witnesses": "npx tsx scripts/audit-gate-witnesses.ts",
     "check:orphaned-docstring": "npx tsx scripts/check-orphaned-docstring.ts",
     "pretypecheck": "npm run build --workspace=@aiclarity/shared",
     "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/minspec/tsconfig.json && tsc --noEmit -p packages/core/tsconfig.json",

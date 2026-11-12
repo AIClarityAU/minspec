@@ -136,7 +136,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   (located by content).
   *Done when:* green on `main` as it stands, with no workflow edit (the other findings in that
   file are expected and not asserted here).
-- [ ] **3.3** (FR-3, DQ-3, AC-5, AC-6, AC-10) `scripts/audit-gate-witnesses.ts` (new, owned)
+- [x] **3.3** (FR-3, DQ-3, AC-5, AC-6, AC-10) `scripts/audit-gate-witnesses.ts` (new, owned)
   pure part: `evaluateWitnesses(required, manifest, self)` and the `SELF_CONTEXTS` constant
   (`lint`, `gate-witnesses`), with the four finding kinds and the stale-entry notice of
   design.md.
@@ -146,7 +146,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   finding; AC-10, `required` lacking `gate-witnesses` yields `not a required context` and the
   output lists every observed context; an unrequired manifest entry is a notice, not a finding.
   *Done when:* green.
-- [ ] **3.4** (FR-3 read, DQ-6, INV-4) same file: the read through an injected runner, the
+- [x] **3.4** (FR-3 read, DQ-6, INV-4) same file: the read through an injected runner, the
   selection loop with exported `rulesetGuardsDefaultBranchChecks` and `extractRequiredContexts`,
   union across guarding rulesets, every read and parse failure as could-not-run.
   Test (`describe('FR-3 read')`, fake runner): list call exits non-zero, exit 2 and stderr
@@ -156,7 +156,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   `disabled` ruleset is skipped; the file imports both helpers from `ruleset-advisor` and
   contains no `required_status_checks` string of its own.
   *Done when:* green.
-- [ ] **3.5** (FR-3 IO, FR-7, AC-8) same file's IO entry under a main guard: repo from `--repo`
+- [x] **3.5** (FR-3 IO, FR-7, AC-8) same file's IO entry under a main guard: repo from `--repo`
   or `GITHUB_REPOSITORY` (neither is exit 2), the honoured-`failClosed` summary printed every
   run, exit 0/1/2; `package.json` script
   `"audit:gate-witnesses": "npx tsx scripts/audit-gate-witnesses.ts"`.
