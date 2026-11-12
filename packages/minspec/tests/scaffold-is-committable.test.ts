@@ -102,4 +102,57 @@ describe('the scaffolded harness passes the gates it scaffolds', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  // SPEC-080 AC-13 / INV-8: the scaffold stays committable with Stage 4 (the
+  // code-quality checks) live. The scaffold stages shell scripts and workflows, so
+  // both checks apply. The real-tool case skips when either tool is absent; tasks.md
+  // 7.1 wants it to FAIL under CI instead, which waits on CI installing the tools
+  // (task 6.1, #3675).
+  const resolvable = (tool: string, p: string) =>
+    spawnSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf-8', env: { ...process.env, PATH: p } }).status === 0;
+  const PATH_NOW = process.env.PATH ?? '';
+  const hasBoth = resolvable('shellcheck', PATH_NOW) && resolvable('actionlint', PATH_NOW);
+
+  function commitScaffold(pathEnv: string): { status: number | null; out: string } {
+    const dir = scaffolded();
+    try {
+      const r = spawnSync('git', ['commit', '-m', 'scaffold'], {
+        cwd: dir,
+        encoding: 'utf-8',
+        env: { ...process.env, ...GIT_ENV, PATH: pathEnv },
+      });
+      return { status: r.status, out: `${r.stdout || ''}${r.stderr || ''}` };
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it.skipIf(!hasBoth)('AC-13: the scaffold commits through its own hook with real shellcheck and actionlint', () => {
+    const r = commitScaffold(PATH_NOW);
+    expect(r.status, `the scaffold must pass its own code-quality checks:\n${r.out}`).toBe(0);
+    expect(r.out).toContain('MinSpec quality: shellcheck passed');
+    expect(r.out).toContain('MinSpec quality: actionlint passed');
+  });
+
+  it('AC-13: with both tools absent the scaffold still commits, and both are reported SKIPPED, never passed', () => {
+    const kept = PATH_NOW.split(path.delimiter).filter((d) => {
+      if (!d) return false;
+      return !['shellcheck', 'actionlint'].some((t) => {
+        try {
+          fs.accessSync(path.join(d, t), fs.constants.X_OK);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    });
+    const without = kept.join(path.delimiter);
+    expect(resolvable('shellcheck', without)).toBe(false);
+    expect(resolvable('actionlint', without)).toBe(false);
+    const r = commitScaffold(without);
+    expect(r.status, r.out).toBe(0);
+    expect(r.out).toMatch(/MinSpec quality: shellcheck SKIPPED/);
+    expect(r.out).toMatch(/MinSpec quality: actionlint SKIPPED/);
+    expect(r.out).not.toMatch(/MinSpec quality: (shellcheck|actionlint) passed/);
+  });
 });
