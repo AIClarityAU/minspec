@@ -1,7 +1,7 @@
 ---
 id: SPEC-264
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - concurrent multi-session coordination; the epic DR-065 (presence-gated fast-forward) belongs to
@@ -16,9 +16,9 @@ implements_reason: >-
   (record shape and isRecordLive, only if D1 (a) or (b)), and
   packages/minspec/tests/presence-sync-parity.test.ts.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -219,6 +219,17 @@ start treating either as corrupt.
   code); see D1 (c).
 
 ## Decisions needed (Clarify)
+
+All 2 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers (DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
+- **D1 - Recorded selection: Option (a),** a namespace token in the presence record; foreign-namespace
+  records are judged by fresh `lastSeen` alone, same-namespace records keep the pid probe (FR-5).
+  The DR-065 amendment is written at Plan, born `proposed`, and must be accepted before build.
+- **D2 - Recorded selection: Option (a),** token = Linux pid-namespace id joined with the kernel boot
+  id; a missing token, or a reader that cannot compute one, falls back to fresh `lastSeen` alone.
 
 **D1 - How may liveness be judged across a namespace boundary?** (Changes DR-065 §1's
 "heartbeat within 120 s AND PID alive"; whichever of (a)/(b) is chosen, a DR-065 amendment,
