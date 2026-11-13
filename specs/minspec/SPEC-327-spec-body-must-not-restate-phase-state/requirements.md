@@ -63,8 +63,7 @@ Having Approve Spec rewrite body prose (rejected: changes the bytes it just hash
 
 ## Decisions needed (Clarify)
 
-Recorded selections: all 4 decisions below were decided by the runner's agent on 2026-11-13, each taking
-the option this document recommends. The approver may change any of them.
+Recorded selections: each of the 4 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
 
 1. **Rollout severity.** (a) Warning on the corpus, error only for specs authored after the check lands **(rec)**: no existing spec is blocked; cost: the authored-after boundary needs a stable marker (spec id above a threshold), one more rule to maintain. (b) Error everywhere: simplest; cost: any currently-matching approved spec fails `npm run validate` until edited, and editing voids its approval.
 

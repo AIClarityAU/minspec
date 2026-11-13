@@ -218,8 +218,7 @@ change is warnings only, but it is unverified until AC-6 runs:
 
 ## Decisions needed (Clarify)
 
-Recorded selections: all 3 decisions below were decided by the runner's agent on 2026-11-13, each taking
-the option this document recommends. The approver may change any of them.
+Recorded selections: each of the 3 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
 
 - **D1 - Is the corpus-rule list (`scripts/validate-frontmatter.ts`) in scope?**
   (a) **(rec)** Yes, as the last task, with AC-7 as its proof. The issue names it, and SPEC-136

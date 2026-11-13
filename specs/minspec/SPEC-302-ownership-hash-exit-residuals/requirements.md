@@ -319,8 +319,7 @@ tokens, 6 non-ASCII, all U+2014 dashes with no `/`). These are latent, like #166
 
 ## Decisions needed (Clarify)
 
-Recorded selections: all 5 decisions below were decided by the runner's agent on 2026-11-13, each taking
-the option this document recommends. The approver may change any of them.
+Recorded selections: each of the 5 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
 
 - **D1 - Engine divergences: close them all, or keep SPEC-070's acceptance?**
   - **(a) Close all (rec).** `structuredOwnedSet` copies Python's classes exactly, and the

@@ -126,8 +126,7 @@ because it decides whether FR-1 alone would have prevented them.
 
 ## Decisions needed (Clarify)
 
-Recorded selections: all 2 decisions below were decided by the runner's agent on 2026-11-13, each taking
-the option this document recommends. The approver may change any of them.
+Recorded selections: each of the 2 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
 
 ### DQ-1 - On a guard refusal, retry or hand to a human?
 

@@ -286,8 +286,7 @@ unrelated `src/free.ts`.
 
 ## Decisions needed (Clarify)
 
-Recorded selections: all 4 decisions below were decided by the runner's agent on 2026-11-13, each taking
-the option this document recommends. The approver may change any of them.
+Recorded selections: each of the 4 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
 
 ### OQ-1 - Does an uncommitted local approval count at commit time?
 

@@ -87,8 +87,7 @@ amendments queued (#2861, #2992, #2628) this will be done repeatedly.
 
 ## Decisions needed (Clarify)
 
-Recorded selections: all 2 decisions below were decided by the runner's agent on 2026-11-13, each taking
-the option this document recommends. The approver may change any of them.
+Recorded selections: each of the 2 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
 
 1. **Surface.** (rec) **A new "Accept Amendment" command**, because the name states the act and
    Accept ADR keeps its simple contract; cost: one more command and menu entry to maintain.

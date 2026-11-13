@@ -286,8 +286,7 @@ is a later decision, backed by the precision measured in FR-10.
 
 ## Decisions needed (Clarify)
 
-Recorded selections: all 8 decisions below were decided by the runner's agent on 2026-11-13, each taking
-the option this document recommends. The approver may change any of them.
+Recorded selections: each of the 8 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
 
 1. **Which repos run it.** (a) This repo only, as dev-time machinery like ai-review **(rec)**;
    cost: adopters do not get the feature that the competitor check said is a differentiator,

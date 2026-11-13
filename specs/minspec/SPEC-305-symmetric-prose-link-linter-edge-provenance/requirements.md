@@ -69,8 +69,7 @@ Make machine edges (`depends_on`, `relates_to`, `supersedes`) auditable in **bot
 
 ## Decisions needed (Clarify)
 
-Recorded selections: all 6 decisions below were decided by the runner's agent on 2026-11-13, each taking
-the option this document recommends. The approver may change any of them.
+Recorded selections: each of the 6 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
 
 - **D1 — Where provenance lives.**
   (a) **(rec)** Inline frontmatter map, e.g. `edge_provenance: { SPEC-004: {kind: llm-suggested, model: ..., date: ...} }` beside the edge lists. Travels with the artifact and shows in review diffs. Cost: touches the artifact's own file, so if frontmatter keys are hashed for approval, tagging an already-approved spec could void its approval — must be checked/excluded in canonicalization first.

@@ -122,8 +122,7 @@ findings from `warning` to the `ownershipDeclaration` dial once its printed coun
 
 ## Decisions needed (Clarify)
 
-Recorded selections: all 3 decisions below were decided by the runner's agent on 2026-11-13, each taking
-the option this document recommends. The approver may change any of them.
+Recorded selections: each of the 3 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
 
 ### DQ-1 — Batch size and shape of the backfill
 
