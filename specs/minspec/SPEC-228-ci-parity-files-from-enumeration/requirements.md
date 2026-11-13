@@ -1,7 +1,7 @@
 ---
 id: SPEC-228
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a parity witness whose own file list is stale certifies green over the files it forgot
@@ -18,8 +18,8 @@ implements_reason: >-
 affects: [packages/minspec/src/lib/template-registry.ts, scripts/gen-ci-templates.mjs]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
