@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-281-clarify-phase-single-rule/requirements.md",
+  "specHash": "feac55e4cf1e35d105cf45585089deb99802e932f3037fd389500737ecee0a42",
+  "approvedAt": "2026-11-02T19:41:45.394Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-settle-1031",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3399#issuecomment-6537247262"
+}
