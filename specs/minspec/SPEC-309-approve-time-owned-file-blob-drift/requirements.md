@@ -1,7 +1,7 @@
 ---
 id: SPEC-309
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - an approved spec whose owned code moved must not read as current
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan. Expected surface:
   `packages/minspec/src/lib/approval.ts`, `scripts/facts.ts`, and new tests. None claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
