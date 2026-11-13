@@ -1,25 +1,29 @@
 ---
 id: SPEC-212
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - a cross-file agreement check on the spec-set is part of the methodology's validator
 aspects: [validator, status, signpost, spec-set, no-silent-gate]
 depends_on: [SPEC-001]
 relates_to: [SPEC-040, SPEC-041, SPEC-042, SPEC-043, SPEC-044, SPEC-046, DR-003, SPEC-059, "#277", "#972", "#971", "#918"]
+implements: none
+implements_reason: >-
+  Owned files are decided at Plan; none are claimed before then, so no shared file is frozen
+  early by a spec whose design is not fixed yet.
 phases:
-  specify: in-progress
+  specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
 
 # SPEC-212: One status per spec-set - sibling docs must not lag requirements.md
 
-> **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human reads
-> it, answers the Clarify questions, and approves it through the normal spec-approval gate
+> **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. Its Clarify
+> questions are answered and it is approved through the normal spec-approval gate
 > before any code changes.
 
 Materializes **#972** - *"sibling spec docs advertise `status: specifying` under an approved
@@ -115,10 +119,10 @@ phase must confirm no overlap by reading both rules, not by assumption.
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are answered, not ratified: an agent session selected, for each, the option this document
+All 3 decisions are answered: an agent session selected, for each, the option this document
 already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). These answers
+bind once this spec is approved, by a human or a covered delegation, and not before.
 
 **DQ-1 Police the field, or remove it from siblings?**
 - **Option A (rec): police agreement (FR-2).** Keeps `status` on every file. Cost: the field

@@ -1,7 +1,7 @@
 ---
 id: SPEC-267
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a shipped gate that reads a valid spec as "nothing to check" blocks nothing where adopters commit
@@ -18,7 +18,7 @@ affects: [packages/minspec/src/lib/template-registry.ts, packages/minspec/src/li
 phases:
   specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

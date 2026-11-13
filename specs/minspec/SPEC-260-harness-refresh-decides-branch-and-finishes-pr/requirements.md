@@ -1,7 +1,7 @@
 ---
 id: SPEC-260
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - harness refresh is a core write path of the SDD scaffold
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   Specify phase only. Files this spec will own are decided at Plan, after Decisions D1-D4 are resolved.
 phases:
-  specify: in-progress
+  specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

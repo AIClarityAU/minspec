@@ -1,17 +1,21 @@
 ---
 id: SPEC-293
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the ai-review merge gate (same epic as SPEC-182 and the reuse/carry records it builds on)
 aspects: [ai-review, review-convergence, tokens, no-silent-gate, prompt-injection, provenance]
 relates_to: [SPEC-182, DR-097, DR-104, DR-110, DR-060, DR-063, DR-033]
 affects: [.github/workflows/ai-review.yml, .github/scripts/ai-review-guard.js, scripts/review-branch.sh, scripts/roles/]  # ai-review-retry.yml is named by the issue but needs no change - see FR-2
+implements: none
+implements_reason: >-
+  Owned files are decided at Plan; none are claimed before then, so no shared file is frozen
+  early by a spec whose design is not fixed yet.
 phases:
-  specify: in-progress
+  specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -19,8 +23,8 @@ phases:
 # MinSpec - ai-review round cap and convergent re-review (Requirements)
 
 > **This is a SPECIFICATION ONLY.** No code, workflow, script, or test is created by the
-> dispatch that produced it. A human reads this spec, resolves the questions under
-> [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it through the
+> dispatch that produced it. Its
+> [Decisions needed (Clarify)](#decisions-needed-clarify) are resolved and it is approved through the
 > normal spec-approval gate before anything is built.
 
 Materializes **#2984** - *"ai-review: round cap (reconsider approach after 3) and
@@ -236,10 +240,10 @@ has no entry on round caps or prior-finding feedback (searched: "round", "loop",
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are answered, not ratified: an agent session selected, for each, the option this document
+All 3 decisions are answered: an agent session selected, for each, the option this document
 already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). These answers
+bind once this spec is approved, by a human or a covered delegation, and not before.
 
 ### DQ-1 - Is the round cap worth building now?
 
