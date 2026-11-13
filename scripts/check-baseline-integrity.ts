@@ -15,6 +15,7 @@
  * exits non-zero (invariant 2 — a witness that cannot run is not a witness that
  * passed). Tier-0, offline.
  */
+import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'node:url';
 
@@ -42,13 +43,28 @@ export function baselineWarningAnnotation(report: BaselineIntegrityReport): stri
   return `::warning title=baseline-integrity::${report.unrecoverable} unrecoverable baseline(s): ${report.unrecoverableSpecs.join(', ')}`;
 }
 
-function main(): void {
-  const rootDir = path.resolve(process.argv[2] ?? process.cwd());
-  const report = checkBaselineIntegrity(rootDir);
-  for (const line of formatBaselineReport(report)) process.stdout.write(`${line}\n`);
-  if (process.env.GITHUB_ACTIONS === 'true') {
-    const annotation = baselineWarningAnnotation(report);
-    if (annotation) process.stdout.write(`${annotation}\n`);
+/**
+ * CLI body. Returns the exit code (0 = ran, drift or not; 1 = could not run).
+ * `checkBaselineIntegrity` never throws on a missing root (`listRecords` swallows
+ * it and reports "0 records"), so an unreadable root is rejected HERE: a witness
+ * that cannot look is not a witness that passed (invariant 2).
+ */
+export function main(argv: string[] = process.argv, env: NodeJS.ProcessEnv = process.env): number {
+  try {
+    const rootDir = path.resolve(argv[2] ?? process.cwd());
+    if (!fs.existsSync(rootDir) || !fs.statSync(rootDir).isDirectory()) {
+      throw new Error(`root directory not found: ${rootDir}`);
+    }
+    const report = checkBaselineIntegrity(rootDir);
+    for (const line of formatBaselineReport(report)) process.stdout.write(`${line}\n`);
+    if (env.GITHUB_ACTIONS === 'true') {
+      const annotation = baselineWarningAnnotation(report);
+      if (annotation) process.stdout.write(`${annotation}\n`);
+    }
+    return 0;
+  } catch (err) {
+    process.stderr.write(`baseline-integrity: check could not run: ${err instanceof Error ? err.message : String(err)}\n`);
+    return 1;
   }
 }
 
@@ -57,4 +73,4 @@ const invokedDirectly = (() => {
   return Boolean(entry) && path.resolve(entry) === fileURLToPath(import.meta.url);
 })();
 
-if (invokedDirectly) main();
+if (invokedDirectly) process.exitCode = main();
