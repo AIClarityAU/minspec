@@ -94,6 +94,11 @@ says so: a silent gate (constitution invariant 2).
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 1. **Who may mint the build verdict?** `approve-issue.sh` deliberately refuses non-TTY and bot
    actors so the pipeline cannot forge the human keystroke.
    - **(rec) Router writes a distinct record kind** (e.g. `minspec-spec-signoff/1`) naming the
@@ -105,12 +110,20 @@ says so: a silent gate (constitution invariant 2).
      closed; rejected.
    - Leave the final step human (router only prompts). Cost: 48 specs stay waiting and the
      tenet-1 goal is not met.
+
+   **Recorded selection: the recommended option,** the router writes a distinct record kind (e.g. `minspec-spec-signoff/1`) naming the approval it derives from. An agent session copied this document's (rec) option; no human chose this item.
 2. **Delegated approvals** (DR-108/DR-119, bot-recorded) vs human Approve Spec: should both
    route? **(rec) Both**, since both are valid sign-off; cost: delegated routes depend on
    SPEC-296's merge lane being live.
+
+   **Recorded selection: the recommended option,** both delegated and human sign-offs route. An agent session copied this document's (rec) option; no human chose this item.
 3. **Where does the router run?** **(rec)** As a step of the drain cycle, reconciling by state
    (finds all waiting issues each cycle), not as an event hook on the approval; cost: build
    starts up to one cycle late. An event hook is faster but misses approvals recorded while
    it was down.
+
+   **Recorded selection: the recommended option,** the router runs as a step of the drain cycle, reconciling by state. An agent session copied this document's (rec) option; no human chose this item.
 4. **Backlog of 48:** route automatically on first run, or require a one-time dry-run report
    first? **(rec) Dry-run report first**; cost: one extra cycle.
+
+   **Recorded selection: the recommended option,** a dry-run report first for the backlog. An agent session copied this document's (rec) option; no human chose this item.

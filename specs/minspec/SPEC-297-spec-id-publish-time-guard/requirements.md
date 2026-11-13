@@ -126,6 +126,11 @@ because it decides whether FR-1 alone would have prevented them.
 
 ## Decisions needed (Clarify)
 
+All 2 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 ### DQ-1 - On a guard refusal, retry or hand to a human?
 
 - **(a) (rec) Renumber and re-run once automatically**, then refuse if still failing. Cost: a
@@ -134,12 +139,16 @@ because it decides whether FR-1 alone would have prevented them.
 - **(b) Refuse and route the issue to a human.** Cost: every collision becomes human work,
   against tenet 1 (make the founder's job smaller).
 
+**Recorded selection: Option (a),** renumber and re-run once automatically, then refuse if the guard still fails. An agent session copied this document's (rec) option; no human chose this item.
+
 ### DQ-2 - Should an allocator failure stop the dispatch (FR-3)?
 
 - **(a) (rec) Yes, return to queue.** Cost: an allocator or network outage idles Specify
   dispatches until it recovers.
 - **(b) Keep the blind fallback, rely on FR-1 at publish.** Cost: wasted agent tokens on a spec
   that will be refused (tenet 2), though no wrong id can be published.
+
+**Recorded selection: Option (a),** yes, an allocator failure stops the dispatch and returns the issue to the queue. An agent session copied this document's (rec) option; no human chose this item.
 
 Neither option has been chosen by a human.
 

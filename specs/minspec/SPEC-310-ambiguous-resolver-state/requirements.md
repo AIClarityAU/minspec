@@ -261,6 +261,11 @@ broken, so the **technique** may be reused and the **code** may not (note, line 
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 - **D1. How severe is `ambiguous`, and where?**
   - **(a) (rec)** Severity class `error` for `ambiguous` and `broken`, `warning` for
     `unknown-prefix`, none for `external` (sdyckjq's split). Surfaces keep today's channels:
@@ -273,6 +278,8 @@ broken, so the **technique** may be reused and the **code** may not (note, line 
     forms, every elided collision blocks a commit at the pre-commit baseline gate, before
     authors have any tool that rewrites them; and it is a new required gate, which needs an
     independent second witness under constitution invariant 2.
+
+  **Recorded selection: Option (a),** severity `error` for `ambiguous` and `broken`, `warning` for `unknown-prefix`, none for `external`; surfaces keep today's channels. An agent session copied this document's (rec) option; no human chose this item.
 - **D2. Are inline code spans excluded too?**
   - **(a) (rec)** Fenced blocks only. Inline code stays a reference. **Cost:** a ref
     quoted inline as an example (`` `DR-999` `` in a sentence about the format) still
@@ -280,6 +287,8 @@ broken, so the **technique** may be reused and the **code** may not (note, line 
   - **(b)** Skip inline code spans as well. **Cost:** blinds the file-citation check:
     34 of today's 45 file-citation warnings are citations written only in inline code,
     because a citation such as `scripts/validate-frontmatter.ts:620` is normally backticked.
+
+  **Recorded selection: Option (a),** fenced blocks only are excluded; inline code stays a reference. An agent session copied this document's (rec) option; no human chose this item.
 - **D3. How are parent-register numbers (`DR-359` and friends) classified?**
   - **(a) (rec)** `broken`, with a message naming the likely cause ("not in this register;
     if this is an `mmo-platform` number, write it `MMO/DR359`"). The `MMO/DR359` form
@@ -292,6 +301,8 @@ broken, so the **technique** may be reused and the **code** may not (note, line 
     refs.
   - Not offered: calling them `ambiguous`. The resolver sees zero candidates for them,
     because the parent register is in another repo and invariant 1 forbids reading it.
+
+  **Recorded selection: Option (a),** `broken`, with a message naming the likely cause and the `MMO/DR359` form. An agent session copied this document's (rec) option; no human chose this item.
 - **D4. Where does this land relative to #679?**
   - **(a) (rec)** This spec is built first (the shared type, registry and extractor), and
     the #679 spec's FR-5 and FR-8 are amended to return these states. **Cost:** #679 waits on
@@ -299,6 +310,8 @@ broken, so the **technique** may be reused and the **code** may not (note, line 
   - **(b)** Fold these requirements into the #679 spec and close this one. **Cost:** that
     spec is already at T3 with four open decisions; adding fence handling and the registry
     change widens it beyond the `project-prefix` module.
+
+  **Recorded selection: Option (a),** this spec is built first, and the #679 spec's FR-5 and FR-8 are amended to return these states. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Out of scope
 

@@ -69,14 +69,31 @@ Make machine edges (`depends_on`, `relates_to`, `supersedes`) auditable in **bot
 
 ## Decisions needed (Clarify)
 
+All 6 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 - **D1 — Where provenance lives.**
   (a) **(rec)** Inline frontmatter map, e.g. `edge_provenance: { SPEC-004: {kind: llm-suggested, model: ..., date: ...} }` beside the edge lists. Travels with the artifact and shows in review diffs. Cost: touches the artifact's own file, so if frontmatter keys are hashed for approval, tagging an already-approved spec could void its approval — must be checked/excluded in canonicalization first.
   (b) Sidecar `.minspec/edge-provenance.json`. Never touches approved bytes. Cost: second source of truth that can drift from the edge lists, and a rename/removal leaves orphans.
+
+  **Recorded selection: Option (a),** an inline frontmatter map (`edge_provenance`); the check that option names stands first: canonicalization must be checked, or the key excluded, before an approved spec is tagged. An agent session copied this document's (rec) option; no human chose this item.
 - **D2 — Do fenced code blocks and HTML comments count as "textual basis"?** (a) **(rec)** No: only prose counts, so an id pasted into a code sample does not launder a false edge. Cost: a legitimate reference inside a table-in-code-fence yields a false warning (mitigated by FR-9). (b) Yes: fewer false warnings, weaker guard.
+
+  **Recorded selection: Option (a),** no, only prose counts as textual basis; fenced code and HTML comments do not. An agent session copied this document's (rec) option; no human chose this item.
 - **D3 — How FR-8 knows an edge "once had" prose support.** (a) **(rec)** Drop "once had" entirely: treat all unsupported `llm-suggested` edges the same as FR-1, with provenance only used for ordering/filtering. Cost: lose the nicer "drift" wording. (b) Compare against git history of the file — richer, but needs git at lint time and breaks in shallow clones/CI.
+
+  **Recorded selection: Option (a),** drop "once had"; unsupported `llm-suggested` edges are treated the same as FR-1. An agent session copied this document's (rec) option; no human chose this item.
 - **D4 — Acknowledgement mechanism for FR-9.** (a) **(rec)** Per-edge `rationale` string in the provenance map (D1a), which also documents *why* a prose-less edge is intentional. Cost: ties FR-9 to D1a. (b) Inline marker comment in body such as `<!-- edge-ok: SPEC-004 -->`. Cost: invisible in rendered view and easy to rot.
+
+  **Recorded selection: Option (a),** a per-edge `rationale` string in the provenance map. An agent session copied this document's (rec) option; no human chose this item.
 - **D5 — Where the linter runs.** (a) **(rec)** Inside `npm run validate` as a warning section plus the in-editor problems surface. Cost: validate output grows noisy on a corpus with many existing prose-less edges; a first run needs a baseline report. (b) Separate `npm run lint:edges`. Cost: easy to never run (install ≠ adopt).
+
+  **Recorded selection: Option (a),** inside `npm run validate` as a warning section, plus the in-editor problems surface. An agent session copied this document's (rec) option; no human chose this item.
 - **D6 — Corpus baseline.** Existing specs may already carry many prose-less edges. Option (a) **(rec)** report only, no mass edit. Cost: standing warning noise until humans clear them. (b) A one-off sweep PR that adds body references or rationale. Cost: edits approved specs and stales their approvals.
+
+  **Recorded selection: Option (a),** report only, no mass edit of the corpus. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Follow-ups (tracked)
 

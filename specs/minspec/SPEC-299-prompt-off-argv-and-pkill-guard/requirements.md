@@ -113,18 +113,29 @@ matches prompt text. The residual risk is a pattern matching other argv content,
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 1. **Guard scope for `pkill`.** Options: (a) deny ALL `pkill`/`killall` **(rec)** — simple
    and matches the issue; cost: blocks the rare legitimate `pkill -P <own pid>`, which the
    agent can replace with `kill <pid>`. (b) deny only `-f` — narrower, but `pkill vitest`
    (name match) still kills sibling test runners.
+
+   **Recorded selection: Option (a),** the guard denies all `pkill` and `killall`; an agent uses `kill <pid>` instead. An agent session copied this document's (rec) option; no human chose this item.
 2. **Guard in the container.** FR-4 extends the guard to the container, where it is
    currently a no-op by design. Options: (a) apply `pkill` rule everywhere **(rec)** — the
    incident happened in the shared PID namespace; cost: a first rule that is not
    host-only, so the module docstring's "must not change container behaviour" needs
    amending. (b) host only — leaves the incident path open.
+
+   **Recorded selection: Option (a),** the `pkill` rule applies everywhere, in the container too, and the module docstring is amended to say so. An agent session copied this document's (rec) option; no human chose this item.
 3. **Decision record.** Options: (a) none **(rec)** — both changes are reversible in under a
    day (DR-359 filter); cost: the "prompt never in argv" convention lives only in this spec
    and tests. (b) a small DR recording it as a dispatch invariant.
+
+   **Recorded selection: Option (a),** no decision record; both changes are reversible in under a day. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Follow-ups (tracked)
 

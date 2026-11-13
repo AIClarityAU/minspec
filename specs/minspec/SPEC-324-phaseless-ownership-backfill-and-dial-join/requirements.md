@@ -122,6 +122,11 @@ findings from `warning` to the `ownershipDeclaration` dial once its printed coun
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 ### DQ-1 — Batch size and shape of the backfill
 
 - **(a) (rec) Up to 4 specs per PR, grouped by area** (agent-execute: 016, 019; approval/merge
@@ -129,6 +134,8 @@ findings from `warning` to the `ownershipDeclaration` dial once its printed coun
   root: 001). **Cost:** about 4 PRs and 4 reviews rather than one.
 - **(b) One PR of all 12.** **Cost:** a reviewer cannot realistically check 12 evidence lines
   against code; the bulk-sign-off shape #1543 warns against.
+
+**Recorded selection: Option (a),** up to 4 specs per PR, grouped by area. An agent session copied this document's (rec) option; no human chose this item.
 
 ### DQ-2 — Who decides each declaration
 
@@ -138,12 +145,16 @@ findings from `warning` to the `ownershipDeclaration` dial once its printed coun
 - **(b) The founder authors all 12 by hand.** **Cost:** directly contradicts tenet 1 for a
   reversible frontmatter edit.
 
+**Recorded selection: Option (a),** an agent proposes each declaration with evidence; a human or ai-review reads the PR. An agent session copied this document's (rec) option; no human chose this item.
+
 ### DQ-3 — Does the flip wait for every spec, or only the fallback count?
 
 - **(a) (rec) Only FR-6's fallback-armed count must be zero** — exactly the grandfather
   criterion SPEC-038 FR-7 and SPEC-081 DQ-2 set. **Cost:** none new.
 - **(b) Also require a clean count of `signal-absent`.** **Cost:** couples this flip to specs
   that merely lack a phases block, which SPEC-081 treats as a separate remedy (add a block via the tool).
+
+**Recorded selection: Option (a),** only FR-6's fallback-armed count must be zero. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Risks
 

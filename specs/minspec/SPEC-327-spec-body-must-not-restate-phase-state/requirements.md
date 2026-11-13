@@ -63,7 +63,20 @@ Having Approve Spec rewrite body prose (rejected: changes the bytes it just hash
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 1. **Rollout severity.** (a) Warning on the corpus, error only for specs authored after the check lands **(rec)**: no existing spec is blocked; cost: the authored-after boundary needs a stable marker (spec id above a threshold), one more rule to maintain. (b) Error everywhere: simplest; cost: any currently-matching approved spec fails `npm run validate` until edited, and editing voids its approval.
+
+   **Recorded selection: Option (a),** warning on the corpus, error only for specs authored after the check lands. An agent session copied this document's (rec) option; no human chose this item.
 2. **How strict is the exemption.** (a) Exempt code fences, inline code, and acceptance-criteria lines **(rec)**: lets approval-related specs describe the command; cost: a writer can hide a claim inside a code span. (b) Exempt only fences: stricter; cost: specs about approval (such as this one, which quotes `phases.clarify` in Problem prose) must paraphrase.
+
+   **Recorded selection: Option (a),** exempt code fences, inline code and acceptance-criteria lines. An agent session copied this document's (rec) option; no human chose this item.
 3. **Landing #3680-#3682.** (a) Fix the prose on main first via a normal spec PR, then the founder re-approves each **(rec)**: tree stays consistent and review passes; cost: three re-approvals and a delay. (b) Merge the sign-offs as-is with an `--admin` override of `ai-review:changes`: fastest; cost: three specs land with a self-contradicting body, the exact false signpost this spec exists to stop.
+
+   **Recorded selection: Option (a),** fix the prose on main first via a normal spec PR, then each spec is re-approved; this selection approves nothing on those specs. An agent session copied this document's (rec) option; no human chose this item.
 4. **Detection by regex or by reading.** (a) Regex over a fixed phrase set **(rec)**: deterministic, offline, cheap; cost: misses novel wording ("is yet to start"). (b) Add an LLM-reviewer rule: catches wording drift; cost: model-trusted and non-deterministic, against the "enforce, don't trust" rule.
+
+   **Recorded selection: Option (a),** a regex over a fixed phrase set. An agent session copied this document's (rec) option; no human chose this item.

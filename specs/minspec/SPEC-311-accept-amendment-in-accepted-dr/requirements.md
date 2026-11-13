@@ -87,12 +87,21 @@ amendments queued (#2861, #2992, #2628) this will be done repeatedly.
 
 ## Decisions needed (Clarify)
 
+All 2 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 1. **Surface.** (rec) **A new "Accept Amendment" command**, because the name states the act and
    Accept ADR keeps its simple contract; cost: one more command and menu entry to maintain.
    Alternative: let **Accept ADR re-accept** when the hash drifted; cost: one command doing two
    acts, so a click meant as a first acceptance cannot be told from a re-acceptance by its label.
    Alternative: keep the two-step and document it; cost: two clicks per amendment and a
    committable intermediate `proposed` state.
+
+   **Recorded selection: the recommended option,** a new "Accept Amendment" command. An agent session copied this document's (rec) option; no human chose this item.
 2. **Confirmation.** (rec) Show a non-modal toast over the visible diff-vs-record before writing
    (HITL approval UX); cost: one extra click. Alternative: write immediately; cost: an
    accidental click accepts an unread amendment.
+
+   **Recorded selection: the recommended option,** a non-modal toast over the visible diff-vs-record before writing. An agent session copied this document's (rec) option; no human chose this item.

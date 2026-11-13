@@ -319,6 +319,11 @@ tokens, 6 non-ASCII, all U+2014 dashes with no `/`). These are latent, like #166
 
 ## Decisions needed (Clarify)
 
+All 5 decisions are answered, not ratified: an agent session selected, for each, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
 - **D1 - Engine divergences: close them all, or keep SPEC-070's acceptance?**
   - **(a) Close all (rec).** `structuredOwnedSet` copies Python's classes exactly, and the
     inventory must come out empty. Removes permanent false drift and makes the snapshot match
@@ -328,6 +333,8 @@ tokens, 6 non-ASCII, all U+2014 dashes with no `/`). These are latent, like #166
   - (b) Keep strip and `$` accepted as SPEC-070 says, and add the line-terminator class to the
     accepted list. Cost: a spec with one of these characters is drifted from approval with no
     re-approval exit, and its snapshot disagrees with its text.
+
+  **Recorded selection: Option (a),** close all engine divergences, so the inventory comes out empty. An agent session copied this document's (rec) option; no human chose this item.
 - **D2 - The exit for an unrefreshable record.**
   - **(a) Archive (rec).** Move the sidecar byte-identical into a retired directory under
     `.minspec/` that no reader walks, and append a dated line to a ledger in that directory.
@@ -339,6 +346,8 @@ tokens, 6 non-ASCII, all U+2014 dashes with no `/`). These are latent, like #166
     hand-edits an approval record, which is the step every other gate here exists to prevent.
   - (c) Widen Approve Spec to accept an orphaned record's path. Cost: it undoes #630's
     deliberate narrowing and makes `design.md`/`tasks.md` approvable again for everyone.
+
+  **Recorded selection: Option (a),** archive: the unrefreshable sidecar moves byte-identical into a retired directory under `.minspec/` that no reader walks, with a dated ledger line. An agent session copied this document's (rec) option; no human chose this item.
 - **D3 - Does the acknowledgement record who did it?**
   - **(a) Yes (rec):** add `ownershipAckedAt` and `ownershipAckedBy` to the record, written by
     FR-15 and shown by `scripts/approval-provenance.py`'s field diff. Without them, a snapshot
@@ -347,6 +356,8 @@ tokens, 6 non-ASCII, all U+2014 dashes with no `/`). These are latent, like #166
     reversed in under a day, so Plan writes a DR or amends DR-088 for it.
   - (b) No: the git commit is the only record. Cost: the record and its history disagree about
     who signed which ownership, and the provenance block cannot show it.
+
+  **Recorded selection: Option (a),** yes, the record gains `ownershipAckedAt` and `ownershipAckedBy`; as that option states, Plan writes a DR or amends DR-088 for the schema change. An agent session copied this document's (rec) option; no human chose this item.
 - **D4 - How "no select-all" is built.**
   - **(a) A single-pick list in a loop (rec).** Each pick toggles one row and re-shows the list,
     with a final "Write N acknowledgements" item. It is all keyboard and has no select-all by
@@ -355,12 +366,16 @@ tokens, 6 non-ASCII, all U+2014 dashes with no `/`). These are latent, like #166
     accessibility testing, more code than the rest of this spec combined.
   - (c) A `canPickMany` QuickPick, if Plan shows its select-all toggle can be removed. Cost: rests
     on a platform behaviour I could not check here (see Measured state, item 3).
+
+  **Recorded selection: Option (a),** a single-pick list in a loop, with a final "Write N acknowledgements" item. An agent session copied this document's (rec) option; no human chose this item.
 - **D5 - One spec or three?**
   - **(a) One (rec):** the three items share one origin (SPEC-070 section 9) and, after Clarify,
     one read. **Cost:** one approval covers three unrelated surfaces. A later edit to any one item
     stales the approval for all three, and Plan cannot ship item 2 ahead of SPEC-070 slice 6 without
     the other two being planned too.
   - (b) Split into three specs. Cost: three Clarify reads instead of one.
+
+  **Recorded selection: Option (a),** one spec for the three items. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Rejected alternatives (DR-086 section 4)
 
