@@ -150,6 +150,9 @@ function runBlock(mode: 'fail' | 'empty' | 'full'): { out: string; status: numbe
     'gh_bot_warm_read() { :; }',
     'gh_bot_reauth_read() { return 1; }',
     'TRIAGE=/bin/true',
+    // The #3344 pile count reads specs/ beside the scripts REMEDIATE names; an empty one
+    // here, so spec-writing is decided by what each test is about, not this repo's corpus.
+    `REMEDIATE=${JSON.stringify(path.join(tmp, 'scripts', 'remediate-pr.sh'))}; mkdir -p ${JSON.stringify(path.join(tmp, 'specs'))} ${JSON.stringify(path.join(tmp, 'scripts'))}`,
     'run_cycle() {',
     queueBlock(),
     '  echo "[drain] REACHED-DISPATCH ${all_ready//$\'\\n\'/,}"',
@@ -463,6 +466,9 @@ function runWithCredential(minter: string, live: string): {
     'REPO="AIClarityAU/minspec"',
     'reconcile_labels() { :; }',
     'TRIAGE=/bin/true',
+    // The #3344 pile count reads specs/ beside the scripts REMEDIATE names; an empty one
+    // here, so spec-writing is decided by what each test is about, not this repo's corpus.
+    `REMEDIATE=${JSON.stringify(path.join(tmp, 'scripts', 'remediate-pr.sh'))}; mkdir -p ${JSON.stringify(path.join(tmp, 'specs'))} ${JSON.stringify(path.join(tmp, 'scripts'))}`,
     'run_cycle() {',
     queueBlock(),
     '  echo "[drain] REACHED-DISPATCH ${all_ready//$\'\\n\'/,}"',

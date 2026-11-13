@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-262-signpost-flat-layout-false-clear/requirements.md",
+  "specHash": "51dfc078ba538cc5250291955bb1740ebc1ad66aba63f7c890658031dfe33a8c",
+  "approvedAt": "2026-11-01T21:14:54.575Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-on-rec-1028",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3229#issuecomment-6541165991"
+}

@@ -125,9 +125,9 @@ Same mechanism as #1916: both allocators read one tree. What #2185 adds:
    worktree sources (b, c), but only on the machine that holds it. AC-10 pins that case.
 2. **Which claimant moves is not settled by convention.** The earlier claim (by commit
    date) had no PR; the later one had a PR and shipped code, so it was cheaper to keep.
-   "First claim wins" and "cheapest to fix wins" give opposite answers. FR-10 already
-   picks a mechanical rule for the gate; DQ-5 asks the founder to confirm it as the
-   convention for people too.
+   "First claim wins" and "cheapest to fix wins" give opposite answers. FR-10 picks
+   a mechanical default for the gate and states the convention people follow, per DQ-5's
+   recorded selection.
 
 State today (read 2026-10-26 23:54 UTC, `origin/main` `983e9107`, no fetch): `main` holds
 `SPEC-076-headless-signpost-reader`, so the later claimant kept the id. No ref read here
@@ -189,12 +189,16 @@ collision was settled by the "cheapest to fix" answer, case by case, with no rul
   directories the PR adds, the spec directories on the base, and the spec directories
   added by every other open PR, and fails when a PR adds a spec directory whose id is
   already claimed on the base or by another open PR.
-- **FR-10 (which PR yields).** When two open PRs claim one id, the gate fails on the PR
-  opened later (higher PR number) and passes the earlier one, so exactly one of the pair
-  is told to move. A PR whose claim duplicates an id already on the base always fails.
-  The key is the PR number because the gate can observe it and nobody can backdate it;
-  commit dates are set by the committer and an unpushed claim has no date the gate can
-  read. Whether this rule is also the convention people follow is DQ-5.
+- **FR-10 (which claimant yields).** The convention is DQ-5's recorded selection (b): when
+  two claims clash, the claimant that is cheaper to renumber renumbers (fewer references, no
+  approval, no shipped code). The gate cannot judge that cost, so on two open PRs claiming
+  one id it fails the PR opened later (higher PR number) as a mechanical default and passes
+  the earlier one, and its output says the cheaper claimant may renumber instead, so exactly
+  one of the pair is told to move by default. The gate and the convention may therefore
+  disagree; DQ-5 records that cost as accepted. A PR whose claim duplicates an id already on
+  the base always fails. The default keys on the PR number because the gate can observe it
+  and nobody can backdate it; commit dates are set by the committer and an unpushed claim
+  has no date the gate can read.
 - **FR-11 (actionable output).** The failure names the other claimant (base path, or PR
   number and path), prints `Next free id: SPEC-NNN` computed as the max across the base
   and every open PR plus one, and prints the renumber steps (rename directory, edit
@@ -279,22 +283,34 @@ collision was settled by the "cheapest to fix" answer, case by case, with no rul
 
 ## Decisions needed (Clarify)
 
-Selections below are recorded on the option this document already marks recommended. An
-agent session recorded them on 2026-10-27, acting on a standing instruction the founder gave
-on 2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
-chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
-(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
-context, not verified. No human chose any single item. DQ-1 and DQ-3 are left open (a
-re-approval of an approved spec, and a required-check change); this section stays open, and
-the spec is not ready to approve, until the founder answers. DQ-5 was added on 2026-10-27
-from #2185, after that instruction; it sets a convention for people, so it is left open
-too.
+DQ-1 and DQ-3 have selections recorded from the answer to task-queue item c227 (2026-10-27:
+"Both (Recommended)"), an answer the queue attributes to the founder. A queue answer is not
+consent and is not verified here: DR-108 (delegated approval) section 4 holds that a queue
+item cannot carry consent, because any session can write the queue. Those selections
+therefore bind nothing on their own. They bind only if the founder approves this spec with
+them in its text; that approval, not this record, is the consent act, and it may overturn
+them. DQ-2 and DQ-4 carry the (rec) option an agent session copied; no human chose them
+(each says so). Delegation DLG-001 (DR-108) made none of these selections. DQ-5 has a
+selection recorded from the answer to task-queue item c227q5 (2026-10-28: "Cheapest fix"),
+on option (b), which is NOT the (rec) option; the same unverified-queue-answer caveat
+applies; FR-10 has been rewritten to match it. The founder's approval of this
+text, with the DQ-2, DQ-4 and DQ-5 selections in place, is what confirms them; this
+record writes no such approval.
 
 ### DQ-1 - Per-product id ranges contradict the global uniqueness gate
 
-**Not recorded:** option (a) needs SPEC-053's text updated, and SPEC-053 is already approved
-(`status: planning`, approval record committed), so it forces a re-approval; it also ends
-the per-product id ranges adopters may rely on. Needs the founder's answer.
+**Recorded selection: (a),** allocate globally and keep the `product` parameter only for
+attribution. Source: the answer to task-queue item c227, 2026-10-27 ("Both
+(Recommended)": global ids). A queue answer is not consent (DR-108 section 4), so this
+selection is unverified and binds only if the founder approves this spec's text with it in
+place. SPEC-053's text then needs an update and a fresh approval; this record does not edit
+SPEC-053.
+
+**A DR is required before implementation.** Option (a) ends the per-product id ranges
+adopters may rely on and forces SPEC-053's re-approval, which cannot be undone in a day once
+adopters allocate under it (the DR-359 filter). Its rationale goes in one decision record,
+written before this spec's Plan completes and so before any implementation; SPEC-053's
+amendment cites the same DR. The DR is not drafted by this record.
 
 `nextSpecId(specsDir, product)` scopes the max to one product (#57, SPEC-053), so a new
 product starts at SPEC-001. Rule 18 checks uniqueness **across all products**
@@ -325,8 +341,11 @@ session copied this document's (rec) option; no human chose this item.
 
 ### DQ-3 - Make `spec-id-collision` a required check?
 
-**Not recorded:** option (a) makes `spec-id-collision` a required check, which is a ruleset
-change. Needs the founder's answer.
+**Recorded selection: (a),** make `spec-id-collision` a required check once it has run green
+on open PRs for a week. Source: the answer to task-queue item c227, 2026-10-27 ("Both
+(Recommended)": required collision check). A queue answer is not consent (DR-108 section
+4), so this selection is unverified and binds only if the founder approves this spec's text
+with it in place. The ruleset edit itself is a separate act; this record makes none.
 
 The DR twin is still advisory: a workflow cannot make itself required.
 
@@ -352,11 +371,16 @@ blindness. Its CI gate exists; its offline allocator does not see branches eithe
 
 ### DQ-5 - Which claimant renumbers when two specs already share an id? (#2185)
 
-**Not recorded:** this sets a convention people follow, not only gate behaviour, and it
-arrived after the 2026-10-26 instruction. Needs the founder's answer.
+**Recorded selection: (b),** cheapest to fix wins: whichever claimant is cheaper to
+renumber renumbers. Source: the answer to task-queue item c227q5, 2026-10-28 ("Cheapest
+fix"), an answer the queue attributes to the founder. It is NOT this document's (rec)
+option, which was (a). The founder accepted the stated cost: a judgement is needed each
+time and the gate cannot apply it. A queue answer is not consent (DR-108 section 4), so this
+selection is unverified and binds only if the founder approves this spec's text with it in
+place. FR-10 is written to match this selection.
 
-FR-10 fixes the gate's answer (lower PR number keeps the id). The open question is whether
-that is also the rule for a clash found any other way - by hand, by the FR-8 command, or
+FR-10 gives the gate a mechanical default (lower PR number keeps the id). The question here
+is what rule applies to a clash found any other way - by hand, by the FR-8 command, or
 between a PR and an unpushed branch as in #2185. Today each clash is settled ad hoc; #2185
 was settled by keeping the cheaper one.
 
@@ -373,8 +397,8 @@ was settled by keeping the cheaper one.
   unpushed claims cannot be seen, so the gate cannot apply it either, and it can force the
   move onto an approved, implemented spec whose approval sidecar is path-keyed (INV-4).
 
-If (a) is chosen, the renumber steps FR-11 prints become the documented convention; nothing
-else changes. If (b) or (c), FR-10 needs rewriting in Clarify before Plan.
+Option (a) would have made the gate's rule the convention with nothing else changing; (b), the
+recorded selection, makes the convention the cheaper-claimant rule and FR-10 says so.
 
 ## Why no new DR
 
