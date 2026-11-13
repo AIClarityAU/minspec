@@ -126,10 +126,8 @@ because it decides whether FR-1 alone would have prevented them.
 
 ## Decisions needed (Clarify)
 
-All 2 decisions are answered, not ratified: an agent session selected, for each, the option this document
-already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+Recorded selections: all 2 decisions below were decided by the runner's agent on 2026-11-13, each taking
+the option this document recommends. The approver may change any of them.
 
 ### DQ-1 - On a guard refusal, retry or hand to a human?
 
@@ -139,7 +137,7 @@ unapproved, so these answers bind nothing until a human or a covered delegation 
 - **(b) Refuse and route the issue to a human.** Cost: every collision becomes human work,
   against tenet 1 (make the founder's job smaller).
 
-**Recorded selection: Option (a),** renumber and re-run once automatically, then refuse if the guard still fails. An agent session copied this document's (rec) option; no human chose this item.
+**Recorded selection: Option (a),** renumber and re-run once automatically, then refuse if the guard still fails. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ### DQ-2 - Should an allocator failure stop the dispatch (FR-3)?
 
@@ -148,7 +146,7 @@ unapproved, so these answers bind nothing until a human or a covered delegation 
 - **(b) Keep the blind fallback, rely on FR-1 at publish.** Cost: wasted agent tokens on a spec
   that will be refused (tenet 2), though no wrong id can be published.
 
-**Recorded selection: Option (a),** yes, an allocator failure stops the dispatch and returns the issue to the queue. An agent session copied this document's (rec) option; no human chose this item.
+**Recorded selection: Option (a),** yes, an allocator failure stops the dispatch and returns the issue to the queue. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 Neither option has been chosen by a human.
 

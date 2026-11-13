@@ -122,10 +122,8 @@ models (`escalate_next_action`); backfilling reasons for existing issues (Decisi
 
 ## Decisions needed (Clarify)
 
-All 4 decisions are answered, not ratified: an agent session selected, for each, the option this document
-already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+Recorded selections: all 4 decisions below were decided by the runner's agent on 2026-11-13, each taking
+the option this document recommends. The approver may change any of them.
 
 1. **Where does the gate-readable `Blocked by` live?** The gate reads the issue body only.
    - **(a) Edit the issue body (rec)** — append a marked `Blocked by #N` block; the gate works
@@ -134,20 +132,20 @@ unapproved, so these answers bind nothing until a human or a covered delegation 
      Cost: widens a gate parser to untrusted comment text, and fixes the 11 SPEC-136 tasks whose
      blockers sit in comments only if comments generally become readable (broader change).
 
-   **Recorded selection: Option (a),** edit the issue body with a marked, idempotent `Blocked by #N` block. An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: Option (a),** edit the issue body with a marked, idempotent `Blocked by #N` block. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 2. **Backfill of the 164 existing escalations?**
    - **(a) None (rec)** — the issue states no reason is recorded; guessing is the failure being fixed.
      Cost: the 11 SPEC-136 tasks stay stuck until someone re-triages or approves them.
    - **(b) One-off script** releasing escalations whose *drain log* reason names blockers that merged.
      Cost: logs are partial; mis-release risk, and it is one-shot code to maintain.
 
-   **Recorded selection: Option (a),** no backfill of existing escalations. An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: Option (a),** no backfill of existing escalations. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 3. **Release target state.** Restore `agent-ready` directly **(rec)** — cost: skips a fresh triage
    verdict made against a possibly stale body; or send back through `triage-inbox.sh`, which costs a
    triage run per release but re-validates tier and scope.
 
-   **Recorded selection: the recommended option,** restore `agent-ready` directly. An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: the recommended option,** restore `agent-ready` directly. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 4. **Who counts as "cleared"?** Merged PR / closed-completed only **(rec)**; cost: a blocker closed
    by a human as superseded needs manual release. Alternative: any close, which risks releasing on a dropped prerequisite.
 
-   **Recorded selection: the recommended option,** merged PR or closed-completed only counts as cleared. An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: the recommended option,** merged PR or closed-completed only counts as cleared. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.

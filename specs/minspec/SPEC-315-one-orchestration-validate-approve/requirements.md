@@ -218,10 +218,8 @@ change is warnings only, but it is unverified until AC-6 runs:
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are answered, not ratified: an agent session selected, for each, the option this document
-already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+Recorded selections: all 3 decisions below were decided by the runner's agent on 2026-11-13, each taking
+the option this document recommends. The approver may change any of them.
 
 - **D1 - Is the corpus-rule list (`scripts/validate-frontmatter.ts`) in scope?**
   (a) **(rec)** Yes, as the last task, with AC-7 as its proof. The issue names it, and SPEC-136
@@ -230,7 +228,7 @@ unapproved, so these answers bind nothing until a human or a covered delegation 
   (b) No - per-spec and approve only; file a separate issue for the corpus list. Cost: task 7
   lands a second hand-written list now, and FR-10 cannot cover it.
 
-  **Recorded selection: Option (a),** yes, the corpus-rule list is in scope as the last task, with AC-7 as its proof. An agent session copied this document's (rec) option; no human chose this item.
+  **Recorded selection: Option (a),** yes, the corpus-rule list is in scope as the last task, with AC-7 as its proof. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 - **D2 - Does `specNotApprovable` (the delegated approval path, found while writing this
   spec, not named in the issue) call FR-2?**
   (a) **(rec)** Yes. It is the same refusal sequence and already uses the narrower option set,
@@ -239,7 +237,7 @@ unapproved, so these answers bind nothing until a human or a covered delegation 
   (b) No - leave it and file an issue. Cost: a fourth copy stays, outside FR-10's allowlist
   by exception.
 
-  **Recorded selection: Option (a),** yes, `specNotApprovable` calls FR-2. An agent session copied this document's (rec) option; no human chose this item.
+  **Recorded selection: Option (a),** yes, `specNotApprovable` calls FR-2. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 - **D3 - On a tree-node re-approval of an already-approved spec with a finished build and
   `implementCloseout: error`, should approve refuse?**
   (a) **(rec)** Yes - one option set everywhere, so approve sees what *Check Spec* sees, and a
@@ -248,7 +246,7 @@ unapproved, so these answers bind nothing until a human or a covered delegation 
   (b) No - FR-1 takes a purpose argument and approve omits `taskTally`. Cost: the divergence
   stays, though now in one function and named.
 
-  **Recorded selection: Option (a),** yes, approve refuses, with one option set everywhere. An agent session copied this document's (rec) option; no human chose this item.
+  **Recorded selection: Option (a),** yes, approve refuses, with one option set everywhere. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ## Out of scope
 

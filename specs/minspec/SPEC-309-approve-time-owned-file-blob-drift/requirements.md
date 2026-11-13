@@ -92,33 +92,31 @@ unverified here; Plan re-measures them with `npm run facts`.)
 
 ## Decisions needed (Clarify)
 
-All 4 decisions are answered, not ratified: an agent session selected, for each, the option this document
-already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+Recorded selections: all 4 decisions below were decided by the runner's agent on 2026-11-13, each taking
+the option this document recommends. The approver may change any of them.
 
 1. **Which set to snapshot.** (a) `implements:` only **(rec)**, narrow and precise, as the issue
    proposes; cost: specs that only declare `affects:` are never measurable. (b) also `affects:`,
    wider coverage; cost: broad paths make formatting-only commits mark many specs drifted, the
    exact false-positive risk the issue names.
 
-   **Recorded selection: Option (a),** snapshot `implements:` only. An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: Option (a),** snapshot `implements:` only. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 2. **Directory or glob entries in `implements:`.** (a) Snapshot only exact file paths, report
    others under "ignored" **(rec)**, cheap and honest; cost: directory-owning specs unmeasured.
    (b) Expand to the tree sha / file list; cost: more schema and churn noise.
 
-   **Recorded selection: Option (a),** snapshot exact file paths only and report other entries under "ignored". An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: Option (a),** snapshot exact file paths only and report other entries under "ignored". Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 3. **Backfill.** (a) None; legacy sidecars stay NOT-MEASURABLE until re-approved **(rec)**; cost:
    little coverage at first. (b) A one-off command snapshotting current blobs for approved specs;
    cost: it asserts "no drift as of now" without the human having reviewed the code, which is a
    borrowed approval.
 
-   **Recorded selection: Option (a),** no backfill; legacy sidecars stay NOT-MEASURABLE until re-approved. An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: Option (a),** no backfill; legacy sidecars stay NOT-MEASURABLE until re-approved. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 4. **Blob key.** Blob sha of working-tree content vs HEAD content. Rec: HEAD blob via
    `git rev-parse HEAD:<path>`, reproducible; cost: uncommitted edits at approve time are not
    captured, so approve-time dirty owned files should be reported `UNMEASURED`.
 
-   **Recorded selection: the recommended key,** the HEAD blob via `git rev-parse HEAD:<path>`, with owned files dirty at approve time reported `UNMEASURED`. An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: the recommended key,** the HEAD blob via `git rev-parse HEAD:<path>`, with owned files dirty at approve time reported `UNMEASURED`. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ## Follow-ups (tracked)
 

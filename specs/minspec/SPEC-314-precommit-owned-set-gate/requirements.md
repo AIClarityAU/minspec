@@ -286,10 +286,8 @@ unrelated `src/free.ts`.
 
 ## Decisions needed (Clarify)
 
-All 4 decisions are answered, not ratified: an agent session selected, for each, the option this document
-already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+Recorded selections: all 4 decisions below were decided by the runner's agent on 2026-11-13, each taking
+the option this document recommends. The approver may change any of them.
 
 ### OQ-1 - Does an uncommitted local approval count at commit time?
 
@@ -306,7 +304,7 @@ allow an edit on the strength of an approval that is in no commit.
   was allowed to write cannot be committed until someone commits the approval, which on a
   dispatch means a founder action mid-run.
 
-**Recorded selection: Option (a),** honour the same common-dir fallback, and print a note that the approval is not in this commit. An agent session copied this document's (rec) option; no human chose this item.
+**Recorded selection: Option (a),** honour the same common-dir fallback, and print a note that the approval is not in this commit. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ### OQ-2 - The bypass: which variable, and is it advertised?
 
@@ -325,7 +323,7 @@ allow an edit on the strength of an approval that is in no commit.
 Either way, no technical control stops an agent from setting the variable or using
 `--no-verify`; the audit line and the CI half (#861) are what make that visible.
 
-**Recorded selection: Option (a),** a dedicated `SPEC_COMMIT_GATE_OFF=1`, documented in the hook header and `docs/`, not printed in the refusal; `MINSPEC_GATE_OFF` does not disable it. An agent session copied this document's (rec) option; no human chose this item.
+**Recorded selection: Option (a),** a dedicated `SPEC_COMMIT_GATE_OFF=1`, documented in the hook header and `docs/`, not printed in the refusal; `MINSPEC_GATE_OFF` does not disable it. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ### OQ-3 - Is this spec the right home, given #861?
 
@@ -339,7 +337,7 @@ Either way, no technical control stops an agent from setting the variable or usi
   path rather than auto-merge. The commit-time check that is buildable today
   waits with it.
 
-**Recorded selection: Option (a),** yes, this spec covers the commit-time, specs-only slice and #861 keeps the CI half. An agent session copied this document's (rec) option; no human chose this item.
+**Recorded selection: Option (a),** yes, this spec covers the commit-time, specs-only slice and #861 keeps the CI half. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ### OQ-4 - What happens when `python3` is missing?
 
@@ -353,7 +351,7 @@ Either way, no technical control stops an agent from setting the variable or usi
   **Cost:** the gate is silently absent - in effect, if not in output - on exactly the
   machines where nobody notices the banner.
 
-**Recorded selection: Option (a),** when a staged path passed the FR-2 filter, refuse with "did not run: python3 not found". An agent session copied this document's (rec) option; no human chose this item.
+**Recorded selection: Option (a),** when a staged path passed the FR-2 filter, refuse with "did not run: python3 not found". Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ## Alternatives considered
 

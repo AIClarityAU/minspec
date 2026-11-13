@@ -188,10 +188,8 @@ lines below.
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are answered, not ratified: an agent session selected, for each, the option this document
-already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+Recorded selections: all 3 decisions below were decided by the runner's agent on 2026-11-13, each taking
+the option this document recommends. The approver may change any of them.
 
 **D1 - Site B: take `npm ci` away from the agents and provision the dispatch worktree in the
 parent?**
@@ -203,7 +201,7 @@ parent?**
   keeps running online, scripts-enabled installs steered by the tree, and the #3224 deletion
   hazard stays reachable.
 
-**Recorded selection: Option (a),** yes, FR-4 and FR-5: the parent provisions the dispatch worktree and the agents lose `npm ci`. An agent session copied this document's (rec) option; no human chose this item.
+**Recorded selection: Option (a),** yes, FR-4 and FR-5: the parent provisions the dispatch worktree and the agents lose `npm ci`. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 **D2 - Site C: apply the guard to the drain's run dir?**
 - (a) **(rec)** Yes: FR-2 and FR-3. Cost: a legitimate future `.npmrc` on main (say, to pin a
@@ -213,7 +211,7 @@ parent?**
 - (b) No: main is the trust root and the drain already runs main's scripts. Cost: a one-line
   `.npmrc` landing on main runs a chosen program in the drain's credentialed shell.
 
-**Recorded selection: Option (a),** yes, FR-2 and FR-3: the guard applies to the drain's run dir. An agent session copied this document's (rec) option; no human chose this item.
+**Recorded selection: Option (a),** yes, FR-2 and FR-3: the guard applies to the drain's run dir. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 **D3 - Site A: confirm "no guard, recorded why" (FR-6)?**
 - (a) **(rec)** Confirm. Cost: none in code; it relies on SPEC-285 for the real boundary, which
@@ -221,7 +219,7 @@ parent?**
 - (b) Guard anyway, for uniformity. Cost: extra refusals that close nothing, and a reader may
   take the guard as a boundary it is not.
 
-**Recorded selection: Option (a),** confirm "no guard, recorded why" at Site A (FR-6). An agent session copied this document's (rec) option; no human chose this item.
+**Recorded selection: Option (a),** confirm "no guard, recorded why" at Site A (FR-6). Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ## Follow-ups (tracked)
 

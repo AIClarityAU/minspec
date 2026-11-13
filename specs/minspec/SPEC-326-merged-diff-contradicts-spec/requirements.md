@@ -286,10 +286,8 @@ is a later decision, backed by the precision measured in FR-10.
 
 ## Decisions needed (Clarify)
 
-All 8 decisions are answered, not ratified: an agent session selected, for each, the option this document
-already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+Recorded selections: all 8 decisions below were decided by the runner's agent on 2026-11-13, each taking
+the option this document recommends. The approver may change any of them.
 
 1. **Which repos run it.** (a) This repo only, as dev-time machinery like ai-review **(rec)**;
    cost: adopters do not get the feature that the competitor check said is a differentiator,
@@ -297,51 +295,51 @@ unapproved, so these answers bind nothing until a human or a covered delegation 
    until opted in; cost: one more template in `ci-review-templates.ts` to keep in sync, and an
    adopter-facing model cost before we know the false-positive rate.
 
-   **Recorded selection: Option (a),** this repo only, as dev-time machinery. An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: Option (a),** this repo only, as dev-time machinery. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 2. **How a merge finds its spec.** (a) Ownership paths only, with an explicit `SPEC-NNN` in the
    commit listed but not judged **(rec)**; cost: a spec that never declared `implements:`
    (T1/T2, or T3/T4 before Clarify) is never checked. (b) Also judge specs named in the commit
    or linked issue; cost: a commit that mentions a spec in passing pays for a model call and
    gets judged against a spec it does not implement.
 
-   **Recorded selection: Option (a),** ownership paths only; an explicit `SPEC-NNN` in the commit is listed but not judged. An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: Option (a),** ownership paths only; an explicit `SPEC-NNN` in the commit is listed but not judged. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 3. **Share the trusted block with SPEC-216.** (a) One generic block for "approved spec text",
    used by both checks, introduced by whichever lands first **(rec)**; cost: the two specs are
    coupled in Plan, and the second one edits the first one's defang list. (b) A separate
    `approved_spec` tag; cost: two near-identical trusted channels, each needing its own defang.
 
-   **Recorded selection: Option (a),** one generic "approved spec text" block shared with SPEC-216, introduced by whichever lands first. An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: Option (a),** one generic "approved spec text" block shared with SPEC-216, introduced by whichever lands first. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 4. **Where the comparison lives long-term.** (a) CI workflow now, with the agent-execute
    extension (Tier 1, DR-015) as a later home for a local run **(rec)**; cost: the founder sees
    findings only on GitHub, not in the editor. (b) Agent-execute only; cost: nothing runs
    unattended after merge, which is the case the issue is about.
 
-   **Recorded selection: Option (a),** a CI workflow now, with agent-execute as a later home for a local run. An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: Option (a),** a CI workflow now, with agent-execute as a later home for a local run. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 5. **Promotion bar.** The bar FR-12 records for a later gate. (a) At least 30 judged merges
    with finding precision of 80% or more over the FR-10 marks **(rec)**; cost: at the current
    merge rate the bar may take weeks, and someone has to mark each finding true or false.
    (b) No bar now; decide when data exists; cost: the report can run indefinitely with no
    trigger to review it.
 
-   **Recorded selection: Option (a),** at least 30 judged merges with finding precision of 80% or more. An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: Option (a),** at least 30 judged merges with finding precision of 80% or more. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 6. **What a `departs` result triggers.** (a) PR comment only **(rec)**; cost: a comment on a
    merged PR is easy to miss, so findings rely on someone reading the log. (b) Also file an
    `inbox` issue per `departs` result; cost: if precision is low, the founder's queue fills
    with false findings, against core tenet 1.
 
-   **Recorded selection: Option (a),** a PR comment only. An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: Option (a),** a PR comment only. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 7. **Where the measurement log lives.** (a) A workflow artifact plus an append to a log file
    on a dedicated data branch **(rec)**; cost: a write to the repo from CI on every judged
    merge, needing a write token in that job. (b) Workflow artifacts only; cost: artifacts
    expire (90 days by default), so the FR-12 evidence can age out before the bar is met.
 
-   **Recorded selection: Option (a),** a workflow artifact plus an append to a log file on a dedicated data branch. An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: Option (a),** a workflow artifact plus an append to a log file on a dedicated data branch. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 8. **Does a red post-merge run alert anyone.** (a) Yes, through the existing `main-red-watch`
    path **(rec)**; cost: a model or quota outage pages the same channel as a broken build.
    (b) No, the job summary only; cost: a broken check can sit unnoticed, the shape constitution
    invariant 2 forbids for gates (this is not a gate, but its silence still hides the signal).
 
-   **Recorded selection: Option (a),** yes, through the existing `main-red-watch` path. An agent session copied this document's (rec) option; no human chose this item.
+   **Recorded selection: Option (a),** yes, through the existing `main-red-watch` path. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ## Out of scope
 

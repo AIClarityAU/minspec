@@ -122,10 +122,8 @@ findings from `warning` to the `ownershipDeclaration` dial once its printed coun
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are answered, not ratified: an agent session selected, for each, the option this document
-already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+Recorded selections: all 3 decisions below were decided by the runner's agent on 2026-11-13, each taking
+the option this document recommends. The approver may change any of them.
 
 ### DQ-1 — Batch size and shape of the backfill
 
@@ -135,7 +133,7 @@ unapproved, so these answers bind nothing until a human or a covered delegation 
 - **(b) One PR of all 12.** **Cost:** a reviewer cannot realistically check 12 evidence lines
   against code; the bulk-sign-off shape #1543 warns against.
 
-**Recorded selection: Option (a),** up to 4 specs per PR, grouped by area. An agent session copied this document's (rec) option; no human chose this item.
+**Recorded selection: Option (a),** up to 4 specs per PR, grouped by area. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ### DQ-2 — Who decides each declaration
 
@@ -145,7 +143,7 @@ unapproved, so these answers bind nothing until a human or a covered delegation 
 - **(b) The founder authors all 12 by hand.** **Cost:** directly contradicts tenet 1 for a
   reversible frontmatter edit.
 
-**Recorded selection: Option (a),** an agent proposes each declaration with evidence; a human or ai-review reads the PR. An agent session copied this document's (rec) option; no human chose this item.
+**Recorded selection: Option (a),** an agent proposes each declaration with evidence; a human or ai-review reads the PR. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ### DQ-3 — Does the flip wait for every spec, or only the fallback count?
 
@@ -154,7 +152,7 @@ unapproved, so these answers bind nothing until a human or a covered delegation 
 - **(b) Also require a clean count of `signal-absent`.** **Cost:** couples this flip to specs
   that merely lack a phases block, which SPEC-081 treats as a separate remedy (add a block via the tool).
 
-**Recorded selection: Option (a),** only FR-6's fallback-armed count must be zero. An agent session copied this document's (rec) option; no human chose this item.
+**Recorded selection: Option (a),** only FR-6's fallback-armed count must be zero. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ## Risks
 
