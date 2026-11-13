@@ -307,6 +307,18 @@ _newest_record_impl() {
   ' 2>/dev/null
 }
 
+# The countermanding labels: any one of them on an issue refuses dispatch, whatever ready
+# label it also wears (the check itself is further down, with the history of why each is
+# here). ONE list, published by `--countermand-labels` so the drain can leave such an issue
+# out of the queue it offers rather than offering it and being refused every cycle (#2645).
+# A copy in the drain would drift the way the duplicate predicates in #1305/#1307 did.
+COUNTERMAND_LABELS=(needs-review needs-info needs-human-review agent-quarantined agent-done agent-escalated agent-crashed)
+
+if [[ "${1:-}" == "--countermand-labels" ]]; then
+  printf '%s\n' "${COUNTERMAND_LABELS[@]}"
+  exit 0
+fi
+
 # Exposed so the credentialed approval front ends select a record with THIS code
 # rather than each carrying its own "take the last one" awk — which is exactly how
 # two of the three readers would have retained the quoted-record defect after the
@@ -685,7 +697,7 @@ fi
 # `needs-human-review`. Either alone would close the hole; both together mean a
 # single missed label write cannot reopen it (constitution invariant 2 — no required
 # check hinging on a single producer).
-for gate in needs-review needs-info needs-human-review agent-quarantined agent-done agent-escalated; do
+for gate in "${COUNTERMAND_LABELS[@]}"; do
   if has_label "$gate"; then
     refuse countermanded "countermanding label '${gate}' present (re-triaged / quarantined since drain)"
   fi

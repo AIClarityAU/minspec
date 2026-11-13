@@ -1,7 +1,7 @@
 ---
 id: SPEC-276
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a gate that checks a folder the project does not use passes silently
@@ -10,20 +10,20 @@ depends_on: []
 relates_to: [SPEC-075, SPEC-218, "#2678", "#2675", "#1569", "#2684", "#1908"]
 implements: none
 implements_reason: >-
-  Clarify answers are recorded but not ratified (D1 option a, D2 and D3 as recommended). Which
+  Clarify answers are recorded, binding once this spec is approved (D1 option a, D2 and D3 as recommended). Which
   files this spec will own is still decided at Plan; no recorded option names a new file, so
   implements stays none.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
 
 # SPEC-276: The pre-commit shell tier never passes silently when a project has moved its specs or decisions folder
 
-> **This is a SPECIFICATION ONLY.** Written for issue #2678 (the shell tier matches `specs/` and `docs/decisions/` literally). Nothing is built until a human approves it. Part of #2675 (the RCDD on values baked into managed files). The spec id was taken as highest-on-disk plus one; open pull requests are invisible from this checkout, so run the id collision gate before approving.
+> **This is a SPECIFICATION ONLY.** Written for issue #2678 (the shell tier matches `specs/` and `docs/decisions/` literally). Nothing is built until it is approved. Part of #2675 (the RCDD on values baked into managed files). The spec id was taken as highest-on-disk plus one; open pull requests are invisible from this checkout, so run the id collision gate before approving.
 
 ## The defect, measured
 
@@ -62,10 +62,10 @@ phases:
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are recorded: an agent session selected, for each, the option this document
+All 3 decisions are answered: an agent session selected, for each, the option this document
 already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001 covers spec approval and engineering-DR acceptance only). They are ratified only when a
-human or a covered delegation approves this spec.
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). These answers
+bind once this spec is approved, by a human or a covered delegation, and not before.
 
 - **D1 - Recorded selection: Option a,** refuse visibly when config names other folders: a bounded
   grep on `"specsDir"` / `"decisionsDir"`, then a fail-closed message.

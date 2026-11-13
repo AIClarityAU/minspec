@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-240-status-orphan-comment-both-directions/requirements.md",
+  "specHash": "18b35ab1d316cbba5f766100f6331ceaec429e5e559cb16e9a0c96448ba4721a",
+  "approvedAt": "2026-10-30T05:54:03.254Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T2",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-c",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3182#issuecomment-6515774347"
+}
