@@ -8,7 +8,7 @@ describe('findOpenClarify (#3059)', () => {
   });
   it('passes when the section says all are resolved', () => {
     expect(findOpenClarify('## Decisions needed (Clarify) — ALL RESOLVED 2026-08-14\n\n- **DQ-1 — x**\n').open).toBe(false);
-    expect(findOpenClarify('## Decisions needed (Clarify)\n\n*All four questions are RESOLVED.*\n\n### DQ-1 (a)\n').open).toBe(false);
+    expect(findOpenClarify('## Decisions needed (Clarify)\n\n### DQ-1 (a) - RESOLVED: yes\n').open).toBe(false);
   });
   it('passes with no section or an empty one', () => {
     expect(findOpenClarify('# S\n\n- FR-1. x\n').open).toBe(false);
@@ -23,8 +23,17 @@ describe('findOpenClarify (#3059)', () => {
       '2. **Which fields count.** Use the strip-list **(rec)**.\n\n## Risks\n\n1. not a decision\n';
     expect(findOpenClarify(t)).toEqual({ open: true, items: ['1', '2'] });
   });
-  it('a numbered list under an all-resolved section is not open', () => {
+  it('a numbered list under an all-resolved heading is not open', () => {
     expect(findOpenClarify('## Decisions needed (Clarify) - all resolved\n\n1. **Where.** Hook.\n').open).toBe(false);
+  });
+  it('body prose saying all are decided does not close an unanswered decision (#3699)', () => {
+    const t =
+      '## Decisions needed (Clarify)\n\nAll 3 decisions below were decided by the runner.\n\n- **D1. Width.**\n  - (a) x\n- **D2. Other.**\n  **Recorded selection: Option (a).**\n';
+    expect(findOpenClarify(t)).toEqual({ open: true, items: ['D1'] });
+  });
+  it('an item with its own recorded selection is closed; a restated label counts once', () => {
+    const t = '## Decisions needed (Clarify)\n\n- **D1 - x.** Recorded selection: Option (a).\n\n### D1 - detail\n\nprose\n';
+    expect(findOpenClarify(t).open).toBe(false);
   });
   it('flags letter-labelled decisions (SPEC-258 shape, #3230)', () => {
     const t = '## Decisions needed (Clarify)\n\n### DQ-A — Which bucket?\n\n### DQ-B — Where?\n\n- **D-C — x**\n\n## Risks\n';
