@@ -14,6 +14,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { runCloseout, BRANCH_PREFIX, type CloseoutDeps } from '../../../scripts/lib/close-finished-specs';
 import { parseSpec } from '../src/lib/spec';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: every case builds a real repo + bare origin and drives git through the `git()`
+// wrapper below (16 call sites, plus the pushes runCloseout makes itself), so it can queue
+// past vitest's 5s default under load. Must be at module scope (#1399).
+useShellTimeout();
 
 const git = (cwd: string, args: readonly string[], env?: NodeJS.ProcessEnv): string =>
   execFileSync('git', ['-C', cwd, ...args], {
