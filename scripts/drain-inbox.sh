@@ -2138,6 +2138,79 @@ _drop_pr_claimed() {
   _drop_out="${_drop_kept%$'\n'}"
 }
 
+# _countermand_holds <varname> — INTO a named variable, one line `<issue> <label>` for each
+# open ready issue (either ready label) that also wears a countermanding label, naming the
+# first such label in the gate's order. Non-zero, and the variable untouched, when either
+# the gate's label set or the issue read cannot be had.
+#
+# Why (#2645): the queue read above sees issue numbers only, and the dispatcher's gate
+# (`dispatch-ready-check.sh`) is the one place the countermanding labels are checked. A
+# verdict hold, an escalation and the 2026-08-06 hold-label backfill each leave a ready
+# label beside the hold, by design, so those issues were offered and refused on every
+# cycle. On 2026-11-13 that was all 28 ready issues: the cycle ended "NOTHING DISPATCHED
+# ... a stale stamp, re-triage it", a stall alarm for issues correctly waiting on a human.
+#
+# The label set is READ from the gate (`--countermand-labels`), next to the dispatcher this
+# cycle runs (the run dir once ensure_fresh_run_dir has moved DISPATCH there), never
+# copied. This is a cheaper first look, not a replacement: the dispatcher's own check is
+# unchanged, so a failure here costs the old behaviour (offer, refuse), never a dispatch.
+_countermand_holds() {
+  local -n _cmh_out="$1"
+  local _cmh_gate _cmh_set _cmh_json _cmh_jq _cmh_val _cmh_all="" _cmh_lbl _cmh_rc=0 _cmh_l
+  _cmh_gate="$(dirname "$DISPATCH")/dispatch-ready-check.sh"
+  _cmh_set="$(bash "$_cmh_gate" --countermand-labels)" || return $?
+  [[ -n "$_cmh_set" ]] || return 1
+  # Embedded in the jq program as a JSON array: `gh --jq` takes no --arg. Only label-safe
+  # names are accepted, so nothing the gate prints can change the program's meaning.
+  _cmh_json=""
+  while IFS= read -r _cmh_l; do
+    [[ "$_cmh_l" =~ ^[A-Za-z0-9:._-]+$ ]] || return 1
+    _cmh_json+="${_cmh_json:+,}\"${_cmh_l}\""
+  done <<<"$_cmh_set"
+  _cmh_jq='.[] | .number as $n | [.labels[].name] as $have
+    | ['"[${_cmh_json}]"'[] | select(. as $g | $have | index($g))] | select(length > 0)
+    | "\($n) \(.[0])"'
+  for _cmh_lbl in agent-ready agent-ready-specify; do
+    _cmh_rc=0
+    _cmh_val=$(gh issue list --repo "$REPO" --state open --label "$_cmh_lbl" --limit "$_ready_fetch_limit" \
+      --json number,labels --jq "$_cmh_jq") || _cmh_rc=$?
+    if (( _cmh_rc != 0 )) && gh_bot_reauth_read; then   # dead credential: re-mint in this shell, retry once (#3400)
+      echo "[drain] the '${_cmh_lbl}' held-for-a-human read failed and the credential was stale — re-minted, retrying once." >&2
+      _cmh_rc=0
+      _cmh_val=$(gh issue list --repo "$REPO" --state open --label "$_cmh_lbl" --limit "$_ready_fetch_limit" \
+        --json number,labels --jq "$_cmh_jq") || _cmh_rc=$?
+    fi
+    (( _cmh_rc == 0 )) || return "$_cmh_rc"
+    [[ -n "$_cmh_val" ]] && _cmh_all+="${_cmh_val}"$'\n'
+  done
+  _cmh_out="${_cmh_all%$'\n'}"
+}
+
+# _drop_held <varname> <holds> <issues> — INTO a named variable, <issues> (one per line)
+# without those <holds> (from _countermand_holds) names. One line names every issue left
+# out and its label, so the set stays visible and is never mistaken for a stall (#2645).
+_drop_held() {
+  local -n _dh_out="$1"
+  local _dh_kept="" _dh_n _dh_label _dh_named="" _dh_count=0
+  local -A _dh_by=()
+  while read -r _dh_n _dh_label; do
+    [[ -n "$_dh_n" && -z "${_dh_by[$_dh_n]:-}" ]] && _dh_by[$_dh_n]="$_dh_label"
+  done <<<"$2"
+  for _dh_n in $3; do
+    if [[ -n "${_dh_by[$_dh_n]:-}" ]]; then
+      _dh_named+=" #${_dh_n} (${_dh_by[$_dh_n]})"
+      _dh_count=$(( _dh_count + 1 ))
+    else
+      _dh_kept+="${_dh_n}"$'\n'
+    fi
+  done
+  if (( _dh_count > 0 )); then
+    echo "[drain] not offered: ${_dh_count} ready issue(s) held for a human by a countermanding label the dispatcher would refuse (#2645):${_dh_named}" >&2
+    echo "[drain]   Not a stall: each waits on a human (an escalation or a verdict hold). Clearing the hold label, or scripts/triage-inbox.sh <N>, puts it back in the queue." >&2
+  fi
+  _dh_out="${_dh_kept%$'\n'}"
+}
+
 # _read_queue <varname> <label> — read one label's queue INTO a named variable, and
 # recover from a DEAD CREDENTIAL once before giving up.
 #
@@ -2409,8 +2482,18 @@ run_cycle() {
     all_ready=""
   else
     _drop_pr_claimed all_ready "$pr_claims" "$all_ready"
+    # Held for a human (#2645): left out here, before ranking and the cap, so a queue of
+    # held issues reads as what it is rather than as a stall. A failed read filters
+    # nothing: the dispatcher's own countermand check still refuses each one.
+    local human_holds="" held_rc=0
+    _countermand_holds human_holds || held_rc=$?
+    if (( held_rc != 0 )); then
+      echo "[drain] WARNING: could not read which ready issues are held for a human (exit ${held_rc}); offering all of them, and the dispatcher's own check refuses any that are (#2645)." >&2
+    else
+      _drop_held all_ready "$human_holds" "$all_ready"
+    fi
     if [[ -z "$all_ready" ]]; then
-      echo "[drain] nothing to dispatch this cycle: every ready issue is already closed by an open pull request. Going on to pull request remediation."
+      echo "[drain] nothing to dispatch this cycle: every ready issue is already closed by an open pull request or held for a human (each named above). Going on to pull request remediation."
     fi
   fi
   if [[ -z "$all_ready" ]]; then
