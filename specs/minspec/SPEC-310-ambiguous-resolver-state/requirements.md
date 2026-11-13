@@ -1,7 +1,7 @@
 ---
 id: SPEC-310
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a ref that silently picks one of two targets is a lying signpost
@@ -16,9 +16,9 @@ implements_reason: >-
   `scripts/validate-frontmatter.ts` Rule 9's registry builder, and their tests. None of it is
   claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
