@@ -36,6 +36,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { spawnSync } from 'child_process';
 import { useHostileAmbientDrainKnobs } from './helpers/drain-env';
 import {
   cleanupDrains,
@@ -74,15 +75,17 @@ const countermanded = (issues: number[], by = 'agent-escalated'): Record<number,
  */
 const GATE = path.resolve(__dirname, '../../../scripts/dispatch-ready-check.sh');
 const COUNTERMANDING: string[] = (() => {
-  const m = fs.readFileSync(GATE, 'utf-8').match(/^for gate in ([a-z -]+); do$/m);
-  if (!m) {
+  // The gate publishes its set (#2645); the same list its refusal loop walks.
+  const r = spawnSync('bash', [GATE, '--countermand-labels'], { encoding: 'utf-8' });
+  const set = r.status === 0 ? r.stdout.split('\n').filter(Boolean) : [];
+  if (set.length === 0) {
     throw new Error(
       'Could not read the countermanding-label list out of dispatch-ready-check.sh. Fix this ' +
         'extractor rather than deleting the tests: they are what proves each of those labels ' +
         'still keeps an issue from being built (#2641).',
     );
   }
-  return m[1].trim().split(/\s+/);
+  return set;
 })();
 
 const refusalLines = (log: string) => log.split('\n').filter((l) => /^Skipping #\d+ /.test(l));
