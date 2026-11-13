@@ -447,6 +447,24 @@ if [ "${DR_INDEX_GATE_OFF:-}" != "1" ] && \
   fi
 fi
 
+# ── approval-race gate (#424) ────────────────────────────────────────────────
+# "Approve Spec" (hash + baseline) and `git commit` are separate, non-atomic steps. A
+# spec edited in between lands with a sidecar describing EARLIER bytes, so it reads
+# `stale` immediately with no history showing the change (SPEC-026, e9f82ca). Refuse a
+# staged approvable whose hash differs from its committed sidecar unless the sidecar is
+# staged too (deliberate re-approval), and refuse a staged sidecar that does not match
+# the staged file. Fails CLOSED if the checker cannot run. Scoped to its own bypass.
+# Bypass: APPROVAL_RACE_GATE_OFF=1 git commit ...
+if [ "${APPROVAL_RACE_GATE_OFF:-}" != "1" ] && git diff --cached --name-only | grep -qE '\.md$|^\.minspec/approvals/'; then
+  race_script="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/check-approval-sidecar-race.ts"
+  if [ -f "$race_script" ]; then
+    if ! race_out="$(npx --no-install tsx "$race_script" 2>&1)"; then
+      printf '%s\n' "$race_out" >&2
+      fail=1
+    fi
+  fi
+fi
+
 # ── generated-template gate (#3546) ──────────────────────────────────────────
 # scripts/gen-ci-templates.mjs copies a fixed set of source files word for word into
 # ci-review-templates.ts / hook-templates.ts. Editing one without re-running the
