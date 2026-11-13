@@ -2019,9 +2019,10 @@ SPECIFY_MAX_PENDING="${MINSPEC_DRAIN_SPECIFY_MAX_PENDING:-40}"
 # frontmatter `status:` is `new` or `specifying`, INTO a named variable. The tree is the
 # one the delegated-approval stage reads (the parent of the scripts the cycle runs, so
 # origin/main's verified run dir when self-refresh found it current). Only the
-# frontmatter counts: a body line quoting `status: specifying` is not a status. Returns 1
-# when the tree has no specs/ folder or the read fails: an absent folder is a count
-# nobody read, not zero (invariant 2).
+# frontmatter counts: a body line quoting `status: specifying` is not a status. Specs
+# named in an open `hold:human` issue are excluded (#3698), which needs a `gh issue list`
+# read. Returns 1 when the tree has no specs/ folder, the read fails, or the hold:human
+# read fails: an uncounted pile is a count nobody read, not zero (invariant 2).
 _pending_specs() {
   local -n _pend_out="$1"
   local root _pend_val
@@ -2338,7 +2339,7 @@ run_cycle() {
           echo "[drain] spec-writing is PAUSED: MINSPEC_DRAIN_SPECIFY_MAX_PENDING=$(printf '%q' "$SPECIFY_MAX_PENDING") is not a whole number, so it is read as 0, the setting that spends nothing: ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
         elif ! _pending_specs pending; then
           specify_on=0
-          echo "[drain] spec-writing is PAUSED: the unapproved specs on main could not be counted (no specs/ folder or an unreadable one under $(printf '%q' "$(dirname "$REMEDIATE")/..")), and a count nobody read is not zero (#3344): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+          echo "[drain] spec-writing is PAUSED: the unapproved specs on main could not be counted (either no specs/ folder or an unreadable one under $(printf '%q' "$(dirname "$REMEDIATE")/.."), or the read of open hold:human issues failed: see the gh error above), and a count nobody read is not zero (#3344): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
         elif (( 10#$pending >= 10#$SPECIFY_MAX_PENDING )); then
           specify_on=0
           echo "[drain] spec-writing is PAUSED: ${pending} spec(s) on main waiting for Clarify or sign-off (status new or specifying), at or above the cap ${SPECIFY_MAX_PENDING} (MINSPEC_DRAIN_SPECIFY_MAX_PENDING, #3344): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
