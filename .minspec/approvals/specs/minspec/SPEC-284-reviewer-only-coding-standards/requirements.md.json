@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-284-reviewer-only-coding-standards/requirements.md",
+  "specHash": "bb4214ee8a5e22cb58c1dbeb072455ba365c0e2e9e585f16e258cdbfc99cfd38",
+  "approvedAt": "2026-11-02T12:29:32.574Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:fix/3390-clarify-wording",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3391#issuecomment-6571380443"
+}
