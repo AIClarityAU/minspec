@@ -246,6 +246,13 @@ if [[ "$noun $verb" == "api graphql" ]]; then
   case "$query" in
     *"nodes(ids:"*) third="nodes"; answer="$dir/comment-nodes.json" ;;
     *"pullRequest("*) third="pullRequest:$number"; answer="$dir/pr-comments.json" ;;
+    # The readiness gate's blocker read (#3326): not the author gate's provenance read, so
+    # it is answered "no native blockers" and kept out of gh-calls.log, which pins the
+    # author gate's reads exactly.
+    *"blockedBy("*) echo '{"data":{"repository":{"issue":{"blockedBy":{"totalCount":0,"nodes":[]}}}}}'; exit 0 ;;
+    # The dispatch gate's open-closing-PR read (#3161): likewise not a provenance read, so
+    # it is answered "no open PRs" and kept out of gh-calls.log.
+    *"pullRequests(states:OPEN"*) echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}'; exit 0 ;;
     *"issue("*) third="issue:$number"; answer="$dir/provenance.$number.json" ;;
     *) third="unrecognised" ;;
   esac
@@ -256,7 +263,14 @@ token=absent; [[ -n "\${GH_TOKEN:-}" ]] && token=present
 wrote() { printf '%s token=%s\\n' "$1" "$token" >> "$dir/gh-writes.log"; }
 case "$noun $verb" in
   "api user")
+    # Default: the 403 an App installation token gets, body on stdout as the real gh prints
+    # it — the drain's production shape (#3037, #3592). STUB_GH_LOGIN answers as a user
+    # token instead; STUB_GH_USER_ERROR fails some other way (a 401, a network error), so
+    # no identity can be established at all.
+    if [[ -n "\${STUB_GH_LOGIN:-}" ]]; then echo "\$STUB_GH_LOGIN"; exit 0; fi
+    if [[ -n "\${STUB_GH_USER_ERROR:-}" ]]; then echo "\$STUB_GH_USER_ERROR" >&2; exit 1; fi
     echo '{"message":"Resource not accessible by integration","status":"403"}'
+    echo 'gh: Resource not accessible by integration (HTTP 403)' >&2
     exit 1 ;;
   "api graphql")
     [[ "$query" == mutation* ]] && wrote "api graphql-mutation"
@@ -1161,7 +1175,10 @@ export function runRemediate(opts: RemediateOptions = {}): RemediateRun {
   git('-C', seed, 'checkout', '-q', '-b', branch);
   fs.mkdirSync(path.join(seed, 'scripts', 'lib'), { recursive: true });
   fs.writeFileSync(path.join(seed, 'scripts', 'lib', 'agent-context.sh'), PASS_THROUGH_HELPER, { mode: 0o755 });
-  git('-C', seed, 'add', 'scripts/lib/agent-context.sh');
+  // remediate-pr.sh refuses `npm ci` without a vetted lockfile, so the branch carries the
+  // smallest valid one: no packages beyond the root, nothing for npm to fetch.
+  fs.writeFileSync(path.join(seed, 'package-lock.json'), '{"lockfileVersion":3,"packages":{"":{}}}\n');
+  git('-C', seed, 'add', 'scripts/lib/agent-context.sh', 'package-lock.json');
   git('-C', seed, 'commit', '-q', '-m', 'fixture: the branch under remediation');
   opts.prepare?.({ dir, repo, origin, seed, branch, worktree, git });
   git('-C', seed, 'push', '-q', 'origin', branch);
@@ -1194,6 +1211,8 @@ export function runRemediate(opts: RemediateOptions = {}): RemediateRun {
     cwd: repo,
     encoding: 'utf-8',
     // One launch: an escalation is not retried on a second model.
+    // No STUB_GH_LOGIN by default: `gh api user` answers the App installation token's 403,
+    // the identity the drain really runs under (#3592).
     env: hermeticEnv(dir, bin, { MINSPEC_ESCALATE_RETRY_OFF: '1', ...opts.env }),
   });
   return { ...collect(dir, r), worktree, branch, origin };
