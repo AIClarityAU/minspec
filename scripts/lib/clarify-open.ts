@@ -34,7 +34,8 @@ const ALL_RESOLVED = /\ball\b[^.\n]{0,40}\b(?:resolved|answered|decided)\b/i;
  * Who made the selection is deliberately not judged here (policy for DR-119's owner).
  *
  * The keyword alone is not a record (#3701 review). It counts only when it
- * - opens a clause: line start, or after `.` `!` `;` `:` `)` `]` `|` `>` `-` `–` `—` `→`, markdown
+ * - opens a clause: line start, or after `.` `!` `;` `:` `]` `|` `>` `→`, or after a dash that has whitespace before it
+ *   (`-` `–` `—`; never a hyphen inside a word or an option label's `)`), markdown
  *   emphasis allowed. So "Not yet decided:", "To be decided", "What is decided here:", "gets
  *   chosen" and "Status: NOT RESOLVED" never count, wherever they sit, the label line included;
  * - is followed by a separator (`:`, `—`, `–`, ` - `), a parenthetical (`(2026-07-12, founder):`)
@@ -46,12 +47,10 @@ const ALL_RESOLVED = /\ball\b[^.\n]{0,40}\b(?:resolved|answered|decided)\b/i;
  *   wrapped).
  */
 const KEYWORD = /\b(?:recorded\s+(?:selection|answer)|resolved|selected|chosen|decided)\b/gi;
-const CLAUSE_START = /(?:^|[.!;:)\]|>\-–—→])[\s*_]*$/;
+const CLAUSE_START = /(?:^|[.!;:\]|>→]|\s[-–—])[\s*_]*$/;
 const SEPARATOR = /^[*_\s]*(?::|—|–|-(?=\s)|\d{4}-\d{2}-\d{2}\b)/;
 const PAREN = /^[*_\s]*\(([^)\n]*)\)[*_\s]*(?::|—|–|-(?=\s))?/;
 const PLACEHOLDER = /^(?:tbd|tbc|pending|open|unresolved|undecided|not\s+yet|none\b|n\/a|\?)/i;
-/** "not a choice": the item is recorded as needing no decision. Unchanged from #3059. */
-const NOT_A_CHOICE = /\bnot a choice\b/i;
 
 function isValue(text: string): boolean {
   const v = text.replace(/^[*_\s,]+/, '');
@@ -62,7 +61,6 @@ function isValue(text: string): boolean {
 
 /** `line` plus, when a separator ends it, the line after: the value of a wrapped record. */
 function recordsSelection(line: string, next = ''): boolean {
-  if (NOT_A_CHOICE.test(line)) return true;
   for (const m of line.matchAll(KEYWORD)) {
     const at = m.index ?? 0;
     if (!CLAUSE_START.test(line.slice(0, at))) continue;

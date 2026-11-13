@@ -89,4 +89,25 @@ describe('findOpenClarify (#3059)', () => {
     const question = '## Decisions needed (Clarify)\n\n- **D4. Resolved: which width wins?**\n';
     expect(findOpenClarify(question)).toEqual({ open: true, items: ['D4'] });
   });
+  it('"not a choice" prose never closes an item that still lists options (#3701 review)', () => {
+    const shapes = [
+      '- **D1. Width.** Option space, not a choice yet: (a) 80 or (b) 120.',
+      '- **D1. Width.**\n  Option space, not a choice:\n  - (a) 80\n  - (b) 120',
+      '- **D1. Width.** This is not a choice we can make alone.',
+    ];
+    for (const b of shapes) {
+      expect(findOpenClarify(`## Decisions needed (Clarify)\n\n${b}\n`), b).toEqual({ open: true, items: ['D1'] });
+    }
+  });
+  it('option text and hyphenated "Not-yet-decided" are not a record (#3701 review)', () => {
+    const shapes = [
+      '- **D1. Width.**\n  - (b) Chosen - the faster path',
+      '- **D1. Width.**\n- (b) Chosen - the faster path',
+      '- **D1. Width.** Not-yet-decided: owner must pick',
+      '- **D1. Width.**\n  Not-yet-decided: owner must pick',
+    ];
+    for (const b of shapes) {
+      expect(findOpenClarify(`## Decisions needed (Clarify)\n\n${b}\n`), b).toEqual({ open: true, items: ['D1'] });
+    }
+  });
 });
