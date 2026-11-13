@@ -1,16 +1,20 @@
 ---
 id: SPEC-251
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a human act needs a witness the agent cannot forge
 aspects: [approval, dr-acceptance, ai-review, no-silent-gate, enforce-dont-trust]
 relates_to: [SPEC-225, SPEC-041, DR-081, DR-056, DR-108, DR-003, "#2153", "#1066", "#2810"]
+implements: none
+implements_reason: >-
+  Owned files are decided at Plan; none are claimed before then, so no shared file is frozen
+  early by a spec whose design is not fixed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -91,23 +95,36 @@ chooses it; amendment acceptance inside an accepted DR (#3016, already reported 
 
 ## Decisions needed (Clarify)
 
+All 4 decisions are resolved: an agent session recorded each option this document already
+recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). They are
+ratified only by approval of this spec.
+
 - **D1 - Where the gate lives.**
   (a) Extend `scripts/approval-integrity.ts` with a "flip requires record" rule **(rec)**:
   reuses base/head plumbing and approver checks; cost: that file is explicitly scoped to
   approval-record PRs (DR-081 section 5), so widening it needs a scope amendment.
   (b) New standalone script and check: clean scope; cost: a second copy of the record
   predicate that can drift from `dr_accept_report` (mitigated by the FR-6 shared table).
+  **Recorded selection: Option (a),** extend `scripts/approval-integrity.ts` with a "flip
+  requires record" rule, reusing its base/head plumbing and approver checks.
 - **D2 - Legacy DRs without a record.**
   (a) Grandfather: no record needed unless status changes again **(rec)**: zero churn; cost:
   `UNVERIFIED` stays on ~105 DRs forever.
   (b) Back-fill `migrated: true` records: uniform tree; cost: a bulk write that manufactures
   sign-off records no human made at that moment, which sits badly with "never mint human
   approval". Not recommended.
+  **Recorded selection: Option (a),** grandfather legacy DRs: no record is needed unless their
+  status changes again.
 - **D3 - Set Status -> accepted.**
   (a) Refuse it, direct to Accept ADR **(rec)**: one route, one witness; cost: a command
   behaviour change for users who use Set Status as a shortcut.
   (b) Make it write the record: keeps the shortcut; cost: two write paths to keep in step.
+  **Recorded selection: Option (a),** refuse Set Status -> accepted and direct the user to
+  Accept ADR, so there is one route and one witness.
 - **D4 - Advisory first or gating at once.** DR-081 ran its check advisory before gating.
   (a) Advisory one week then required **(rec)**: catches false positives cheaply; cost: a
   week where an unwitnessed flip can merge. (b) Required immediately: no window; cost: a
   false positive blocks every DR acceptance, the exact failure #2153 reported.
+  **Recorded selection: Option (a),** run the check advisory for one week, then make it
+  required.
