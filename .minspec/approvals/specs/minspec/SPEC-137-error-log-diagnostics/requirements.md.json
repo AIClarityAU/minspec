@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-137-error-log-diagnostics/requirements.md",
+  "specHash": "aab96af5e1607fd346deb4332c03fdc0c320699e0d7441342899630e66d9da48",
+  "approvedAt": "2026-10-28T08:21:24.966Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/phone-home-1015",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/2721#issuecomment-6463851145"
+}

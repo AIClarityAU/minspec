@@ -441,6 +441,22 @@ def select_verdict(entries):
     return primary["approval"], primary["rec"], files
 
 
+def collision_note(entries):
+    """Describe a spec-id collision (#1406), or None when there is none.
+
+    A collision = two or more gated docs sharing one spec id whose approval
+    verdicts DISAGREE. `select_verdict` still resolves it deterministically
+    (strongest approval wins), but the disagreement is a corpus defect — a
+    sibling doc carries tier/phases it should not, or lacks an approval — and
+    must be reported, never silently collapsed. Pure and order-independent:
+    paths are sorted, so the note is identical for any input order.
+    """
+    if len({e["approval"] for e in entries}) < 2:
+        return None
+    return ", ".join("%s=%s" % (e["spec_rel"], e["approval"])
+                     for e in sorted(entries, key=lambda e: e["spec_rel"]))
+
+
 def owned_match(rel, files):
     """True if `rel` (POSIX, cwd-relative) is in a spec's owned (declared-impl) set.
 
@@ -512,6 +528,7 @@ def main():
     gated = 0
     blocking = []      # (sid, verdict, files)
     migrated = []      # (sid, files)
+    collisions = []    # (sid, note, files) — #1406
     by_id = {}         # sid -> list of per-doc candidate dicts
     for sp in glob.glob(os.path.join(cwd, "specs", "**", "*.md"), recursive=True):
         try:
@@ -574,6 +591,9 @@ def main():
     for sid, entries in by_id.items():
         gated += 1
         approval, rec, files = select_verdict(entries)
+        note = collision_note(entries)
+        if note:
+            collisions.append((sid, note, files))
 
         if approval in ("unapproved", "stale"):
             blocking.append((sid, approval, files))
@@ -584,6 +604,12 @@ def main():
     # Does the target file fall inside any BLOCKING spec's owned set?
     matched = [(sid, verdict) for (sid, verdict, fil) in blocking
                if owned_match(rel, fil)]
+
+    # #1406: surface sibling-doc approval disagreements scoped to this file.
+    collision_msg = "; ".join(
+        "%s has sibling docs that disagree on approval (%s) — fix the corpus: "
+        "only one doc per spec should carry tier/phases" % (sid, note)
+        for (sid, note, fil) in sorted(collisions) if owned_match(rel, fil))
 
     if matched:
         # Fail closed: if the canonical store is unresolvable (cwd is not a git
@@ -608,20 +634,26 @@ def main():
             "(VS Code: 'MinSpec: Approve Spec for Implementation', or the checkmark "
             "in the MinSpec sidebar)."
             % (rel, names)
+            + ((" COLLISION: " + collision_msg + ".") if collision_msg else "")
         )
 
     # No blocker owns this file. Surface a migrated-approval WARN only when the
     # file is inside a migrated spec's own set (FR-5, scoped), else plain allow.
     warn_ids = [sid for (sid, fil) in migrated if owned_match(rel, fil)]
-    if warn_ids:
-        print(json.dumps({"hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
-            "permissionDecisionReason": (
+    if warn_ids or collision_msg:
+        parts = []
+        if warn_ids:
+            parts.append(
                 "MinSpec gate (WARN): approval migrated for %s — re-approve to "
                 "clear (MinSpec: Approve Spec for Implementation). Allowed for "
                 "now; promotion to a hard block is pending a clean corpus."
-                % ", ".join(warn_ids))}}))
+                % ", ".join(warn_ids))
+        if collision_msg:
+            parts.append("MinSpec gate (WARN): spec-id collision — " + collision_msg + ".")
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "permissionDecisionReason": " ".join(parts)}}))
         sys.exit(0)
     allow()
 
