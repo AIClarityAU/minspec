@@ -49,6 +49,7 @@ vi.mock('../src/lib/backlog', async importOriginal => ({
 
 import {
   BACKLOG_ROW,
+  BACKLOG_VIEW_ISSUE_LIMIT,
   BacklogGroupNode,
   BacklogIssueNode,
   BacklogTreeProvider,
@@ -453,7 +454,25 @@ describe('BacklogTreeProvider', () => {
       await gesture();
 
       expect(mockFetchIssues).toHaveBeenCalledTimes(1);
-      expect(mockFetchIssues).toHaveBeenCalledWith('/tmp/test', { state: 'open' });
+      expect(mockFetchIssues).toHaveBeenCalledWith('/tmp/test', { state: 'open', limit: BACKLOG_VIEW_ISSUE_LIMIT });
+    });
+
+    it('a list that reaches the request ceiling says it is truncated (#2246)', async () => {
+      mockFetchIssues.mockResolvedValue(
+        Array.from({ length: BACKLOG_VIEW_ISSUE_LIMIT }, (_, i) => makeIssue({ number: i + 1 })),
+      );
+      await gesture();
+      const children = await rows();
+
+      expect(children.some(c => String(c.label).includes(`first ${BACKLOG_VIEW_ISSUE_LIMIT} open issues`))).toBe(true);
+    });
+
+    it('a list under the ceiling shows no truncation row (#2246)', async () => {
+      mockFetchIssues.mockResolvedValue([makeIssue()]);
+      await gesture();
+      const children = await rows();
+
+      expect(children.some(c => String(c.label).includes('more exist'))).toBe(false);
     });
 
     it('the gesture runs no gh availability probe (DQ-2)', async () => {

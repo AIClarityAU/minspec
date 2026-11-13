@@ -42,6 +42,8 @@ _ISSUE_LEASE_REPO_ROOT="$(cd "${_ISSUE_LEASE_DIR}/../.." && pwd)"      # repo ro
 # and offline, so calling it per-writer costs nothing. (#1401 architect review.)
 # shellcheck source=scripts/lib/gh-bot.sh
 source "${_ISSUE_LEASE_DIR}/gh-bot.sh"
+# shellcheck source=scripts/lib/dispatch-author-gate.sh
+source "${_ISSUE_LEASE_DIR}/dispatch-author-gate.sh"
 : "${MINSPEC_LEASE_WORKTREE_BASE:=/tmp/minspec-agent}"
 
 # ── Work-item lease constants (SPEC-044 D10 / OQ-2) ──────────────────────────
@@ -86,8 +88,24 @@ SHIPPED_MARKER='<!-- minspec-shipped -->'
 lease_self_sid() {
   if [[ -n "${MINSPEC_LEASE_SID:-}" ]]; then printf '%s' "$MINSPEC_LEASE_SID"; return 0; fi
   if [[ -n "${MINSPEC_SESSION_ID:-}" ]]; then printf '%s' "$MINSPEC_SESSION_ID"; return 0; fi
-  local pid="$$" starttime
-  starttime="$(stat -c '%Y' "/proc/$pid" 2>/dev/null)" || starttime=""
+  # starttime = field 22 of /proc/PID/stat (clock ticks since boot, fixed for the
+  # process's life). NOT `stat -c %Y /proc/PID`: that is the mtime of the procfs inode,
+  # stamped when the kernel instantiates it on first access, so it equals "first time
+  # anyone looked" and is re-minted if the inode is evicted under memory pressure —
+  # the sid then changes mid-life and the session stops matching its own claim (#3502).
+  # `comm` (field 2) may contain spaces/parens, so strip through the LAST ')' first;
+  # field 22 is then the 20th remaining field.
+  # `local IFS` is load-bearing: the word split below must not depend on the caller's
+  # IFS (a script that sets IFS=$'\n\t' would otherwise get ONE field, an empty
+  # starttime, and every sid would collapse to sid-<pid>-0).
+  local IFS=$' \t\n'
+  local pid="$$" starttime="" statline rest
+  if statline="$(cat "/proc/$pid/stat" 2>/dev/null)"; then
+    rest="${statline##*) }"
+    # shellcheck disable=SC2086
+    set -- $rest
+    starttime="${20:-}"
+  fi
   printf 'sid-%s-%s' "$pid" "${starttime:-0}"
 }
 
@@ -218,7 +236,80 @@ lease_gate_open_unshipped() {
        | grep -qF "$SHIPPED_MARKER"; then
     return 1                                   # already shipped ⇒ never re-dispatch
   fi
+  # #3161: an OPEN PR that closes this issue is work in flight, whatever its branch name
+  # or author (a job or session opens `fix/N-…`, not `agent/issue-N`). Building anyway
+  # spends a build + review panel and opens a rival PR. Keyed on the PR's own
+  # closingIssuesReferences, never on our branch name or a label. Fails closed: a gh/jq
+  # error reads as "cannot prove nothing is in flight" ⇒ refuse (visibly, on stdout).
+  local closing
+  if ! closing="$(lease_open_closing_prs "$item")"; then
+    echo "Cannot list open PRs to check whether one already closes #$item — refusing (fail closed, #3161)."
+    return 1
+  fi
+  if [[ -n "$closing" ]]; then
+    echo "Skipping #$item — open PR(s) already close it: ${closing} (#3161). Not building a rival."
+    return 1
+  fi
   return 0
+}
+
+# lease_open_closing_prs <item>: print the numbers (space-separated, "#N" form) of every
+# OPEN pull request whose closingIssuesReferences contains <item>; empty when none.
+# Non-zero on any read/parse failure (the caller treats that as "unknown", never "none"),
+# and when the open-PR list is not read IN FULL (a truncated list cannot prove "none in
+# flight").
+#
+# Read with GraphQL, not `gh pr list --json`: that command has no `authorAssociation`
+# field (it exits non-zero, which this gate would turn into refusing EVERY dispatch), and
+# the association is what the trust filter below needs.
+#
+# TRUSTED PR authors only. This repo is PUBLIC and `Closes #N` in any fork PR's body fills
+# closingIssuesReferences, so an unfiltered read lets any internet user park a throwaway PR
+# and deny dispatch of #N for as long as it stays open — the same zero-permission denial
+# the shipped-marker read above filters against. Trusted = authorAssociation
+# OWNER/MEMBER/COLLABORATOR, or an account on the dispatch author list (kind + number, never
+# a login: dispatch-author-gate.sh explains why a login is a spelling anyone can register).
+lease_open_closing_prs() {
+  local item="${1:?lease_open_closing_prs needs an item}" owner name listed defs
+  local cursor="" page more pages=0 max_pages=10 acc="" hits q
+  owner="${MINSPEC_LEASE_REPO%%/*}"; name="${MINSPEC_LEASE_REPO#*/}"
+  listed="$(_dispatch_trusted_identities_json 2>/dev/null)" && [[ -n "$listed" ]] || return 1
+  defs="$(_dispatch_gate_jq_defs)"
+  q='query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){pullRequests(states:OPEN,first:100,after:$cursor){pageInfo{hasNextPage endCursor} nodes{number authorAssociation author{'"$(_dispatch_actor_fields)"'} closingIssuesReferences(first:100){pageInfo{hasNextPage} nodes{number repository{nameWithOwner}}}}}}}'
+  while :; do
+    (( pages < max_pages )) || return 1          # more than 1000 open PRs: cannot prove "none"
+    pages=$((pages + 1))
+    if [[ -n "$cursor" ]]; then
+      page="$(_dispatch_graphql_read -f query="$q" -f owner="$owner" -f name="$name" -f cursor="$cursor" 2>/dev/null)" || return 1
+    else
+      page="$(_dispatch_graphql_read -f query="$q" -f owner="$owner" -f name="$name" 2>/dev/null)" || return 1
+    fi
+    # Absent/odd shape or GraphQL errors: unknown. Then, over TRUSTED authors only, a PR whose
+    # closing list is itself truncated is unknown too; an untrusted PR's truncated list is
+    # ignored, else one fork PR naming >100 issues would deny dispatch of every issue. The page
+    # goes in on stdin and only the matching PR numbers are kept, so neither a big page nor a
+    # long accumulator rides on argv (one argument is capped at 128 KiB). jq's `error` exits
+    # non-zero, which is this function's fail-closed path.
+    hits="$(printf '%s' "$page" | jq -r --argjson n "$item" --argjson listed "$listed" --arg repo "$MINSPEC_LEASE_REPO" "$defs"'
+      if (.errors // [] | length) != 0 or (.data.repository.pullRequests.nodes | type) != "array"
+      then error("unreadable page") else . end
+      | [ .data.repository.pullRequests.nodes[]
+          | select((.authorAssociation // "") as $a
+                   | $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR"
+                     or (.author | listed)) ]
+      | if all(.[]; .closingIssuesReferences.pageInfo.hasNextPage == false) | not
+        then error("truncated closing list on a trusted PR") else . end
+      | .[]
+      | select(any(.closingIssuesReferences.nodes[]?; .number == $n and .repository.nameWithOwner == $repo))
+      | "#\(.number)"' 2>/dev/null)" || return 1
+    [[ -z "$hits" ]] || acc="${acc:+$acc }${hits//$'\n'/ }"
+    more="$(printf '%s' "$page" | jq -r '.data.repository.pullRequests.pageInfo.hasNextPage')" || return 1
+    [[ "$more" == "false" ]] && break
+    [[ "$more" == "true" ]] || return 1
+    cursor="$(printf '%s' "$page" | jq -r '.data.repository.pullRequests.pageInfo.endCursor // empty')" || return 1
+    [[ -n "$cursor" ]] || return 1
+  done
+  printf '%s' "$acc"
 }
 
 # ── Claim comment body + read/enumerate ──────────────────────────────────────
@@ -236,8 +327,18 @@ lease_claim_body() {
 # ANY gh/parse error return non-zero (the caller maps that to enum_complete=0 → INV-6
 # stand-down). serverOrder = the comment's server-assigned monotonic id.
 lease_read_claims() {
-  local item="${1:?lease_read_claims needs an item}" raw
-  raw="$(gh api --paginate "repos/${MINSPEC_LEASE_REPO}/issues/${item}/comments" 2>/dev/null)" || return 1
+  local item="${1:?lease_read_claims needs an item}" raw errf err_txt rc=0
+  # Keep gh's own stderr and REPORT it on failure (#3501): it was discarded, so a dead
+  # token (HTTP 401) and a network fault printed the same guess. Stdout stays the claims
+  # JSON; the reason goes to this function's stderr, which no caller captures into data.
+  errf="$(mktemp)" || { echo "lease: reading the claims on #${item} failed: mktemp could not create a scratch file" >&2; return 1; }
+  raw="$(gh api --paginate "repos/${MINSPEC_LEASE_REPO}/issues/${item}/comments" 2>"$errf")" || rc=$?
+  err_txt="$(cat "$errf" 2>/dev/null)"  # swallow-ok: read only to PRINT the diagnosis; rc is the verdict
+  rm -f "$errf"
+  if (( rc != 0 )); then
+    echo "lease: reading the claims on #${item} failed (gh exit ${rc}): ${err_txt:-no detail from gh}" >&2
+    return 1
+  fi
   # gh --paginate concatenates JSON arrays; jq -s . re-wraps them, then flatten.
   printf '%s' "$raw" | jq -s -c --arg m "<!-- ${CLAIM_MARKER}:" '
     [ .[][] | select(.body | contains($m))
@@ -301,9 +402,29 @@ lease_renew() {
   # Going through lease_read_claims is also what makes "the read itself failed"
   # (network/auth; gh/jq returned nonzero) distinguishable from "the read succeeded and
   # our claim just is not in it" (deleted, or never posted).
+  #
+  # A failed read is an OBSERVATION that the token may be dead (#3501): a ticker inherits
+  # GH_TOKEN at fork and the age check dates it from first sight, not from minting, so a
+  # token the broker cached can die ~35 min before the age re-mint. Re-mint on the
+  # failure and retry ONCE; gh_bot_reauth_read returns non-zero when no different
+  # credential was obtained, in which case a retry is guaranteed to fail again.
   if ! claims="$(lease_read_claims "$item")"; then
-    echo "lease: cannot renew the claim on #${item}: could not read claims (gh api error; network or auth)." >&2
-    return 1
+    local _reminted=0
+    if gh_bot_reauth_read; then
+      _reminted=1
+      # The ticker runs this in a subshell, so the fresh token would die with it and every
+      # later tick would 401 again. Hand it back through the ticker's private 0600 file
+      # (never stdout/stderr); the ticker adopts it in its own shell.
+      if [[ -n "${_LEASE_TOKEN_HAND:-}" && -n "${GH_TOKEN:-}" ]]; then
+        printf '%s' "$GH_TOKEN" > "$_LEASE_TOKEN_HAND" 2>/dev/null || true  # swallow-ok: a lost hand-back only costs one more re-mint next tick
+      fi
+    fi
+    if (( _reminted )) && claims="$(lease_read_claims "$item")"; then
+      echo "lease: read of the claims on #${item} succeeded after a token re-mint." >&2
+    else
+      echo "lease: cannot renew the claim on #${item}: could not read claims (reason above; re-mint did not help)." >&2
+      return 1
+    fi
   fi
 
   local cid claimed
@@ -408,6 +529,12 @@ _LEASE_TICKER_PID=""
 lease_start_renew_ticker() {
   local item="${1:?lease_start_renew_ticker needs an item}"
   [[ -z "$_LEASE_TICKER_PID" ]] || return 0    # idempotent — exactly one ticker per dispatch
+  # Private hand-back channel for a token a renewal re-mints inside the ticker (#3501).
+  # mktemp makes it 0600. It is made HERE, in the parent, and removed by
+  # lease_stop_renew_ticker: a library must not set an exit trap of its own (the caller's
+  # one trap would be replaced; see dispatch-outcome-status.test.ts), so teardown rides the
+  # stop function the caller's trap already calls.
+  _LEASE_TOKEN_HAND="$(mktemp)" || _LEASE_TOKEN_HAND=""
   (
     # fd 3 keeps the REAL stderr reachable after the next redirect silences fd 2 on
     # THIS subshell. The only thing fd 2 would otherwise carry from here is bash's own
@@ -428,6 +555,14 @@ lease_start_renew_ticker() {
     while sleep "$LEASE_RENEW_SECS" 2>&3; do
       _lease_rc=0
       ( lease_renew "$item" ) 2>&3 >/dev/null || _lease_rc=$?
+      if [[ -n "$_LEASE_TOKEN_HAND" && -s "$_LEASE_TOKEN_HAND" ]]; then
+        _lease_tok="$(cat "$_LEASE_TOKEN_HAND")"
+        : > "$_LEASE_TOKEN_HAND"
+        # _gh_bot_adopt keeps the ownership stamp in step with the token.
+        if declare -F _gh_bot_adopt >/dev/null; then _gh_bot_adopt "$_lease_tok" >/dev/null || true  # swallow-ok: returns "changed" status, not failure
+        else export GH_TOKEN="$_lease_tok"; fi
+        _lease_tok=""
+      fi
       (( _lease_rc == 0 || _lease_rc == 143 )) && continue
       echo "lease: renewal of the claim on #${item} FAILED (exit ${_lease_rc}); heartbeat not written. The claim lapses ${LEASE_TTL_SECS}s after its last successful renewal, and this session then no longer holds it." >&3
     done
@@ -445,6 +580,8 @@ lease_stop_renew_ticker() {
   kill "$_LEASE_TICKER_PID" 2>/dev/null || true
   wait "$_LEASE_TICKER_PID" 2>/dev/null || true
   _LEASE_TICKER_PID=""
+  [[ -z "${_LEASE_TOKEN_HAND:-}" ]] || rm -f "$_LEASE_TOKEN_HAND"
+  _LEASE_TOKEN_HAND=""
   return 0
 }
 
