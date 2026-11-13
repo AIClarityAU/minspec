@@ -313,6 +313,20 @@ class ScopedGateTests(unittest.TestCase):
             "an approved spec does not even freeze its own dir",
         )
 
+    def test_bom_marked_spec_is_still_gated(self):
+        """#2477: a leading UTF-8 BOM must not drop the spec from gating."""
+        rel = "specs/minspec/SPEC-905-bom/requirements.md"
+        content = _spec_text(
+            "SPEC-905", IMPLEMENTING_PHASES,
+            extra_fm="implements:\n  - packages/x/src/a.ts\n",
+        )
+        path = os.path.join(self.fx.root, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(b"\xef\xbb\xbf" + content.encode("utf-8"))
+        self.fx.write("packages/x/src/a.ts", "export const a = 1;\n")
+        self.assertEqual(self.fx.decision("packages/x/src/a.ts"), "deny")
+
     def test_stale_approval_blocks_declared_impl_not_own_doc(self):
         """A stale approval re-blocks the spec's DECLARED impl CODE — but NOT the
         spec's own doc, which must stay editable to drive re-approval."""
