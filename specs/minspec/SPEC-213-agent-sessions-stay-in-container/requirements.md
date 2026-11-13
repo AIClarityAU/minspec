@@ -28,9 +28,10 @@ phases:
 
 # SPEC-213: An agent session that is not provably inside the agent container cannot act on GitHub as the founder
 
-> **Specification only.** Nothing is built by the session that wrote this. The founder
-> resolves [Decisions needed (Clarify)](#decisions-needed-clarify) and approves the spec
-> through the normal approval gate before anything is built. No design.md or tasks.md is
+> **Specification only.** Nothing is built by the session that wrote this. The five
+> selections in [Decisions needed (Clarify)](#decisions-needed-clarify) are recorded, not
+> ratified; they are ratified only by approval of this spec through the normal approval gate,
+> which is also what completes Clarify. Nothing is built before that approval. No design.md or tasks.md is
 > written for founder sign-off.
 
 ## In plain terms
@@ -263,11 +264,13 @@ founder's D-3 act. A single green probe, a closed issue or an empty file is not 
 
 Each of the 5 decisions has a recorded selection, not ratified: an agent session selected the option
 this document already recommended. No human chose them, and no delegation covers authoring Clarify
-answers (DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these selections bind nothing until a human or a covered delegation approves it. This
-spec is T4, and the FR-2 table (`specs/minspec/requirements.md:74`) requires stakeholder review of a
-T4 Clarify. No stakeholder has reviewed these selections (SPEC-281 D3 proposes dropping that phrase,
-and that selection is itself unratified), so `phases.clarify` stays `pending`.
+answers (DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). These
+selections bind nothing until a human or a covered delegation approves this spec; that approval,
+not this record, is what ratifies them, and it may overturn them. This spec is T4, and the FR-2
+table (`specs/minspec/requirements.md:74`) requires stakeholder review of a T4 Clarify (SPEC-281 D3
+proposes dropping that phrase, and that selection is itself unratified). The approval is that
+review: `phases.clarify` is `done` only as a result of an approval, and this text records no
+such approval.
 
 **D-1 - How much may a host session do in a MinSpec repo?**
 - (a) Writes only, as today: refuse ambient `gh` and `git push` by command text. Cost: evaded by

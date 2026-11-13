@@ -1,7 +1,7 @@
 ---
 id: SPEC-216
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - gate-signal integrity; a merge-relevant witness that can be absent with nothing turning red
@@ -19,9 +19,9 @@ relates_to: [SPEC-212, SPEC-046, SPEC-065, SPEC-035, DR-033, DR-066, DR-079, DR-
 implements: [scripts/roles/design-scope.md, .github/workflows/design-scope.yml, .github/scripts/design-scope-decide.js, .github/scripts/design-scope-decide.test.js]
 affects: [scripts/review-branch.sh, .github/scripts/ai-review-guard.js, .github/scripts/ai-review-guard.test.js, .github/workflows/ready-to-merge.yml, .github/workflows/ci.yml, packages/minspec/src/lib/ci-review-templates.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
