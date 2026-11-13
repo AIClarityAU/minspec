@@ -94,6 +94,8 @@ Hook reach (#3234 / #3239); a `clarify` open-question body check (#3104); #3102'
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 3 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
+
 1. **Writer: Option A or B?**
    - **A (rec):** remove the instruction, add the validator rule, drop the field check from
      #3104. Cost: `phases.clarify` reads `pending` on answered specs until approval, so a sidebar
@@ -102,9 +104,15 @@ Hook reach (#3234 / #3239); a `clarify` open-question body check (#3104); #3102'
    - **B:** keep the instruction; make the gate treat `specify: done, clarify: done, plan:
      pending` as specifying. Cost: changes the freeze range DR-069 section 3 says not to narrow;
      needs a decision record.
+
+   **Recorded selection: Option A,** remove the instruction, add the validator rule, drop the field check from #3104. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 2. **Does the rule also refuse the arms-later shape** (`specify: in-progress, clarify: done`)?
    Rec: yes, since `advancePhase` converts it to the armed state; cost: more existing specs fail
    the survey (FR5). Alternative: only the shapes already returning `implementing`/`done`.
+
+   **Recorded selection: the recommended option,** yes, the rule also refuses the arms-later shape. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 3. **Stale-approval specs found by the survey:** fix each in this change (rec; cost: touches many
    spec files, each a hash-sensitive edit) or grandfather by dated allowlist (cost: a standing
    exemption that can drift).
+
+   **Recorded selection: the recommended option,** fix each stale-approval spec the survey finds in this change. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
