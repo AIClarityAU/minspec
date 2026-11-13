@@ -137,6 +137,12 @@ export interface DrainFixture {
    * spec-writing on.
    */
   pendingSpecs?: number | 'missing';
+  /**
+   * Bodies of the open `hold:human` issues (#3698). A `SPEC-NNN` named in one is a spec only
+   * the founder can move, so it must not count toward the pending cap. `'fail'` makes that
+   * one query exit 1. Unset answers an empty list.
+   */
+  holdHumanBodies?: string[] | 'fail';
   /** The reading on disk when the drain starts. `null` = no file at all. */
   reading: Reading | null;
   /** What the meter reads once the dispatch of that issue has finished. */
@@ -280,6 +286,7 @@ function build(f: DrainFixture): Built {
   fs.mkdirSync(bin);
   fs.mkdirSync(path.join(dir, 'root'));
   if (f.pendingSpecs !== 'missing') writePendingSpecs(path.join(dir, 'specs', 'minspec'), f.pendingSpecs ?? 0);
+  fs.writeFileSync(path.join(dir, 'hold-human-bodies'), Array.isArray(f.holdHumanBodies) ? f.holdHumanBodies.join('\n') + '\n' : '');
   const quota = path.join(dir, 'quota.json');
   const logFile = path.join(dir, 'log');
   const stub = (name: string, body: string) =>
@@ -337,6 +344,7 @@ if [[ "$1" == "issue" && "$2" == "list" ]]; then
     agent-ready)         cat "${dir}/queue.ready" ;;
     agent-ready-specify) cat "${dir}/queue.specify" ;;
     inbox)               cat "${dir}/queue.inbox" ;;
+    hold:human)          ${f.holdHumanBodies === 'fail' ? 'echo "HTTP 502: Bad Gateway" >&2; exit 1' : `cat "${dir}/hold-human-bodies"`} ;;
   esac
   exit 0
 fi

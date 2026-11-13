@@ -2040,11 +2040,22 @@ _pending_specs() {
     _pend_out=0
     return 0
   fi
-  _pend_val=$(awk '
-      FNR == 1 { fm = ($0 ~ /^---[[:space:]]*$/); next }
-      fm && /^---[[:space:]]*$/ { fm = 0; nextfile }
-      fm && /^status:[[:space:]]*["'\'']?(new|specifying)["'\'']?[[:space:]]*(#.*)?$/ { n++; fm = 0; nextfile }
-      END { print n + 0 }' "${_pend_files[@]}") || return 1
+  # Specs only a founder act can move do not count (#3698): a SPEC-NNN named in the body of
+  # an open `hold:human` issue is the founder's to move, so counting it keeps spec-writing
+  # paused on drafts the drain cannot advance. A failed read of those issues returns 1: a
+  # hold list nobody read is not an empty one (invariant 2).
+  local _pend_held _pend_held_rc=0
+  _pend_held=$(gh issue list --repo "$REPO" --state open --label hold:human --limit 1000 \
+    --json body --jq '.[].body // ""') || _pend_held_rc=$?
+  (( _pend_held_rc == 0 )) || return 1
+  _pend_held=$(printf '%s\n' "$_pend_held" | awk '{ while (match($0, /SPEC-[0-9]+/)) { print substr($0, RSTART, RLENGTH); $0 = substr($0, RSTART + RLENGTH) } }' | sort -u | tr '\n' ' ')
+  _pend_val=$(awk -v held=" ${_pend_held}" '
+      function flush() { if (pend && !(index(held, " " sid " ") > 0)) n++; pend = 0; sid = "" }
+      FNR == 1 { flush(); fm = ($0 ~ /^---[[:space:]]*$/); next }
+      fm && /^---[[:space:]]*$/ { fm = 0; flush(); nextfile }
+      fm && /^id:[[:space:]]*/ { v = $0; sub(/^id:[[:space:]]*["'\'']?/, "", v); sub(/["'\''[:space:]#].*$/, "", v); sid = v }
+      fm && /^status:[[:space:]]*["'\'']?(new|specifying)["'\'']?[[:space:]]*(#.*)?$/ { pend = 1 }
+      END { flush(); print n + 0 }' "${_pend_files[@]}") || return 1
   [[ "$_pend_val" =~ ^[0-9]+$ ]] || return 1
   _pend_out="$_pend_val"
 }
