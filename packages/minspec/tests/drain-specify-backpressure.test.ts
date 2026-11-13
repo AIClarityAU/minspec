@@ -249,3 +249,83 @@ describe('#3570 H1-H7: only spec drafts count toward the held cap', () => {
     expect(pausedLines(d.log())).toEqual([]);
   });
 });
+
+/**
+ * T2 (#3698) - specs only the founder can move do not count toward the pending cap.
+ *
+ * THE BUG. `_pending_specs` counted every spec at `status: new|specifying` and excluded
+ * nothing, so 43 specs against a cap of 40 kept spec-writing paused although 8 of them
+ * waited on the founder alone: the drain could never lower that count itself.
+ *
+ *   F1  a spec named in an open `hold:human` issue body does not count.
+ *   F2  with no such issue the count is unchanged.
+ *   F3  an unreadable hold list pauses spec-writing, loudly (invariant 2).
+ */
+describe('#3698 F1-F3: founder-held specs do not count toward the pending cap', () => {
+  it('F1: 3 pending at a cap of 3, two named in a hold:human body, leaves spec-writing on', async () => {
+    const d = await runOnce({
+      ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 3, reading: ROOM,
+      holdHumanBodies: ['SPEC-900 and SPEC-901 are held for the founder.'],
+      env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' },
+    });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+
+  it('F2: a hold:human body naming no pending spec changes nothing', async () => {
+    const d = await runOnce({
+      ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 3, reading: ROOM,
+      holdHumanBodies: ['Nothing about SPEC-9999 here.'],
+      env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' },
+    });
+    expect(d.dispatched()).toEqual([42]);
+    expect(pausedLines(d.log())).toHaveLength(1);
+  });
+
+  it('F3: the hold:human query failing pauses spec-writing and says the count failed', async () => {
+    const d = await runOnce({ ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 0, reading: ROOM, holdHumanBodies: 'fail' });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('could not be counted');
+  });
+
+  it('F4: a hold:human PULL REQUEST naming a spec in its title excludes that spec', async () => {
+    const d = await runOnce({
+      ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 3, reading: ROOM,
+      holdPrTitles: ['docs: record founder answers for SPEC-900 and SPEC-901'],
+      env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' },
+    });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+
+  it('F5: a hold:human pull request body line that leads with the spec excludes it', async () => {
+    const d = await runOnce({
+      ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 3, reading: ROOM,
+      holdPrBodies: ['- SPEC-900 D4 (queue item x): "yes".', '- SPEC-901 DQ-4: "start now".'],
+      env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' },
+    });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+
+  it('F6: the hold:human pull-request query failing pauses spec-writing and says the count failed', async () => {
+    const d = await runOnce({ ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 0, reading: ROOM, holdPrBodies: 'fail' });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('could not be counted');
+  });
+
+  it('F7: a passing mention of a spec in a hold body does NOT exclude it', async () => {
+    const d = await runOnce({
+      ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 3, reading: ROOM,
+      holdHumanBodies: ['Unrelated change; see SPEC-900 and SPEC-901 for context.'],
+      holdPrBodies: ['Touches the area SPEC-900 describes.'],
+      env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' },
+    });
+    expect(d.dispatched()).toEqual([42]);
+    expect(pausedLines(d.log())).toHaveLength(1);
+  });
+});
