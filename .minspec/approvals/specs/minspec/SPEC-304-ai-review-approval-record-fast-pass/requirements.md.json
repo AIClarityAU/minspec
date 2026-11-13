@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-304-ai-review-approval-record-fast-pass/requirements.md",
+  "specHash": "1ca1ef0c2fd2584ca4dda6c7858563491d4bd4ed9c6966a5e0434aca03c105a5",
+  "approvedAt": "2026-11-13T05:42:03.394Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:docs/clarify-recs-1113",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3697#issuecomment-6840772356"
+}

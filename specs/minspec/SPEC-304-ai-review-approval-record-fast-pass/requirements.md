@@ -1,7 +1,7 @@
 ---
 id: SPEC-304
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - docs-lane ergonomics (same epic as SPEC-039)
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan. Expected surface:
   `.github/workflows/ai-review.yml`, one new pure judge under `scripts/lib/`, new tests. None claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
