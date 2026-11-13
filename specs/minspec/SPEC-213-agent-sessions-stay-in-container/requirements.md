@@ -28,9 +28,10 @@ phases:
 
 # SPEC-213: An agent session that is not provably inside the agent container cannot act on GitHub as the founder
 
-> **Specification only.** Nothing is built by the session that wrote this. The founder
-> resolves [Decisions needed (Clarify)](#decisions-needed-clarify) and approves the spec
-> through the normal approval gate before anything is built. No design.md or tasks.md is
+> **Specification only.** Nothing is built by the session that wrote this. The five
+> selections in [Decisions needed (Clarify)](#decisions-needed-clarify) are recorded, not
+> ratified; they are ratified only by approval of this spec through the normal approval gate,
+> which is also what completes Clarify. Nothing is built before that approval. No design.md or tasks.md is
 > written for founder sign-off.
 
 ## In plain terms
@@ -261,6 +262,16 @@ founder's D-3 act. A single green probe, a closed issue or an empty file is not 
 
 ## Decisions needed (Clarify)
 
+Each of the 5 decisions has a recorded selection, not ratified: an agent session selected the option
+this document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers (DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). These
+selections bind nothing until a human or a covered delegation approves this spec; that approval,
+not this record, is what ratifies them, and it may overturn them. This spec is T4, and the FR-2
+table (`specs/minspec/requirements.md:74`) requires stakeholder review of a T4 Clarify (SPEC-281 D3
+proposes dropping that phrase, and that selection is itself unratified). The approval is that
+review: `phases.clarify` is `done` only as a result of an approval, and this text records no
+such approval.
+
 **D-1 - How much may a host session do in a MinSpec repo?**
 - (a) Writes only, as today: refuse ambient `gh` and `git push` by command text. Cost: evaded by
   writing the call into a script, so it stops only the accidental path.
@@ -275,6 +286,8 @@ founder's D-3 act. A single green probe, a closed issue or an empty file is not 
   keyring D-Bus socket, the gpg-agent SSH socket and `~/.git-credentials`; not recommended until
   measured.
 
+**Recorded selection: Option (b),** refuse every `Bash` call when the location is not `container`; read, search and edit tools keep working. An agent session copied this document's (rec) option; no human chose this item.
+
 **D-2 - Where does the location probe live?**
 - (a) **(rec)** A small probe in this repo (`scripts/lib/`), used by the guard and the loops and
   tested in CI; `~/.claude/scripts/identity-boundary-check.sh` stays the full credential check
@@ -283,12 +296,16 @@ founder's D-3 act. A single green probe, a closed issue or an empty file is not 
 - (b) Keep calling the outside script. Cost: the gate's deciding input stays outside review and
   CI, which is how its pid-1 denylist went unexamined.
 
+**Recorded selection: Option (a),** a small probe in this repo (`scripts/lib/`), used by the guard and the loops and tested in CI. An agent session copied this document's (rec) option; no human chose this item.
+
 **D-3 - Where does the editor's wrapper setting come from? (founder host act, not a repo change)**
 - (a) **(rec)** Generated from the host's `home.nix`, as DR-079 already lists. Cost: an evening
   of host configuration, and the setting then cannot be changed from the editor UI.
 - (b) Leave it in the synced `settings.json` and rely on the host detector. Cost: a sync from
   another machine silently returns `~/code` sessions to the founder's identity until the next
   detector run notices.
+
+**Recorded selection: Option (a),** the wrapper setting is generated from the host's `home.nix`, as DR-079 lists. The host configuration is a founder act; this record performs none. An agent session copied this document's (rec) option; no human chose this item.
 
 **D-4 - How does a scripted push name its identity?**
 - (a) **(rec)** Each push site clears the ambient helpers and supplies the bot broker explicitly
@@ -298,12 +315,16 @@ founder's D-3 act. A single green probe, a closed issue or an empty file is not 
 - (b) Rely on the FR-5 start gate alone. Cost: one gate per loop; a push site added outside those
   five scripts is uncovered.
 
+**Recorded selection: Option (a),** each push site clears the ambient credential helpers and supplies the bot broker explicitly. An agent session copied this document's (rec) option; no human chose this item.
+
 **D-5 - Is there an opt-out for a host session?**
 - (a) **(rec)** None. The founder's own GitHub acts never need to go through a Claude session.
   Cost: no escape hatch when the container is down; work waits for the container, or the founder
   acts in their own terminal.
 - (b) A launch-time environment variable. Cost: an agent can start a nested session with it set,
   so it is a bypass with a name, the shape #1816's panel rejected for `WITNESS_OFF=1`.
+
+**Recorded selection: Option (a),** no opt-out for a host session. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Alternatives considered and rejected
 

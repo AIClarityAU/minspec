@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-143-spec-gate-shell-writes/requirements.md",
+  "specHash": "1d56975fe7b2b78fd91423f55d6aa07b8a2219aed07addea6a7243987c67cbf5",
+  "approvedAt": "2026-11-12T14:11:21.995Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-a",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3180#issuecomment-6823018530"
+}
