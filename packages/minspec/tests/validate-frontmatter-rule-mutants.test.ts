@@ -310,6 +310,13 @@ const MUTANTS: Mutant[] = [
     mutate: (f) =>
       replaceOnce(f, SPEC1, '\nBody.\n', '\nAn agent session recorded each option, under delegation DLG-001.\n'),
   },
+  {
+    rules: ['26'],
+    name: 'DR frontmatter with a retired field spelling',
+    severity: 'FAIL',
+    expect: /DR frontmatter — field `approved-by` is a retired spelling/,
+    mutate: (f) => replaceOnce(f, 'docs/decisions/DR-001.md', 'date: 2026-01-01\n---', 'date: 2026-01-01\napproved-by: x\n---'),
+  },
 ];
 
 // ---- Rules deliberately not mutated here ----------------------------------

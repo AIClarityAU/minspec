@@ -1347,7 +1347,7 @@ if [[ "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
   # D12/FR-3b sequential guard — refuse a closed/already-shipped item BEFORE any build.
   # The PR-per-head CAS window closes on merge, so at-most-one-merge across TIME rests here.
   if ! lease_gate_open_unshipped "$ISSUE"; then
-    echo "Refusing #$ISSUE — issue is closed or already shipped (FR-3b/INV-1). Never re-dispatched."
+    echo "Refusing #$ISSUE — issue is closed or already shipped (FR-3b/INV-1), or an open PR already closes it or its PR list is unreadable (#3161); the line above says which. Not built."
     exit_declined
   fi
   # Soft claim: post → re-read TO EXHAUSTION → verify winner (FR-1/FR-2). Not the
@@ -2380,7 +2380,7 @@ shepherd_own_pr() {
       stop-merged)
         echo "  PR #$pr_num merged — creator-shepherd done."; return 0 ;;
       stand-down)
-        echo "  Claim on #$ISSUE was reclaimed by another session — standing down WITHOUT publishing (D3/INV-5)."; return 0 ;;
+        echo "  Claim on #$ISSUE is no longer held by this session (lapsed, unreadable, or taken by another — see the lease: lines above) — standing down WITHOUT publishing (D3/INV-5)."; return 0 ;;
       stop-timeout)
         shepherd_hand_off "$pr_num" "the creator-shepherd reached its ${SHEPHERD_MAX_SECS}s ceiling"; return 0 ;;
       stop-capped)

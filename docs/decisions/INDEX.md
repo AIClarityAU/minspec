@@ -925,7 +925,7 @@ ZCode (Z.ai's editor) runs apart from the host so that the host's editor and age
 
 ## [DR-118 — Issues labelled pipeline-blocker skip spec-first and route straight to a full build, decided inside the triage gate](DR-118.md)
 
-*Status: proposed · Date: 2026-10-30*
+*Status: accepted · Date: 2026-10-30*
 
 <!-- dr-summary:DR-118 auto=3aa38b3fb488 -->
 DR-076 (solo mode, accepted 2026-08-01) keeps "genuinely human moments", the first of which reads: "**T3/T4 spec approval.** Reading a spec before building from it is where one human-hour has the highest leverage." #1169 implemented that in the triage gate (scripts/triage-decide.sh): an auto-buildable T3/T4 resolves to agent-ready-specify / hold specify, so an agent may write the spec but nothing is built until the spec is approved.
@@ -939,9 +939,17 @@ DR-076 (solo mode, accepted 2026-08-01) keeps "genuinely human moments", the fir
 The bot records delegated spec approvals, and no rule lets anything but the founder merge them, so they queue on a keystroke the delegation was meant to remove. | Count | Pull requests | Outcome under section 1 | |---|---|---| | 16 | #3154, #3155, #3244, #3356, #3358 to #3361, #3363 to #3365, #3370 to #3374 | Eligible once brought up to date | | 1 | #3357 | Refused: test failed on its head. All test files passed and…
 <!-- /dr-summary:DR-119 -->
 
+## [DR-120 — MinSpec owns minspec-ci-parity.yml as a managed template - the first file it claims that adopters wrote by hand, taken over only with consent, and changed afterwards only through a human-pushed refresh](DR-120.md)
+
+*Status: proposed · Date: 2026-10-31*
+
+<!-- dr-summary:DR-120 auto=71d14efeb889 -->
+Adopters check MinSpec's review files with a workflow MinSpec does not ship, so the check rejects what a sanctioned refresh writes and its file list falls behind what MinSpec scaffolds.
+<!-- /dr-summary:DR-120 -->
+
 ## [DR-121 — Plan artifacts merge on AI review once their spec is approved, through the delegated lane, under the delegated-approval merge lane's pins](DR-121.md)
 
-*Status: proposed · Date: 2026-11-06*
+*Status: accepted · Date: 2026-11-06*
 
 <!-- dr-summary:DR-121 auto=a299007d3188 -->
 _No summary available._
