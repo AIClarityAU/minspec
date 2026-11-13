@@ -20,10 +20,14 @@ import {
   type CommitLine,
   type GitRunner,
 } from '../../../scripts/lib/repeat-fix-share';
+import { useShellTimeout } from './helpers/shell-timeout';
 
 const TODAY = '2026-10-20';
 let n = 0;
 const c = (date: string, subject: string): CommitLine => ({ sha: `sha${String(n++).padStart(4, '0')}`, date, subject });
+
+// Module scope (#1399): shells out; vitest's 5s default flakes under load (#2598).
+useShellTimeout();
 
 describe('fails closed — an untrustworthy share is unknown, never low', () => {
   it('no fix commits in the window → unknown', () => {
