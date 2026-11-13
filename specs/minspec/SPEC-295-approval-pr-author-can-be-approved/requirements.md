@@ -1,7 +1,7 @@
 ---
 id: SPEC-295
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - same epic as DR-082 (bot identity) and DR-050 (consented gh)
@@ -10,12 +10,12 @@ depends_on: []
 relates_to: ["#2995", "#995", "#1355", "#2243", "SPEC-050", "SPEC-039", "#2978", "DR-050", "DR-074", "DR-082", "DR-098", "DR-108"]
 implements: none
 implements_reason: >-
-  Specify phase only. Which files this spec will own is decided at Plan, after Decisions
+  Which files this spec will own is decided at Plan, after Decisions
   D1-D4. Expected surface is listed under "Measured state", none of it claimed yet.
 phases:
-  specify: in-progress
+  specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -23,8 +23,8 @@ phases:
 # SPEC-295: An approval pull request is opened by an identity the target repo lets the founder approve
 
 > **This is a SPECIFICATION ONLY.** Written for issue
-> [#2995](https://github.com/AIClarityAU/minspec/issues/2995). Nothing is built until a human
-> reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
+> [#2995](https://github.com/AIClarityAU/minspec/issues/2995). Nothing is built until its
+> [Decisions needed (Clarify)](#decisions-needed-clarify) are resolved and it is approved.
 >
 > Design rests on: **DR-050** (shelling the user's own `gh` on consent; its Amendment
 > 2026-07-01 makes a read of the repo's own rulesets autonomous), **DR-082** (agent GitHub
@@ -164,10 +164,10 @@ agent act, and does not let any identity approve on the founder's behalf.
 
 ## Decisions needed (Clarify)
 
-All 4 decisions are answered, not ratified: an agent session selected, for each, the option this document
+All 4 decisions are answered: an agent session selected, for each, the option this document
 already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). These answers
+bind once this spec is approved, by a human or a covered delegation, and not before.
 
 - **D1 Who opens the PR when the founder cannot be its author.**
   - (a) **(rec)** The extension pushes and stops; the dev-time runner (already holding the

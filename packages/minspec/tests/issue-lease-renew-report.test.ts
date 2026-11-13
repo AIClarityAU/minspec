@@ -24,6 +24,11 @@
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite's own `run()` wrapper around spawnSync is called per scenario; the
+// literal call-site count alone understates it.
+useShellTimeout();
 
 const LEASE = path.resolve(__dirname, '../../../scripts/lib/issue-lease.sh');
 const REPO_ROOT = path.resolve(__dirname, '../../..');

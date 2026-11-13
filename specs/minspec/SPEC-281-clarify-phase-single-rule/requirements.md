@@ -1,7 +1,7 @@
 ---
 id: SPEC-281
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - prose that states a gate must agree with what the gate does
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Files owned are decided at Plan, after Decision D1 (which rule is the
   single rule) is answered; D1 changes which of five places is the odd one out.
 phases:
-  specify: in-progress
+  specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

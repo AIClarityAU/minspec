@@ -1,7 +1,7 @@
 ---
 id: SPEC-291
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - reviewer prompts are part of the gate chain; a prompt change needs a regression score
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan, after Decisions D1-D5.
 phases:
-  specify: in-progress
+  specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

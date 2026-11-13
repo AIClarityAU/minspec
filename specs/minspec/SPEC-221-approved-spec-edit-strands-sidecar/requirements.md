@@ -1,16 +1,20 @@
 ---
 id: SPEC-221
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a sign-off must never silently attest to text nobody approved
 aspects: [approval, gate-integrity, no-silent-gate, never-wrong, tier-0, offline]
 relates_to: [DR-081, DR-029, DR-003, SPEC-069, SPEC-136, "#2017", "#1029"]
+implements: none
+implements_reason: >-
+  Owned files are decided at Plan; none are claimed before then, so no shared file is frozen
+  early by a spec whose design is not fixed yet.
 phases:
-  specify: in-progress
+  specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -113,10 +117,10 @@ Out: blocking edits to approved specs (Alternative 2 in the issue, rejected: DR-
 
 ## Decisions needed (Clarify)
 
-All 3 decisions are answered, not ratified: an agent session selected, for each, the option this document
+All 3 decisions are answered: an agent session selected, for each, the option this document
 already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). These answers
+bind once this spec is approved, by a human or a covered delegation, and not before.
 
 - **D1 - blocking or advisory for `STRANDS`?**
   - (a) **Annotate, exit 0** (rec): print the verdict and surface it as a PR comment/summary

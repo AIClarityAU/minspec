@@ -1,7 +1,7 @@
 ---
 id: SPEC-290
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - same epic as SPEC-069 / DR-081, the approval-PR gate this extends
@@ -14,9 +14,9 @@ implements_reason: >-
   D1-D2. The files it is expected to touch are listed under "Surface" below, none of them
   claimed yet.
 phases:
-  specify: in-progress
+  specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
