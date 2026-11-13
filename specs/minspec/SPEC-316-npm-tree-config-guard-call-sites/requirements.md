@@ -1,7 +1,7 @@
 ---
 id: SPEC-316
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute - the dev-time autonomous build/merge pipeline (the npm call sites live in its dispatch, remediation and drain scripts)
@@ -15,9 +15,9 @@ implements_reason: >-
   (`provision_run_dir_modules`), `scripts/dispatch-issue.sh` and `scripts/remediate-pr.sh`
   (agent tool allowlists, worktree provisioning), and tests. None of it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
