@@ -44,7 +44,7 @@ Shared rules for every task:
 
 ## 1 - One matcher, in its own library (FR-1, FR-6, INV-3, AC-6 first half)
 
-- [ ] **1.1** `scripts/lib/quota-notice.sh` (new) - move `drain-inbox.sh:612-651` here byte
+- [ ] **1.1** `scripts/lib/quota-notice.sh` (new) - move `drain-inbox.sh:626-665` here byte
   for byte: `_quota_notice_forms`, `QUOTA_NOTICE_RE`, `quota_notice_lines`, `is_quota`, and
   the explanatory comment above them (anchor, fence pairing, honest limit). It defines and
   runs nothing else. Header comment: who sources it (drain, dispatcher) and that a widening
@@ -52,7 +52,7 @@ Shared rules for every task:
 - [ ] **1.2** `scripts/drain-inbox.sh` - replace the moved block with
   `source "${SCRIPT_DIR}/lib/quota-notice.sh"` (with the `# shellcheck source=` line the
   file's other sources carry), and rewrite the "departs from SPEC-074" paragraph at
-  `:590-599` to say the dispatcher shares this matcher through the library. Commit trailer
+  `:606-613` (inside the comment block that starts at `:564`) to say the dispatcher shares this matcher through the library. Commit trailer
   `Closes #2251`. Nothing else in the drain changes.
 - [ ] **1.3** Test, block "the matcher has one home": across every file under `scripts/`,
   the definitions `_quota_notice_forms=(` and `QUOTA_NOTICE_RE=` each occur in exactly one
@@ -68,13 +68,14 @@ Shared rules for every task:
 Lands before the label is ever written, so no issue can carry it while the gate ignores it.
 
 - [ ] **2.1** `scripts/dispatch-ready-check.sh` - add `agent-blocked-quota` to the
-  `for gate in` list (`:685`) and one line to the comment above it naming #1656 and
+  `for gate in` list (`:688`, which already holds `agent-crashed`) and one line to the comment block above it (`:669-687`) naming #1656 and
   SPEC-074.
 - [ ] **2.2** `scripts/approve-issue.sh` - add `agent-blocked-quota` to `CLEAR_LABELS`
   (`:274`) and to the singly-retried list (`:281`), with one comment line giving the same
   reason the file gives for `agent-escalated`.
 - [ ] **2.3** `scripts/triage-inbox.sh` - add `agent-blocked-quota` to `SUPERSEDED` for
-  `agent-ready` and `agent-ready-specify` (`:288-289`), and to the comment above them.
+  `agent-ready` and `agent-ready-specify` (`:338-339`, both lists already hold `agent-crashed`), and
+  to the comment above them (`:331-337`).
 - [ ] **2.4** `packages/minspec/tests/label-lifecycle.test.ts` - add `agent-blocked-quota`
   to the stamp list in the #1347 loop.
 - [ ] **2.5** Test, block "AC-5": the real `dispatch-ready-check.sh` given labels
@@ -87,7 +88,7 @@ Lands before the label is ever written, so no issue can carry it while the gate 
 ## 3 - The dispatcher's pure functions (FR-1, FR-2, FR-4, AC-3, AC-4, AC-6 second half)
 
 - [ ] **3.1** `scripts/dispatch-issue.sh` - source `lib/quota-notice.sh` beside the other
-  libraries (`:184-226`), and add `crash_class`, `quota_reset_iso` and
+  libraries (`:184-228`), and add `crash_class`, `quota_reset_iso` and
   `quota_blocked_comment` next to `escalate_next_action`, as design.md D2 and D4 define
   them. Each closes with a lone `}` at column 0 so the test can extract it. Each exits 0 on
   every input; `crash_class` answers `crash` on an unreadable log. Not called yet.
@@ -118,20 +119,31 @@ Lands before the label is ever written, so no issue can carry it while the gate 
   exposed on `Recorded` as `issueEdits`. Say both in the file's header comment.
 - [ ] **4.2** `scripts/dispatch-issue.sh` - add `hold_quota_blocked` beside
   `quarantine_publish` and `hold_specify_scope`, and splice it into the crash `else`
-  (`:2794-2810`) as design.md D3 shows. Today's crash write and its #1307 comment move
-  into the inner `else` unchanged.
+  (`:3059-3092`) as design.md D3 shows. The whole of today's `else` body moves into the
+  inner `else` unchanged: the `escalated,needs-human-review` write and its #1307 comment,
+  the "Agent CRASHED" line, and the #1202 `agent-crashed` label and crash-signature
+  comment. `hold_quota_blocked` adds none of those (design.md D6).
 - [ ] **4.3** Test, block "the crash path, run for real" (`runDispatch`):
-  - AC-1: stub prints the #1785 wall and exits 1. `issueEdits` adds `agent-blocked-quota`
-    and removes `agent-running,agent-ready`; no edit adds `agent-escalated`,
-    `needs-human-review` or `agent-ready`; one posted comment contains the D4 heading and
+  - Label assertions compare an exact set, not a contains-check. The set is the labels
+    added by the `issue edit` calls recorded AFTER the first `claude` launch, split on
+    commas and compared order-independently. The claim step's own `agent-running` add
+    (`dispatch-issue.sh:1400`) happens before the launch and is excluded by that rule.
+  - AC-1: stub prints the #1785 wall and exits 1. The added set is exactly
+    `{agent-blocked-quota}`, and the removed set exactly `{agent-running, agent-ready}`;
+    so no edit adds `agent-escalated`, `needs-human-review`, `agent-crashed` or
+    `agent-ready`; one posted comment contains the D4 heading and
     the parsed reset. Stdout carries `Agent QUOTA-BLOCKED`.
-  - AC-3: stub prints prose with `too many requests` and exits 1. Labels are
-    `agent-escalated,needs-human-review`, `agent-ready` removed. Control: the same prose
-    plus the wall gives AC-1's labels.
+  - AC-3: stub prints prose with `too many requests` and exits 1. This is today's crash
+    path, unchanged, so the added set is exactly
+    `{agent-escalated, needs-human-review, agent-crashed}` (the first two from the
+    #1307 write, `agent-crashed` from the #1202 write that follows it) and the removed
+    set `{agent-running, agent-ready}`; one comment is posted, the crash signature.
+    Control: the same prose plus the wall gives AC-1's sets.
   - AC-2: stub prints `ESCALATE: fixture` and exits 0 on both starts. Two launches, the
-    second with `--model opus`; final edit adds `agent-escalated,needs-human-review`.
+    second with `--model opus`; the added set is exactly
+    `{agent-escalated, needs-human-review}` (the ESCALATE branch never adds `agent-crashed`).
   - Escalation then wall: start 0 prints `ESCALATE: fixture`, exit 0; start 1 prints the
-    wall, exit 1. Final labels are AC-1's.
+    wall, exit 1. The added set is AC-1's.
   *Done when:* this block, `dispatch-escalate-retry.test.ts`, `dispatch-outcome-status.test.ts`
   and every other test that uses `agent-launch-harness.ts` are green.
 
