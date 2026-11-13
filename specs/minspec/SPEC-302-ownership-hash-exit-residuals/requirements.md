@@ -1,7 +1,7 @@
 ---
 id: SPEC-302
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - same epic as SPEC-070, whose residual follow-ups these are
@@ -16,9 +16,9 @@ implements_reason: >-
   script, `packages/minspec/src/lib/approval-store.ts`, and one new palette command. None of
   it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
