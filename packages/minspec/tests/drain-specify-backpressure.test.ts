@@ -265,7 +265,7 @@ describe('#3698 F1-F3: founder-held specs do not count toward the pending cap', 
   it('F1: 3 pending at a cap of 3, two named in a hold:human body, leaves spec-writing on', async () => {
     const d = await runOnce({
       ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 3, reading: ROOM,
-      holdHumanBodies: ['Held for the founder: SPEC-900 and SPEC-901.'],
+      holdHumanBodies: ['SPEC-900 and SPEC-901 are held for the founder.'],
       env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' },
     });
     expect(d.dispatched()).toEqual([42, 77]);
@@ -288,5 +288,44 @@ describe('#3698 F1-F3: founder-held specs do not count toward the pending cap', 
     const lines = pausedLines(d.log());
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain('could not be counted');
+  });
+
+  it('F4: a hold:human PULL REQUEST naming a spec in its title excludes that spec', async () => {
+    const d = await runOnce({
+      ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 3, reading: ROOM,
+      holdPrTitles: ['docs: record founder answers for SPEC-900 and SPEC-901'],
+      env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' },
+    });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+
+  it('F5: a hold:human pull request body line that leads with the spec excludes it', async () => {
+    const d = await runOnce({
+      ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 3, reading: ROOM,
+      holdPrBodies: ['- SPEC-900 D4 (queue item x): "yes".', '- SPEC-901 DQ-4: "start now".'],
+      env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' },
+    });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+
+  it('F6: the hold:human pull-request query failing pauses spec-writing and says the count failed', async () => {
+    const d = await runOnce({ ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 0, reading: ROOM, holdPrBodies: 'fail' });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('could not be counted');
+  });
+
+  it('F7: a passing mention of a spec in a hold body does NOT exclude it', async () => {
+    const d = await runOnce({
+      ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 3, reading: ROOM,
+      holdHumanBodies: ['Unrelated change; see SPEC-900 and SPEC-901 for context.'],
+      holdPrBodies: ['Touches the area SPEC-900 describes.'],
+      env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' },
+    });
+    expect(d.dispatched()).toEqual([42]);
+    expect(pausedLines(d.log())).toHaveLength(1);
   });
 });

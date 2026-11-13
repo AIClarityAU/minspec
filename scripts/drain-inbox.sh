@@ -2041,15 +2041,34 @@ _pending_specs() {
     _pend_out=0
     return 0
   fi
-  # Specs only a founder act can move do not count (#3698): a SPEC-NNN named in the body of
-  # an open `hold:human` issue is the founder's to move, so counting it keeps spec-writing
-  # paused on drafts the drain cannot advance. A failed read of those issues returns 1: a
-  # hold list nobody read is not an empty one (invariant 2).
-  local _pend_held _pend_held_rc=0
-  _pend_held=$(gh issue list --repo "$REPO" --state open --label hold:human --limit 1000 \
-    --json body --jq '.[].body // ""') || _pend_held_rc=$?
-  (( _pend_held_rc == 0 )) || return 1
-  _pend_held=$(printf '%s\n' "$_pend_held" | awk '{ while (match($0, /SPEC-[0-9]+/)) { print substr($0, RSTART, RLENGTH); $0 = substr($0, RSTART + RLENGTH) } }' | sort -u | tr '\n' ' ')
+  # Specs only a founder act can move do not count (#3698). A hold sits on an open issue OR an
+  # open pull request labelled `hold:human`; a spec counts as held only when the hold NAMES it:
+  # in its title, or a body line that leads with it (optionally after a list marker), possibly
+  # chained ("SPEC-1 and SPEC-2"). A passing mention ("see SPEC-123") excludes nothing, so any
+  # doubt counts the spec and pauses. A failed read of EITHER list returns 1: a hold list nobody
+  # read is not an empty one (invariant 2).
+  local _pend_held _pend_issues _pend_prs _pend_rc=0
+  local _pend_jq='.[] | ("@@TITLE@@ " + (.title // "")), (.body // "")'
+  _pend_issues=$(gh issue list --repo "$REPO" --state open --label hold:human --limit 1000 \
+    --json title,body --jq "$_pend_jq") || _pend_rc=$?
+  (( _pend_rc == 0 )) || return 1
+  _pend_prs=$(gh pr list --repo "$REPO" --state open --label hold:human --limit 1000 \
+    --json title,body --jq "$_pend_jq") || _pend_rc=$?
+  (( _pend_rc == 0 )) || return 1
+  _pend_held=$(printf '%s\n%s\n' "$_pend_issues" "$_pend_prs" | tr -d '\r' | awk '
+    function emit(t,   r) {
+      while (match(t, /SPEC-[0-9]+/)) { print substr(t, RSTART, RLENGTH); t = substr(t, RSTART + RLENGTH) }
+    }
+    /^@@TITLE@@ / { emit($0); next }
+    {
+      t = $0
+      sub(/^[[:space:]>*_`"-]*/, "", t)
+      while (match(t, /^SPEC-[0-9]+/)) {
+        print substr(t, RSTART, RLENGTH); t = substr(t, RSTART + RLENGTH)
+        if (!match(t, /^[[:space:]]*(,|and|&)[[:space:]]+SPEC-/)) break
+        sub(/^[[:space:]]*(,|and|&)[[:space:]]+/, "", t)
+      }
+    }' | sort -u | tr '\n' ' ')
   _pend_val=$(awk -v held=" ${_pend_held}" '
       function flush() { if (pend && !(index(held, " " sid " ") > 0)) n++; pend = 0; sid = "" }
       FNR == 1 { flush(); fm = ($0 ~ /^---[[:space:]]*$/); next }

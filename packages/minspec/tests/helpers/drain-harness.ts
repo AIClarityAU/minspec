@@ -143,6 +143,14 @@ export interface DrainFixture {
    * one query exit 1. Unset answers an empty list.
    */
   holdHumanBodies?: string[] | 'fail';
+  /** Titles of the open `hold:human` issues, answered as the drain's `@@TITLE@@ ` rows. */
+  holdHumanTitles?: string[];
+  /**
+   * Titles and bodies of the open `hold:human` PULL REQUESTS (#3698 review): a hold sits on a
+   * pull request as often as on an issue. `'fail'` makes that one query exit 1.
+   */
+  holdPrBodies?: string[] | 'fail';
+  holdPrTitles?: string[];
   /** The reading on disk when the drain starts. `null` = no file at all. */
   reading: Reading | null;
   /** What the meter reads once the dispatch of that issue has finished. */
@@ -286,7 +294,8 @@ function build(f: DrainFixture): Built {
   fs.mkdirSync(bin);
   fs.mkdirSync(path.join(dir, 'root'));
   if (f.pendingSpecs !== 'missing') writePendingSpecs(path.join(dir, 'specs', 'minspec'), f.pendingSpecs ?? 0);
-  fs.writeFileSync(path.join(dir, 'hold-human-bodies'), Array.isArray(f.holdHumanBodies) ? f.holdHumanBodies.join('\n') + '\n' : '');
+  fs.writeFileSync(path.join(dir, 'hold-human-bodies'), [...(f.holdHumanTitles ?? []).map((t) => '@@TITLE@@ ' + t), ...(Array.isArray(f.holdHumanBodies) ? f.holdHumanBodies : [])].map((l) => l + '\n').join(''));
+  fs.writeFileSync(path.join(dir, 'hold-pr-bodies'), [...(f.holdPrTitles ?? []).map((t) => '@@TITLE@@ ' + t), ...(Array.isArray(f.holdPrBodies) ? f.holdPrBodies : [])].map((l) => l + '\n').join(''));
   const quota = path.join(dir, 'quota.json');
   const logFile = path.join(dir, 'log');
   const stub = (name: string, body: string) =>
@@ -351,6 +360,9 @@ fi
 if [[ "$1" == "issue" && "$2" == "view" ]]; then
   [[ -f "${dir}/issue.$3.json" ]] && cat "${dir}/issue.$3.json"
   exit 0
+fi
+if [[ "$1" == "pr" && "$2" == "list" && "$label" == "hold:human" ]]; then
+  ${f.holdPrBodies === 'fail' ? 'echo "HTTP 502: Bad Gateway" >&2; exit 1' : `cat "${dir}/hold-pr-bodies"; exit 0`}
 fi
 if [[ "$1" == "pr" && "$2" == "list" && "$label" == "needs-human-review" ]]; then
   echo "pr list --label needs-human-review" >> "${dir}/held-asked"
