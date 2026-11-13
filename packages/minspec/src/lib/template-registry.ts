@@ -460,6 +460,7 @@ Two notes about clones, because an inert gate is worse than no gate — it looks
 | Secret scan | \`pre-commit\` | Staged changes containing a detected secret |
 | Spec frontmatter | \`pre-commit\` | A staged spec missing \`id: SPEC-NNN\` |
 | Decision frontmatter | \`pre-commit\` | A staged decision record under \`docs/decisions/\` missing \`id: DR-NNN\` |
+| Code-quality checks | \`pre-commit\` | A staged shell script, workflow or TypeScript change that shellcheck, actionlint or tsc rejects |
 | Deferred-work gate | \`commit-msg\` | A message that defers work without saying where it went |
 | Root-cause gate | \`commit-msg\` | A \`fix:\` commit whose body has no \`Root cause:\` line |
 
@@ -568,6 +569,40 @@ Enforced by the same shell case inside the pre-commit hook's SDD-validation stag
 spec frontmatter, and by \`validate.py\`'s \`DR_ID_RE\` tier. The path is matched literally
 against \`docs/decisions/\`, so a project that has relocated \`{{decisionsDir}}/\` is not covered
 by the lower tiers — the same known limit the spec-frontmatter gate carries (#2684).
+
+### Code-quality checks
+
+After the SDD validation, the pre-commit hook runs up to three blocking checks on the
+**staged** content - what the commit will actually contain, never your working copy:
+
+| Check | Applies when the commit stages | Install |
+|---|---|---|
+| \`shellcheck\` | a \`*.sh\` file | https://github.com/koalaman/shellcheck#installing |
+| \`actionlint\` | a workflow directly in \`.github/workflows/\` (\`*.yml\`) | https://github.com/rhysd/actionlint/blob/main/docs/install.md |
+| \`tsc\` | a \`*.ts\`, \`*.tsx\`, \`*.mts\` or \`*.cts\` file, and the index holds a root \`tsconfig.json\` | \`npm i -D typescript\` |
+
+A check that does not apply prints nothing. One that applies prints exactly one line starting
+\`MinSpec quality:\` - \`passed\`, \`BLOCKED\` (after the tool's own findings), or \`SKIPPED\` when the
+tool is not installed, with the install pointer on that line. A skip lets the commit through,
+so read it as what it is: that check is **not** protecting you until the tool is installed.
+The project's own TypeScript (\`npx --no-install tsc\`) is used before a \`tsc\` on PATH, and
+nothing is ever installed or fetched.
+
+Each check blocks at **error** severity only. A shellcheck warning or style note is neither
+printed nor blocking, so the gate never trains you to scroll past it. A tool that is installed
+but fails to run blocks too: a check that could not run has certified nothing.
+
+\`tsc\` typechecks the whole staged tree against the root \`tsconfig.json\`, because a type error
+can live in a file you did not touch. Its pass line says how many of your staged TypeScript
+files the program actually contained ("typechecked 2 of 2"); a solution-style or excluding
+\`tsconfig.json\` reads "0 of N", which is a pass with nothing checked. Know the cost of a root
+\`tsconfig.json\` that is only a base config (\`compilerOptions\` and no \`include\`): \`tsc\` then
+compiles every \`.ts\` file in the repo under the base settings, and a monorepo laid out that
+way can block every TypeScript commit.
+
+There is no per-check switch and no \`.minspec/config.json\` setting. The only bypass is
+\`MINSPEC_GATE_OFF=1 git commit ...\`, which also skips the secret scan and every other gate
+above - so use it for the one commit the check is wrong about, not as a standing setting.
 
 ### Deferred-work gate
 
@@ -1218,13 +1253,20 @@ export const MINSPEC_HOOKS_DIR = '.minspec/hooks';
  *       - shell — the always-present `minspec_shell_gate`: the two pattern-matchable
  *         gates (spec `id:` frontmatter present; no MinSpec-internal ref leaking out
  *         per DR-032).
+ *  4. Code-quality checks (SPEC-080): `minspec_quality_gate`, after Stage 3 and run even
+ *     when Stage 3 failed, so one attempt reports both. shellcheck on staged `*.sh`,
+ *     actionlint on staged top-level workflows, tsc when the index holds a root
+ *     `tsconfig.json` and a staged TypeScript file - all on the STAGED content, at error
+ *     severity, each printing one `MinSpec quality:` roster line. A missing tool is a
+ *     one-line SKIPPED; a tool that fails to run BLOCKS. Reads no config, adds no switch.
  *
  * Bypass (rare, explicit): MINSPEC_GATE_OFF=1 git commit ...
  * Fail direction, and it differs by CONDITION. A missing prerequisite fails OPEN — an
  * unreachable validator tier falls through (above), gitleaks is skipped when not installed,
  * the branch guard stands aside when the default branch cannot be determined. A hook-internal
  * ERROR fails CLOSED: \`set -u\`, plus Stage 3 capturing the tier's exit code in
- * \`minspec_stage3_rc\` and the hook ending with \`exit "$minspec_stage3_rc"\` (SPEC-080 FR-6),
+ * \`minspec_stage3_rc\` and the hook exiting with it when non-zero, else with Stage 4's
+ * verdict (SPEC-080 FR-6),
  * and no top-level handler around validate.py's \`main()\`, so a tooling bug refuses the
  * commit rather than waving it through. Do not collapse the two — a gate that certifies while broken is the
  * invariant-2 violation, and this comment claimed exactly that until #1905.
@@ -1619,6 +1661,224 @@ minspec_shell_gate() {
   return 0
 }
 
+# minspec_quality_gate: the code-quality checks (SPEC-080), called after Stage 3.
+# Three blocking checks on the STAGED content, never the working copy: shellcheck
+# on staged *.sh files, actionlint on staged top-level .github/workflows/*.yml
+# files, and tsc when the index holds a root tsconfig.json and a staged
+# TypeScript file. A check that does not apply prints nothing. A check that
+# applies prints exactly one roster line on stderr, prefixed "MinSpec quality:":
+# passed, BLOCKED (after the tool's own output), or SKIPPED when the tool is not
+# installed (with an install pointer). Tools are probed, never installed or
+# fetched, and run at error severity only, so a warning neither prints nor
+# blocks. A tool that is present but fails to run blocks: a check that could not
+# run has certified nothing. Nothing here reads .minspec/config.json, and no
+# switch but MINSPEC_GATE_OFF turns it off. Returns 1 if any check blocked.
+minspec_q_tmp=""
+
+# One throwaway directory per hook run, removed on every exit path.
+minspec_q_mktemp() {
+  [ -n "$minspec_q_tmp" ] && return 0
+  minspec_q_tmp=$(mktemp -d 2>/dev/null) || { minspec_q_tmp=""; return 1; }
+  trap 'rm -rf "$minspec_q_tmp"' EXIT
+  return 0
+}
+
+# Count NUL-terminated records on stdin (paths from "git ... -z").
+minspec_q_count() {
+  tr -cd '\\000' | wc -c | tr -d ' '
+}
+
+minspec_q_files() {
+  if [ "$1" -eq 1 ]; then echo "1 staged file"; else echo "$1 staged files"; fi
+}
+
+minspec_q_blocked() {
+  echo "✗ MinSpec quality: $1 BLOCKED the commit - $2." >&2
+  echo "  Bypass (rare): MINSPEC_GATE_OFF=1 git commit ..." >&2
+}
+
+minspec_q_skipped() {
+  echo "⚠ MinSpec quality: $1 SKIPPED - not installed ($2)." >&2
+}
+
+# The staged tree reaches its dependencies through a symlink to each working-copy
+# node_modules beside an indexed package.json; copying them would cost seconds to
+# minutes per commit. Where ln -s cannot make a real link (Git for Windows without
+# native symlinks copies instead), the typecheck cannot be built, and that BLOCKS
+# with the cause named rather than passing unchecked.
+minspec_q_link_deps() {
+  minspec_q_tree="$minspec_q_tmp/minspec-staged-tree"
+  minspec_q_need=$(git -c core.quotePath=false ls-files -- 'package.json' '*/package.json' \\
+    | while IFS= read -r minspec_q_p; do
+        minspec_q_d=$(dirname -- "$minspec_q_p")
+        if [ -d "$repo_root/$minspec_q_d/node_modules" ] && [ ! -e "$minspec_q_tree/$minspec_q_d/node_modules" ]; then
+          printf '%s\\n' "$minspec_q_d"
+        fi
+      done)
+  [ -z "$minspec_q_need" ] && return 0
+  : > "$minspec_q_tmp/ln-target"
+  if ! ln -s "$minspec_q_tmp/ln-target" "$minspec_q_tmp/ln-probe" 2>/dev/null \\
+     || [ ! -L "$minspec_q_tmp/ln-probe" ]; then
+    minspec_q_blocked tsc "this shell cannot create symbolic links (ln -s did not make a link), so the staged tree cannot reach node_modules"
+    return 1
+  fi
+  if ! printf '%s\\n' "$minspec_q_need" | while IFS= read -r minspec_q_d; do
+      ln -s "$repo_root/$minspec_q_d/node_modules" "$minspec_q_tree/$minspec_q_d/node_modules" || exit 1
+    done; then
+    minspec_q_blocked tsc "node_modules could not be linked into the staged tree"
+    return 1
+  fi
+  return 0
+}
+
+minspec_quality_gate() {
+  minspec_q_rc=0
+  minspec_q_n_sh=$(git diff --cached --name-only -z --diff-filter=ACMR -- '*.sh' | minspec_q_count)
+  # GitHub reads workflows from the top level of .github/workflows only, and a
+  # plain pathspec * also matches /, so glob magic keeps nested files out.
+  minspec_q_n_wf=$(git diff --cached --name-only -z --diff-filter=ACMR -- ':(glob).github/workflows/*.yml' | minspec_q_count)
+  minspec_q_n_ts=0
+  if git cat-file -e :tsconfig.json 2>/dev/null; then
+    minspec_q_n_ts=$(git diff --cached --name-only -z --diff-filter=ACMR -- '*.ts' '*.tsx' '*.mts' '*.cts' | minspec_q_count)
+  fi
+
+  # The shellcheck check: the staged scripts plus every indexed .shellcheckrc, copied out
+  # of the index at their own paths so a finding names the repo-relative file.
+  if [ "$minspec_q_n_sh" -gt 0 ]; then
+    if ! command -v shellcheck >/dev/null 2>&1; then
+      minspec_q_skipped shellcheck "https://github.com/koalaman/shellcheck#installing"
+    elif ! minspec_q_mktemp || ! mkdir "$minspec_q_tmp/sh" \\
+       || ! git diff --cached --name-only -z --diff-filter=ACMR -- '*.sh' \\
+            | git checkout-index -z --stdin --prefix="$minspec_q_tmp/sh/" \\
+       || ! git ls-files -z -- '.shellcheckrc' '*/.shellcheckrc' \\
+            | git checkout-index -z --stdin --prefix="$minspec_q_tmp/sh/"; then
+      minspec_q_blocked shellcheck "the staged scripts could not be copied out of the index"
+      minspec_q_rc=1
+    elif minspec_q_out=$(cd "$minspec_q_tmp/sh" \\
+         && find . -type f -name '*.sh' -exec shellcheck --severity=error --color=never {} + 2>&1); then
+      echo "✓ MinSpec quality: shellcheck passed ($(minspec_q_files "$minspec_q_n_sh"))." >&2
+    else
+      minspec_q_trc=$?
+      if [ -n "$minspec_q_out" ]; then
+        printf '%s\\n' "$minspec_q_out" >&2
+        minspec_q_blocked shellcheck "its findings are above"
+      else
+        minspec_q_blocked shellcheck "it exited $minspec_q_trc and printed nothing"
+      fi
+      minspec_q_rc=1
+    fi
+  fi
+
+  # The actionlint check: run with no .git directory, it does not discover its config, so a
+  # staged .github/actionlint.yaml (or .yml) is passed explicitly. The flags are
+  # the ones this harness's own CI uses: no nested shellcheck or pyflakes run.
+  if [ "$minspec_q_n_wf" -gt 0 ]; then
+    minspec_q_cfg=""
+    minspec_q_ok=1
+    if ! command -v actionlint >/dev/null 2>&1; then
+      minspec_q_skipped actionlint "https://github.com/rhysd/actionlint/blob/main/docs/install.md"
+      minspec_q_ok=0
+    elif ! minspec_q_mktemp || ! mkdir "$minspec_q_tmp/wf" \\
+       || ! git diff --cached --name-only -z --diff-filter=ACMR -- ':(glob).github/workflows/*.yml' \\
+            | git checkout-index -z --stdin --prefix="$minspec_q_tmp/wf/"; then
+      minspec_q_blocked actionlint "the staged workflows could not be copied out of the index"
+      minspec_q_rc=1
+      minspec_q_ok=0
+    else
+      for minspec_q_c in .github/actionlint.yaml .github/actionlint.yml; do
+        if git cat-file -e ":$minspec_q_c" 2>/dev/null; then
+          if git checkout-index --prefix="$minspec_q_tmp/wf/" -- "$minspec_q_c"; then
+            minspec_q_cfg="$minspec_q_c"
+          else
+            minspec_q_blocked actionlint "the staged $minspec_q_c could not be copied out of the index"
+            minspec_q_rc=1
+            minspec_q_ok=0
+          fi
+          break
+        fi
+      done
+    fi
+    if [ "$minspec_q_ok" -eq 1 ]; then
+      if [ -n "$minspec_q_cfg" ]; then
+        minspec_q_out=$(cd "$minspec_q_tmp/wf" \\
+          && actionlint -shellcheck= -pyflakes= -no-color -config-file "$minspec_q_cfg" .github/workflows/*.yml 2>&1)
+      else
+        minspec_q_out=$(cd "$minspec_q_tmp/wf" \\
+          && actionlint -shellcheck= -pyflakes= -no-color .github/workflows/*.yml 2>&1)
+      fi
+      minspec_q_trc=$?
+      if [ "$minspec_q_trc" -eq 0 ]; then
+        echo "✓ MinSpec quality: actionlint passed ($(minspec_q_files "$minspec_q_n_wf"))." >&2
+      elif [ -n "$minspec_q_out" ]; then
+        printf '%s\\n' "$minspec_q_out" >&2
+        minspec_q_blocked actionlint "its findings are above"
+        minspec_q_rc=1
+      else
+        minspec_q_blocked actionlint "it exited $minspec_q_trc and printed nothing"
+        minspec_q_rc=1
+      fi
+    fi
+  fi
+
+  # The tsc check: tsc resolves a project, not a file, so the whole staged tree is copied
+  # out of the index and typechecked against the root tsconfig.json. The
+  # project's own TypeScript wins (npx --no-install, offline, from the repo
+  # root), then a tsc on PATH. --listFiles is the non-vacuity witness: the pass
+  # line says how many staged TypeScript files the program actually contained,
+  # so a tsconfig that compiles none of them reads "0 of N", not a silent pass.
+  if [ "$minspec_q_n_ts" -gt 0 ]; then
+    minspec_q_tsc=""
+    if command -v npx >/dev/null 2>&1 \\
+       && (cd "$repo_root" && npm_config_offline=true npx --no-install --prefix "$repo_root" tsc --version) >/dev/null 2>&1; then
+      minspec_q_tsc=npx
+    elif command -v tsc >/dev/null 2>&1; then
+      minspec_q_tsc=path
+    fi
+    if [ -z "$minspec_q_tsc" ]; then
+      minspec_q_skipped tsc "npm i -D typescript, https://www.typescriptlang.org/download"
+    elif ! minspec_q_mktemp || ! mkdir "$minspec_q_tmp/minspec-staged-tree" \\
+       || ! git checkout-index --all --prefix="$minspec_q_tmp/minspec-staged-tree/"; then
+      minspec_q_blocked tsc "the staged tree could not be copied out of the index"
+      minspec_q_rc=1
+    elif ! minspec_q_link_deps; then
+      minspec_q_rc=1
+    else
+      if [ "$minspec_q_tsc" = npx ]; then
+        minspec_q_out=$(cd "$minspec_q_tmp/minspec-staged-tree" \\
+          && npm_config_offline=true npx --no-install --prefix "$repo_root" tsc --noEmit --pretty false --listFiles -p tsconfig.json 2>&1)
+      else
+        minspec_q_out=$(cd "$minspec_q_tmp/minspec-staged-tree" \\
+          && tsc --noEmit --pretty false --listFiles -p tsconfig.json 2>&1)
+      fi
+      minspec_q_trc=$?
+      # --listFiles prints absolute paths; diagnostics are relative to the tree.
+      minspec_q_diag=$(printf '%s\\n' "$minspec_q_out" | grep -v -e '^/' -e '^[A-Za-z]:[/\\]')
+      if [ "$minspec_q_trc" -eq 0 ]; then
+        printf '%s\\n' "$minspec_q_out" > "$minspec_q_tmp/tsc.out"
+        git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR -- '*.ts' '*.tsx' '*.mts' '*.cts' \\
+          > "$minspec_q_tmp/ts.list"
+        # A staged file counts when a --listFiles line ends in its path under the
+        # copied tree. Matching the suffix sidesteps how the absolute prefix is
+        # spelled (/private/var on macOS, C:/ on Windows).
+        minspec_q_hit=$(awk '
+          NR == FNR { want["/minspec-staged-tree/" $0] = 1; next }
+          { for (w in want) if (length($0) >= length(w) && substr($0, length($0) - length(w) + 1) == w) got[w] = 1 }
+          END { n = 0; for (w in got) n++; print n }' "$minspec_q_tmp/ts.list" "$minspec_q_tmp/tsc.out")
+        echo "✓ MinSpec quality: tsc passed (typechecked $minspec_q_hit of $minspec_q_n_ts staged TypeScript files)." >&2
+      elif [ -n "$minspec_q_diag" ]; then
+        printf '%s\\n' "$minspec_q_diag" >&2
+        minspec_q_blocked tsc "its findings are above"
+        minspec_q_rc=1
+      else
+        minspec_q_blocked tsc "it exited $minspec_q_trc and printed no diagnostic"
+        minspec_q_rc=1
+      fi
+    fi
+  fi
+
+  return "$minspec_q_rc"
+}
+
 # Stage 3's verdict is CAPTURED, never exited on (SPEC-080 FR-6): the first tier
 # that runs records its exit code in minspec_stage3_rc, later tiers run only while
 # it is still empty, and the hook exits with it at the end. Tier order, probes and
@@ -1667,7 +1927,14 @@ if [ -z "$minspec_stage3_rc" ]; then
   minspec_stage3_rc=$?
 fi
 
-exit "$minspec_stage3_rc"`;
+# ── Stage 4: code-quality checks (SPEC-080) ──────────────────────────────────
+# Runs even when Stage 3 failed, so one commit attempt reports both stages'
+# findings. Stage 3's own non-zero code wins; otherwise Stage 4's verdict stands.
+minspec_quality_gate
+minspec_stage4_rc=$?
+
+[ "$minspec_stage3_rc" -ne 0 ] && exit "$minspec_stage3_rc"
+exit "$minspec_stage4_rc"`;
 
 /**
  * Shell `commit-msg` hook (DR-037 / #247) — the RCDD root-cause gate (DR-003).
