@@ -8,7 +8,8 @@
  *
  * Pure text predicate, shared by the delegated-approval CLI and its caller so the two
  * witnesses cannot drift. Fail closed: a section that lists decision items is OPEN unless
- * it says, in its heading or body, that ALL of them are resolved/answered/decided.
+ * its HEADING line says ALL of them are resolved/answered/decided, or each item's own block
+ * records a selection (see SELECTION). Body prose never closes a section.
  */
 
 const HEADING = /^(#{1,6})\s+(.*)$/;
@@ -28,12 +29,59 @@ const NUMBERED_ITEM = /^\s*(\d+)[.)]\s+\*\*/;
 const ALL_RESOLVED = /\ball\b[^.\n]{0,40}\b(?:resolved|answered|decided)\b/i;
 /**
  * A per-decision record: the item's own block carries a selection line, e.g.
- * `**Recorded selection: Option (a),** ...`, `**Resolved: Option A.**`, `RESOLVED 2026-08-23 - Option A`, `RESOLVED: (d).`.
+ * `**Recorded selection: Option (a),** ...`, `**Resolved: Option A.**`, `RESOLVED 2026-08-23 - Option A`,
+ * `RESOLVED: (d).`, `→ RESOLVED: out of scope`, `**Recorded answer: yes, ...**`.
  * Who made the selection is deliberately not judged here (policy for DR-119's owner).
+ *
+ * The keyword alone is not a record (#3701 review). It counts only when it
+ * - opens a clause: line start, or after `.` `!` `;` `:` `)` `]` `|` `>` `-` `–` `—` `→`, markdown
+ *   emphasis allowed. So "Not yet decided:", "To be decided", "What is decided here:", "gets
+ *   chosen" and "Status: NOT RESOLVED" never count, wherever they sit, the label line included;
+ * - is followed by a separator (`:`, `—`, `–`, ` - `), a parenthetical (`(2026-07-12, founder):`)
+ *   or an ISO date, and then a value. Only the upper-case status stamp `RESOLVED` may be
+ *   followed directly by a word (`RESOLVED for the declaration`). A bare keyword never counts;
+ * - carries a value that is not a placeholder (TBD, pending, open, not yet, none, `?`) and is
+ *   not a question (a sentence-ending `?`, outside code spans, before the first full stop). A
+ *   separator ending its line takes its value from the next line (`**Recorded selection:**`
+ *   wrapped).
  */
-const SELECTION =
-  /\b(?:recorded\s+selection|resolved|selected|chosen|decided)\b\s*(?:[:*(]|\w+\s*[:*])|\bnot a choice\b/i;
-const SELECTION_UPPER = /\bRESOLVED\b/;
+const KEYWORD = /\b(?:recorded\s+(?:selection|answer)|resolved|selected|chosen|decided)\b/gi;
+const CLAUSE_START = /(?:^|[.!;:)\]|>\-–—→])[\s*_]*$/;
+const SEPARATOR = /^[*_\s]*(?::|—|–|-(?=\s)|\d{4}-\d{2}-\d{2}\b)/;
+const PAREN = /^[*_\s]*\(([^)\n]*)\)[*_\s]*(?::|—|–|-(?=\s))?/;
+const PLACEHOLDER = /^(?:tbd|tbc|pending|open|unresolved|undecided|not\s+yet|none\b|n\/a|\?)/i;
+/** "not a choice": the item is recorded as needing no decision. Unchanged from #3059. */
+const NOT_A_CHOICE = /\bnot a choice\b/i;
+
+function isValue(text: string): boolean {
+  const v = text.replace(/^[*_\s,]+/, '');
+  if (v === '' || PLACEHOLDER.test(v)) return false;
+  // A question is not an answer: no sentence-ending `?` (code spans aside) before the first full stop.
+  return !/^[^.]*\?(?=[\s*_)]|$)/.test(v.replace(/`[^`]*`/g, '``'));
+}
+
+/** `line` plus, when a separator ends it, the line after: the value of a wrapped record. */
+function recordsSelection(line: string, next = ''): boolean {
+  if (NOT_A_CHOICE.test(line)) return true;
+  for (const m of line.matchAll(KEYWORD)) {
+    const at = m.index ?? 0;
+    if (!CLAUSE_START.test(line.slice(0, at))) continue;
+    const tail = line.slice(at + m[0].length);
+    const sep = SEPARATOR.exec(tail);
+    if (sep) {
+      const rest = tail.slice(sep[0].length);
+      if (isValue(/^[*_\s]*$/.test(rest) ? next : rest)) return true;
+      continue;
+    }
+    const paren = PAREN.exec(tail);
+    if (paren) {
+      if (isValue(paren[1]) && isValue(tail.slice(paren[0].length))) return true;
+      continue;
+    }
+    if (m[0] === 'RESOLVED' && /^\s+\S/.test(tail) && isValue(tail)) return true;
+  }
+  return false;
+}
 
 export interface ClarifyVerdict {
   readonly open: boolean;
@@ -81,7 +129,7 @@ export function findOpenClarify(content: string): ClarifyVerdict {
     const flush = (): void => {
       if (label === undefined) return;
       if (!seen.includes(label)) seen.push(label);
-      if (block.some((l) => SELECTION.test(l) || SELECTION_UPPER.test(l))) answered.add(label);
+      if (block.some((l, i) => recordsSelection(l, block[i + 1]))) answered.add(label);
     };
     for (const line of lines.slice(1)) {
       const l = ITEM.test(line) ? /(?:D|DQ|Q|OQ)(?:-?\d+|-[A-Z])\b/.exec(line)?.[0] : NUMBERED_ITEM.exec(line)?.[1];
