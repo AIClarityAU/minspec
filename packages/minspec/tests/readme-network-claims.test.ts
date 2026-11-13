@@ -149,6 +149,7 @@ const LOCAL_ONLY: Readonly<Record<string, string>> = {
   'lib/git-analyzer.ts': 'local git diff, status and show through the simple-git library',
   'lib/approval.ts': 'git hash-object, update-ref, cat-file, log, show, config user.email',
   'lib/approve-commit.ts': 'git add and git commit of the approval, and local ref reads; never pushes',
+  'lib/dr-index-scope.ts': 'git show of the committed INDEX.md (a local read) to confine an approval commit to one decision; never fetches or pushes',
   'lib/scaffold.ts': 'git ls-files, git rm --cached, git config --local core.hooksPath',
   'lib/presence.ts': 'git worktree list, branch --show-current, rev-parse --show-toplevel',
   'lib/tidy-primary.ts': 'git status, rev-parse, rev-list, cat-file, show, checkout -- <path>; never fetches',

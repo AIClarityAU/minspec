@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-210-hooks-armed-witness/requirements.md",
+  "specHash": "c36efca0fd032059b927b3c4fc1ef3c511bfa36c05c5f60afdc2032c366fc279",
+  "approvedAt": "2026-11-02T10:05:23.676Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/specapprove-1028",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3231#issuecomment-6541272955"
+}
