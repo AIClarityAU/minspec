@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-213-agent-sessions-stay-in-container/requirements.md",
+  "specHash": "b9620c18b226bfb6503dcdd687a8fbdc9d5f8efd4854f53755b56a8d18140859",
+  "approvedAt": "2026-11-13T05:14:29.153Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:spec/fix-selfcontradictions-213-217-227",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3696#issuecomment-6839243437"
+}
