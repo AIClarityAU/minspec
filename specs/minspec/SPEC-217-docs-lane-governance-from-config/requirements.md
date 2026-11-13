@@ -192,14 +192,17 @@ this change.
 ## Decisions needed (Clarify)
 
 DQ-3 has a selection recorded from the answer to task-queue item c217 (2026-10-27: "Yes
-(Recommended)"), an answer the queue attributes to the founder. A queue answer is not
-consent and is not verified here: DR-108 (delegated approval) section 4 holds that a queue
-item cannot carry consent, because any session can write the queue. That selection therefore
-binds nothing on its own. It binds only if the founder approves this spec with it in its
-text; that approval, not this record, is the consent act, and it may overturn it. The other
-selections carry the (rec) option an agent session copied; no human chose them (each says
-so). Delegation DLG-001 (DR-108) made none of these selections. This section stays open, and
-the spec is not ready to approve, until the founder answers or confirms the rest.
+(Recommended)"), an answer the queue attributes to the founder. A queue answer is not consent and is
+not verified here: DR-108 (delegated approval) section 4 holds that a queue item cannot carry
+consent, because any session can write the queue. DQ-1, DQ-2, DQ-4 and DQ-5 carry the (rec) option
+an agent session copied; no human chose them (each says so). Delegation DLG-001 (DR-108) made none
+of these selections and covers spec approval and engineering-DR acceptance only. An agent-recorded
+selection carries no consent, whoever prompted it. It is ratified only by approval of this spec, the
+founder's or the bot's under DLG-001, and that approval may overturn it. Every decision has a
+recorded selection. The evidence gap under DQ-3 stays open as a finding for the approver to weigh
+(it is not a pending Clarify item); approval of this spec's text is the confirmation or reversal
+of every selection above, and `phases.clarify` is `done` only as a result of such an approval,
+which this text does not record.
 
 **DQ-1 — `.minspec/` present but `config.json` absent.** The extension treats this as "all
 defaults" (`config.ts:210-212`).
@@ -233,10 +236,10 @@ item c217, 2026-10-27 ("Yes (Recommended)"). A queue answer is not consent (DR-1
 4), so this selection is unverified and binds only if the founder approves this spec's text
 with it in place.
 
-The evidence gap stays open: no record yet decides whether an epic `status:` change is a
-human act, the search for one was partial, and the note below still stands. This selection
-does not close that gap. The founder confirms or reverses it, with the gap in view, when
-approving this spec's text.
+The evidence gap is a finding, not an unmade decision: no record yet decides whether an epic
+`status:` change is a human act, the search for one was partial, and the note below still
+stands. This selection does not close that gap. The approver confirms or reverses it, with the
+gap in view, by approving or refusing this spec's text.
 
 - `a` **(rec)** Include `epicsDir` (default `docs/epics`) in this change. *Cost:* it changes
   behaviour for this repo: an epic `status:` edit, for example `active` to `done`, now needs a
