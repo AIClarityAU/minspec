@@ -34,6 +34,7 @@ const mockBacklogTreeProvider = { refresh: vi.fn(), refreshIfStale: vi.fn(), set
 const mockNextTaskStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockScaffoldCommitStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockTidyPrimaryStatusBar = { update: vi.fn(), dispose: vi.fn() };
+const mockQueueDepthStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockSpecPanel = { show: vi.fn(), refresh: vi.fn(), dispose: vi.fn() };
 const mockCodeLensProvider = { refresh: vi.fn() };
 const mockSpecFileLensProvider = { refresh: vi.fn() };
@@ -205,6 +206,7 @@ vi.mock('../src/views/status-bar', async (importOriginal) => ({
   MinSpecNextTaskStatusBar: vi.fn(function () { return mockNextTaskStatusBar; }),
   MinSpecScaffoldCommitStatusBar: vi.fn(function () { return mockScaffoldCommitStatusBar; }),
   MinSpecTidyPrimaryStatusBar: vi.fn(function () { return mockTidyPrimaryStatusBar; }),
+  MinSpecQueueDepthStatusBar: vi.fn(function () { return mockQueueDepthStatusBar; }),
 }));
 vi.mock('../src/commands/next-task', () => ({
   nextTaskCommand: vi.fn(() => vi.fn()),
@@ -336,17 +338,17 @@ describe('auto-classify git watcher', () => {
     configValues = {}; // autoClassifyOnCommit defaults to false
     activate(makeMockContext());
 
-    // 5 standard watchers (specs, adrs, traceability, approvals, epics), no git watcher.
-    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(5);
+    // 6 standard watchers (specs, adrs, traceability, approvals, epics, queue), no git watcher.
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(6);
   });
 
   it('creates a git watcher and fires classify only for watched git paths when enabled', () => {
     configValues = { autoClassifyOnCommit: true };
     activate(makeMockContext());
 
-    // The git watcher is the 6th (index 5) created (5 standard + git).
-    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(6);
-    const gitWatcher = createdWatchers[5];
+    // The git watcher is the 7th (index 6) created (6 standard incl. queue + git).
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(7);
+    const gitWatcher = createdWatchers[6];
     expect(gitWatcher.onDidChange).toHaveBeenCalled();
     expect(gitWatcher.onDidCreate).toHaveBeenCalled();
 
@@ -392,7 +394,7 @@ describe('auto-classify git watcher', () => {
   it('starts the git watcher live when autoClassifyOnCommit flips on after activation', () => {
     configValues = {}; // start disabled
     activate(makeMockContext());
-    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(5);
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(6);
     expect(configChangeHandler).toBeDefined();
 
     // Simulate the toast writing the setting, then VS Code firing the change.
@@ -402,8 +404,8 @@ describe('auto-classify git watcher', () => {
     });
 
     // The 6th watcher (the git watcher) now exists without any reload.
-    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(6);
-    const gitWatcher = createdWatchers[5];
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(7);
+    const gitWatcher = createdWatchers[6];
     expect(gitWatcher.onDidChange).toHaveBeenCalled();
     expect(gitWatcher.onDidCreate).toHaveBeenCalled();
   });
@@ -411,7 +413,7 @@ describe('auto-classify git watcher', () => {
   it('disposes the git watcher live when autoClassifyOnCommit flips off', () => {
     configValues = { autoClassifyOnCommit: true };
     activate(makeMockContext());
-    const gitWatcher = createdWatchers[5];
+    const gitWatcher = createdWatchers[6];
 
     configValues = { autoClassifyOnCommit: false };
     configChangeHandler!({
@@ -424,13 +426,13 @@ describe('auto-classify git watcher', () => {
   it('ignores config changes for unrelated settings', () => {
     configValues = {}; // disabled
     activate(makeMockContext());
-    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(5);
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(6);
 
     // A change to some other key must not create the git watcher.
     configValues = { autoClassifyOnCommit: true };
     configChangeHandler!({ affectsConfiguration: () => false });
 
-    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(5);
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(6);
   });
 });
 
@@ -535,7 +537,7 @@ describe('an installation that ran the ScroogeLLM bridge (SPEC-086 FR-1, FR-2, F
     activate(makeMockContext());
 
     // The five standing watchers (specs, adrs, traceability, approvals, epics) and no sixth.
-    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(5);
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(6);
   });
 });
 

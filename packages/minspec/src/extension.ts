@@ -351,15 +351,6 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
   refreshQueueDepth();
-  if (workspaceRoot) {
-    const queueWatcher = vscode.workspace.createFileSystemWatcher(
-      new vscode.RelativePattern(workspaceRoot, '.minspec/queue/**'),
-    );
-    queueWatcher.onDidChange(refreshQueueDepth);
-    queueWatcher.onDidCreate(refreshQueueDepth);
-    queueWatcher.onDidDelete(refreshQueueDepth);
-    context.subscriptions.push(queueWatcher);
-  }
 
   // CodeLens providers (Phase 7)
   const codeLensProvider = new MinSpecCodeLensProvider(workspaceRoot);
@@ -674,6 +665,18 @@ export function activate(context: vscode.ExtensionContext): void {
   epicsWatcher.onDidCreate(onEpicsChanged);
   epicsWatcher.onDidDelete(onEpicsChanged);
   context.subscriptions.push(epicsWatcher);
+
+  // Queue watcher (#737): created after the spec/ADR/epic watchers so their
+  // creation order is unchanged.
+  if (workspaceRoot) {
+    const queueWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(workspaceRoot, '.minspec/queue/**'),
+    );
+    queueWatcher.onDidChange(refreshQueueDepth);
+    queueWatcher.onDidCreate(refreshQueueDepth);
+    queueWatcher.onDidDelete(refreshQueueDepth);
+    context.subscriptions.push(queueWatcher);
+  }
 
   // Drift detection: monitor file saves
   if (workspaceRoot) {
