@@ -22,6 +22,48 @@
 
 set -uo pipefail
 
+# --- Scratch / rescue guard (#3100) -----------------------------------------------
+# A junk-sweep "rescue" once committed untracked `.scratch-*/` session files to a
+# `rescue/*` branch and pushed it to a PUBLIC origin. Credential scanners look for
+# keys, not transcripts, so nothing stopped it. This guard refuses (a) creating a
+# `refs/heads/rescue/*` ref on the remote and (b) pushing commits that add paths
+# under `.scratch*/`. Ref-name + path-prefix only: it makes no network call
+# (invariant 1) and a differently named scratch dir still gets through.
+# Runs BEFORE the App-token/workflow logic below, which exits early for most pushes.
+# Bypass: MINSPEC_ALLOW_SCRATCH_PUSH=1 git push …
+refs_input=$(cat)
+if [ "${MINSPEC_ALLOW_SCRATCH_PUSH:-0}" != "1" ]; then
+  _zero='0000000000000000000000000000000000000000'
+  _bad=''
+  while read -r _lref _lsha _rref _rsha; do
+    [ -n "${_lsha:-}" ] || continue
+    [ "$_lsha" = "$_zero" ] && continue
+    case "$_rref" in
+      refs/heads/rescue/*)
+        if [ "${_rsha:-$_zero}" = "$_zero" ]; then
+          _bad="${_bad}  new rescue ref: ${_rref}"$'\n'
+        fi ;;
+    esac
+    _b=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || _b=''
+    [ -n "$_b" ] || _b='origin/main'
+    if [ "${_rsha:-$_zero}" != "$_zero" ] && git merge-base --is-ancestor "$_rsha" "$_lsha" 2>/dev/null; then
+      _r="$_rsha..$_lsha"
+    else
+      _r="$_b...$_lsha"
+    fi
+    _f=$(git diff --name-only --diff-filter=AMR "$_r" 2>/dev/null | grep -E '(^|/)\.scratch[^/]*/' || true)
+    [ -n "$_f" ] && _bad="${_bad}$(printf '%s\n' "$_f" | sed 's/^/  scratch path: /')"$'\n'
+  done <<< "$refs_input"
+  if [ -n "$_bad" ]; then
+    {
+      echo "pre-push: refusing — scratch/rescue content must not reach a remote (#3100):"
+      printf '%s' "$_bad"
+      echo "Keep salvage local (copy files or \`git bundle\`). Override: MINSPEC_ALLOW_SCRATCH_PUSH=1 git push …"
+    } >&2
+    exit 1
+  fi
+fi
+
 hook_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 lib="$hook_dir/../scripts/lib/workflow-paths.sh"
 
@@ -83,7 +125,7 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
   [ -n "$files" ] || continue
   hits=$(printf '%s\n' "$files" | grep -E "$WORKFLOW_PATH_RE" || true)
   [ -n "$hits" ] && touched="${touched}${hits}"$'\n'
-done
+done <<< "$refs_input"
 
 [ -n "$touched" ] || exit 0
 
