@@ -5,7 +5,7 @@ type: design
 # document is read by spec-gate.py as a second, unapproved spec. (SPEC-086 is T3.)
 # status and phases mirror requirements.md. This file has no approval record of its own:
 # only requirements.md is signed, so these two fields describe and never seal.
-status: implementing
+status: done
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain
 relates_to: [DR-075, DR-014, DR-001, DR-027, DR-064, SPEC-042, SPEC-040, SPEC-085, "#2205", "#2359"]
@@ -14,7 +14,7 @@ phases:
   clarify: done
   plan: done
   tasks: done
-  implement: in-progress
+  implement: done
 ---
 
 # SPEC-086 - Design: remove the ScroogeLLM upsell and the bridge built for it
