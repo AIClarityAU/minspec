@@ -1,7 +1,7 @@
 ---
 id: SPEC-285
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-007  # Agent Execute - the dev-time autonomous build/merge pipeline (this is its execution boundary)
@@ -14,9 +14,9 @@ implements_reason: >-
   will own (scripts/, the host unit, the sandbox image) is still decided at Plan; no recorded
   option names a file by path, so implements stays none.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
