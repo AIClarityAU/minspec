@@ -218,3 +218,41 @@ hover cards for project vocabulary/jargon — is a sibling feature tracked separ
   **approvable-level** subset (`SPEC-014`, `#500`) can render against the v1 resolver today.
 - **SPEC-018 / SPEC-014** — the webview render host. Paused (token economy); this spec
   ships when that work resumes.
+
+## Proposed amendment (not approved) - number-only card for offline issue refs
+
+> **Status: PROPOSED, for the founder to read. Not part of the approved spec until he
+> re-approves.** Founder answer (queue item i035): "n = number-only card: shows the number
+> with 'no details offline' and opens the issue on GitHub."
+
+**Amends FR8** (unknown/unresolvable -> plain text) and, by extension, **INV-graceful-degrade**,
+for one case only: a GitHub issue reference such as `#500` that cannot be resolved offline.
+
+**Current text being narrowed (quoted, not deleted):**
+
+- FR8: "An unknown project/approvable/paragraph code, or a ref whose target cannot be found,
+  renders as **plain text** (never an error, never a dead lozenge)".
+- INV-graceful-degrade: "an unknown or unresolvable reference renders as plain text; it
+  never errors, never breaks the view, never becomes a dead lozenge."
+
+**Proposed behaviour.** When an issue reference (`#N`, or `PROJECT#N` such as `SCR#204`) is
+well-formed but its details cannot be resolved offline (Tier-0 has no network and no local
+issue data), the reference renders as a **number-only card** instead of plain text:
+
+1. The lozenge shows the issue number (`#500`).
+2. Its hover/focus card (FR3) shows the number and the words "no details offline". No title,
+   status or summary is shown, and none is guessed (INV-live-status-deterministic holds).
+3. Activating it (click/Enter, FR7) opens the issue on GitHub in the user's browser. This is
+   an explicit user action, so Tier-0 detection and resolution still make no network call
+   (INV-tier0-detection); the browser opens the URL, MinSpec does not fetch it.
+4. The card is a live, activatable lozenge, so it is not "plain text" and not a dead lozenge:
+   it always has a working target. Keyboard path per INV-keyboard.
+
+**Unchanged.** Unknown project codes, unknown approvable ids and unresolvable paragraph refs
+still render as plain text under FR8 and INV-graceful-degrade. Only well-formed issue refs
+gain the number-only card.
+
+**If approved,** FR8 and INV-graceful-degrade are edited to carve out this case and this
+section is folded into FR8; an acceptance criterion is added under Acceptance Criteria.
+**Merging this change voids the current SPEC-035 approval** (hash-locked, DR-012); re-approval
+in the editor ("MinSpec: Approve Spec") is the founder's route.
