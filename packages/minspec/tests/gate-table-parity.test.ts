@@ -70,6 +70,14 @@ const GATES: GateSpec[] = [
     tableKeyword: /id: DR-NNN/,
   },
   {
+    // SPEC-080 Stage 4 (task 8.2).
+    name: 'Code-quality checks',
+    hook: 'pre-commit',
+    source: PRE_COMMIT,
+    sourceAnchor: /Stage 4: code-quality checks/,
+    tableKeyword: /shellcheck, actionlint or tsc/,
+  },
+  {
     name: 'Deferred-work gate',
     hook: 'commit-msg',
     source: COMMIT_MSG,

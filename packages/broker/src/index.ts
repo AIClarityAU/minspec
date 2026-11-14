@@ -80,6 +80,17 @@ function json(body: unknown, status: number): Response {
   });
 }
 
+/**
+ * The AC-4 reason: what the customer must do, naming only the public App slug.
+ *
+ * Constant on purpose. It quotes no App id, installation id or GitHub response text, so
+ * nothing about our side of the exchange leaks through the one refusal that is meant to
+ * be read by a person.
+ */
+export const APP_NOT_INSTALLED_REASON =
+  'the minspec-sdd GitHub App is not installed on this repository: install it, or grant ' +
+  'its existing installation access to this repository, then re-run';
+
 /** The one route this Worker serves. */
 export const TOKEN_PATH = '/installation-token';
 
@@ -185,6 +196,13 @@ export function createFetchHandler(deps: HandlerDeps = {}) {
     // remembering to pass the right string.
     const result = await mintScopedToken(verified.claims, factory);
     if (!result.ok) {
+      // FR-4 / AC-4: the App is not installed on (or not granted) this repository. The
+      // caller has already proven, by a verified OIDC claim matched against the body,
+      // that this is THEIR repository, so telling them is not an oracle about anyone
+      // else's - which is why this sits after authorisation and never before it.
+      if (result.code === 'app_not_installed') {
+        return json({ error: 'app_not_installed', reason: APP_NOT_INSTALLED_REASON } satisfies TokenError, 403);
+      }
       return json({ error: 'mint_failed', reason: 'could not mint' } satisfies TokenError, 502);
     }
 
