@@ -1607,7 +1607,14 @@ minspec_symlink_escapes() {
 }
 
 if [ "\${SYMLINK_GATE_OFF:-}" != "1" ]; then
-  minspec_sl_list=$(git diff --cached --raw --diff-filter=AMT | awk -F'\\t' '{ n = split($1, a, " "); if (a[2] == "120000") print $2 }')
+  # -z: NUL-delimited, so git never C-quotes a non-ASCII path (core.quotepath).
+  # R/C records carry TWO paths (source then destination): take the destination,
+  # which is where the symlink now lives. NULs become newlines for the awk state
+  # machine (a path containing a literal newline is not supported).
+  minspec_sl_list=$(git diff --cached --raw -z -M --diff-filter=AMTRC | tr '\\0' '\\n' | awk '
+    want == 0 { n = split(substr($0, 2), a, " "); st = substr(a[5], 1, 1); mode = a[2]; want = (st == "R" || st == "C") ? 2 : 1; next }
+    { want--; if (want == 0 && mode == "120000") print }
+  ')
   minspec_sl_fail=0
   while IFS= read -r minspec_sl_path; do
     [ -n "$minspec_sl_path" ] || continue
