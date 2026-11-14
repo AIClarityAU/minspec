@@ -5,6 +5,15 @@ status: implementing
 tier: T4
 product: minspec
 epic: EPIC-002  # Signpost Integrity
+relates_to: [DR-047, SPEC-031]
+# FR-16/FR-17/FR-18 (added for #528, DR-047 §2) generalise the human-gate predicate from
+# PR-only (ai-review:pass ∧ mergeable ∧ checks-green) to every human-gated node kind. This
+# is new content on top of an already-`implementing`, already-approved spec: editing these
+# FRs intentionally stales the DR-012 content hash so the extension re-asks for approval —
+# per DR-012 the hash lock applies only after Approve Spec, and this file was approved
+# before #528 existed. `status: implementing` is left unchanged because the bulk of this
+# spec (FR-1 through FR-15) already ships; only the FR-16/17/18 slice is new, unbuilt, and
+# — per DQ-1/DQ-2 below — partly dormant-by-design pending #527's per-type reviewer.
 implements:
   - packages/shared/src/next-task.ts
   - packages/shared/tests/next-task.test.ts
@@ -84,10 +93,16 @@ Each **pending human decision** is a node:
 
 | Node kind | Pending when | Cleared by |
 |---|---|---|
-| `epic-promote` | epic `status: proposed` | promote → `active` |
-| `spec-approve` | spec unapproved/stale AND not `done`/`archived` (DR-012) | Approve Spec |
-| `adr-accept` | ADR `status: proposed` | accept/reject |
-| `phase-action` | SPEC-010 within-feature hole (uncovered FR / unchecked task) | author the phase |
+| `epic-promote` | epic `status: proposed` **∧ greenlit** (`ai-review/epic:pass`, FR-16) | promote → `active` |
+| `spec-approve` | spec unapproved/stale AND not `done`/`archived` (DR-012) **∧ greenlit** (`ai-review/spec:pass`, FR-16) | Approve Spec |
+| `adr-accept` | ADR `status: proposed` **∧ greenlit** (`ai-review/dr:pass`, FR-16) | accept/reject |
+| `constitution-accept` *(new, FR-17)* | constitution invariant `status: proposed` **∧ greenlit** (`ai-review/constitution:pass`) | accept/reject |
+| `pr-review` *(new, FR-17 — subsumes #182)* | PR-to-main open ∧ mergeable ∧ checks-green **∧ greenlit** (`ai-review:pass`) | merge |
+| `phase-action` | SPEC-010 within-feature hole (uncovered FR / unchecked task) — **not** gated by FR-16: a phase-action is SPEC-010-owned work, not a reviewed Approvable type | author the phase |
+
+The greenlit clause on every row above except `phase-action` is this spec's #528 addition
+(FR-16/FR-17, DR-047 §2). `plan-approve` is deliberately **absent** from this table — see
+Decisions needed → DQ-3.
 
 Edges are of two kinds. **(a) Implicit SDD-tree edges** — derived from structure,
 always present:
@@ -254,6 +269,49 @@ are live invariant breaches, not future work.
   *decides whether* corruption exists (deterministic, step 0); it only *proposes a
   fix* a human confirms.
 
+### Human-gate predicate generalisation (DR-047 §2, #528)
+
+- **FR-16 (greenlit-for-type is a precondition for every human-gated node, not just
+  gate-open).** The existing structural "gate-open" condition (epic `proposed`, spec
+  un/stale-approved, ADR `proposed`) is **necessary but no longer sufficient**. Before a
+  node of kind `epic-promote`, `spec-approve`, `adr-accept`, or either FR-17 kind is added
+  to the pending set, the resolver MUST also check **greenlit-for-type**: the artifact's
+  `ai-review/<type>` status reads `pass`, bound to the artifact's *current* content
+  revision — a verdict pinned to a stale/prior revision is NOT greenlit (mirrors SPEC-031
+  FR-9a's verified-fresh semantics; re-derive, never trust an old label). `phase-action` is
+  unaffected — it is SPEC-010-owned work, not itself a reviewed Approvable type. This
+  generalises DR-033 §6's PR-only predicate (`ai-review:pass` ∧ mergeable ∧ checks-green)
+  to every human-gated type per **DR-047 §2 / SPEC-031 FR-4** (which defines the contract
+  and explicitly assigns the resolver half of it here): the full predicate is
+  **greenlit-for-type ∧ prior-stage-gates-clear ∧ human-gate-open**. "Prior-stage-gates-clear"
+  for a doc Approvable reuses the existing FR-9/FR-13 coherence and `depends_on` checks
+  unchanged; for `pr-review` it is DR-033 §6's original `mergeable ∧ checks-green`.
+- **FR-17 (two new human-gated node kinds — `constitution-accept`, `pr-review`; subsumes
+  #182).** The node-kind set gains:
+  - **`constitution-accept`** — a constitution invariant `status: proposed`, mirroring
+    `adr-accept`'s shape (DR-047 Decision 1 names the constitution invariant as
+    high-criticality / always-human).
+  - **`pr-review`** — a PR-to-main that is open, mergeable, and checks-green, pending
+    human merge-confirmation. This is the node kind issue #182 proposed; #182's own
+    predicate was never built into the resolver (`grep -c ai-review
+    packages/shared/src/next-task.ts` → 0 today, and this file's own header already lists
+    "PR-review nodes (#182) … out of this slice"), so FR-17 builds it directly as the
+    `pr-review` case of FR-16's generalised predicate rather than as a separate
+    PR-only predecessor this spec would then have to extend again. DR-038 §6 confirms the
+    *rendering* of PR nodes is downstream of whatever this resolver emits, not a competing
+    source of truth — building the predicate here is consistent with that DR, not a
+    detour from it. See Decisions needed → DQ-1 for the scope call this makes.
+  - `plan-approve` is **not** introduced by this FR — see Decisions needed → DQ-3.
+- **FR-18 (fail closed — absence or a non-pass verdict is never read as greenlit).** Per
+  the project's no-silent-gate invariant (constitution #2): if an artifact's
+  `ai-review/<type>` check has never run, or reads `pending`, `escalated`, or `changes`,
+  the node is **not emitted as pending at all** — withheld from the ranked set entirely,
+  never merely demoted (mirrors DR-047 §2's "MUST NOT appear in the human queue"). Absence
+  of evidence MUST NOT be read as a pass. A T0 fixture asserts: a `spec-approve` candidate
+  with zero `ai-review/spec` history is excluded from the resolver's output entirely, not
+  ranked-low. See Decisions needed → DQ-2 for why this rule, applied naively today, is a
+  live blackout risk and needs a sequencing answer before it ships.
+
 ### Packaging
 
 - **FR-11 (Tier-0 pure function in `packages/shared`).** The resolver is a single
@@ -295,6 +353,14 @@ Seams where a v1 mistake is expensive to undo later — ranked. Each is FR-ancho
 - **INV #5 (user override wins).** Reuses SPEC-010 FR-7 override memory: the human
   may dismiss the current next task ("not this — I'm on X"); the dismissal sticks
   until state changes.
+- **INV — Greenlit-for-type gate (DR-047 §2, FR-16/FR-17/FR-18, #528).** A human-gated
+  node (`spec-approve`, `adr-accept`, `epic-promote`, `constitution-accept`, `pr-review`)
+  MUST NOT be emitted unless its type's independent AI-review verdict is a fresh `pass`
+  (FR-16); absence or any non-pass verdict withholds the node entirely (FR-18, fail
+  closed — never defaulted to pass). Non-gated types (Issue; auto-accepted
+  design.md/tasks.md per dev config, DR-047 Decision 5) are never emitted as nodes at all,
+  regardless of review verdict. Generalises DR-033 §6's PR-only predicate to every
+  human-gated Approvable type.
 
 ## Acceptance Criteria (Zone A)
 
@@ -314,6 +380,9 @@ requirement is met. The resolver ships only when every box is tickable.
 - [ ] **(FR-15)** Structural corruption (malformed frontmatter, dangling refs, DAG cycle) is detected deterministically; the ladder offers programmatic repair first, LLM escalation only when no deterministic repair applies; both confirm-before-write.
 - [ ] **(FR-11)** A single pure function in `packages/shared` (no `vscode`, no network) is the *only* resolver, imported by status-bar, explorer rollup, and CI/`npm run validate`.
 - [ ] **(FR-12)** Each (state → next-task) mapping has a T0 invariant test; the two triggering-session inconsistencies (stale epic INDEX; SPEC-004 implementing-under-proposed) exist as T3 regression fixtures.
+- [ ] **(FR-16)** A fixture with a structurally-open `spec-approve`/`adr-accept`/`epic-promote` node but no `ai-review/<type>:pass` verdict is excluded from the ranked set; the identical fixture with a fresh `pass` verdict is included.
+- [ ] **(FR-17)** A `pr-review` fixture (PR open, mergeable, checks-green, `ai-review:pass`) is ranked; the same PR missing any one of the three conditions is excluded. A `constitution-accept` fixture mirrors `adr-accept`'s on/off behaviour.
+- [ ] **(FR-18)** Absent, `pending`, `escalated`, and `changes` verdicts all exclude the node (fail-closed); a test asserts the resolver never defaults an unknown/missing verdict to pass.
 
 ## Coverage Map (all bases)
 
@@ -337,6 +406,8 @@ requirement is met. The resolver ships only when every box is tickable.
 | Gate violations (the 2 found by hand) | FR-9, FR-12 |
 | Resolve SPEC-010 OQ#1 (global order) | FR-2, FR-4 |
 | One engine, every surface | FR-11 |
+| Generalise PR-only predicate to all human-gated types (DR-047 §2, #528) | FR-16, FR-17 |
+| Fail closed on missing/non-pass review evidence | FR-18 |
 
 ## Risks & Mitigations
 
@@ -349,6 +420,7 @@ requirement is met. The resolver ships only when every box is tickable.
 | R5 | **Corruption blackout (DoS).** One cycle or malformed file makes the resolver say "unclear" globally → no next task at all, signpost dead. | Med · High | FR-15 localizes the report to the offending edge/file set and offers repair; the rest of the DAG MUST still resolve. A single bad node must not blank the whole signpost. |
 | R6 | **Advisory drifts to de-facto blocking.** Human follows the signpost blindly, mis-ordering real-world priorities the model can't see. | Med · Med | FR-5 advisory + INV #5 override + FR-6 pipeline view (see what's behind the one task). The signpost suggests; the human still decides. |
 | R7 | **Two-queue leak.** Agent/LLM dispatch work surfaces as a human next task (or vice-versa), polluting the signpost. | Low · Med | INV — Two Queues (T0) + dedicated tests; the resolver's node sources exclude the dispatch queue by construction (FR-8). |
+| R8 | **Greenlit gate blanks the signpost by omission, not error.** Unlike R5 (one bad node blanks the DAG), FR-16/FR-18 can make *every* `spec-approve`/`adr-accept`/`epic-promote`/`constitution-accept` node vanish at once — silently indistinguishable from the honest "nothing pending" empty-queue state (Failure-Mode #3) — if the per-type reviewer (#527) that produces `ai-review/<type>` verdicts has not shipped yet. This is the exact "signpost lies" failure EPIC-010 exists to prevent, via omission instead of a wrong task. | High (certain, if sequenced naively) · High | See Decisions needed → DQ-1/DQ-2: this spec does not ship FR-16 enabled for the doc-type kinds until #527 posts real verdicts; FR-7's show-the-evidence is extended so a withheld node's reason ("no `ai-review/spec` verdict yet") is inspectable via the FR-6 expand, never a silent disappearance. |
 
 ## Assumptions
 
@@ -356,6 +428,8 @@ requirement is met. The resolver ships only when every box is tickable.
 - Artifacts carry parseable YAML frontmatter with `status`, and (where set) `epic`, `epic.order`, `priority`, and the FR-13 edge keys — i.e. the validation gate from `npm run validate` keeps frontmatter well-formed enough to parse.
 - The implicit SDD-tree edges (epic→members, spec-approval→implement per DR-012, phase-predecessor→successor per SPEC-010) are derivable from existing structure without new authoring; only the **explicit** cross-cutting edges (FR-13) require new frontmatter authoring.
 - A `MILESTONE-NNN` artifact registry / INDEX participation (FR-3b) can reuse the same id+status+index pattern already used for SPECs/DRs/epics rather than needing a new storage substrate.
+- **(FR-16/FR-17)** A PR's `mergeable` / `checks-green` / `ai-review:*` fields, and each doc Approvable's `ai-review/<type>` verdict, are supplied as already-fetched structured input by the calling adapter (the fs-adapter for docs; a CI/dispatch-side adapter for PRs) — the pure resolver core never fetches them itself. This preserves FR-11's Tier-0/no-network constraint exactly as the existing fs-adapter does for epic/spec/ADR status today; a PR-fetching resolver would violate constitution invariant #1 (no network calls without consent) and FR-1's determinism (a live API response is not a pure function of a fixed input).
+- **(FR-16/FR-18)** The per-type reviewer that produces `ai-review/<type>` verdicts for Spec/DR/Epic/Constitution (#527, SPEC-031 FR-1/FR-3) is assumed to exist and be posting verdicts before FR-16's gate is *enabled* for those four node kinds — see Decisions needed → DQ-1. The `pr-review` kind's `ai-review` verdict pipeline is assumed already live (DR-033 §6 / SPEC-031: "already shipped").
 
 ## Test-thought
 
@@ -367,11 +441,13 @@ Verified by a T0 invariant-fixture suite in `packages/shared/tests`: each (state
 - Collapses SPEC-010's within-feature signpost and the three cross-artifact approval gates into **one** total order, resolving SPEC-010 OQ#1 (global ordering) with a single engine rather than per-surface logic (FR-2, FR-4).
 - Makes prose-only relationships (`Triggered by:`, `Resolves:`, `composes`) machine-readable (FR-13), so blockers the engine was blind to now actually re-rank — and a dangling ref becomes detectable corruption instead of an invisible drop (FR-15).
 - One `packages/shared` pure function means status-bar, explorer, and CI can never disagree on "next task" (FR-11) — the signpost has a single source of truth.
+- The signpost queue becomes a pre-filtered, AI-greenlit set across every human-gated type, not just PRs (FR-16/FR-17) — closing the rubber-stamp surface DR-047 names (#344–349) at the resolver layer, not just by policy.
 
 **Negative:**
 - Adds authoring burden: cross-cutting blockers only count once a human writes `depends_on`/`supersedes` (FR-13) and registers `MILESTONE-NNN` artifacts (FR-3b). Un-authored edges leave the resolver under-ordering (R2).
 - Introduces a new corpus-wide frontmatter contract (the edge vocabulary) that, once adopted, is costly to change (see Costly to Refactor #1) — and a new artifact kind (milestones) to maintain.
 - The resolver is now a single point of failure for the signpost: a structural-corruption blackout (R5) must be carefully localized (FR-15) or one bad file blanks the global next-task.
+- The greenlit gate (FR-16/FR-18) adds a second, silent way for the queue to go empty — not corruption, just missing review evidence (R8) — which must be sequenced against #527's rollout or the signpost blanks for every doc Approvable in the corpus.
 
 ## Failure-Modes / Edge-Cases
 
@@ -382,6 +458,8 @@ Verified by a T0 invariant-fixture suite in `packages/shared/tests`: each (state
 5. **Coherence breach vs deeper incoherence** — child-ahead-of-parent (FR-9) routes to a gate-violation next-task; malformed/dangling state beyond FR-9 routes to "state unclear — <file>" + repair ladder (FR-10/FR-15). The boundary between these two must not be miscategorized.
 6. **`supersedes` to an already-`done`/`archived` target** — superseding a node whose target is already out of the queue must be a no-op, not a re-introduction or error (FR-13).
 7. **Milestone never reached** — a `depends_on: [MILESTONE-NNN]` whose milestone stays `open` keeps the dependent legitimately hidden indefinitely; this is correct (auto-clears on reach), not a stuck state (FR-3a/FR-3b).
+8. **No `ai-review/<type>` history exists at all for a type** (e.g. #527 not yet shipped) — every node of that kind is withheld (FR-18), and the resulting empty/thinner queue is indistinguishable from edge-case #3's honest "nothing pending." This is the R8 risk made concrete; the mitigation is sequencing (DQ-1), not a resolver-side fix, because the resolver cannot tell "truly nothing pending" apart from "nothing has been reviewed yet" from inputs alone.
+9. **A greenlit verdict regresses mid-queue** (a fresh `ai-review/spec:changes` lands after a prior `pass` — new commits, a re-review). The node that was previously withheld-as-absent or included-as-greenlit must re-evaluate on the next resolve; a stale cached `pass` must never outlive the content revision it was verified against (FR-16's "current revision" clause).
 
 ## Test / Verification Strategy
 
@@ -402,6 +480,9 @@ Per-FR tier + one-line assertion sketch:
 | FR-15 | T0/T2 | Cycle/dangling/malformed detected deterministically; repair ladder offered (deterministic first, LLM second), confirm-before-write. |
 | FR-11 | T1 | Single `packages/shared` pure function (no `vscode`/network) imported by status-bar, explorer, CI. |
 | FR-12 | T0 | Coverage check: every severity class + gate edge + coherence rule has a mapped T0 test; 2 session bugs exist as T3 fixtures. |
+| FR-16 | T0 | Structurally-open node + no/stale `ai-review/<type>` verdict → excluded; same node + fresh `pass` → included. |
+| FR-17 | T0 | `pr-review`/`constitution-accept` fixtures each exercise their full on/off predicate independently. |
+| FR-18 | T0 | Every non-`pass` verdict value (absent, `pending`, `escalated`, `changes`) excludes the node; none default to included. |
 
 ## Alternatives Considered
 
@@ -420,12 +501,15 @@ Per-FR tier + one-line assertion sketch:
 - [DR-014](../../../docs/decisions/DR-014.md) tier map — mandates the resolver live in `packages/shared` (FR-11).
 - [DR-019](../../../docs/decisions/DR-019.md) — the decision this spec is the contract for (determinism, no-LLM ranking).
 - The frontmatter schema across all SPEC/DR/epic artifacts (parsed for `status`, `epic.order`, `priority`, FR-13 edges) and the `MILESTONE-NNN` registry (FR-3b).
+- [DR-047](../../../docs/decisions/DR-047.md) §2 — the predicate contract FR-16/FR-17/FR-18 implement (the resolver half; [SPEC-031](../SPEC-031-reviewer-all-approvables/requirements.md) FR-4/FR-8 own the rest).
+- [SPEC-031](../SPEC-031-reviewer-all-approvables/requirements.md) FR-1/FR-3 (#527, unbuilt) — the per-type reviewer that must be posting `ai-review/<type>` verdicts before FR-16 is safe to enable for the doc-type node kinds (DQ-1).
 
 **Blast-radius — what breaks if changed:**
 - Changing the `packages/shared` resolver signature breaks **all four consumers** (status-bar signpost, explorer rollup, CI/`npm run validate`, future surfaces) simultaneously (FR-11, DR-014).
 - Changing the FR-13 edge vocabulary names/semantics requires migrating every artifact that authored them (Costly to Refactor #1).
 - Changing the FR-2 severity-class set/order invalidates the entire T0 fixture suite (FR-12) and any class-coded UI.
 - A regression that lets an agent/dispatch node leak in breaks INV — Two Queues across every surface at once (FR-8).
+- Enabling FR-16's greenlit gate for the doc-type node kinds before #527 ships withholds **every** `spec-approve` / `adr-accept` / `epic-promote` / `constitution-accept` node across the whole corpus simultaneously (R8) — the single highest-blast-radius risk this addition introduces, because it is silent by design (FR-18 is correct to fail closed; the danger is purely sequencing).
 
 ## Rollback / Reversibility
 
@@ -440,6 +524,9 @@ Per-FR tier + one-line assertion sketch:
 - **OQ4 (cross-epic gate-violation tie-break)** and **OQ5 (deterministic-repairable vs LLM-only corruption set)** — both deferred to the plan phase (see Open questions); resolve before implement.
 - **MILESTONE-NNN registry/INDEX mechanics (FR-3b)** — exact storage + index-participation to be specified at plan time (assumed to reuse the SPEC/DR id+status+INDEX pattern).
 - **UX/data-contract handoff** — the status-bar signpost + explorer rollup visual design is a separate downstream UX spec (see Out of scope); this spec hands it the ordering + task-object contract.
+- **Activation of FR-16 for the doc-type node kinds (#528 / DQ-1):** tracked as an explicit follow-up step, not a prose promise — **no issue number yet** (this dispatch is specify-only and forbids opening one; the approving human should file it, or route it through the usual triage, before Plan). It must name: "flip the greenlit gate on for `spec-approve`/`adr-accept`/`epic-promote`/`constitution-accept` once #527 is confirmed posting verdicts."
+- **DR-047 Plan/design.md identity contradiction (DQ-3):** also not yet issue-tracked for the same reason. Blocks introducing a `plan-approve` node kind until resolved.
+- **#182 closure note:** if DQ-1 resolves to "absorb" (this spec's working assumption, FR-17), #182 should be closed/relinked as *"subsumed by #528 / SPEC-012 FR-17"* explicitly in the implementing PR — never silently, per the project's prose-only-follow-up-leak rule.
 
 ## Out of scope
 
@@ -455,6 +542,12 @@ Per-FR tier + one-line assertion sketch:
   data the engine reads (FR-3), never engine/LLM inference at resolve time.
 - **Blocking enforcement** — the resolver is advisory (mirrors SPEC-010 FR-5);
   the blocking gate is DR-012.
+- **A `plan-approve` node kind** — not introduced by FR-17; blocked on DQ-3
+  (the Plan/design.md file-identity contradiction DR-047 itself flags unresolved).
+- **The per-type reviewer that produces `ai-review/<type>` verdicts** — owned by
+  SPEC-031 (#527); this spec only *consumes* the resulting label/status.
+- **The ordering gate (doc-before-implementing-code)** — owned by SPEC-031 FR-5 (#529);
+  a PR-level gate, distinct from this spec's per-node predicate.
 
 ## Resolved questions
 
@@ -478,3 +571,77 @@ Per-FR tier + one-line assertion sketch:
   unambiguous dangling ref → re-resolve) vs require an LLM offer (ambiguous ref,
   malformed hand-edited frontmatter)? Enumerate the deterministic set at plan time;
   default everything outside it to the LLM-escalation rung. *(Open — plan phase.)*
+
+## Decisions needed (Clarify)
+
+Added for #528 (DR-047 §2). These are the human's read. Each names a recommendation
+**and** what that recommendation costs, per the project's decision convention.
+
+- **DQ-1 — Scope: does #528 absorb #182's never-built PR-node-kind work, or does it
+  depend on #182 landing first?** The issue body reads "extends #182 (PR-only precursor)
+  to all human-gated types," phrasing that assumes #182 already shipped a PR-only
+  predicate to extend. It did not — `grep -c ai-review packages/shared/src/next-task.ts`
+  is `0` today, and this file's own header already lists "PR-review nodes (#182) …
+  out of this slice" as unbuilt. FR-17 (above) takes the working assumption that #528
+  builds `pr-review` directly, since no other spec owns this predicate and DR-038 §6
+  confirms the graph-render surface is downstream of whatever this resolver emits, not a
+  competing source of truth.
+  - **(A) Absorb — recommended.** Build `pr-review` here (FR-17), close #182 as
+    subsumed, relinked explicitly in the implementing PR (never silently — see Out of
+    scope). *Cost:* grows this spec's diff by a full new node kind rather than
+    "generalise 3 existing predicates" — worth re-confirming the T3/T4 tier call still
+    fits once Plan sizes it, and loses whatever discussion/history lives only on #182 if
+    it is closed rather than cross-linked.
+  - **(B) Depend on #182.** Scope #528 to the four doc-type node kinds only
+    (`spec-approve`/`adr-accept`/`epic-promote`/`constitution-accept`); file/land #182
+    as its own prerequisite PR first. *Cost:* two sequenced PRs instead of one, and a
+    `depends_on: [#182]` edge this spec's own FR-13 machinery would have to track on
+    itself — recursive, and slower for no correctness gain since the predicate shape
+    (FR-16) is identical either way.
+
+- **DQ-2 — Rollout sequencing of the FR-16 greenlit gate.** Enabling FR-16/FR-18 for
+  `spec-approve`/`adr-accept`/`epic-promote`/`constitution-accept` the moment this spec's
+  code ships will withhold **every** node of those kinds corpus-wide, because #527 (the
+  per-type reviewer that posts `ai-review/<type>` verdicts) has never run — confirmed
+  unbuilt in SPEC-031 ("still unbuilt — #527/#453", FR-7). The signpost would read
+  "nothing pending," indistinguishable from the honest empty-queue case (Failure-Mode #3),
+  while real human-gated work sits un-surfaced — the exact *signpost-lies* failure
+  EPIC-010 exists to prevent, reached via omission instead of a wrong answer. `pr-review`
+  is NOT at risk here — its `ai-review` pipeline is already shipped and merge-blocking
+  (SPEC-031: "already shipped").
+  - **(B) Gate only `pr-review` now; land FR-16/FR-18 for the four doc-type kinds
+    specified-but-dormant until #527 ships, then flip one corpus-wide switch —
+    recommended.** *Cost:* ships a documented-but-unenforced requirement for 4 of 6 node
+    kinds; the activation step must get its own tracked issue (see Out of scope) so it
+    is never a prose-only promise that quietly never happens.
+  - **(A) Gate everything now.** Correct per DR-047's letter if #527 ships
+    first/atomically with this spec. *Cost:* if the two land out of order — plausible,
+    since they are different issues with no enforced sequencing today — the signpost
+    goes blank for every doc Approvable until #527 catches up, with no error raised.
+  - **(C) Treat "never reviewed" as distinct from "reviewed and rejected"; gate only on
+    an actual negative verdict, never on absence.** *Rejected as a standalone answer:*
+    this is exactly the fail-open shape FR-18 and constitution invariant #2 (no silent
+    gate) forbid — "not reviewed yet" and "never going to be reviewed" are
+    indistinguishable from the resolver's inputs, so this reopens the rubber-stamp
+    surface DR-047 closes. Could still serve as (B)'s temporary bridge condition, not as
+    its own resolution.
+
+- **DQ-3 — What artifact backs the "Plan" human gate?** DR-047 Decision 1/5 lists Plan
+  as high-criticality/always-human, but DR-047's own 2026-08-05 self-correction #3 found
+  no `plan.md` exists anywhere in the corpus (`find specs -name plan.md` → empty) — the
+  Plan-phase artifact **is** `design.md`, which Decision 5 separately classifies as
+  low-criticality/auto-acceptable. One physical file, two contradictory policies, flagged
+  by the DR itself and never resolved. FR-17 deliberately ships **no** `plan-approve`
+  node kind until this is settled (see Out of scope).
+  - **(A) Plan's gate = design.md's own approval sidecar; reclassify "Plan" out of the
+    high-criticality list — recommended.** Fewer concepts: one file, one gate, matching
+    what already exists for design.md (#630's sidecar mechanism). *Cost:* requires a
+    DR-047 follow-up amendment correcting Decision 1/5's text before this spec can
+    honestly claim Plan coverage; until that lands, Plan stays a documented gap here, not
+    a silent omission.
+  - **(B) Plan's gate is a new, SPEC-012-native sub-gate on the spec's `phases.plan`
+    transition**, distinct from design.md's content-sidecar — "approving the plan
+    decision" ≠ "approving the design.md document," even though one file realises both
+    today. *Cost:* introduces a frontmatter/approval concept with no existing analogue in
+    the corpus, and routes around DR-047's flagged contradiction rather than resolving
+    it — risking the two gates drifting further apart in meaning over time.
