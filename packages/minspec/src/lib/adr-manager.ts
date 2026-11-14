@@ -7,6 +7,7 @@ import { epicRefValue } from './epic-manager';
 import { inspectAllStatusClaims, claimParagraphText } from './status-parity';
 import { ensureDirectory } from './opt-in';
 import { prepareText, readDocument, readDocumentText, restoreLineEndings } from './text-io';
+import { applyDrIndexDelta } from './dr-index-splice';
 export { slugify };
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -631,15 +632,62 @@ export const ADR_STATUS_VALUES: readonly AdrStatus[] = [
   'superseded',
 ];
 
-/** True if the ADR file already has a leading YAML frontmatter block. */
+/** What {@link adrFrontmatterState} found at the head of a decision record. */
+export type AdrFrontmatterState = 'present' | 'absent' | 'unreadable';
+
+/**
+ * Whether a decision record's frontmatter can be written to (SPEC-095 FR-6).
+ *
+ * - `present` - a leading block the frontmatter pattern reads.
+ * - `absent` - the first non-blank line is not `---`: a hand-written record with no
+ *   frontmatter, the case the synthesize branch of {@link setAdrStatus} exists for (#201).
+ * - `unreadable` - the first non-blank line IS `---` but no block can be read (a blank
+ *   line before it, a missing closing fence, a leading byte order mark). Synthesizing here
+ *   put a second block in front of the first, so the record asserted two statuses (#2467,
+ *   DQ-5); every writer refuses instead.
+ *
+ * Decided by the first non-blank line with one leading U+FEFF ignored, never by "the
+ * pattern did not match": a failed match is "could not read", not "has none".
+ * `content` is expected prepared (LF, `readDocument`). Pure, no fs.
+ */
+export function adrFrontmatterState(content: string): AdrFrontmatterState {
+  if (FRONTMATTER_RE.test(content)) return 'present';
+  const firstNonBlank = content
+    .replace(/^\uFEFF/, '')
+    .split('\n')
+    .find((line) => line.trim() !== '');
+  return firstNonBlank?.trim() === '---' ? 'unreadable' : 'absent';
+}
+
+/** The refusal FR-6 requires: names the file, says nothing was written. */
+function unreadableFrontmatterError(filePath: string): Error {
+  return new Error(
+    `${path.basename(filePath)} opens with a frontmatter fence (---), but no frontmatter ` +
+      `block can be read from it (a blank line before the block, a missing closing ---, or a ` +
+      `leading byte order mark). Nothing was written. Repair the block by hand, then retry.`,
+  );
+}
+
+/**
+ * True if the ADR file already has a leading YAML frontmatter block; false if it has none
+ * or cannot be read.
+ *
+ * THROWS (SPEC-095 FR-6) when the record opens with `---` but no block can be read, so a
+ * caller can never mistake "could not read" for "has none" and offer to add a second
+ * block: the Accept / Set Decision Status path surfaces the error before any write.
+ */
 export function adrHasFrontmatter(filePath: string): boolean {
+  let text: string;
   try {
     // Prepared (SPEC-095): a CRLF record has its frontmatter too. Reading it as "none" is
     // what sent Accept Decision to its "predates MinSpec" prompt and a second block (#2397).
-    return FRONTMATTER_RE.test(readDocumentText(filePath));
+    text = readDocumentText(filePath);
   } catch {
     return false;
   }
+  const state = adrFrontmatterState(text);
+  if (state === 'unreadable') throw unreadableFrontmatterError(filePath);
+  return state === 'present';
 }
 
 /**
@@ -798,12 +846,20 @@ export function reconcileBodyStatus(content: string, status: AdrStatus): string 
  * SPEC-095: the record is read through `text-io` and written back in the line endings it
  * had. A CRLF record used to fail the frontmatter pattern and take the synthesize branch,
  * which put an LF block in front of a block that still said `proposed` (#2397).
+ *
+ * SPEC-095 FR-6: the synthesize branch is taken only when the first non-blank line is not
+ * `---` ({@link adrFrontmatterState}). A record that opens with `---` but whose block cannot
+ * be read throws, naming the file, and nothing is written.
  */
 export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   if (!ADR_STATUSES.has(status)) {
     throw new Error(`Invalid ADR status: ${status}`);
   }
   const { text: content, original } = readDocument(filePath);
+  // SPEC-095 FR-6: decide by the first non-blank line, not by whether the pattern matched.
+  // A record that opens with `---` and has no readable block is refused, file untouched.
+  const state = adrFrontmatterState(content);
+  if (state === 'unreadable') throw unreadableFrontmatterError(filePath);
   const fmMatch = content.match(FRONTMATTER_RE);
   if (!fmMatch) {
     // No frontmatter — synthesize one and prepend it, preserving the body
@@ -1195,6 +1251,62 @@ export function regenerateDrIndex(
   fs.writeFileSync(indexPath, prior ? restoreLineEndings(merged, prior.original) : merged, 'utf-8');
 
   return { filePath: indexPath, count };
+}
+
+/**
+ * Update <decisionsDir>/INDEX.md for the listed decisions only (#896).
+ *
+ * The file watcher used to call {@link regenerateDrIndex} on every DR create, change and
+ * delete. A full rebuild rewrites every entry, so creating DR-099 also "fixed" any other
+ * entry that had drifted from its file, and deleting DR-099 again (Source Control
+ * Discard Changes on the untracked file) rebuilt from disk instead of undoing the
+ * create. The drift fixes stayed, and INDEX.md stayed modified after the discard.
+ *
+ * Here the INDEX is changed only in the entries for `drIds`. Each one is taken from a
+ * full in-memory regeneration (so the rendering is identical to regenerateDrIndex), or
+ * removed when that regeneration has no entry for it. A create and a discard of the
+ * same file therefore cancel out byte for byte.
+ *
+ * Falls back to a full {@link regenerateDrIndex} when there is no INDEX yet, or when
+ * the INDEX is not a managed register a per-entry edit can handle (see
+ * `applyDrIndexDelta`). The file is written only when its content changes.
+ */
+export function regenerateDrIndexEntries(
+  rootDir: string,
+  drIds: readonly string[],
+  vscodeOverrides?: { decisionsDir?: string },
+  options: DrIndexOptions = {},
+): DrIndexResult {
+  const decisionsDir = resolveDecisionsDir(rootDir, vscodeOverrides);
+  const indexPath = path.join(decisionsDir, 'INDEX.md');
+  if (!fs.existsSync(indexPath)) return regenerateDrIndex(rootDir, vscodeOverrides, options);
+
+  const prior = readDocument(indexPath);
+  const { content, count } = buildDrIndexContent(rootDir, vscodeOverrides, options, prior.text);
+  const fresh = mergeDrIndex(prior.text, content);
+  const next = applyDrIndexDelta(prior.original, fresh, drIds)
+    ?? restoreLineEndings(fresh, prior.original);
+  if (next !== prior.original) fs.writeFileSync(indexPath, next, 'utf-8');
+  return { filePath: indexPath, count };
+}
+
+/**
+ * The decision id a DR file contributes to the INDEX: its frontmatter `id:` when the
+ * file exists and declares one, else the `DR-NNN` prefix of its file name (what
+ * {@link listAdrs} uses for a record without one). Null for a file that is not a DR
+ * file at all (INDEX.md, a README). A deleted file can only be named by its file name.
+ */
+export function drIdForFile(filePath: string): string | null {
+  const base = path.basename(filePath);
+  if (!ADR_FILE_RE.test(base)) return null;
+  const fromName = base.match(ADR_ID_RE)?.[0] ?? null;
+  try {
+    const fm = readDocumentText(filePath).match(FRONTMATTER_RE);
+    const id = fm ? parseFrontmatterYaml(fm[1]).id : undefined;
+    return typeof id === 'string' && id !== '' ? id : fromName;
+  } catch {
+    return fromName;
+  }
 }
 
 // ─── INDEX Status-Drift Validation (issue #220) ───────────────────────────────
