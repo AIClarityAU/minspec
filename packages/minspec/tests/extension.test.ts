@@ -17,6 +17,7 @@ const mockBacklogTreeProvider = { refresh: vi.fn(), refreshIfStale: vi.fn(), set
 const mockNextTaskStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockScaffoldCommitStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockTidyPrimaryStatusBar = { update: vi.fn(), dispose: vi.fn() };
+const mockQueueDepthStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockSpecPanel = { show: vi.fn(), refresh: vi.fn(), dispose: vi.fn() };
 const mockCodeLensProvider = { refresh: vi.fn() };
 const mockSpecFileLensProvider = { refresh: vi.fn() };
@@ -240,6 +241,7 @@ vi.mock('../src/views/status-bar', async (importOriginal) => ({
   MinSpecNextTaskStatusBar: vi.fn(function () { return mockNextTaskStatusBar; }),
   MinSpecScaffoldCommitStatusBar: vi.fn(function () { return mockScaffoldCommitStatusBar; }),
   MinSpecTidyPrimaryStatusBar: vi.fn(function () { return mockTidyPrimaryStatusBar; }),
+  MinSpecQueueDepthStatusBar: vi.fn(function () { return mockQueueDepthStatusBar; }),
 }));
 // Stub the next-task command factory + cheap computeNextTask so activate's
 // status-bar wiring runs without building a real graph (no fs in this mock).
@@ -756,12 +758,13 @@ describe('activate()', () => {
   // File system watchers
   // -------------------------------------------------------------------------
 
-  it('creates five file system watchers (specs, adrs, traceability, approvals, epics)', () => {
+  it('creates six file system watchers (specs, adrs, traceability, approvals, epics, queue)', () => {
     activate(makeMockContext());
 
     // DR-012 added the approvals watcher → 4 (was 3); SPEC-012 signpost wiring
     // added the docs/epics/** watcher (epic status feeds the next-task resolver) → 5.
-    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(5);
+    // #737 added the .minspec/queue/** watcher (queue-depth status bar) → 6.
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(6);
   });
 
   it('wires spec watcher callbacks to refresh tree and panel', () => {
