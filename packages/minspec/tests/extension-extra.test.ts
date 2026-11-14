@@ -180,7 +180,14 @@ vi.mock('../src/commands/epic', () => ({
   acceptEpicCommand: vi.fn(),
 }));
 vi.mock('../src/commands/backfill-epics', () => ({ backfillEpicsCommand: vi.fn() }));
-vi.mock('../src/lib/adr-manager', () => ({ regenerateDrIndex: vi.fn() }));
+vi.mock('../src/lib/adr-manager', () => ({
+  regenerateDrIndex: vi.fn(),
+  // #896: the watcher maps each event to a decision id and updates only those entries.
+  regenerateDrIndexEntries: vi.fn(),
+  resolveDecisionsDir: vi.fn((root: string) => `${root}/docs/decisions`),
+  listAdrs: vi.fn(() => []),
+  drIdForFile: vi.fn((p: string) => /\/(DR-\d+)[^/]*\.md$/.exec(p)?.[1] ?? null),
+}));
 vi.mock('../src/commands/backlog', () => ({ scoreWsjfCommand: vi.fn(), triageIssueCommand: vi.fn() }));
 vi.mock('../src/commands/approve', () => ({ approveSpecCommand: vi.fn(), revokeApprovalCommand: vi.fn() }));
 vi.mock('../src/commands/validate', () => ({ validateSpecCommand: vi.fn() }));
@@ -290,7 +297,7 @@ import { approveSpecCommand, revokeApprovalCommand } from '../src/commands/appro
 import { validateSpecCommand } from '../src/commands/validate';
 import { migrateLayoutCommand } from '../src/commands/migrate';
 import { parkCommand } from '../src/commands/park';
-import { regenerateDrIndex } from '../src/lib/adr-manager';
+import { regenerateDrIndex, regenerateDrIndexEntries } from '../src/lib/adr-manager';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -982,12 +989,13 @@ describe('ADR watcher onAdrsChanged guards', () => {
 
       vi.advanceTimersByTime(300);
       expect(regenerateDrIndex).not.toHaveBeenCalled();
+      expect(regenerateDrIndexEntries).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('passes undefined options to regenerateDrIndex when decisionsDir is empty (line 298)', () => {
+  it('passes undefined options to regenerateDrIndexEntries when decisionsDir is empty (line 298)', () => {
     vi.useFakeTimers();
     try {
       configValues = { decisionsDir: '' };
@@ -995,14 +1003,14 @@ describe('ADR watcher onAdrsChanged guards', () => {
 
       const adrWatcher = createdWatchers[1];
       const onChange = adrWatcher.onDidChange.mock.calls[0][0] as (u: any) => void;
-      vi.mocked(regenerateDrIndex).mockClear();
+      vi.mocked(regenerateDrIndexEntries).mockClear();
 
       onChange({ fsPath: '/tmp/test-workspace/docs/decisions/DR-009.md' });
       vi.advanceTimersByTime(300);
 
       // The `decisionsDir ? {decisionsDir} : undefined` ternary takes the
       // undefined branch when decisionsDir is the empty string.
-      expect(regenerateDrIndex).toHaveBeenCalledWith('/tmp/test-workspace', undefined);
+      expect(regenerateDrIndexEntries).toHaveBeenCalledWith('/tmp/test-workspace', ['DR-009'], undefined);
     } finally {
       vi.useRealTimers();
     }
