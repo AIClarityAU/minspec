@@ -81,15 +81,22 @@ export function formatKeybindingForDisplay(binding: string): string {
  * binding, so this reflects what MinSpec ships. A 'Change…' affordance into the
  * Keyboard Shortcuts editor is the honest escape hatch (tracked follow-up).
  */
-export function resolveNextTaskKeybinding(
+export function resolveKeybinding(
   packageJSON:
     | { contributes?: { keybindings?: ReadonlyArray<{ command?: string; key?: string; mac?: string }> } }
     | undefined,
+  command: string,
 ): string | undefined {
-  const entry = packageJSON?.contributes?.keybindings?.find((k) => k.command === 'minspec.nextTask');
+  const entry = packageJSON?.contributes?.keybindings?.find((k) => k.command === command);
   if (!entry) return undefined;
   const raw = process.platform === 'darwin' ? entry.mac ?? entry.key : entry.key;
   return raw ? formatKeybindingForDisplay(raw) : undefined;
+}
+
+export function resolveNextTaskKeybinding(
+  packageJSON: Parameters<typeof resolveKeybinding>[0],
+): string | undefined {
+  return resolveKeybinding(packageJSON, 'minspec.nextTask');
 }
 
 /**
@@ -251,6 +258,59 @@ export class MinSpecTidyPrimaryStatusBar {
       `Redundant (already on origin, safe to discard): ${redundantPaths.join(', ')}.${orphanNote} Click to tidy.`;
     this.statusBarItem.accessibilityInformation = {
       label: `MinSpec: ${redundantPaths.length} redundant path${redundantPaths.length === 1 ? '' : 's'} in the primary checkout`,
+    };
+    this.statusBarItem.show();
+  }
+
+  /** Clean up resources */
+  dispose(): void {
+    this.statusBarItem.dispose();
+  }
+}
+
+// ─── Phase-advance queue-depth status bar (#737) ─────────────────────────────
+
+/** Status bar text for a non-empty queue. The item is hidden at zero. */
+export function formatQueueDepthText(depth: number): string {
+  return `$(inbox) MinSpec: ${depth} queued`;
+}
+
+/**
+ * Makes enqueued phase-advance requests visible so they cannot silently rot
+ * when no consumer (drain loop / agent-execute) is running (DR-057 residual
+ * risk). Hidden at zero; otherwise shows the depth, the oldest request's
+ * timestamp, and the keyboard chord (`keybindingLabel`, from
+ * {@link resolveKeybinding}) in the tooltip. Clicking it runs
+ * `minspec.viewQueue`.
+ */
+export class MinSpecQueueDepthStatusBar {
+  private statusBarItem: vscode.StatusBarItem;
+  private readonly keybindingLabel: string | undefined;
+
+  constructor(keybindingLabel?: string) {
+    this.keybindingLabel = keybindingLabel;
+    this.statusBarItem = vscode.window.createStatusBarItem(
+      vscode.StatusBarAlignment.Left,
+      96, // just left of the tidy-primary item (priority 97)
+    );
+    this.statusBarItem.command = 'minspec.viewQueue';
+  }
+
+  update(requests: readonly { specPath: string; requestedAt?: string }[]): void {
+    if (requests.length === 0) {
+      this.statusBarItem.hide();
+      return;
+    }
+    const oldest = requests.find((r) => r.requestedAt)?.requestedAt;
+    const shortcut = this.keybindingLabel ? `\nShortcut: ${this.keybindingLabel}` : '';
+    this.statusBarItem.text = formatQueueDepthText(requests.length);
+    this.statusBarItem.tooltip =
+      `${requests.length} phase-advance request${requests.length === 1 ? '' : 's'} waiting in .minspec/queue/` +
+      (oldest ? ` (oldest: ${oldest})` : '') +
+      '. Nothing advances until a consumer (drain loop / agent-execute) runs. Click to view.' +
+      shortcut;
+    this.statusBarItem.accessibilityInformation = {
+      label: `MinSpec: ${requests.length} phase-advance request${requests.length === 1 ? '' : 's'} queued`,
     };
     this.statusBarItem.show();
   }
