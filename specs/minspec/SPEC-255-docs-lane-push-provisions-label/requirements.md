@@ -13,6 +13,9 @@ phases:
   plan: pending
   tasks: pending
   implement: pending
+implements: none
+implements_reason: >-
+  Specify phase only. Which files this spec will own is decided at Plan.
 ---
 
 # SPEC-255: "MinSpec: Push Docs Lane" lands in a repository that has no `docs-lane` label

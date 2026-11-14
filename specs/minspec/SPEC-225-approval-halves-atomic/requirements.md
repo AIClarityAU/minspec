@@ -13,6 +13,9 @@ phases:
   plan: pending
   tasks: pending
   implement: pending
+implements: none
+implements_reason: >-
+  Specify phase only. Which files this spec will own is decided at Plan.
 ---
 
 # SPEC-225: An approval's two halves land together, or only the safe half lands
