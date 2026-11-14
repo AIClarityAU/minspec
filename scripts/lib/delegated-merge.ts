@@ -29,7 +29,9 @@
  *     for ONE spec whose `requirements.md` is approved on the base (a non-stale approval
  *     record, status planning/implementing/done), authored and committed by the bot
  *     only, every latest check run on the head finished SUCCESS, SKIPPED or NEUTRAL
- *     (DR-121 s2.4, DR-119 item 10), and DR-121 is `accepted` on the base. Until it is, a
+ *     (DR-121 s2.4, DR-119 item 10), GitHub reports the branch current and mergeable
+ *     (`mergeable_state` clean, unstable or has_hooks: never BEHIND or UNKNOWN, #3748),
+ *     and DR-121 is `accepted` on the base. Until it is, a
  *     plan artifact is refused by name (#2980). A plan is merged DIRECTLY at the judged
  *     head (`mergeMode: 'direct'`), never by native auto-merge (DR-121 s2.4, item 11),
  *     because native auto-merge waits only for the REQUIRED checks. See `planArmFacts`;
@@ -99,6 +101,14 @@ export const PLAN_DECISION = 'DR-121';
 export const PLAN_SPEC_APPROVED_STATUSES: ReadonlySet<string> = new Set(['planning', 'implementing', 'done']);
 /** DR-119 section 1 item 10, as DR-121 section 2.4 applies it: the only green conclusions. */
 export const PLAN_GREEN_CONCLUSIONS: ReadonlySet<string> = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL']);
+/**
+ * #3748: the merge states in which a direct merge (no --auto, no --admin) can land. An
+ * allowlist, matched case-insensitively (REST `mergeable_state` is lower-case, GraphQL
+ * `mergeStateStatus` upper-case). The ruleset is strict, so GitHub refuses a BEHIND branch;
+ * UNKNOWN (not yet computed), BLOCKED, DIRTY, DRAFT and anything new deny too. The same
+ * three are what `gh pr merge` itself treats as immediately mergeable.
+ */
+export const PLAN_MERGEABLE_STATES: ReadonlySet<string> = new Set(['clean', 'unstable', 'has_hooks']);
 /** DR-119 section 1 item 2, as DR-121 section 2.4 applies it: the bot, keyed on type. */
 export const PLAN_BOT_LOGIN = 'minspec-sdd[bot]';
 /** A spec that has not been approved yet. Anything later is the founder's. */
@@ -122,6 +132,11 @@ export interface MergePull {
   /** GitHub's `user.type` (`Bot`, `User`); undefined = not read. Plan arm only. */
   readonly authorType?: string;
   readonly labels: readonly string[];
+  /**
+   * #3748: GitHub's merge state for the pull request (REST `mergeable_state`, e.g. `clean`,
+   * `behind`, `unknown`); undefined = not read or not yet computed. Plan arm only.
+   */
+  readonly mergeState?: string;
 }
 
 /** DR-121: the planned spec as it stands on the base. null = absent, undefined = unreadable. */
@@ -433,6 +448,24 @@ function planArmFacts(
       `check run(s) on ${pull.headSha} did not finish SUCCESS, SKIPPED or NEUTRAL: ${red.map((c) => `${c.name || '<unnamed>'}=${String(c.conclusion)}`).join(', ')} (${PLAN_DECISION} s2.4)`,
     );
   }
+  // #3748: a direct merge lands only on a branch current with main. The ruleset is strict,
+  // so GitHub refuses a BEHIND branch; admitting one failed the merge every cycle (19 PRs on
+  // 2026-11-14) and nothing updated it. A BEHIND plan is held for the one-at-a-time update
+  // turn (as remediate-pr.sh's skip-awaiting-merge-turn), never updated here and never in
+  // bulk. An unread or UNKNOWN state is not current: it denies, and the next cycle re-reads.
+  const mergeState = String(pull.mergeState ?? '').toLowerCase();
+  if (mergeState === 'behind') {
+    return no(
+      'plan-behind',
+      `#${pull.number} is BEHIND main and the ruleset is strict, so a direct merge would be refused; held for its one-at-a-time update turn, then judged again on the new head`,
+    );
+  }
+  if (!PLAN_MERGEABLE_STATES.has(mergeState)) {
+    return no(
+      'plan-merge-state-not-clean',
+      `#${pull.number}'s merge state is "${pull.mergeState ?? 'unread'}", not clean, unstable or has_hooks; a direct merge waits until GitHub reports it current and mergeable`,
+    );
+  }
   return { tier: tier as Tier };
 }
 
@@ -503,6 +536,7 @@ export function gatherMergeInput(args: MergeArgs, deps: MergeDeps): MergeInput {
       authorLogin: s((p.user as Json | null)?.login),
       authorType: s((p.user as Json | null)?.type) || undefined,
       labels: ((p.labels ?? []) as Json[]).map((l) => s(l.name)),
+      mergeState: s(p.mergeable_state) || undefined,
     };
   } catch {
     pull = undefined;
