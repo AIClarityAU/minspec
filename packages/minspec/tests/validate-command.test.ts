@@ -51,6 +51,8 @@ vi.mock('../src/lib/epic-manager', () => ({
 // check. Mock it (default 'unapproved').
 vi.mock('../src/lib/approval', () => ({
   getApprovalStatus: vi.fn(() => 'unapproved'),
+  // SPEC-212 x SPEC-059: a shard with no record of its own is judged by its set's parent.
+  getApprovalRecord: vi.fn(() => undefined),
 }));
 
 // #439: readShardIdFiles does real fs reads keyed off the spec's directory —
@@ -58,6 +60,10 @@ vi.mock('../src/lib/approval', () => ({
 // of depending on whether the fake `/tmp/ws/...` test paths happen to exist.
 vi.mock('../src/lib/spec-layout', () => ({
   readShardIdFiles: vi.fn(() => []),
+  // SPEC-212: the spec-set status reader also reads the spec's directory.
+  readSpecSetStatusFiles: vi.fn(() => []),
+  // SPEC-212 x SPEC-059: identity by default (not a spec-set shard).
+  specSetApprovalSubject: vi.fn((p: string) => p),
 }));
 
 vi.mock('../src/lib/artifact-graph', () => ({
@@ -73,8 +79,8 @@ import { readSpecFile } from '../src/lib/spec';
 import { loadConfig } from '../src/lib/config';
 import { validateSpec } from '../src/lib/spec-validator';
 import { epicRefSet } from '../src/lib/epic-manager';
-import { getApprovalStatus } from '../src/lib/approval';
-import { readShardIdFiles } from '../src/lib/spec-layout';
+import { getApprovalRecord, getApprovalStatus } from '../src/lib/approval';
+import { readShardIdFiles, readSpecSetStatusFiles, specSetApprovalSubject } from '../src/lib/spec-layout';
 import type { SpecSummary } from '../src/lib/spec-manager';
 import type { ValidationResult, ValidationViolation } from '../src/lib/spec-validator';
 
@@ -134,6 +140,9 @@ describe('validateSpecCommand', () => {
     );
     vi.mocked(getApprovalStatus).mockReturnValue('unapproved');
     vi.mocked(readShardIdFiles).mockReturnValue([]);
+    vi.mocked(readSpecSetStatusFiles).mockReturnValue([]);
+    vi.mocked(getApprovalRecord).mockReturnValue(undefined);
+    vi.mocked(specSetApprovalSubject).mockImplementation((p: string) => p);
     vi.mocked(validateSpec).mockReturnValue(makeResult());
   });
 
@@ -441,6 +450,7 @@ describe('validateSpecCommand', () => {
       approvalState: 'approved',
       explicitTerminal: undefined,
       siblingShardFiles: [],
+      specSetStatusFiles: [],
       pathExists: expect.any(Function),
       taskTally: { total: 0, remaining: 0 },
     });
@@ -485,6 +495,67 @@ describe('validateSpecCommand', () => {
       expect.anything(),
       expect.anything(),
       expect.objectContaining({ approvalState: 'unapproved', siblingShardFiles: shardFiles }),
+    );
+  });
+
+  // ── SPEC-212: spec-set literal status agreement wiring ─────────────────────
+
+  it('reads the spec-set status files from the spec directory and forwards them to validateSpec', async () => {
+    const spec = makeSpec('SPEC-014');
+    const setFiles = [
+      { fileName: 'requirements.md', raw: '---\nstatus: implementing\n---\n' },
+      { fileName: 'design.md', raw: '---\nstatus: specifying\n---\n' },
+    ];
+    vi.mocked(readSpecSetStatusFiles).mockReturnValue(setFiles);
+    vi.mocked(validateSpec).mockReturnValue(makeResult({ complete: true, violations: [] }));
+
+    await validateSpecCommand({ spec });
+
+    // The reader gets the spec's containing DIRECTORY, not the file itself.
+    expect(readSpecSetStatusFiles).toHaveBeenCalledWith('/tmp/ws/specs/minspec/SPEC-014');
+    expect(validateSpec).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ specSetStatusFiles: setFiles }),
+    );
+  });
+
+  // ── SPEC-212 x SPEC-059: which approval record a shard is judged by ────────
+
+  it('judges an unsigned spec-set shard by its requirements.md approval record', async () => {
+    const spec = { ...makeSpec('SPEC-059'), filePath: '/tmp/ws/specs/minspec/SPEC-059-x/design.md' } as SpecSummary;
+    const parent = '/tmp/ws/specs/minspec/SPEC-059-x/requirements.md';
+    vi.mocked(getApprovalRecord).mockReturnValue(undefined);
+    vi.mocked(specSetApprovalSubject).mockReturnValue(parent);
+    vi.mocked(getApprovalStatus).mockImplementation((_root, p) => (p === parent ? 'approved' : 'unapproved'));
+    vi.mocked(validateSpec).mockReturnValue(makeResult({ complete: true, violations: [] }));
+
+    await validateSpecCommand({ spec });
+
+    expect(specSetApprovalSubject).toHaveBeenCalledWith(spec.filePath);
+    expect(getApprovalStatus).toHaveBeenCalledWith('/tmp/ws', parent);
+    expect(validateSpec).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ approvalState: 'approved' }),
+    );
+  });
+
+  it('keeps a shard\'s OWN approval record when it has one (never the parent)', async () => {
+    const spec = { ...makeSpec('SPEC-019'), filePath: '/tmp/ws/specs/x/SPEC-019-y/design.md' } as SpecSummary;
+    vi.mocked(getApprovalRecord).mockReturnValue({} as ReturnType<typeof getApprovalRecord>);
+    vi.mocked(specSetApprovalSubject).mockReturnValue('/tmp/ws/specs/x/SPEC-019-y/requirements.md');
+    vi.mocked(getApprovalStatus).mockReturnValue('stale');
+    vi.mocked(validateSpec).mockReturnValue(makeResult({ complete: true, violations: [] }));
+
+    await validateSpecCommand({ spec });
+
+    expect(specSetApprovalSubject).not.toHaveBeenCalled();
+    expect(getApprovalStatus).toHaveBeenCalledWith('/tmp/ws', spec.filePath);
+    expect(validateSpec).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ approvalState: 'stale' }),
     );
   });
 });

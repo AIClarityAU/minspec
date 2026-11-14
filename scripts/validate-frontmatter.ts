@@ -33,7 +33,9 @@ import {
   type SplitLayoutFile,
   validateStatusAnnotation,
   validateFrontmatterProse,
+  validateSpecSetStatusAgreement,
 } from '../packages/minspec/src/lib/spec-validator';
+import { readSpecSetStatusFiles } from '../packages/minspec/src/lib/spec-layout';
 import { parseSpec } from '../packages/minspec/src/lib/spec';
 import { readSpecTaskTally } from '../packages/minspec/src/lib/artifact-graph';
 import { getApprovalStatus } from '../packages/minspec/src/lib/approval';
@@ -356,6 +358,26 @@ if (epicRegistry.fileCount > 0 && epicRefs.size === 0) {
     const result = validateSplitLayoutCoverage(byDir.get(dir) ?? [], DEFAULT_CONFIG);
     for (const v of result.violations) {
       warn(`split-coverage ${relative(ROOT, dir)}: ${v.message}`);
+    }
+  });
+}
+
+// Rule 27 (non-fatal, #972, SPEC-212): one status per spec-set. For each
+// `SPEC-NNN-*/` directory holding a requirements.md, warn when design.md or tasks.md
+// carries a LITERAL `status:` line behind requirements.md's (or, under a terminal
+// requirements.md, a different one), and when any of the three files' status cannot be
+// read (constitution invariant 2: an unreadable witness is reported, never skipped).
+// This is the SAME pair of functions the extension's MinSpec: Validate Spec command
+// calls (readSpecSetStatusFiles + validateSpecSetStatusAgreement, SPEC-212 FR-5), so
+// the commit/CI path and the editor read one lens. WARNS only (SPEC-212 DQ-3): it never
+// fails the build, matching the extension's warning severity.
+{
+  const specFiles = listCorpus('Rule 27', specsDir, '.md', false);
+  const dirs = [...new Set(specFiles.map((f) => dirname(f)))].sort();
+  eachFile('Rule 27', dirs, false, (dir) => {
+    const result = validateSpecSetStatusAgreement(readSpecSetStatusFiles(dir));
+    for (const v of result.violations) {
+      warn(`spec-set-status ${relative(ROOT, dir)}: ${v.message}`);
     }
   });
 }

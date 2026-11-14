@@ -101,6 +101,9 @@ vi.mock('../src/lib/approval', async (importOriginal) => {
     approveSpec: vi.fn(),
     revokeApproval: vi.fn(() => true),
     getApprovalStatus: vi.fn(() => 'unapproved'),
+    // SPEC-212: validate.ts picks its approval subject from this record first; a
+    // missing export here throws inside the command's try and skips the lookup.
+    getApprovalRecord: vi.fn(() => undefined),
     gitConfigEmail: vi.fn(() => 't@example.com'),
     // DR-056: real pure gate functions ('t@example.com' is a human → passes).
     checkApprover: actual.checkApprover,

@@ -1,7 +1,7 @@
 ---
 id: SPEC-029
 type: tasks
-status: implementing
+status: done
 product: minspec
 epic: EPIC-002  # Signpost Integrity
 ---

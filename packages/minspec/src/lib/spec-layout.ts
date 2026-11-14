@@ -4,8 +4,9 @@ import type { ParsedSpec, SpecFrontmatter } from './spec';
 import { parseSpec, writeSpec } from './spec';
 import { PHASES } from './config';
 import { ensureDirectory } from './opt-in';
-import { restoreLineEndings } from './text-io';
-import type { ShardIdFile } from './spec-validator';
+import { readDocumentText, restoreLineEndings } from './text-io';
+import type { ShardIdFile, SpecSetStatusFile } from './spec-validator';
+import { SPEC_SET_STATUS_FILE_NAMES } from './spec-validator';
 
 /**
  * Storage layout for a single spec on disk.
@@ -249,6 +250,84 @@ export function readShardIdFiles(dirPath: string): ShardIdFile[] {
     }
   }
   return out;
+}
+
+/** A spec-set directory: `SPEC-` + digits + `-` + slug (SPEC-212 FR-1). */
+const SPEC_SET_DIR_RE = /^SPEC-\d+-/;
+
+/**
+ * lstat presence: a dangling or looping symlink is present (and then fails to read).
+ * Only ENOENT / ENOTDIR mean absent. Any other lstat error (EACCES on an unsearchable
+ * directory, EIO) counts as present, so the read that follows fails and is reported as
+ * an unreadable witness (SPEC-212 FR-3, constitution invariant 2) instead of the file
+ * silently dropping out of the set.
+ */
+function isPresent(filePath: string): boolean {
+  try {
+    fs.lstatSync(filePath);
+    return true;
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    return !(code === 'ENOENT' || code === 'ENOTDIR');
+  }
+}
+
+/**
+ * Read the requirements.md / design.md / tasks.md texts of one spec-set directory
+ * (SPEC-212, #972), feeding `validateSpecSetStatusAgreement` in spec-validator.ts, which
+ * is pure. This is the impure glue.
+ *
+ * - Returns `[]` unless the directory's basename is `SPEC-NNN-<slug>` and a
+ *   requirements.md is present in it (FR-1: a flat spec, or `specs/minspec/` holding
+ *   SPEC-001's flat set, is never grouped).
+ * - Each present file is read with `readDocumentText`, so a CRLF checkout reads as LF and
+ *   the frontmatter regex still matches.
+ * - Presence is `lstat`, not `existsSync`: a dangling symlink is a file the reader cannot
+ *   read, and must surface as one. A read that throws becomes
+ *   `{ fileName, raw: undefined, readError }`, reported downstream and never swallowed
+ *   (contrast `readShardIdFiles`, whose `catch {}` is safe only because its rule skips
+ *   id-less files by design). Invariant 2: a missing witness fails visibly.
+ */
+export function readSpecSetStatusFiles(dirPath: string): SpecSetStatusFile[] {
+  if (!SPEC_SET_DIR_RE.test(path.basename(dirPath))) return [];
+  if (!isPresent(path.join(dirPath, 'requirements.md'))) return [];
+  const out: SpecSetStatusFile[] = [];
+  for (const fileName of SPEC_SET_STATUS_FILE_NAMES) {
+    const filePath = path.join(dirPath, fileName);
+    if (!isPresent(filePath)) continue;
+    try {
+      out.push({ fileName, raw: readDocumentText(filePath) });
+    } catch (err) {
+      out.push({ fileName, raw: undefined, readError: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return out;
+}
+
+/**
+ * The file whose approval record a spec-set file's derived status is judged by
+ * (SPEC-212, interaction with SPEC-059's `status.mirror-drift`).
+ *
+ * In a `SPEC-NNN-<slug>/` set only `requirements.md` is signed, and the set's status is
+ * requirements.md's (SPEC-212 FR-2). A `design.md` or `tasks.md` judged by its own
+ * (absent) record would always derive `specifying`, so the mirror-drift rule would warn on
+ * every sibling SPEC-212 asks to agree with an approved requirements.md, and the reverse.
+ * SPEC-059's design ("Known tension") names the reconciliation: derive a shard from its
+ * parent's approval record. This returns that parent path for such a shard, and
+ * `filePath` unchanged for everything else (requirements.md itself, a flat spec,
+ * a file outside a SPEC-NNN set, or a set with no requirements.md).
+ *
+ * The caller still prefers the shard's OWN record when one exists (SPEC-001's and
+ * SPEC-019's signed design.md): this is the fallback for an unsigned shard only, so it
+ * never makes a file read as approved unless its spec-set's requirements.md is approved.
+ */
+export function specSetApprovalSubject(filePath: string): string {
+  const fileName = path.basename(filePath);
+  if (fileName !== 'design.md' && fileName !== 'tasks.md') return filePath;
+  const dir = path.dirname(filePath);
+  if (!SPEC_SET_DIR_RE.test(path.basename(dir))) return filePath;
+  const parent = path.join(dir, 'requirements.md');
+  return fs.existsSync(parent) ? parent : filePath;
 }
 
 /**

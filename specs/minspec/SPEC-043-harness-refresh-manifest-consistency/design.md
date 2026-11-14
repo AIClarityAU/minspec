@@ -1,7 +1,7 @@
 ---
 id: SPEC-043
 type: design
-status: specifying
+status: implementing
 product: minspec
 epic: EPIC-002  # Signpost Integrity — derived-state truthfulness (harness-refresh hash manifest)
 ---

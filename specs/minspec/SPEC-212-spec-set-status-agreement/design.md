@@ -80,6 +80,48 @@ Each was run against `9c84f799`, not inferred.
    frontmatter says. Task 4.3 re-runs `npm run validate` to prove it.
 8. **Baseline.** `npm run validate` on `9c84f799` passes with 546 non-fatal warnings.
 
+## Interaction with SPEC-059
+
+Measured point 5 holds for what each rule compares, but the two rules still disagreed on
+their INPUT: which approval record an unsigned `design.md` / `tasks.md` is derived from.
+`status.mirror-drift` (live in `validateSpec` section 0c, fed by the **MinSpec: Validate
+Spec** command) derived each shard from its OWN record, and SPEC-059's plan (design.md,
+*Which files*) keeps that for its corpus rule. An unsigned shard then derives at most
+`specifying`, while FR-2 asks it to carry an approved requirements.md's `planning` or
+later. Every shard of an approved set would draw one warning from one rule or the other,
+and the backfill below would leave inline comments claiming the shard's status is the
+unsigned-derived value.
+
+SPEC-059's design records this tension ("Known tension, not resolved here") and leaves the
+reconciliation to whichever spec lands second, naming the simplest one: derive a shard from
+its parent's approval record. SPEC-212 lands second and takes that option.
+
+- **Rule.** An unsigned `design.md` or `tasks.md` in a `SPEC-NNN-*/` directory that has a
+  `requirements.md` is derived from requirements.md's approval record (approved, stale or
+  unapproved), with its own `phases:`. A shard WITH its own record (SPEC-001's flat set,
+  SPEC-019's `design.md`) keeps it. One shared helper decides this,
+  `specSetApprovalSubject` in `spec-layout.ts`; `commands/validate.ts` uses it before
+  calling `getApprovalStatus`.
+- **No over-claim.** A shard reads as approved only when its spec-set's requirements.md
+  is approved and current. An unapproved or stale parent still derives `specifying`, so
+  the backfill raises no shard in a set without a current approval record. Each backfill
+  target's parent was checked: all ten sets' `requirements.md` resolve `approved`.
+- **Measured effect.** Of the 15 backfilled shards, the 6 that carry a `phases:` block
+  (SPEC-042 `tasks.md`, SPEC-059 both, SPEC-064 `design.md`, SPEC-211 both) derived
+  `specifying` from their own record and now derive `planning`, equal to their literal, so
+  both rules are clean on them. The other 9 have no `phases:` block and derive `new`
+  whichever record is used: that drift predated this change (their literal was
+  `specifying` or `implementing`) and is SPEC-059 FR-4's no-phases case, not changed here.
+- **Binding on SPEC-059's corpus rule.** When SPEC-059 builds its corpus pass it must call
+  the same helper, or the two surfaces split again. Its *Which files* paragraph and its
+  task 2.2 case "an unsigned `design.md` shard with `status: planning` ... is reported"
+  predate this reconciliation; that case is correct only for a shard whose parent is not
+  approved. SPEC-059's Known tension paragraph already hands this choice to the second
+  spec, so this records the choice; amending SPEC-059's plan text is left to its builder.
+- Rejected: comparing SPEC-212's rule against each shard's own derived status. That makes
+  every shard of an approved set `specifying`, which is the lag FR-2 (approved) forbids.
+  Rejected: exempting SPEC-059's shards. It would hide the same conflict on every other set.
+
 ## Architecture
 
 ### The rule: `validateSpecSetStatusAgreement` (FR-2, FR-3, FR-5)
@@ -243,8 +285,8 @@ build time (task 4.1), because sets change between this Plan and the build: any 
 | File | Change | Owned by |
 |---|---|---|
 | `packages/minspec/src/lib/spec-validator.ts` | rule, types, constant, option, `validateSpec` step | modifies, not owns (as SPEC-059) |
-| `packages/minspec/src/lib/spec-layout.ts` | `readSpecSetStatusFiles` | modifies, not owns |
-| `packages/minspec/src/commands/validate.ts` | pass the option | modifies, not owns |
+| `packages/minspec/src/lib/spec-layout.ts` | `readSpecSetStatusFiles`, `specSetApprovalSubject` | modifies, not owns |
+| `packages/minspec/src/commands/validate.ts` | pass the option; derive an unsigned shard from its parent's record | modifies, not owns |
 | `scripts/validate-frontmatter.ts` | Rule 27 | modifies, not owns (as SPEC-059) |
 | `packages/minspec/tests/spec-set-status-agreement.test.ts` | new: T0 pure-rule cases + reader cases | test file |
 | `packages/minspec/tests/validate-frontmatter-spec-set-status.test.ts` | new: Rule 27 subprocess cases | test file |
