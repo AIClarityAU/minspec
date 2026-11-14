@@ -30,7 +30,7 @@ change.
 
 ## 1 - T0: the two gates, red before any port
 
-- [ ] **1.1** `.github/scripts/ai-review-guard.test.js` - add the [A] helpers from the design
+- [x] **1.1** `.github/scripts/ai-review-guard.test.js` - add the [A] helpers from the design
   (lexer, use test, `findUnusedExports`, `collectTestTitles`, `findUnresolvedCitations`,
   `EXPORT_GATE_EXEMPTIONS` with the one `parseCliVerdict` entry) and the [B] self-tests:
   a planted unused name is reported; an import-list entry and a title alone are not use; a
@@ -40,7 +40,7 @@ change.
   (division, `b(` stays code) and `if (x) /foo(/.test(s)` (regex, `foo(` removed); an invented citation
   is unresolved; a source with zero citations reports failure.
   *Done when:* every [B] case is green.
-- [ ] **1.2** Same file - add the two [C] live cases.
+- [x] **1.2** Same file - add the two [C] live cases.
   *Done when:* run on a tree where only 1.1 and 1.2 have landed, the export case fails
   naming exactly `selectVotersToRun`, `renderVoterRecord`, `parseVoterRecords`,
   `isStructuralVerdictBlock`, `renderVerdictBlock`, `defangProtocolTokens`, and the
@@ -52,14 +52,14 @@ change.
 
 ## 2 - T1: the ports, written against the unchanged guard
 
-- [ ] **2.1** Same file - port the 32 cases of the voter-reuse vitest file (5 round-trip,
+- [x] **2.1** Same file - port the 32 cases of the voter-reuse vitest file (5 round-trip,
   15 `selectVotersToRun`, 12 `isStructuralVerdictBlock`) under the design's title scheme,
   with a named case for each of the seven FR-1 guard rails.
   *Done when:* all 32 pass with the guard unchanged, and a grep of every quoted `it(` title
   in the vitest file finds its prefixed counterpart in the shipped suite (so non-rail cases
   such as app-slug lower-casing are not dropped); a case that fails is a `DEEPER:` stop,
   not a guard edit (INV-1).
-- [ ] **2.2** Same file - port the 13 cases of the protocol-token vitest file: the
+- [x] **2.2** Same file - port the 13 cases of the protocol-token vitest file: the
   token-shape case, the ten (site, token) cases over the four sites, each with a literal
   title per the design, and the two `defangProtocolTokens` cases, reading siblings relative
   to the suite and failing by name on an unreadable one; plus the case asserting the ten
@@ -69,7 +69,7 @@ change.
 
 ## 3 - Comments and citations
 
-- [ ] **3.1** `.github/scripts/ai-review-guard.js` - rewrite the four comments in the design
+- [x] **3.1** `.github/scripts/ai-review-guard.js` - rewrite the four comments in the design
   table into the citation form. Comments only.
   *Done when:* the FR-4 grep in requirements.md prints nothing, the citation case from 1.2
   passes with at least three citations resolved, and the INV-1 esbuild comparison and
@@ -79,6 +79,7 @@ change.
 
 - [ ] **4.1** Delete `packages/minspec/tests/voter-survivor-reuse.test.ts` and
   `packages/minspec/tests/review-protocol-tokens.test.ts`.
+  Deferred: the file stays until DR-097's citations are repointed (#3679 - DR-097 stale citations).
 - [ ] **4.2** `docs/decisions/DR-097.md` - repoint its two citations of the deleted voter
   file to the shipped suite, keeping the `#2163 @ <sha>` addresses. No other wording.
   *Done when:* the FR-3 `git grep` in requirements.md returns only lines carrying a
@@ -86,12 +87,12 @@ change.
 
 ## 5 - Generated copy and full verification
 
-- [ ] **5.0** `packages/minspec/src/lib/template-registry.ts` - update the comment on the
+- [x] **5.0** `packages/minspec/src/lib/template-registry.ts` - update the comment on the
   `ai-review-guard-test` entry to name all four sibling files the shipped suite reads
   (ai-review.yml, docs-lane.yml, scripts/review-decide.sh and scripts/review-branch.sh).
   Comment only.
   *Done when:* the comment names the four, and the managed-script-dependencies test passes.
-- [ ] **5.1** Regenerate `packages/minspec/src/lib/ci-review-templates.ts` with
+- [x] **5.1** Regenerate `packages/minspec/src/lib/ci-review-templates.ts` with
   `node scripts/gen-ci-templates.mjs`; never by hand.
   *Done when:* `node scripts/gen-ci-templates.mjs --check` and `npm run validate` exit 0.
 - [ ] **5.2** Run the scratch-copy mutations in the acceptance criteria (dummy export,
