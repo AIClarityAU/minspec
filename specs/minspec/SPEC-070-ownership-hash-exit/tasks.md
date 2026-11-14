@@ -156,7 +156,7 @@ AC-19's creation half in 4.4, AC-22 clause 3 in 9.3.
 
 ## 3 - The owned-set oracle (FR-5)
 
-- [ ] **3.1** Create `packages/minspec/src/lib/owned-set.ts` with `structuredOwnedSet(frontmatter)`
+- [x] **3.1** Create `packages/minspec/src/lib/owned-set.ts` with `structuredOwnedSet(frontmatter)`
   and `ownedSets(cwd, specPath, frontmatter)` returning `{ structured, full }`. Its own
   tokenizer, which keeps inline comment tokens exactly as the gate's `fm_value` does, and must
   not call `fmListField`. Normalisation follows design section 3 "Snapshot normalisation",
@@ -173,7 +173,7 @@ AC-19's creation half in 4.4, AC-22 clause 3 in 9.3.
   `importlib` subprocess (design section 7 rejects adding a CLI arm to the hook), plus named
   cases pinning the three engine divergences as design section 3 decides them.
   *Done when:* every fixture's TS set equals the Python set, and no test asserts order.
-- [ ] **3.2** Corpus parity. In the same test file, compare `ownedSets` with `owned_file_set`
+- [x] **3.2** Corpus parity. In the same test file, compare `ownedSets` with `owned_file_set`
   for every T3/T4 spec file in the corpus, naming the symmetric difference on failure; add the
   separate pin that `structured` and `full` differ on
   specs/minspec/SPEC-017-trust-dashboard/requirements.md (structured empty, full set
@@ -182,6 +182,16 @@ AC-19's creation half in 4.4, AC-22 clause 3 in 9.3.
   *Done when:* green on the live corpus with a non-empty count of specs compared, and the
   test fails when `python3` is absent rather than skipping (the existing parity suite's
   whole-corpus `it.skip` is the pattern not to copy).
+  *Built 2026-11-13 (notes for later slices):* the Python structured set is read today as
+  `declared_impl_files(root, fm, <empty temp dir>)`, so no `tasks.md` is found and the gate is
+  untouched; task 4.1's `include_fuzzy=` replaces that call. Re-measured at the build commit,
+  SPEC-017 is structured 7 / full 22, not 0 / 22: #1849 declared seven paths after the design
+  measured it. The pin asserts structured as a strict, non-empty subset of full, and a
+  separate corpus-wide test pins the empty-structured, non-empty-full shape. The TS twin
+  mirrors Python's whitespace class and text-mode newline handling, which closes the strip
+  divergence outright rather than accepting it. Found while pinning: a trailing space after
+  `implements:` makes the gate's `fm_value` return `''`, so a block list below it is never
+  read; reproduced for parity (fixture `trailing-space-block-header`), fix tracked as #3653.
 
 ## 4 - Inert drift machinery (FR-6, FR-7, OQ-5)
 
