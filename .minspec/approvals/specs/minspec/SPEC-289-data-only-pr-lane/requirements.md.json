@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-289-data-only-pr-lane/requirements.md",
+  "specHash": "5b507eb800bbb8b99f2bd5e93118b479aaa463fb2cb625d7d4d11c9a858f69bf",
+  "approvedAt": "2026-11-13T05:14:01.951Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-pile-1112a-clarify",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3631#issuecomment-6815676235"
+}
