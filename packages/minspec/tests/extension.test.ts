@@ -210,6 +210,11 @@ vi.mock('../src/commands/adr', () => ({
 }));
 vi.mock('../src/lib/adr-manager', () => ({
   regenerateDrIndex: vi.fn(),
+  // #896: the watcher maps each event to a decision id and updates only those entries.
+  regenerateDrIndexEntries: vi.fn(),
+  resolveDecisionsDir: vi.fn((root: string) => `${root}/docs/decisions`),
+  listAdrs: vi.fn(() => []),
+  drIdForFile: vi.fn((p: string) => /\/(DR-\d+)[^/]*\.md$/.exec(p)?.[1] ?? null),
 }));
 vi.mock('../src/commands/backlog', () => ({
   scoreWsjfCommand: vi.fn(),
@@ -320,7 +325,7 @@ import { declareScopeCommand } from '../src/commands/session';
 import { parkCommand } from '../src/commands/park';
 import { generateExampleCommand } from '../src/commands/example';
 import { createAdrCommand } from '../src/commands/adr';
-import { regenerateDrIndex } from '../src/lib/adr-manager';
+import { regenerateDrIndex, regenerateDrIndexEntries, resolveDecisionsDir } from '../src/lib/adr-manager';
 import { scoreWsjfCommand, triageIssueCommand } from '../src/commands/backlog';
 import {
   goToSpecCommand,
@@ -796,14 +801,18 @@ describe('activate()', () => {
     try {
       activate(makeMockContext());
       vi.mocked(regenerateDrIndex).mockClear();
+      vi.mocked(regenerateDrIndexEntries).mockClear();
 
       const onChangeHandler = adrWatcher.onDidChange.mock.calls[0][0];
       onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-007.md' });
 
       // Debounced — not called synchronously
-      expect(regenerateDrIndex).not.toHaveBeenCalled();
+      expect(regenerateDrIndexEntries).not.toHaveBeenCalled();
       vi.advanceTimersByTime(300);
-      expect(regenerateDrIndex).toHaveBeenCalledTimes(1);
+      // Only DR-007's entry is touched (#896); no full rebuild.
+      expect(regenerateDrIndexEntries).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(regenerateDrIndexEntries).mock.calls[0].slice(0, 2)).toEqual(['/tmp/test-workspace', ['DR-007']]);
+      expect(regenerateDrIndex).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -814,12 +823,14 @@ describe('activate()', () => {
     try {
       activate(makeMockContext());
       vi.mocked(regenerateDrIndex).mockClear();
+      vi.mocked(regenerateDrIndexEntries).mockClear();
 
       const onChangeHandler = adrWatcher.onDidChange.mock.calls[0][0];
       onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/INDEX.md' });
 
       vi.advanceTimersByTime(300);
       expect(regenerateDrIndex).not.toHaveBeenCalled();
+      expect(regenerateDrIndexEntries).not.toHaveBeenCalled();
       // Tree still refreshes regardless
       expect(mockAdrTreeProvider.refresh).toHaveBeenCalled();
     } finally {
@@ -832,6 +843,7 @@ describe('activate()', () => {
     try {
       activate(makeMockContext());
       vi.mocked(regenerateDrIndex).mockClear();
+      vi.mocked(regenerateDrIndexEntries).mockClear();
 
       const onChangeHandler = adrWatcher.onDidChange.mock.calls[0][0];
       onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-001.md' });
@@ -839,7 +851,48 @@ describe('activate()', () => {
       onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-002.md' });
 
       vi.advanceTimersByTime(300);
+      expect(regenerateDrIndexEntries).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(regenerateDrIndexEntries).mock.calls[0][1]).toEqual(['DR-001', 'DR-007', 'DR-002']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // #896: Source Control "Discard Changes" on a new DR deletes the file; the
+  // delete must remove that one entry, not rebuild (and so rewrite) the register.
+  it('a DR delete updates only that entry, never a full rebuild', () => {
+    vi.useFakeTimers();
+    try {
+      activate(makeMockContext());
+      vi.mocked(regenerateDrIndex).mockClear();
+      vi.mocked(regenerateDrIndexEntries).mockClear();
+
+      const onDeleteHandler = adrWatcher.onDidDelete.mock.calls[0][0];
+      onDeleteHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-099-test.md' });
+      vi.advanceTimersByTime(300);
+
+      expect(regenerateDrIndexEntries).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(regenerateDrIndexEntries).mock.calls[0][1]).toEqual(['DR-099']);
+      expect(regenerateDrIndex).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('falls back to a full rebuild when the register directory cannot be resolved', () => {
+    vi.useFakeTimers();
+    try {
+      activate(makeMockContext());
+      vi.mocked(regenerateDrIndex).mockClear();
+      vi.mocked(regenerateDrIndexEntries).mockClear();
+      vi.mocked(resolveDecisionsDir).mockImplementationOnce(() => { throw new Error('bad config'); });
+
+      const onChangeHandler = adrWatcher.onDidChange.mock.calls[0][0];
+      onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-007.md' });
+      vi.advanceTimersByTime(300);
+
       expect(regenerateDrIndex).toHaveBeenCalledTimes(1);
+      expect(regenerateDrIndexEntries).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -854,6 +907,7 @@ describe('activate()', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       activate(makeMockContext());
       vi.mocked(regenerateDrIndex).mockClear();
+      vi.mocked(regenerateDrIndexEntries).mockClear();
 
       // Opt-in check is re-evaluated when the debounced timer fires, not
       // cached from activation — flip it to "never opted in" here.
@@ -864,6 +918,7 @@ describe('activate()', () => {
 
       vi.advanceTimersByTime(300);
       expect(regenerateDrIndex).not.toHaveBeenCalled();
+      expect(regenerateDrIndexEntries).not.toHaveBeenCalled();
       // Tree still refreshes regardless — only the write is gated.
       expect(mockAdrTreeProvider.refresh).toHaveBeenCalled();
     } finally {
@@ -878,18 +933,21 @@ describe('activate()', () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
       activate(makeMockContext());
       vi.mocked(regenerateDrIndex).mockClear();
+      vi.mocked(regenerateDrIndexEntries).mockClear();
 
       const onChangeHandler = adrWatcher.onDidChange.mock.calls[0][0];
       onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-007.md' });
       vi.advanceTimersByTime(300);
-      expect(regenerateDrIndex).not.toHaveBeenCalled();
+      expect(regenerateDrIndexEntries).not.toHaveBeenCalled();
 
       // ...then `MinSpec: Initialize` runs and creates .minspec/ on the SAME
       // activation; the next debounced fire must pick that up live.
       vi.mocked(fs.existsSync).mockReturnValue(true);
       onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-008.md' });
       vi.advanceTimersByTime(300);
-      expect(regenerateDrIndex).toHaveBeenCalledTimes(1);
+      // The DR-007 change seen before opt-in is not lost.
+      expect(regenerateDrIndexEntries).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(regenerateDrIndexEntries).mock.calls[0][1]).toEqual(['DR-007', 'DR-008']);
     } finally {
       vi.useRealTimers();
     }
