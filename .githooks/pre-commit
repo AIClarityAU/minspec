@@ -468,9 +468,16 @@ approval_race_relevant() {
   return 1
 }
 if [ "${APPROVAL_RACE_GATE_OFF:-}" != "1" ] && approval_race_relevant; then
-  race_script="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/check-approval-sidecar-race.ts"
+  race_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  race_script="$race_root/scripts/check-approval-sidecar-race.ts"
+  # Resolve tsx from the HOOK's checkout, like the script itself. A bare `npx --no-install
+  # tsx` looks in the COMMITTING repo's cwd, which (core.hooksPath pointed here from a
+  # throwaway repo, as the gate's own test does) has no node_modules: it then only worked
+  # where a stale npx-cache entry held tsx, and failed closed on a fresh CI runner.
+  race_tsx=(npx --no-install tsx)
+  [ -x "$race_root/node_modules/.bin/tsx" ] && race_tsx=("$race_root/node_modules/.bin/tsx")
   if [ -f "$race_script" ]; then
-    if ! race_out="$(npx --no-install tsx "$race_script" 2>&1)"; then
+    if ! race_out="$("${race_tsx[@]}" "$race_script" 2>&1)"; then
       printf '%s\n' "$race_out" >&2
       fail=1
     fi
