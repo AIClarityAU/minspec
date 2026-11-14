@@ -954,4 +954,9 @@ Adopters check MinSpec's review files with a workflow MinSpec does not ship, so 
 <!-- dr-summary:DR-121 auto=a299007d3188 -->
 _No summary available._
 <!-- /dr-summary:DR-121 -->
+
+## [DR-122 — Agents may select the recommended answer to a T3 spec's Clarify items under the bot's own name, except SPEC-217, SPEC-227 and every T4 spec](DR-122.md)
+
+*Status: proposed · Date: 2026-11-13*
+
 <!-- minspec:dr-index:end -->
