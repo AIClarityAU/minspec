@@ -587,6 +587,25 @@ export function approveSpec(
   const bodyOnly = getSpecBodyOnly(raw);
   const specPath = specRelPath(rootDir, specFilePath);
 
+  // #1371: a live, hash-matching approval by this same approver already exists —
+  // return it untouched. Re-stamping `approvedAt` would write a byte-different but
+  // semantically identical sidecar, minting a duplicate approval PR and a second
+  // "when was this approved" answer. A changed hash (legit re-approve) or a
+  // different approver (or a migrated record, which a human re-approval upgrades)
+  // falls through to the normal write. A record whose baseline is absent OR
+  // unrecoverable (dangling ref, gc-pruned blob, #404) also falls through so
+  // re-approving re-mints it and restores diffing.
+  const existing = readRecord(rootDir, specPath);
+  if (
+    existing &&
+    !existing.migrated &&
+    existing.specHash === hash &&
+    existing.approvedBy === email &&
+    classifyBaseline(rootDir, existing) === 'recovered'
+  ) {
+    return existing;
+  }
+
   // 2. Mint + pin the baseline (git blob → sanitized ref), gzip fallback if non-git
   //    OR if the ref pin fails — never leave a blob unpinned (gc would prune it).
   //    Any error here degrades to '' (no M1 datapoint); approval is always written.
