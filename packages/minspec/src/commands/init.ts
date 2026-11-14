@@ -824,10 +824,11 @@ async function resolveWantedChecks(
  * phrase when GitHub said nothing quotable — an unexplained failure is an honest
  * report; an invented explanation is not.
  */
-function describeRulesetFailure(outcome: {
+export function describeRulesetFailure(outcome: {
   forbidden: boolean;
   planLimited: boolean;
   reason: string | null;
+  detail?: string;
 }): string {
   if (outcome.planLimited) {
     return (
@@ -837,6 +838,11 @@ function describeRulesetFailure(outcome: {
   }
   if (outcome.reason) return `GitHub said: ${outcome.reason}`;
   if (outcome.forbidden) return 'the request was refused — your gh token may lack repo-admin scope';
+  // The outcome's own `detail` is the only evidence of what happened (a local
+  // parse failure, a missing rule, a raw non-403 body) — quote it, bounded, and
+  // keep the non-committal phrase only for the genuinely empty case.
+  const detail = (outcome.detail ?? '').replace(/\s+/g, ' ').trim();
+  if (detail) return detail.length > 200 ? `${detail.slice(0, 200)}…` : detail;
   return 'the request failed';
 }
 
@@ -1245,8 +1251,8 @@ export async function offerCoverageThresholdPrompt(folder: string): Promise<void
         prompt: 'Minimum coverage percentage (whole number, 0-100)',
         value: String(recommended),
         validateInput: (v) => {
-          const n = Number(v);
-          return Number.isInteger(n) && n >= 0 && n <= 100 ? undefined : 'Enter a whole number 0-100';
+          // Validate the TEXT: Number() coerces '', whitespace, hex and exponent forms.
+          return /^\d{1,3}$/.test(v) && Number(v) <= 100 ? undefined : 'Enter a whole number 0-100';
         },
       });
       if (input === undefined) return; // dismissed
@@ -1264,6 +1270,53 @@ export async function offerCoverageThresholdPrompt(folder: string): Promise<void
   }
 }
 
+/** Quick-pick label for the multi-root "initialize every folder" choice (#294). */
+export const INIT_ALL_LABEL = 'All uninitialized folders';
+
+/**
+ * Multi-root target selection for Initialize SDD Structure (#294). Only engages when
+ * the workspace has 2+ folders AND 2+ of them lack `.minspec/config.json` — otherwise
+ * returns `undefined` and the caller falls through to the usual single-folder
+ * resolution. When engaged it ALWAYS asks (the active editor's folder is listed
+ * first, not silently chosen), so a focused file can no longer steer init at a
+ * folder the user did not mean. Returns the folders to initialize, or 'cancelled'.
+ */
+async function pickInitTargets(): Promise<string[] | 'cancelled' | undefined> {
+  const folders = vscode.workspace?.workspaceFolders;
+  if (!folders || folders.length < 2) return undefined;
+  const paths = folders.map((f) => f.uri.fsPath);
+  const uninitialized = paths.filter(
+    (p) => !fs.existsSync(path.join(p, '.minspec', 'config.json')),
+  );
+  if (uninitialized.length < 2) return undefined;
+
+  const active = vscode.window.activeTextEditor?.document.uri.fsPath;
+  const activeFolder = active
+    ? paths
+        .filter((p) => active === p || active.startsWith(p.endsWith('/') ? p : p + '/'))
+        .sort((a, b) => b.length - a.length)[0]
+    : undefined;
+  const ordered = [...paths].sort(
+    (a, b) => Number(b === activeFolder) - Number(a === activeFolder),
+  );
+  const items = [
+    ...ordered.map((p) => ({
+      label: workspaceFolderLabel(p),
+      description: uninitialized.includes(p) ? p : `${p} (already initialized)`,
+      folders: [p],
+    })),
+    {
+      label: INIT_ALL_LABEL,
+      description: `${uninitialized.length} folders`,
+      folders: uninitialized,
+    },
+  ];
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: 'MinSpec: select the project to initialize',
+  });
+  return picked ? picked.folders : 'cancelled';
+}
+
 export async function initCommand(
   folderArg?: string,
   deps?: OfferScaffoldCommitDeps & {
@@ -1272,6 +1325,17 @@ export async function initCommand(
     githubPrExt?: GitHubPrExtAdvisoryDeps;
   },
 ): Promise<void> {
+  if (folderArg === undefined) {
+    const choice = await pickInitTargets();
+    if (choice === 'cancelled') return;
+    if (choice) {
+      // "All uninitialized folders": run the full per-folder init for each, in
+      // workspace order. A failure in one folder is surfaced by that folder's own
+      // run and never stops the rest.
+      for (const target of choice) await initCommand(target, deps);
+      return;
+    }
+  }
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
   // Onboarding only makes sense the FIRST time a project gets a config.json —

@@ -102,3 +102,230 @@ describe('#2939 B6: the switch already off is not overridden or re-asked', () =>
     expect(d.heldAsked()).toBe(0);
   });
 });
+
+/**
+ * T3 (#3344) - the held count misses drafts that already merged.
+ *
+ * THE BUG. Delegated spec merge (#2981, Step 0c) lands a held spec draft on main at
+ * `status: specifying`, which takes it OUT of the held count above. Each such merge
+ * reopened spec-writing while the drafts it landed still waited on Clarify and sign-off,
+ * so unapproved specs on main went from 30 to 77 between 2026-10-27 and 2026-10-29 with
+ * the held cap holding throughout. The brake measured where a draft waits before merge,
+ * never where it waits after.
+ *
+ *   P1  at or above MINSPEC_DRAIN_SPECIFY_MAX_PENDING (default 40) unapproved specs on the
+ *       tree the drain runs from, spec-writing pauses even with nothing held; builds run.
+ *   P2  below it, spec-writing runs; only the frontmatter `status:` counts.
+ *   P3  a tree with no specs/ folder is a count nobody read: spec-writing pauses, loudly.
+ *   P4  a cap that is not a whole number is read as 0, the setting that spends nothing.
+ */
+describe('#3344 P1: unapproved specs on main at the cap pause spec-writing', () => {
+  it.each([
+    { name: 'exactly the default cap of 40', pending: 40, env: {} as Record<string, string>, cap: 40 },
+    { name: 'the 77 on main on 2026-10-29', pending: 77, env: {} as Record<string, string>, cap: 40 },
+    { name: 'a cap of 3 with 3 pending', pending: 3, env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' }, cap: 3 },
+  ])('$name: only the build is dispatched, and the cycle says why once', async ({ pending, env, cap }) => {
+    const d = await runOnce({ ready: [42], specify: [77, 78], heldPrs: 0, pendingSpecs: pending, reading: ROOM, env });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(`${pending} spec(s) on main waiting for Clarify or sign-off`);
+    expect(lines[0]).toContain(`cap ${cap}`);
+    expect(lines[0]).toContain('2 agent-ready-specify issue(s) left');
+  });
+});
+
+describe('#3344 P2: below the pending cap, spec-writing runs', () => {
+  it.each([
+    { name: '39 pending, default cap', pending: 39, env: {} as Record<string, string> },
+    { name: '2 pending, cap of 3 (body mention and approved specs not counted)', pending: 2, env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' } },
+  ])('$name: both queues are dispatched', async ({ pending, env }) => {
+    const d = await runOnce({ ready: [42], specify: [77], heldPrs: 0, pendingSpecs: pending, reading: ROOM, env });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+});
+
+describe('#3344 P3: no specs folder is not a count of zero', () => {
+  it('spec-writing pauses and the line says the count could not be read', async () => {
+    const d = await runOnce({ ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 'missing', reading: ROOM });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('unapproved specs on main could not be counted');
+  });
+});
+
+describe('#3344 P4: a pending cap that is not a whole number spends nothing', () => {
+  it.each(['forty', '-1', '2.5'])('MINSPEC_DRAIN_SPECIFY_MAX_PENDING=%j pauses spec-writing and names the value', async (value) => {
+    const d = await runOnce({ ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 0, reading: ROOM, env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: value } });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('MINSPEC_DRAIN_SPECIFY_MAX_PENDING');
+    expect(lines[0]).toContain('is not a whole number');
+  });
+});
+
+/**
+ * T0 (#3570) - the held count is spec drafts, not every held pull request.
+ *
+ * THE BUG. `_held_drain_prs` counted every `needs-human-review` pull request on an
+ * `agent/issue-*` head. Dispatch adds that label to every machinery build too, so 44 build
+ * PRs waiting on a merge path (not a spec decision) held spec-writing at PAUSED against a
+ * cap of 20 with only 4 real drafts open.
+ *
+ *   H1  held machinery builds do not count toward SPECIFY_MAX_HELD.
+ *   H2  held spec drafts (every file under specs/) still count.
+ *   H3  a non-drain head never counts; specs/ plus a file outside specs/ and docs/decisions/ is a build.
+ *   H4  an unreadable file list fails the count closed.
+ *   H5  a draft shipping docs/decisions/ files beside specs/ still counts (#3217).
+ *   H6  specs/ plus a scripts/ file does not count.
+ *   H7  only docs/decisions/ files (no specs/ file) does not count.
+ */
+describe('#3570 H1-H7: only spec drafts count toward the held cap', () => {
+  const build = (n: number) => ({ head: `agent/issue-${n}`, files: ['scripts/drain-inbox.sh', 'packages/minspec/tests/x.test.ts'] });
+  const draft = (n: number) => ({ head: `agent/issue-${n}`, files: [`specs/minspec/SPEC-${n}-x/requirements.md`] });
+
+  it('H1: many held machinery builds leave spec-writing running', async () => {
+    const heldRows = Array.from({ length: 12 }, (_, i) => build(100 + i));
+    const d = await runOnce({ ready: [42], specify: [77], heldRows, reading: ROOM });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+
+  it('H2: held spec drafts at the cap still pause spec-writing', async () => {
+    const heldRows = Array.from({ length: 10 }, (_, i) => draft(200 + i));
+    const d = await runOnce({ ready: [42], specify: [77], heldRows, reading: ROOM });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('10 drain pull request(s) held for a human');
+  });
+
+  it('H3: builds beside drafts are not added to the count; non-drain heads are ignored', async () => {
+    const heldRows = [
+      ...Array.from({ length: 9 }, (_, i) => draft(300 + i)),
+      ...Array.from({ length: 5 }, (_, i) => build(400 + i)),
+      { head: 'cos/plan-1', files: ['specs/minspec/SPEC-1-x/requirements.md'] },
+      { head: 'agent/issue-500', files: ['specs/minspec/SPEC-500-x/requirements.md', 'scripts/x.sh'] },
+    ];
+    const d = await runOnce({ ready: [42], specify: [77], heldRows, reading: ROOM });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+
+  it('H4: a pull request with no readable file list fails the count closed', async () => {
+    const d = await runOnce({ ready: [42], specify: [77], heldRows: [{ head: 'agent/issue-9', files: null }], reading: ROOM });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('could not be counted');
+  });
+
+  it('H5: a draft shipping a decision record and INDEX.md beside specs/ still counts', async () => {
+    const withDr = { head: 'agent/issue-600', files: ['specs/minspec/SPEC-268-x/requirements.md', 'docs/decisions/DR-115.md', 'docs/decisions/INDEX.md'] };
+    const heldRows = [...Array.from({ length: 9 }, (_, i) => draft(700 + i)), withDr];
+    const d = await runOnce({ ready: [42], specify: [77], heldRows, reading: ROOM });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('10 drain pull request(s) held for a human');
+  });
+
+  it('H6: specs/ plus a scripts/ file is a build and does not count', async () => {
+    const mixed = { head: 'agent/issue-601', files: ['specs/minspec/SPEC-1-x/requirements.md', 'scripts/x.sh'] };
+    const heldRows = [...Array.from({ length: 9 }, (_, i) => draft(800 + i)), mixed];
+    const d = await runOnce({ ready: [42], specify: [77], heldRows, reading: ROOM });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+
+  it('H7: a pull request with only docs/decisions/ files does not count', async () => {
+    const drOnly = { head: 'agent/issue-602', files: ['docs/decisions/DR-116.md', 'docs/decisions/INDEX.md'] };
+    const heldRows = [...Array.from({ length: 9 }, (_, i) => draft(900 + i)), drOnly];
+    const d = await runOnce({ ready: [42], specify: [77], heldRows, reading: ROOM });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+});
+
+/**
+ * T2 (#3698) - specs only the founder can move do not count toward the pending cap.
+ *
+ * THE BUG. `_pending_specs` counted every spec at `status: new|specifying` and excluded
+ * nothing, so 43 specs against a cap of 40 kept spec-writing paused although 8 of them
+ * waited on the founder alone: the drain could never lower that count itself.
+ *
+ *   F1  a spec named in an open `hold:human` issue body does not count.
+ *   F2  with no such issue the count is unchanged.
+ *   F3  an unreadable hold list pauses spec-writing, loudly (invariant 2).
+ */
+describe('#3698 F1-F3: founder-held specs do not count toward the pending cap', () => {
+  it('F1: 3 pending at a cap of 3, two named in a hold:human body, leaves spec-writing on', async () => {
+    const d = await runOnce({
+      ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 3, reading: ROOM,
+      holdHumanBodies: ['SPEC-900 and SPEC-901 are held for the founder.'],
+      env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' },
+    });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+
+  it('F2: a hold:human body naming no pending spec changes nothing', async () => {
+    const d = await runOnce({
+      ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 3, reading: ROOM,
+      holdHumanBodies: ['Nothing about SPEC-9999 here.'],
+      env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' },
+    });
+    expect(d.dispatched()).toEqual([42]);
+    expect(pausedLines(d.log())).toHaveLength(1);
+  });
+
+  it('F3: the hold:human query failing pauses spec-writing and says the count failed', async () => {
+    const d = await runOnce({ ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 0, reading: ROOM, holdHumanBodies: 'fail' });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('could not be counted');
+  });
+
+  it('F4: a hold:human PULL REQUEST naming a spec in its title excludes that spec', async () => {
+    const d = await runOnce({
+      ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 3, reading: ROOM,
+      holdPrTitles: ['docs: record founder answers for SPEC-900 and SPEC-901'],
+      env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' },
+    });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+
+  it('F5: a hold:human pull request body line that leads with the spec excludes it', async () => {
+    const d = await runOnce({
+      ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 3, reading: ROOM,
+      holdPrBodies: ['- SPEC-900 D4 (queue item x): "yes".', '- SPEC-901 DQ-4: "start now".'],
+      env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' },
+    });
+    expect(d.dispatched()).toEqual([42, 77]);
+    expect(pausedLines(d.log())).toEqual([]);
+  });
+
+  it('F6: the hold:human pull-request query failing pauses spec-writing and says the count failed', async () => {
+    const d = await runOnce({ ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 0, reading: ROOM, holdPrBodies: 'fail' });
+    expect(d.dispatched()).toEqual([42]);
+    const lines = pausedLines(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('could not be counted');
+  });
+
+  it('F7: a passing mention of a spec in a hold body does NOT exclude it', async () => {
+    const d = await runOnce({
+      ready: [42], specify: [77], heldPrs: 0, pendingSpecs: 3, reading: ROOM,
+      holdHumanBodies: ['Unrelated change; see SPEC-900 and SPEC-901 for context.'],
+      holdPrBodies: ['Touches the area SPEC-900 describes.'],
+      env: { MINSPEC_DRAIN_SPECIFY_MAX_PENDING: '3' },
+    });
+    expect(d.dispatched()).toEqual([42]);
+    expect(pausedLines(d.log())).toHaveLength(1);
+  });
+});
