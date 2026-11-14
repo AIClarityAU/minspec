@@ -1243,6 +1243,8 @@ export const MINSPEC_HOOKS_DIR = '.minspec/hooks';
  *  2. Secret scan (#244): if `gitleaks` is on PATH, run it on the staged changes and
  *     BLOCK on a finding. If gitleaks is absent, emit a one-line advisory and
  *     CONTINUE — graceful degradation, never a hard fail for a missing optional tool.
+ *  2b. Committed-symlink gate (#922): refuse a staged symlink named `node_modules`, with an
+ *     absolute target, or whose target escapes the repo. Bypass: SYMLINK_GATE_OFF=1.
  *  3. SDD validation (DR-037 detection chain): run the highest-fidelity validator
  *     that is ACTUALLY available — every tier is opportunistic and falls through if
  *     it cannot run, so an unreachable tier never bricks a commit (never-wrong):
@@ -1568,6 +1570,66 @@ if command -v gitleaks >/dev/null 2>&1; then
 else
   echo "⚠ MinSpec gate: gitleaks not installed — secret scan SKIPPED." >&2
   echo "  Install gitleaks (https://github.com/gitleaks/gitleaks) to gate committed secrets." >&2
+fi
+
+# ── Stage 2b: committed-symlink gate (#922, mirrors the harness's own #913) ──
+# A \`node_modules/\` ignore pattern matches a DIRECTORY, not a symlink FILE named
+# \`node_modules\`, so \`git add\` accepts one. Worktrees routinely symlink a shared
+# hoisted node_modules; committing it bakes a dev-machine path into history that
+# breaks every other checkout and CI. Refuse a staged symlink (git mode 120000)
+# when ANY of:
+#   - its own name is \`node_modules\` (at any depth) - machine-local whatever the target;
+#   - its target is an ABSOLUTE path (non-portable);
+#   - its target lexically ESCAPES the repository root (\`../\` climbs out).
+# Reads only the index (offline). Bypass (rare, intentional in-repo relative link
+# this heuristic cannot tell apart): SYMLINK_GATE_OFF=1 git commit ...
+minspec_symlink_escapes() {
+  # Lexical, POSIX sh, no globbing: does resolving $2 from directory $1 climb
+  # above the repo root?
+  minspec_sl_rest="$1/$2"
+  minspec_sl_depth=0
+  while [ -n "$minspec_sl_rest" ]; do
+    minspec_sl_comp=\${minspec_sl_rest%%/*}
+    case "$minspec_sl_rest" in
+      */*) minspec_sl_rest=\${minspec_sl_rest#*/} ;;
+      *) minspec_sl_rest="" ;;
+    esac
+    case "$minspec_sl_comp" in
+      '' | .) : ;;
+      ..)
+        minspec_sl_depth=$((minspec_sl_depth - 1))
+        [ "$minspec_sl_depth" -lt 0 ] && return 0
+        ;;
+      *) minspec_sl_depth=$((minspec_sl_depth + 1)) ;;
+    esac
+  done
+  return 1
+}
+
+if [ "\${SYMLINK_GATE_OFF:-}" != "1" ]; then
+  minspec_sl_list=$(git diff --cached --raw --diff-filter=AMT | awk -F'\\t' '{ n = split($1, a, " "); if (a[2] == "120000") print $2 }')
+  minspec_sl_fail=0
+  while IFS= read -r minspec_sl_path; do
+    [ -n "$minspec_sl_path" ] || continue
+    minspec_sl_target=$(git show ":$minspec_sl_path" 2>/dev/null || true)
+    minspec_sl_reason=""
+    if [ "$(basename -- "$minspec_sl_path")" = "node_modules" ]; then
+      minspec_sl_reason="a 'node_modules' symlink must never be committed (shared hoisted deps are machine-local)"
+    elif [ "\${minspec_sl_target#/}" != "$minspec_sl_target" ]; then
+      minspec_sl_reason="its target '$minspec_sl_target' is an absolute path (non-portable / dev-machine-specific)"
+    elif minspec_symlink_escapes "$(dirname -- "$minspec_sl_path")" "$minspec_sl_target"; then
+      minspec_sl_reason="its target '$minspec_sl_target' escapes the repository root"
+    fi
+    if [ -n "$minspec_sl_reason" ]; then
+      echo "✗ MinSpec gate: refusing staged symlink '$minspec_sl_path' — $minspec_sl_reason." >&2
+      echo "  Unstage it (git rm --cached '$minspec_sl_path'); use a real in-repo relative link if you need one." >&2
+      echo "  Override (rare): SYMLINK_GATE_OFF=1 git commit ..." >&2
+      minspec_sl_fail=1
+    fi
+  done <<MINSPEC_SL_EOF
+$minspec_sl_list
+MINSPEC_SL_EOF
+  [ "$minspec_sl_fail" -eq 0 ] || exit 1
 fi
 
 # ── Stage 3: SDD validation (DR-037 detection chain) ─────────────────────────
