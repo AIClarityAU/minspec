@@ -87,12 +87,18 @@ amendments queued (#2861, #2992, #2628) this will be done repeatedly.
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 2 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
+
 1. **Surface.** (rec) **A new "Accept Amendment" command**, because the name states the act and
    Accept ADR keeps its simple contract; cost: one more command and menu entry to maintain.
    Alternative: let **Accept ADR re-accept** when the hash drifted; cost: one command doing two
    acts, so a click meant as a first acceptance cannot be told from a re-acceptance by its label.
    Alternative: keep the two-step and document it; cost: two clicks per amendment and a
    committable intermediate `proposed` state.
+
+   **Recorded selection: the recommended option,** a new "Accept Amendment" command. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 2. **Confirmation.** (rec) Show a non-modal toast over the visible diff-vs-record before writing
    (HITL approval UX); cost: one extra click. Alternative: write immediately; cost: an
    accidental click accepts an unread amendment.
+
+   **Recorded selection: the recommended option,** a non-modal toast over the visible diff-vs-record before writing. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.

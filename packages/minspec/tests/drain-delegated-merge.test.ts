@@ -14,7 +14,7 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { useHostileAmbientDrainKnobs } from './helpers/drain-env';
 import { useShellTimeout } from './helpers/shell-timeout';
-import { PLAN_ARTIFACT } from '../../../scripts/lib/delegated-merge';
+import { PLAN_ARTIFACT, SPEC_PLAN_PATH } from '../../../scripts/lib/delegated-merge';
 
 useHostileAmbientDrainKnobs();
 useShellTimeout();
@@ -54,6 +54,8 @@ function run(
     listStderr?: string;
     failFirst?: number;
     seamExit?: Record<number, number>;
+    /** PRs whose seam answer is a direct plan merge (DR-121 s2.4), not an arm. */
+    direct?: number[];
     env?: Record<string, string>;
     /** gh_bot_reauth_read stub: 'new' = a different credential is now in hand; 'same' = broker gave the same one. */
     reauth?: 'new' | 'same';
@@ -76,16 +78,22 @@ function run(
   const codes = Object.entries(o.seamExit ?? {})
     .map(([pr, c]) => `  ${pr}) code=${c} ;;`)
     .join('\n');
+  const direct = (o.direct ?? []).map((n) => `  ${n}) mode=direct ;;`).join('\n');
   const seam = path.join(tmp, 'dispatch.sh');
   fs.writeFileSync(
     seam,
     `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> ${JSON.stringify(calls)}
 code=0
+mode=auto
 case "$2" in
 ${codes}
 esac
-if [ "$code" = 0 ]; then echo '{"proceed":true,"armed":true,"delegationId":"DLG-001","headSha":"abc"}';
+case "$2" in
+${direct}
+esac
+if [ "$code" = 0 ] && [ "$mode" = direct ]; then echo '{"proceed":true,"armed":false,"merged":true,"mergeMode":"direct","delegationId":"DLG-001","headSha":"abc"}';
+elif [ "$code" = 0 ]; then echo '{"proceed":true,"armed":true,"mergeMode":"auto","delegationId":"DLG-001","headSha":"abc"}';
 else echo '{"proceed":false,"reason":"delegation-plan-artifact","detail":"nope"}'; fi
 exit $code
 `,
@@ -180,34 +188,55 @@ describe('Step 0c hands held spec-only PRs to the seam, and nothing else', () =>
   });
 });
 
-describe('a plan-artifact PR takes no judgement slot (T3, 2026-10-30)', () => {
+describe('a plan PR the judge must deny takes no judgement slot (T3, 2026-10-30)', () => {
   // Measured on that day's real list: 21 of 26 candidates carried design.md or tasks.md,
-  // which the judge denies whatever else is true (PLAN_ARTIFACT, delegated-merge.ts). They
-  // spent the cap on a certain "no": ten plan PRs filled a cycle, "0 armed of 10 judged",
-  // while #3391, the one PR that would arm, waited behind them.
+  // which the judge then denied by name (#2980). They spent the cap on a certain "no".
+  // Since DR-121 the only certain "no" is a plan artifact MIXED with other paths or specs
+  // (plan-mixed-diff); those are still skipped.
   const plan = (n: number) => `specs/minspec/SPEC-${n}-x/design.md`;
+  const tasks = (n: number) => `specs/minspec/SPEC-${n}-x/tasks.md`;
 
-  it('a PR behind ten plan PRs is armed in the same cycle', () => {
-    const rows = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => ({ number: n, files: [plan(n)] }));
+  it('a PR behind ten mixed plan PRs is armed in the same cycle', () => {
+    const rows = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => ({ number: n, files: [spec(n), plan(n)] }));
     const r = run([...rows, { number: 11, files: [spec(11)] }]);
     expect(r.seamCalls).toEqual(['--delegated-spec-merge 11 --arm']);
     expect(r.stdout).toContain('1 armed of 1 judged');
   });
 
   it('skipping is never silent: the PRs are named with the reason', () => {
-    const r = run([{ number: 7, files: [plan(7)] }, { number: 8, files: [spec(8)] }]);
-    expect(r.stdout).toContain('1 held PR(s) carry a plan artifact (#2980), not judged: #7');
+    const r = run([{ number: 7, files: [spec(7), plan(7)] }, { number: 8, files: [spec(8)] }]);
+    expect(r.stdout).toContain('1 held PR(s) mix a plan artifact with other paths or specs (#2980, DR-121 s2.2), not judged: #7');
   });
 
-  it('only plan PRs held: named, then the empty-queue line, and the cycle goes on', () => {
-    const r = run([{ number: 7, files: [plan(7)] }]);
+  it('only mixed plan PRs held: named, then the empty-queue line, and the cycle goes on', () => {
+    const r = run([{ number: 7, files: [spec(7), plan(7)] }]);
     expect(r.seamCalls).toEqual([]);
     expect(r.stdout).toContain('not judged: #7');
     expect(r.stdout).toContain('no held spec-only PRs');
     expect(r.stdout).toContain('rc=0');
   });
 
-  it('skips exactly what the judge calls a plan artifact, so the prefilter cannot admit one or starve a spec', () => {
+  it('a plan-only PR for one spec reaches the judge (DR-121; the starvation of 2026-11-14)', () => {
+    const r = run([{ number: 3280, files: [plan(66), tasks(66)] }]);
+    expect(r.seamCalls).toEqual(['--delegated-spec-merge 3280 --arm']);
+    expect(r.stdout).not.toContain('not judged');
+  });
+
+  it('a plan PR the seam merged directly is reported as merged, not armed (DR-121 s2.4)', () => {
+    const r = run([{ number: 3280, files: [plan(66), tasks(66)] }, { number: 3281, files: [spec(67)] }], { direct: [3280] });
+    expect(r.stdout).toContain('#3280 merged (plan, DR-121) - DLG-001 at abc');
+    expect(r.stdout).not.toContain('#3280 armed');
+    expect(r.stdout).toContain('#3281 armed - DLG-001 at abc');
+    expect(r.stdout).toContain('2 armed of 2 judged');
+  });
+
+  it('plans for two specs in one PR are skipped, as the judge denies them', () => {
+    const r = run([{ number: 5, files: [plan(1), tasks(2)] }]);
+    expect(r.seamCalls).toEqual([]);
+    expect(r.stdout).toContain('not judged: #5');
+  });
+
+  it('skips exactly what the judge certainly denies, so the prefilter cannot admit one or starve a plan', () => {
     const paths = [
       'specs/minspec/SPEC-1-x/design.md',
       'specs/minspec/SPEC-1-x/tasks.md',
@@ -215,15 +244,18 @@ describe('a plan-artifact PR takes no judgement slot (T3, 2026-10-30)', () => {
       'specs/minspec/SPEC-1-design.md/requirements.md',
       'specs/minspec/SPEC-1-x/redesign.md',
       'specs/minspec/SPEC-1-x/subtasks.md',
+      'specs/minspec/tasks.md',
+      'specs/minspec/SPEC-1-x/sub/design.md',
+      'specs/design.md',
     ];
     for (const p of paths) {
       fs.rmSync(path.join(tmp, 'cursor'), { force: true });
       const r = run([{ number: 5, files: [p] }]);
-      expect(r.seamCalls.length === 0, p).toBe(PLAN_ARTIFACT.test(p));
+      expect(r.seamCalls.length === 0, p).toBe(PLAN_ARTIFACT.test(p) && !SPEC_PLAN_PATH.test(p));
     }
   });
 
-  it('a mixed PR (requirements plus design) is a plan PR, as it is to the judge', () => {
+  it('a mixed PR (requirements plus design) is skipped, as the judge denies it', () => {
     const r = run([{ number: 5, files: [spec(5), plan(5)] }]);
     expect(r.seamCalls).toEqual([]);
     expect(r.stdout).toContain('not judged: #5');
