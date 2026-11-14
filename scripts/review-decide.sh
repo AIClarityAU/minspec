@@ -202,6 +202,16 @@ if [[ "$END_COUNT" -ne 1 ]]; then
   echo "ai-review:changes"; exit 2
 fi
 
+# Counting one BEGIN and one END is not enough: the END must CLOSE the block, i.e.
+# come AFTER the BEGIN. With `END, BEGIN, verdict: pass` both counts are 1, but the
+# sed range above never meets a closing line and runs to end of input, so the block
+# is unclosed and must not green. The extracted range closes on END_RE only when it
+# found one after BEGIN, so its last line must be that END marker.
+if ! printf '%s\n' "$BLOCK" | tail -n 1 | grep -qE "$END_RE"; then
+  echo "review-decide: refusing — REVIEW_VERDICT_END does not come after REVIEW_VERDICT_BEGIN (unclosed block, #3484)." >&2
+  echo "ai-review:changes"; exit 2
+fi
+
 # Extract a single field value, lowercased and trimmed; empty if absent.
 field() {
   printf '%s\n' "$BLOCK" \
