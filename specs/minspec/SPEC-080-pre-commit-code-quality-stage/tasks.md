@@ -62,7 +62,7 @@ Shared rules for every task:
 
 ## 2 - Stage 4 with the shellcheck check (FR-1 to FR-5, FR-8 shell, FR-10; AC-3, AC-6, AC-11, AC-12 shell half)
 
-- [ ] **2.1** `packages/minspec/src/lib/template-registry.ts` - add `minspec_quality_gate`
+- [x] **2.1** `packages/minspec/src/lib/template-registry.ts` - add `minspec_quality_gate`
   beside `minspec_shell_gate` and call it after Stage 3 under the comment
   `# ── Stage 4: code-quality checks (SPEC-080)`; the hook exits with Stage 3's code if it
   failed, else Stage 4's (design.md, *Stage 3's exit, captured*). This task builds the
@@ -71,7 +71,7 @@ Shared rules for every task:
   including every indexed `.shellcheckrc`, and the shellcheck run
   (`--severity=error --color=never`, any non-zero exit blocks). Roster lines exactly as
   design.md shows; a skip is one line with an install pointer.
-- [ ] **2.2** `packages/minspec/tests/pre-commit-code-quality-stage.test.ts` - with a stub
+- [x] **2.2** `packages/minspec/tests/pre-commit-code-quality-stage.test.ts` - with a stub
   `shellcheck`: AC-3 (no `.sh`, no workflow, no TypeScript: zero `MinSpec quality:` lines and
   the exit status equals the Stage-3-only control's; the same with `pyproject.toml` and a
   staged `.py`); AC-6 (Stage 3 passes, stub finds `STAGE4_BAD`: refused, finding printed);
@@ -86,13 +86,13 @@ Shared rules for every task:
 
 ## 3 - The actionlint check (FR-5 workflows, FR-8 actionlint)
 
-- [ ] **3.1** `packages/minspec/src/lib/template-registry.ts` - `minspec_quality_gate`
+- [x] **3.1** `packages/minspec/src/lib/template-registry.ts` - `minspec_quality_gate`
   selects staged `.github/workflows/<name>.yml` files at the top level only (a `case` `*`
   matches `/`, so nested paths are excluded explicitly), materializes them plus any indexed
   `.github/actionlint.yaml` or `.github/actionlint.yml`, and runs
   `actionlint -shellcheck= -pyflakes= -no-color`, adding `-config-file` when a config was
   materialized. Runs after shellcheck, before tsc.
-- [ ] **3.2** `packages/minspec/tests/pre-commit-code-quality-stage.test.ts` - with a stub
+- [x] **3.2** `packages/minspec/tests/pre-commit-code-quality-stage.test.ts` - with a stub
   `actionlint`: a bad staged workflow is refused and a clean one passes with one roster line;
   the stub's argv carries `-shellcheck=` and `-pyflakes=`; a staged `.github/actionlint.yaml`
   is passed by `-config-file` and its staged content (not the working copy's) is what the stub
@@ -101,7 +101,7 @@ Shared rules for every task:
 
 ## 4 - The typecheck (FR-2 typecheck, FR-5 typecheck, FR-8 tsc; AC-1, AC-4, AC-10, AC-12 tsc half)
 
-- [ ] **4.1** `packages/minspec/src/lib/template-registry.ts` - the typecheck applies when
+- [x] **4.1** `packages/minspec/src/lib/template-registry.ts` - the typecheck applies when
   `git cat-file -e :tsconfig.json` succeeds and a staged path matches `*.ts`, `*.tsx`,
   `*.mts` or `*.cts`. Probe `npx --no-install tsc --version` from the repo root, then
   `command -v tsc`. Materialize the whole index with `git checkout-index --all`; probe that
@@ -110,7 +110,7 @@ Shared rules for every task:
   `--noEmit --pretty false --listFiles -p tsconfig.json` from the tree. Print the diagnostics
   without the `--listFiles` lines; on a pass print "typechecked N of M staged TypeScript
   files", comparing paths under `pwd -P`.
-- [ ] **4.2** `packages/minspec/tests/pre-commit-code-quality-stage.test.ts` - real `tsc`
+- [x] **4.2** `packages/minspec/tests/pre-commit-code-quality-stage.test.ts` - real `tsc`
   through a wrapper on `PATH`: AC-1 (a staged type error: refused, output names the file, the
   line and `error TS`); AC-12's tsc pair; AC-4 (no wrapper, `npm_config_cache` empty: exactly
   one skip line naming `tsc`, commit succeeds); AC-10 (clean `.sh` with a passing stub and
@@ -121,7 +121,7 @@ Shared rules for every task:
 
 ## 5 - The deferral and no-config guards (FR-7, FR-8 metric half, FR-9; AC-2, AC-7, AC-8, INV-3, INV-7)
 
-- [ ] **5.1** `packages/minspec/tests/pre-commit-code-quality-stage.test.ts` - AC-2: stub
+- [x] **5.1** `packages/minspec/tests/pre-commit-code-quality-stage.test.ts` - AC-2: stub
   `jscpd`, `madge`, `knip`, `ts-prune`, `eslint`, `radon` and `ruff` that write a sentinel
   file when run; with near-duplicate staged files, the commit succeeds, no sentinel exists,
   and no output line names any of them. AC-7: on AC-1's and AC-6's fixtures, a
@@ -158,7 +158,7 @@ Shared rules for every task:
 
 ## 8 - The scaffolded CLAUDE.md says what Stage 4 does (FR-3, FR-10 as documentation)
 
-- [ ] **8.1** `packages/minspec/src/lib/template-registry.ts` - `CLAUDE_MD_TEMPLATE`, section
+- [x] **8.1** `packages/minspec/src/lib/template-registry.ts` - `CLAUDE_MD_TEMPLATE`, section
   *Pre-Commit Checks*: one table row, `| Code-quality checks | pre-commit | A staged shell
   script, workflow or TypeScript change that shellcheck, actionlint or tsc rejects |`, and a
   `### Code-quality checks` subsection: when each check applies, that each blocks at error
@@ -166,7 +166,7 @@ Shared rules for every task:
   `MINSPEC_GATE_OFF=1` is the only bypass (and also skips the secret scan), and that a
   base-config root `tsconfig.json` blocks (design.md R1). The `PRE_COMMIT_HOOK` doc comment's
   numbered stage list gains item 4.
-- [ ] **8.2** `packages/minspec/tests/gate-table-parity.test.ts` - one `GATES` entry:
+- [x] **8.2** `packages/minspec/tests/gate-table-parity.test.ts` - one `GATES` entry:
   `sourceAnchor: /Stage 4: code-quality checks/`, `tableKeyword: /shellcheck, actionlint or tsc/`.
   *Done when:* the parity test is green with the new row, and red if the row is removed.
 
