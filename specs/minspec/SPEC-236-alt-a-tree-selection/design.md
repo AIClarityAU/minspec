@@ -197,7 +197,7 @@ lookup reads `.selection` from memory: no refresh, no GitHub call for the Backlo
 
 ```json
 { "command": "minspec.approveActive", "key": "alt+a",
-  "when": "editorTextFocus || minspec.markdownPreviewActive" },
+  "when": "editorTextFocus && focusedView != minspecStatus && focusedView != minspecAdrs && focusedView != minspecBacklog || minspec.markdownPreviewActive && focusedView != minspecStatus && focusedView != minspecAdrs && focusedView != minspecBacklog" },
 { "command": "minspec.approveActive", "key": "alt+a",
   "when": "focusedView == minspecStatus",
   "args": { "source": "tree", "viewId": "minspecStatus" } },
@@ -209,9 +209,24 @@ lookup reads `.selection` from memory: no refresh, no GitHub call for the Backlo
   "args": { "source": "tree", "viewId": "minspecBacklog" } }
 ```
 
-The four `when` clauses are disjoint (a focused view never has `editorTextFocus`), so
-order does not matter. No binding is widened: each clause names one MinSpec view id
-(invariant 3).
+**The clauses are made disjoint by an explicit guard, not by an assumption.** An earlier
+draft claimed they cannot overlap because "a focused view never has `editorTextFocus`".
+That is true of `editorTextFocus` but false of the other arm:
+`minspec.markdownPreviewActive` is set from `tabGroups.activeTabGroup.activeTab`
+(`packages/minspec/src/extension.ts:91-103`), so it tracks the ACTIVE TAB, not keyboard
+focus. With a markdown preview as the active tab and a MinSpec tree focused, both the
+editor/preview entry (no `args`) and the `focusedView == X` entry match, and VS Code runs
+the LAST matching entry. Tree entries happen to come last, but a reorder would make
+Alt+A in a tree reach the handler with no argument and fall to the recently-viewed
+picker: bug #2118 (Alt+A in a tree never reads the tree's selection) again. So each arm of
+the editor/preview entry carries `focusedView != <id>` for every id in `TREE_VIEW_IDS`
+(written as a flat `&&`/`||` form, with no parentheses, so it does not depend on a
+newer when-clause grammar). The tree entries stay `focusedView == X`; no two entries can
+now match one keypress, so entry order does not matter and the test below does not
+depend on it. Each guard negates one MinSpec view id only, so behaviour in every other
+view or context is unchanged (invariant 3). Cost: the editor/preview `when` string is
+long, and a new tree view needs its `!=` guard added in two arms (the test fails until it
+is).
 
 ### The contribution test (FR-7, AC-6)
 
@@ -225,16 +240,26 @@ of problem strings. Rules:
   second `focusedView` arm or `editorTextFocus` in the same clause (one view per entry, so
   the `args` is exact).
 - Every id in `treeViewIds` must have exactly one such entry.
-- At least one entry with no `args` must exist and cover `editorTextFocus` (FR-6: the
-  editor path is not lost).
+- **Disjointness guard.** Every entry with no `args` (the editor/preview entry) must, in
+  EACH `||` arm of its `when`, contain `focusedView != X` for every X in `treeViewIds`,
+  and must contain no `focusedView == ` arm. Otherwise the problem list names the
+  missing id and arm. This is what makes the four entries mutually exclusive, so a
+  keypress can never match both the no-`args` entry and a tree entry whatever the entry
+  order (the preview-active-while-tree-focused case).
+- At least one entry with no `args` must exist and cover `editorTextFocus` and
+  `minspec.markdownPreviewActive` (FR-6: the editor path is not lost).
 
-The test runs the checker on the real manifest (expect `[]`) and on two in-memory mutants
-of it (AC-6): one adds `|| focusedView == minspecFoo` to the editor entry's `when`, one
-deletes the `minspecAdrs` entry. Each mutant must produce a non-empty problem list naming
-the id. `treeViewIds` is the handler's exported `TREE_VIEW_IDS`, so adding a view in one
-place without the other fails. A third check asserts every `TREE_VIEW_IDS` member is a
-`contributes.views` id and `TREE_VIEW_NAMES[id]` equals that view's `name`, so messages
-name the view the user sees.
+The test runs the checker on the real manifest (expect `[]`) and on in-memory mutants of
+it (AC-6), each of which must produce a non-empty problem list naming the id: (1) adds
+`|| focusedView == minspecFoo` to the editor entry's `when`; (2) deletes the
+`minspecAdrs` entry; (3) **removes the `focusedView != minspecAdrs` guard from the
+`minspec.markdownPreviewActive` arm of the editor entry** (the overlap mutant: with it,
+preview-active plus a focused MinSpec tree reaches the no-`args` entry). A
+fourth case reverses the entry order of the real manifest and expects `[]` still, proving
+the result does not depend on order. `treeViewIds` is the handler's exported
+`TREE_VIEW_IDS`, so adding a view in one place without the other fails. A further check
+asserts every `TREE_VIEW_IDS` member is a `contributes.views` id and
+`TREE_VIEW_NAMES[id]` equals that view's `name`, so messages name the view the user sees.
 
 ### Header comment (FR-8)
 
@@ -306,6 +331,14 @@ machinery merge.
   builder removes `confirmTreeTarget` and its test cases in the same pull request, per D1.
 - **R3 A future view is added to `when` but not to `TREE_VIEW_IDS`.** That is exactly what
   task 4.1's test fails on.
+- **R4 The no-`args` entry overlaps a tree entry.** `minspec.markdownPreviewActive`
+  follows the active tab, not focus, so a preview tab plus a focused tree matches both
+  entries; if the no-`args` one wins (a reorder, or a different engine's tie-break),
+  Alt+A in a tree falls to the recently-viewed picker, which is bug #2118. Closed two
+  ways: the `focusedView != <id>` guards in the editor/preview entry make the entries
+  disjoint, and task 4.1's disjointness rule plus the guard-removed mutant fail the
+  build if a guard is dropped. Residual: the test reads the manifest, not VS Code's
+  matcher, so AC-7 (task 6.1, case iv) also observes it with a preview tab active.
 
 ## Follow-ups (tracked)
 

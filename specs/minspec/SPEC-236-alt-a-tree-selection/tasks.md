@@ -116,11 +116,17 @@ Shared rules for every task:
 
 - [ ] **4.1** `packages/minspec/tests/approve-active-keybindings.test.ts` (new) - the pure
   checker `altAContributionProblems(manifest, treeViewIds)` local to the test, with the
-  rules in design.md *The contribution test*, and these cases:
+  rules in design.md *The contribution test* (including the disjointness guard), and these
+  cases:
   - mutant 1: the real manifest with `|| focusedView == minspecFoo` appended to the
     editor entry's `when` → problems non-empty and naming `minspecFoo`;
   - mutant 2: the real manifest with the `minspecAdrs` entry deleted → problems non-empty
     and naming `minspecAdrs`;
+  - mutant 3 (overlap): the real manifest with `focusedView != minspecAdrs` removed from the
+    `minspec.markdownPreviewActive` arm of the no-`args` entry → problems non-empty and
+    naming `minspecAdrs` and that arm (it must fail while that entry is the only change,
+    so the guard rule, not the delete rule, is what catches it);
+  - order independence: the real manifest with its `alt+a` entries in reverse order → `[]`;
   - a hand-built manifest in the target shape → `[]` (the checker's control: it can
     return empty, so mutant 1 and 2 are not failing for an unrelated reason);
   - every `TREE_VIEW_IDS` member is a `contributes.views` id, and `TREE_VIEW_NAMES[id]`
@@ -128,13 +134,13 @@ Shared rules for every task:
   - the real manifest → `[]`.
   Mutants are built with `structuredClone` of the parsed manifest; the file on disk is
   never written. *Done when:* the real-manifest case is RED on `origin/main` (one entry
-  with three `focusedView` arms and no `args`) and the two mutant cases and the control are
-  green against the checker.
+  with three `focusedView` arms and no `args`, and no `!=` guard) and the three mutant cases, the order case and the control are green against the checker.
 
 ## 5 - Wiring (FR-1, FR-3)
 
 - [ ] **5.1** `packages/minspec/package.json` - replace the one `alt+a` entry with the
-  four in design.md *Keybindings*. *Done when:* 4.1's real-manifest case is green, and
+  four in design.md *Keybindings*, the first carrying the `focusedView != <id>` guards in
+  both arms. *Done when:* 4.1's real-manifest case is green, and
   `tests/readme-manifest-parity.test.ts`, `tests/manifest-no-internal-ids.test.ts`,
   `tests/getting-started.test.ts` and `tests/status-bar.test.ts` are green unmodified
   (design.md measured point 7).
@@ -161,7 +167,10 @@ Shared rules for every task:
   the confirmation names the selected spec, Enter approves it (FR-4, D1 confirmation);
   (ii) in the Specs view, click spec A, arrow-down to spec B, Alt+A → the confirmation
   names A, not B (the focus/selection split, design.md measured point 1); Esc → nothing
-  approved; (iii) Alt+A on a backlog issue row → one message, nothing approved.
+  approved; (iii) Alt+A on a backlog issue row → one message, nothing approved; (iv) make a markdown
+  preview the active tab, then focus the Specs view and press Alt+A → the tree
+  confirmation appears, not the recently-viewed picker (the overlap case design.md R4
+  closes).
   If (ii) shows B, the split is not real in VSCodium: remove `confirmTreeTarget`, its call
   and task 3.1's cases in the same pull request, per D1, and say so in the body. This is
   the spec's own manual acceptance step; the builder states it as pending in the pull
