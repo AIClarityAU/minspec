@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-317-spec-signoff-routes-build/requirements.md",
+  "specHash": "7cd5a125a4fc6dfa6caab6422de3aca491b2eab86893e3bea60c194fd0a194f0",
+  "approvedAt": "2026-11-13T06:48:20.899Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:docs/clarify-recs-1113",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3697#issuecomment-6840772356"
+}
