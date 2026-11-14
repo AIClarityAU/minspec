@@ -182,6 +182,9 @@ export interface FrontmatterFinding {
 export interface FrontmatterContext {
   readonly repoRelativePath?: string; // FR-12 needs the base name and the parent directory
   readonly epicsRegistered?: boolean;  // FR-4 epic row; undefined = do not evaluate
+  // Base names of the files beside this one. Supplied by the CALLER, who read the directory;
+  // the checker does no I/O. FR-12's root-file arm needs it. undefined = not supplied.
+  readonly siblingNames?: readonly string[];
 }
 export function checkSpecFrontmatter(raw: string, ctx: FrontmatterContext): FrontmatterFinding[];
 ```
@@ -197,9 +200,15 @@ a rule id moves. The unknown-key suggestion uses a Damerau-Levenshtein distance 
 FR-12 applies when the base name is `requirements.md`, `design.md` or `tasks.md` and the
 parent directory matches `^SPEC-\d+` **or** the file is one of the root split files
 (`specs/<product>/{requirements,design,tasks}.md` whose siblings include the other two).
-The second arm is what keeps `specs/minspec/design.md` in scope, as FR-12 requires; it is
-decided from the path alone, so the checker stays pure. A path-less call (an editor buffer
-with no file) skips FR-12 and says nothing.
+The second arm is what keeps `specs/minspec/design.md` in scope, as FR-12 requires. The
+path alone cannot decide it, because sibling existence is a directory fact. So the checker
+stays pure by taking the sibling set as an explicit input, `ctx.siblingNames`, which the
+caller fills from a directory read it already does or makes (`readdirSync` of the file's
+parent): the corpus gate and `commands/validate.ts`/`approve.ts` supply it. The root arm
+applies only when `siblingNames` is supplied and holds the other two base names. The
+`SPEC-\d+` arm needs the path only. A path-less call (an editor buffer with no file) skips
+FR-12 and says nothing; a call with a root-shaped path and no `siblingNames` skips the root
+arm and says nothing, never guesses.
 
 ### `SpecFrontmatter` and the parser (FR-3, FR-5)
 
@@ -323,17 +332,25 @@ FR-2), which its existing tests pin.
   whose `shape` is `closed-set` or `id`, plus `superseded-by`), and `checkClosedSetField`'s
   required-ness reads the row's `RequiredWhen`. `validateSpec` appends
   `checkSpecFrontmatter`'s FR-12/13/14 findings, all `severity: 'warning'`.
-  `ValidateSpecOptions` gains `repoRelativePath?: string`; `commands/validate.ts` and
-  `commands/approve.ts` already hold `spec.filePath` and pass it relative to the root. The stale "21 files,
+  `ValidateSpecOptions` gains `repoRelativePath?: string` and `siblingNames?: readonly string[]`;
+  `commands/validate.ts` and `commands/approve.ts` already hold `spec.filePath`, pass it
+  relative to the root, and pass the base names of its parent directory. The stale "21 files,
   2026-06-04" comment is rewritten to cite the table instead of a corpus count.
 - **Corpus gate** (`scripts/validate-frontmatter.ts`): a new **Rule 27** (the next free
   number at `64d24aed`; re-check on rebase) loads the schema through a guarded
   `await import(...)`, calls `assertTableWellFormed`, then runs `checkSpecFrontmatter`
-  over every `specs/**/*.md` with `epicsRegistered: epicRefs.size > 0`. A `presence`
-  finding calls `fail()`, the rest `warn()`. Rule 2 + 5 stops calling the script-local
-  `parseFrontmatter` and reads `id` and `epic` through the schema's
-  `readFrontmatterBlock` + `splitFrontmatter` + `readScalar`; its messages and fatality do
-  not change. `parseFrontmatter` stays for the DR and epic rules, which are out of scope.
+  over every `specs/**/*.md` with `epicsRegistered: epicRefs.size > 0` and `siblingNames`
+  from a `readdirSync` of each file's directory. A `presence` finding calls `fail()`, the
+  rest `warn()`. FR-11 requires the gate to stop using its own `parseFrontmatter` for spec
+  rules, so every rule that parses a **spec** file moves to the schema's
+  `readFrontmatterBlock` + `splitFrontmatter` + `readScalar`, with messages and fatality
+  unchanged: Rule 2 + 5 (`id`, `epic`), Rule 7 split coverage (`type`, `tier`, the read at
+  `parseFrontmatter(readFileSync(file, ...))` in the Rule 7 `eachFile`), Rule 9's reference
+  registry (spec `id`, in `buildReferenceRegistry`), and Rule 11 status parity (spec
+  `status`, the `kind: 'spec'` arm of its `eachFile`). Rule 11 also reads decision records
+  and Rule 9 also reads epics; those reads keep `parseFrontmatter`, which stays only for
+  DR and epic files, out of FR-11's scope. After the change no call passes a spec file to
+  `parseFrontmatter`; task 8.1 proves it by a gate test (see tasks).
 - **Load failure (FR-15, AC-11).** If the import or `assertTableWellFormed` throws, the
   gate calls `fail()` with `Rule 27 (spec frontmatter schema) validated NOTHING: <error>`
   and skips only Rule 27; every other rule still runs and the exit is non-zero.
@@ -405,7 +422,7 @@ checks it with the same function, so the legacy block coming back turns it red (
 | `packages/minspec/src/lib/scaffold.ts` | `affects:` | `buildTasksMdContent` key order from the table |
 | `packages/minspec/src/views/frontmatter-completion.ts` | `affects:` | derived value lists, `type` arm |
 | `packages/minspec/src/views/spec-panel.ts` | `affects:` | `displayTitle` for the panel title |
-| `scripts/validate-frontmatter.ts` | `affects:` | Rule 27; Rule 2 + 5 reads through the schema |
+| `scripts/validate-frontmatter.ts` | `affects:` | Rule 27; Rules 2 + 5, 7, 9 and 11 read spec files through the schema |
 | `specs/minspec/design.md` | `affects:` | FR-17 example |
 | `packages/minspec/src/views/spec-panel-html.ts` | **not declared** | `displayTitle`, sibling-aware `effectiveTier` for the badge, `phaseMap` |
 | `packages/minspec/src/extension.ts` | **not declared** | resolver calls where it builds a summary from frontmatter |

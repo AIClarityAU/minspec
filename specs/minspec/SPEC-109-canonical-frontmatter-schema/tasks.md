@@ -61,8 +61,9 @@ Shared rules for every task:
     rule id and `presence` flag; AC-6 (`design.md` with `type: tasks`, and with no `type`,
     under `specs/x/SPEC-NNN-a/` each give `frontmatter.type.mismatch`; a flat
     `specs/SPEC-NNN-b.md` with no `type` gives nothing); FR-12's root arm
-    (`specs/minspec/design.md` with siblings, no `type`: mismatch); a path-less call skips
-    FR-12; AC-7's finding (`relate_to:` gives `frontmatter.key.unknown` naming
+    (`specs/minspec/design.md` with `siblingNames: ['requirements.md','tasks.md']`, no `type`:
+    mismatch; the same path with `siblingNames` absent, or holding only one other name:
+    nothing, the root arm is skipped, not guessed); a path-less call skips FR-12; AC-7's finding (`relate_to:` gives `frontmatter.key.unknown` naming
     `relates_to`, `presence: false`); an out-of-order file gives one `frontmatter.order`
     with `presence: false`; `status: draft` gives `frontmatter.status.unknown` (INV-7);
   - INV-1: the module's `import` declarations are exactly `./spec-vocabulary` and a
@@ -78,13 +79,15 @@ Shared rules for every task:
 
 ## 2 - `SpecFrontmatter` follows the table; resolvers; no behaviour change (FR-3, FR-6; AC-5 type half)
 
-This task changes types and call sites only. `parseSpec` still fills its defaults, so every
-resolver returns the value it is given and no written output changes. The one visible
-change is intended: the Active Spec panel's tier badge on a tier-less split `design.md` or
-`tasks.md` shows its `requirements.md` sibling's tier (AC-4).
+This task changes types and call sites only. `parseSpec` still fills its defaults (an
+untiered `design.md` still parses as `tier: 'T2'`), so every resolver returns the value it is
+given and no output changes, the panel badge included. The resolvers and
+`readRequirementsSiblingTier` are built and unit-tested here; AC-4's visible change (the
+badge showing the sibling's tier) is delivered by task 3, once `parseSpec` stops filling
+`tier`.
 
 - [ ] **2.1** `packages/minspec/tests/spec-frontmatter-roundtrip.test.ts` (new, owned) -
-  resolver cases: `effectiveTier` (own valid tier; `design`/`tasks` with a supplied sibling
+  resolver cases (pure functions given explicit inputs; no claim about `parseSpec`): `effectiveTier` (own valid tier; `design`/`tasks` with a supplied sibling
   tier; no tier and no sibling gives `T2`; a `requirements` file ignores a supplied sibling);
   `displayTitle` (frontmatter `title`, empty `title` falls to the H1, no H1 falls to `id`);
   `phaseMap` (absent gives five `pending`); AC-4's resolution half through
@@ -102,8 +105,9 @@ change is intended: the Active Spec panel's tier badge on a tier-less split `des
   `packages/minspec/src/lib/spec-validator.ts` (`effectiveTier(spec.frontmatter)` with no
   sibling, `phaseMap`), `packages/minspec/src/lib/spec-manager.ts`,
   `packages/minspec/src/views/spec-panel.ts` (`displayTitle`), and the undeclared files
-  design.md names: `src/views/spec-panel-html.ts` (the tier badge passes
-  `readRequirementsSiblingTier` for a split `design`/`tasks` file),
+  design.md names: `src/views/spec-panel-html.ts` (the tier badge calls `effectiveTier` and passes
+  `readRequirementsSiblingTier` for a split `design`/`tasks` file; no visible change until
+  task 3.3, because `parseSpec` still supplies `T2`),
   `src/extension.ts`, `src/lib/spec-catalog.ts`, `src/lib/spec-progress.ts`,
   `src/lib/spec-closeout.ts`, `src/lib/artifact-graph.ts`. `src/lib/lifecycle.ts`:
   `phasesForApproval` accepts `undefined` and resolves it to all-`pending` first (D6).
@@ -121,8 +125,11 @@ change is intended: the Active Spec panel's tier badge on a tier-less split `des
   write leaves the frontmatter block byte-identical; AC-2 (no `created:`, parsed under
   `vi.setSystemTime` at two dates: deep-equal); AC-3 (an approved split `tasks.md` with no
   `tier`/`title`/`created`, toggled through `toggleTask` + `writeSpec` as
-  `spec-panel.ts` `handleMessage` does: frontmatter block byte-identical); AC-4's write half
-  (the `design.md` from 2.1 has no `tier:` line after a write); a status change rewrites
+  `spec-panel.ts` `handleMessage` does: frontmatter block byte-identical); AC-4 end to end,
+  red against task 2: parse the tier-less `design.md` from 2.1 beside its `tier: T4`
+  `requirements.md`, then the badge's tier computation (`effectiveTier` with
+  `readRequirementsSiblingTier`) gives `T4` where task 2 gives `T2`, and the file has no
+  `tier:` line after a write; a status change rewrites
   only the `status:` line; a phase change rewrites only that child line and keeps a child's
   inline comment elsewhere; a transition on a phaseless spec inserts `phases:` at its table
   position (INV-9); an unknown key with a comment above it, mid-block and last, survives in
@@ -141,7 +148,10 @@ change is intended: the Active Spec panel's tier badge on a tier-less split `des
   `extraFrontmatter` from it, and substitutes nothing for an absent `tier`, `created`,
   `title` or `phases`; `parseFrontmatterYaml`, `extractUnknownFrontmatterLines` and
   `KNOWN_FRONTMATTER_KEYS` are removed. `serializeFrontmatter` implements both branches of
-  design.md, *The writer*; `writeSpec` passes `frontmatterSource`.
+  design.md, *The writer*; `writeSpec` passes `frontmatterSource`. This is the task that
+  delivers AC-4's visible change: with no filled `tier`, the Active Spec panel badge on a
+  tier-less split `design.md` or `tasks.md` shows its `requirements.md` sibling's tier.
+  Gates still call `effectiveTier` without a sibling (D5), so no verdict moves.
 - [ ] **3.4** `packages/minspec/src/lib/spec-layout.ts` - `splitSpecForSpecKit` gives the
   `spec.md` shard the source's `frontmatterSource`; `mergeSpecKitShards` carries the
   `spec.md` shard's. `packages/minspec/src/lib/spec-manager.ts` - `migrateLayout` writes the
@@ -180,10 +190,10 @@ change is intended: the Active Spec panel's tier badge on a tier-less split `des
   messages of the pre-existing `frontmatter.*` rules are unchanged on today's fixtures.
 - [ ] **5.2** `packages/minspec/src/lib/spec-validator.ts` - `CLOSED_SET_FIELDS` built from
   the table, required-ness from `RequiredWhen`, `checkSpecFrontmatter`'s FR-12/13/14
-  findings appended as warnings, `ValidateSpecOptions.repoRelativePath`, and the
+  findings appended as warnings, `ValidateSpecOptions.repoRelativePath` and `siblingNames`, and the
   "21 files, 2026-06-04" comment replaced by a pointer to the table.
   `packages/minspec/src/commands/validate.ts` and `src/commands/approve.ts` (undeclared)
-  pass `repoRelativePath`.
+  pass `repoRelativePath` and the base names of the file's directory (`siblingNames`).
   *Done when:* 5.1 is green and approving a corpus spec in the Extension Development Host
   shows no new warning on a file in FR-2 order.
 
@@ -234,7 +244,7 @@ change is intended: the Active Spec panel's tier badge on a tier-less split `des
   pull request (FR-20).
   *Done when:* 7.1 is green, `npm run validate` is green, and 7.4 is recorded.
 
-## 8 - The corpus gate evaluates the table (FR-11 corpus half, FR-15; AC-7, AC-8, AC-10, AC-11) - machinery
+## 8 - The corpus gate evaluates the table (FR-11 corpus half, all spec-reading rules, FR-12 root arm, FR-15; AC-7, AC-8, AC-10, AC-11) - machinery
 
 `scripts/` is review machinery, so this pull request needs a machinery merge. It depends on
 task 7 (the FR-12 rule is fatal and would red on the three FR-20 files).
@@ -248,15 +258,25 @@ task 7 (the FR-12 rule is fatal and would red on the three FR-20 files).
   `spec-frontmatter-schema` to a module that throws: exit non-zero, output names Rule 27 as
   validated nothing, and a finding from a later rule is still printed; control: the same
   tree without the hook exits 0). The hook case first asserts the redirect landed (the
-  thrown message appears in the output), so it cannot pass vacuously.
+  thrown message appears in the output), so it cannot pass vacuously. FR-11 one-parser
+  cases, each red before 8.3: a fixture spec with CRLF line endings and one with an inline
+  comment on `type:`/`tier:`/`id:`/`status:` is read identically by Rule 7, Rule 9 and
+  Rule 11 and by Rule 27 (no rule reports it unreadable while another accepts it); and a
+  source-text case asserting that no `parseFrontmatter(` call in `scripts/validate-frontmatter.ts`
+  sits in a spec-reading path (the allowed call sites are the DR and epic readers, listed by
+  name). Root-arm FR-12 case: `specs/<product>/design.md` with its two siblings and no
+  `type` fails the gate; the same file alone in its directory does not.
 - [ ] **8.2** `packages/minspec/tests/validate-frontmatter-rule-mutants.test.ts`
   (undeclared) - a Rule 27 mutant (delete `status:` from one golden spec; Rule 27 is the
   only finding); add `type:` lines to golden spec files if the golden corpus otherwise trips
   FR-12.
 - [ ] **8.3** `scripts/validate-frontmatter.ts` - Rule 27 per design.md, *The two
   validators*, including the guarded `await import` and `assertTableWellFormed`; Rule 2 + 5
-  reads `id` and `epic` through the schema reader with its messages and fatality unchanged.
-  The local `parseFrontmatter` stays for the DR and epic rules.
+  reads `id` and `epic` through the schema reader with its messages and fatality unchanged;
+  Rule 7 (split coverage), Rule 9's spec-`id` registry read and Rule 11's `kind: 'spec'`
+  `status` read do the same (FR-11: no spec file goes through the local `parseFrontmatter`).
+  Rule 27 passes `siblingNames` from `readdirSync`. The local `parseFrontmatter` stays for
+  the DR and epic readers only.
   *Done when:* 8.1 and 8.2 are green, `npm run validate` on this repository is green with
   zero Rule 27 failures (AC-10), and the full suite, lint and build pass.
 
