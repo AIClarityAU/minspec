@@ -8,9 +8,7 @@ epic: EPIC-003  # SDD Core Methodology — the spec→code ownership contract (S
 aspects: [ownership, corpus-backfill, ratchet, no-silent-gate, tier-0]
 depends_on: [SPEC-081, SPEC-070]  # SPEC-081 ships the findings + FR-6 count; SPEC-070 (DR-088) makes a declaration cost no re-approval
 relates_to: [SPEC-038, SPEC-051, SPEC-022, DR-088, DR-076, "#3650", "#1543", "#1521"]
-# Ownership deliberately empty. This spec's deliverables are edits to existing specs'
-# frontmatter (12 files, owned by no one) and a one-line severity change in files that
-# SPEC-081 owns/affects. It creates no new production file, so there is nothing to own.
+# Owns the three files it edits: its deliverables are a severity change there plus backfill edits to other specs' frontmatter.
 implements: [scripts/validate-frontmatter.ts, packages/minspec/src/lib/template-registry.ts, packages/minspec/src/lib/spec-validator.ts]
 affects: [packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/template-registry.ts, scripts/validate-frontmatter.ts]
 phases:
