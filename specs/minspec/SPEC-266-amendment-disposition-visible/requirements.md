@@ -134,6 +134,10 @@ has already happened.
   #1841 ratified it (rec: nobody can answer from the repo); cost: `CLAUDE.md` keeps citing
   FR-4b from a block labelled not accepted. (b) Correct the label now; cost: voids the
   current approval and forces re-approval of a T4 spec.
+  **Founder answer (2026-10-29, founder, via AskUserQuestion, queue item s266d4):** "yes, his
+  SPEC-044 sign-off covered Amendment A" - the founder's SPEC-044 sign-off (approval #1841)
+  covered Amendment A (the CoS order-vs-fixes shepherding split). This answers the open
+  question in option (a) of D4.
 - **D5 Scope of "proposed".** Whether `Held`/`Draft` wording without the exact phrase counts.
   (a) Exact phrase `PROPOSED, not accepted` plus `Status: proposed` (rec); cost: misses
   novel wordings. (b) Any heading containing `proposed`; cost: false positives on prose.
