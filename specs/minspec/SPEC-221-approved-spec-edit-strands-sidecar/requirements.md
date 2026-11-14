@@ -1,7 +1,7 @@
 ---
 id: SPEC-221
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a sign-off must never silently attest to text nobody approved
@@ -12,9 +12,9 @@ implements_reason: >-
   Owned files are decided at Plan; none are claimed before then, so no shared file is frozen
   early by a spec whose design is not fixed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
