@@ -44,7 +44,10 @@ export async function migrateLayoutCommand(workspaceRoot: string): Promise<void>
     .getConfiguration('minspec')
     .update('specsLayout', target, vscode.ConfigurationTarget.Workspace);
 
-  vscode.window.showInformationMessage(
-    `MinSpec: Migrated ${result.migrated} spec${result.migrated === 1 ? '' : 's'} to ${target} layout.`,
-  );
+  const done = `MinSpec: Migrated ${result.migrated} spec${result.migrated === 1 ? '' : 's'} to ${target} layout.`;
+  if (result.warning) {
+    vscode.window.showWarningMessage(`${done} ${result.warning}`);
+    return;
+  }
+  vscode.window.showInformationMessage(done);
 }
