@@ -68,22 +68,30 @@ Shared rules for every task:
     entry in `conflicts`); two different trailers -> `unknown`, reason
     `conflicting-trailers`; a prose line `see Tier: T2 above` -> not a trailer.
   - Origin issue precedence: scope beats `Closes`; lowest `Closes` id; lookup fallback.
-  - AC-2: one PR with no tier -> listed in `unknown.prs`. Coverage forced to 79% -> every
-    tier `share: undefined` with a reason naming classified/total. Linkable fixes at 79%
-    -> same, reason names linked/total. 19 PRs in a tier -> `undefined`, reason
-    `n=19 < 20`.
+  - AC-2: one PR with no tier -> listed in `unknown.prs`. Per-tier coverage (design P5):
+    T3 with 40 PRs and T1 with 20 PRs beside 6 unknown PRs -> T3 coverage 40/46 (0.87)
+    reports a share, T1 coverage 20/26 (0.77) is `share: undefined` with reason
+    `coverage 20/26 < 0.8 (unknown PRs counted against this tier)`; boundary: 24 PRs
+    with 6 unknown (exactly 0.8) reports. Linkable fixes at 79% -> every tier undefined,
+    reason names linked/total. 19 PRs in a tier -> `undefined`, reason `n=19 < 20`.
   - AC-3: a tier with zero PRs -> `share: undefined`, reason `n=0`.
   - FR-7: shuffle the input array, the output is deep-equal and `JSON.stringify` equal.
   - Unreadable `today` or commit date -> top-level reason, no tier has a number.
+  - FR-2 base: every reading holds `cost.formula: 'tokens-sum/1'`, `cost.base` and
+    `cost.weeklyCapTokens`; `cap.tokens` of 0, -1, `NaN` or `Infinity`, or a blank
+    `cap.base` -> a refusal carrying a reason and no `tiers` field at all.
   *Done when:* RED on `origin/main` (missing module), observed once before 1.2.
 - [ ] **1.2** `scripts/lib/gate-payoff.ts` (new) - types and `computeGatePayoff` exactly
-  as design.md, *The pure core*, steps 1-7 and 9. Import `fixScopeIssues` from
-  `./repeat-fix-share`. Export the floors as constants beside `WINDOW_DAYS`-style names
-  (`HORIZON_DAYS = 30`, `MIN_COVERAGE = 0.8`, `MIN_TIER_PRS = 20`, `MIN_LINKABLE = 0.8`).
+  as design.md, *The pure core*, the cap refusal and steps 1-7 and 9. Import
+  `fixScopeIssues` from `./repeat-fix-share`. Export the floors as constants beside
+  `WINDOW_DAYS`-style names (`HORIZON_DAYS = 30`, `MIN_COVERAGE = 0.8`,
+  `MIN_TIER_PRS = 20`, `MIN_LINKABLE = 0.8`).
   *Done when:* 1.1 is green.
 - [ ] **1.3** Mutation check (AC-2): in a scratch copy, (a) delete the `unknown` bucket
-  push, (b) default an untiered PR to `T3`, (c) drop the coverage floor. Run 1.1 against
-  each; each must fail. Record the three failing test names in the PR body. Revert.
+  push, (b) default an untiered PR to `T3`, (c) drop the coverage floor, (d) compute
+  coverage window-wide (classified / all) instead of per tier, (e) accept a missing
+  `cap`. Run 1.1 against each; each must fail. Record the five failing test names in the
+  PR body. Revert.
 
 ## 2 - Cost join (FR-4; AC-5)
 
@@ -95,9 +103,14 @@ Shared rules for every task:
   - a unit with no record counts in `prsWithoutRecords`; the tier's `reason` says
     incomplete with that count (AC-5);
   - one joined record with `costUsd: null` -> tier `costUsd: undefined` with reason, token
-    sums still present;
-  - no `cap` -> `weeklyShareMean` and `weeklyShareTotal` undefined, reason names the two
-    flags; with `cap {usd: 1000, base: 'x'}` -> exact arithmetic.
+    sums and both token weekly shares still numeric (USD is a column, not the base, P7);
+  - with `cap {tokens: 1000000, base: 'x'}` and two records of 30000 and 10000 tokens
+    (sum of all four classes) on two PRs -> `totalTokens 40000`, `meanTokensPerPr 20000`,
+    `weeklyShareMean 0.02`, `weeklyShareTotal 0.04` exactly;
+  - no division uses `costUsd`: a separate fixture with one record of `costUsd: 99` and
+    zero tokens -> `weeklyShareTotal 0`;
+  - a tier with no joined record -> `meanTokensPerPr` and both shares undefined, reason
+    names the missing count.
   *Done when:* RED before 2.2.
 - [ ] **2.2** `scripts/lib/gate-payoff.ts` - step 8 of the design. *Done when:* 2.1 green.
 
@@ -108,8 +121,13 @@ Shared rules for every task:
     `emit_usage_line` reads) -> exact record; `result` prose never appears in the record;
     a non-finite token -> 0; a model id outside the safe charset -> `'unknown'`; no
     `total_cost_usd` -> `costUsd: null`.
-  - `ledgerPath`: env override wins; otherwise `<git common dir>/minspec/ceremony-cost.jsonl`
-    in a temp repo, and the same path from a linked worktree of that repo.
+  - `ledgerPath` (design P4, D5 (a)): env override wins; otherwise
+    `<main worktree root>/.minspec/state/ceremony-cost.jsonl` in a temp repo, and the SAME
+    path (the main worktree's, not its own) from a linked worktree of that repo; the
+    linked worktree removed afterwards -> the file and its lines remain.
+  - Ignore guard: in a temp repo whose `.gitignore` lacks `.minspec/state/`, `append`
+    writes nothing, exits non-zero, stderr says `ledger path not gitignored`; with the
+    entry, it writes, and `git status --porcelain` stays empty.
   - `append` CLI (subprocess, `node scripts/lib/ceremony-cost-ledger.mjs`): writes one
     line; second call appends; with no `.minspec/` and no env var -> writes nothing, exit
     0 with a stderr line saying it is inert; unparseable stdin -> exit non-zero, stderr
@@ -122,7 +140,9 @@ Shared rules for every task:
   - Concurrency: 20 parallel `append` subprocesses -> 20 parseable lines.
   *Done when:* RED before 3.2.
 - [ ] **3.2** `scripts/lib/ceremony-cost-ledger.mjs` (new, node built-ins only) - as
-  design.md, *Ledger module*. *Done when:* 3.1 green.
+  design.md, *Ledger module*; `.gitignore` gains the line `.minspec/state/` (D5 (a)).
+  *Done when:* 3.1 green and `git check-ignore -q --no-index
+  .minspec/state/ceremony-cost.jsonl` exits 0 in this repo.
 
 ## 4 - Writers (FR-4, D1 trailer; AC-6) - the writers PR, machinery
 
@@ -146,12 +166,17 @@ Shared rules for every task:
     amended, message ends `Tier: T3`, tree SHA unchanged; tip equals base -> no amend; a
     message already holding `Tier: T2` -> no amend; a failing commit-msg hook -> commit
     unchanged, one stderr line naming the step, return 0.
-  - Wiring (source text, with a behavioural partner above): `add_tier_trailer` is called
-    before `run_egress_guard` on the completion path; both `claude -p` calls pass
-    `--output-format json` and pipe through `ceremony-cost-ledger.mjs filter` before
-    `tee`, with stages `build`/`specify` and `fix-round`.
+  - `cost_stage_for_run` (sourced, design *The writers* (c)): agent run with
+    `SPECIFY_ONLY=1` -> `specify`; with `0` -> `build`; fix-round run with either ->
+    `fix-round`; `SPECIFY_ONLY=x` -> empty output, one named stderr line, non-zero.
+  - Wiring (source text, with the behavioural partners above): `add_tier_trailer` is
+    called before `run_egress_guard` on the completion path; both `claude -p` calls pass
+    `--output-format json` and pipe through `ceremony-cost-ledger.mjs filter --stage
+    "$COST_STAGE"` before `tee`, where `COST_STAGE` comes from `cost_stage_for_run`
+    (no literal stage string on either call).
 - [ ] **4.4** `scripts/dispatch-issue.sh` - (a) read `TRIAGE_TIER` before `$VERDICT_SRC`
-  is removed; (b) `add_tier_trailer`; (c) the two `--output-format json | filter` changes.
+  is removed; (b) `add_tier_trailer`; (c) `cost_stage_for_run` and the two
+  `--output-format json | filter` changes.
   Re-run `dispatch-escalate-retry.test.ts` and every `dispatch-*.test.ts` unchanged.
   *Done when:* 4.3 green and the full `packages/minspec/tests` suite is green.
 - [ ] **4.5** `.github/workflows/ai-review.yml` - `MINSPEC_COST_LEDGER` on the voter steps
@@ -180,7 +205,13 @@ Shared rules for every task:
 
 - [ ] **6.1** `packages/minspec/tests/gate-payoff-cli.test.ts` (new), subprocess against a
   temp repo built with real `git commit`s (subjects ending `(#N)`, bodies with trailers):
-  - output carries ref, sha, window, horizon, definition, cost base (AC-1 end to end);
+  - output carries ref, sha, window, horizon, definition, cost base (`cost.formula`,
+    `cost.base`, `cost.weeklyCapTokens`) (AC-1 end to end);
+  - FR-2 refusal: no cap flags; only `--weekly-cap-tokens`; only `--cap-base`;
+    `--weekly-cap-tokens 0`; `--weekly-cap-tokens abc`; `--cap-base ""` -> each exits 2,
+    stdout is empty (zero bytes), stderr holds `gate-payoff: refusing to emit: no cost
+    base` and names the flag; `--weekly-cap-usd 100` alone is rejected the same way (no
+    dollar base exists);
   - AC-4: a `git clone --depth 1` copy -> undefined reading, reason names the shallow
     clone, exit 1; `--today 2026-13-40` -> reason, exit 1; a corrupt lookup -> reason,
     exit 1; a ledger with one malformed line -> cost reason counts it;
@@ -200,13 +231,19 @@ Shared rules for every task:
 
 - [ ] **7.1** Run `scripts/backfill-pr-tier.ts --online --from <windowStart>` with an App
   token, commit `docs/research/gate-payoff/pr-tier-lookup.json`. Then run
-  `npm run measure:gate-payoff -- --weekly-cap-usd <n> --cap-base "<name>"` with the cap
-  figure and its source taken from the runner's latest measurement (or without the flags,
-  in which case the reading says the weekly share is undefined and why). Commit
+  `npm run measure:gate-payoff -- --weekly-cap-tokens <n> --cap-base "<name>"`, with the
+  weekly cap in tokens under formula `tokens-sum/1` (design P7) and a name saying which
+  cap and where the figure came from, taken from the runner's latest measurement. Both
+  flags are required; there is no run without them (FR-2). If no cap figure in tokens is
+  available, or the only one is in another unit and was not converted onto
+  `tokens-sum/1` by its supplier, STOP: commit no reading and report the missing base.
+  Commit
   `docs/research/gate-payoff/<date>-reading.md`: command, full JSON, `unknown` list, and
   the per-gate table with arithmetic per design.md, *FR-6 first reading*. Any "remove"
-  verdict is worded as a proposal to the founder. *Done when:* `npm run validate` green and
-  a grep of the note finds a number or "insufficient data" in every verdict cell (AC-9).
+  verdict is worded as a proposal to the founder. *Done when:* `npm run validate` green,
+  a grep of the note finds a number or "insufficient data" in every verdict cell (AC-9),
+  and the committed JSON's `cost.base` and `cost.weeklyCapTokens` are present and
+  non-empty.
 - [ ] **7.2** Follow-ups from the reading: if coverage is under 80%, file one issue
   (`inbox`) for a trailer writer on non-dispatched PRs, citing the reading's numbers; add
   the two dated `docs/backlog.md` lines named in design.md, *Follow-ups (tracked)*.

@@ -23,7 +23,8 @@ Plan for [requirements.md](requirements.md) (APPROVED under DLG-001; read, never
 this Plan), built under the five recorded Clarify selections: D1 (a) tier made local by a
 `Tier:` trailer plus a one-off opt-in backfill, D2 (a) same-origin-issue OR `Root cause:`
 citation, D3 (a) 60-day window with a 30-day follow-up horizon, D4 (a) 80% coverage and
-n >= 20, D5 (a) an append-only, untracked JSONL ledger plus a CI artifact copy. Citations
+n >= 20, D5 (a) an append-only, gitignored JSONL ledger under `.minspec/state/` plus a CI
+artifact copy. Citations
 of "today" are against `origin/main` `8b3c0017` (2026-11-13). New code is named by symbol,
 because its line numbers will move. The task list is [tasks.md](tasks.md).
 
@@ -36,7 +37,9 @@ repeat fix within 30 days, the share (or `undefined` with a reason), and the cer
 A reader, `scripts/lib/gate-payoff-reader.ts`, does the local I/O (git, the committed
 lookup file, the cost ledger) and never touches the network. A CLI, `scripts/gate-payoff.ts`,
 prints the reading as deterministic JSON beside the existing repo-wide
-`readRepeatFixShare`, and exits non-zero when any tier is unknown. Two writers make the
+`readRepeatFixShare`, and exits non-zero when any tier is unknown. It refuses to print any
+reading at all (exit 2, named reason, empty stdout) unless the caller states the weekly cap
+in tokens and names its base (FR-2). Two writers make the
 inputs exist going forward: a zero-dependency ledger module,
 `scripts/lib/ceremony-cost-ledger.mjs`, called from `review-branch.sh` and
 `dispatch-issue.sh` with the usage the CLI already returns; and a `Tier: Tn` trailer that
@@ -103,30 +106,56 @@ Each was run against `8b3c0017`, not inferred.
   envelope's `.result` (the bytes text mode printed) and passes every non-envelope line
   through verbatim, so the log, the `ESCALATE:` grep and the crash diagnostics read as
   before.
-- **P4 - The local ledger lives in the git common dir.** Default path
-  `$(git rev-parse --git-common-dir)/minspec/ceremony-cost.jsonl`: shared by every
-  worktree of the clone, never tracked, never in a working tree, so it survives worktree
-  removal (dispatch builds in throwaway worktrees). Precedent: the session-scope file
-  under `.git/worktrees/<name>/minspec/`. `MINSPEC_COST_LEDGER` overrides it (CI sets it
-  to `$RUNNER_TEMP`). This meets D5 (a)'s "append-only, gitignored, under the repo"
-  without a `.gitignore` entry. Rejected: `.minspec/state/` inside the working tree (a
-  dispatch worktree's copy is deleted with the worktree, losing the records).
-- **P5 - Coverage is a window property.** D4's 80% floor cannot be per tier: an
-  unclassified PR's tier is unknown, so it could belong to any tier. The floor is applied
-  to the window (classified PRs / all PRs); below it every tier's share is `undefined`.
-  n >= 20 is per tier. A second floor mirrors `MIN_ATTRIBUTION`: fix PRs in the horizon
-  that cite no origin issue and no `Root cause:` reference cannot be linked to anything,
-  so their repeats are invisible; below 80% linkable, every share is `undefined`.
+- **P4 - The local ledger lives under `.minspec/state/` of the MAIN worktree (D5 (a)).**
+  Default path `<main worktree root>/.minspec/state/ceremony-cost.jsonl`, where the main
+  worktree root is the path on the first `worktree` line of `git worktree list
+  --porcelain` (correct from any linked worktree, and with a separate git dir). Resolving
+  to the main worktree, not the current one, keeps D5's location while surviving the
+  removal of the throwaway worktrees dispatch builds in: every worktree of a clone appends
+  to the one file. `.gitignore` gains `.minspec/state/` (task 3.2), and the writer checks
+  `git check-ignore -q --no-index <path>` before every append and refuses, with its named
+  stderr line, when the path is not ignored, so "gitignored" is enforced rather than
+  assumed (a tracked ledger would dirty the primary checkout and churn `main`, D5 (b)'s
+  cost). `MINSPEC_COST_LEDGER` overrides the path (CI sets it under `$RUNNER_TEMP`; the
+  ignore check is skipped for an explicit override outside any repo). Rejected:
+  `.minspec/state/` of the CURRENT worktree (a dispatch worktree's copy is deleted with the
+  worktree, losing the records); the git common dir (`.git/minspec/`), which the first
+  Plan draft chose, because it departs from the recorded D5 selection without a
+  requirements change.
+- **P5 - The coverage floor is applied per tier (FR-3, D4 (a)), counting every unknown PR
+  against each tier.** An unclassified PR could belong to any tier, so the only per-tier
+  coverage that never overstates is the worst case: tier T's classified coverage =
+  `prs(T) / (prs(T) + |unknown|)`. Below 0.8 that tier's share is `undefined` with a
+  reason naming both counts; tiers above it still report. n >= 20 is also per tier.
+  Rejected: one window-wide coverage figure (classified / all PRs), which the first Plan
+  draft used and which does not meet FR-3's "a tier whose classified coverage is below
+  the floor"; and apportioning unknowns to tiers in proportion to their classified counts,
+  which algebraically reduces every tier's coverage to the window-wide figure and so is
+  the same rejected rule in disguise. Cost: a small tier needs four classified PRs per
+  unknown one, so T1 or T4 can read `undefined` while T3 reports (Risks). A second,
+  separate floor is window-wide by necessity and is not D4's: fix PRs in the horizon that
+  cite no origin issue and no `Root cause:` reference cannot be linked to any unit, so they
+  cannot be assigned a tier and their repeats are invisible to every tier; below 80%
+  linkable, every share is `undefined` (mirrors `MIN_ATTRIBUTION`; it only ever withholds
+  a number, never adds one).
 - **P6 - Ceremony is not the build.** Stages `specify`, `review`, `security-review` and
   `fix-round` sum to ceremony cost. `build` is recorded and printed as work cost, never
   added to ceremony (the implementation would be paid with or without a gate).
-- **P7 - One cost unit for the weekly share.** Every record keeps the four raw token
-  classes and the model. The weekly share is computed only from `total_cost_usd`
-  (API-equivalent USD; the CLI applies per-model and per-cache-class prices), against a
-  cap the caller states in the same unit (`--weekly-cap-usd <n> --cap-base "<name>"`).
-  Without both flags the share is `undefined` with a reason and only raw counts print.
-  Token counts are never divided by a dollar cap or the reverse (memory: ratios across two
-  formulas gave a 5x wrong claim).
+- **P7 - The cost base is tokens (FR-2), one named formula.** Every record keeps the four
+  raw token classes and the model. Ceremony cost is counted in tokens under formula
+  `tokens-sum/1`: input + cache-write + cache-read + output tokens, unweighted. The weekly
+  share divides that count by a cap the caller states in the same formula
+  (`--weekly-cap-tokens <n> --cap-base "<name>"`, where the name says which weekly cap and
+  where the figure came from). The reading prints `cost.formula`, `cost.base` and
+  `cost.weeklyCapTokens` beside every share. `total_cost_usd` is kept and printed as an
+  additional column (`costUsd`, `meanCostUsdPerPr`), never divided by the cap and never the
+  base. A cap figure in any other unit (dollars, a weighted token index) is converted onto
+  `tokens-sum/1` by whoever supplies it, before it is passed; the CLI never mixes units
+  (memory: a ratio across two formulas gave a 5x wrong claim). Rejected: USD as the base
+  (the first Plan draft; FR-2 names tokens); a price-weighted token index (no weights are
+  recorded in this repo, so it would be a second, unnamed formula). Cost: the unweighted
+  sum counts a cache-read token the same as an output token, so a cache-heavy stage reads
+  larger than its price; listed in `bias`.
 
 ## Contracts
 
@@ -162,9 +191,13 @@ the writer refuses (stderr, exit 3) rather than write a longer line.
 
 ### Ledger module (`scripts/lib/ceremony-cost-ledger.mjs`, node only, no dependencies)
 
-- `ledgerPath(env, cwd)` - `MINSPEC_COST_LEDGER`, else `<git common dir>/minspec/ceremony-cost.jsonl`.
+- `ledgerPath(env, cwd)` - `MINSPEC_COST_LEDGER`, else
+  `<main worktree root>/.minspec/state/ceremony-cost.jsonl` (P4).
 - `recordFromEnvelope(envelope, meta) -> CostRecord | undefined` - pure.
-- `appendRecord(path, record)` - `mkdir -p` the parent, one `appendFileSync` with flag `a`.
+- `appendRecord(path, record)` - when `path` is inside a git working tree, first
+  `git check-ignore -q --no-index <path>`; not ignored -> refuse (reason `ledger path not
+  gitignored`), nothing written. Then `mkdir -p` the parent, one `appendFileSync` with
+  flag `a`.
 - CLI `append --stage S --source X [--pr N] [--issue N] [--head SHA] [--run-id ID]`:
   envelope on stdin, writes one record, prints nothing on stdout. Any failure prints one
   stderr line `ceremony-cost: no record for <stage> <pr|issue>: <reason>` and exits
@@ -175,8 +208,10 @@ the writer refuses (stderr, exit 3) rather than write a longer line.
   seen -> stderr line naming the run, no record, and the passed-through bytes unchanged.
 - Opt-in marker (invariant 3): the module writes only when `MINSPEC_COST_LEDGER` is set or
   the repo root holds `.minspec/`. `review-branch.sh` is mirrored to adopters by
-  `gen-ci-templates.mjs`; an adopter's opted-in repo writes into its own `.git`, nothing
-  machine-wide.
+  `gen-ci-templates.mjs`; an adopter's opted-in repo writes into its own
+  `.minspec/state/`, nothing machine-wide, and only if that repo ignores the path (else
+  the named stderr line and no record; the adopter scaffold's ignore list is not changed
+  by this spec).
 
 ### Lookup file (`docs/research/gate-payoff/pr-tier-lookup.json`)
 
@@ -210,7 +245,12 @@ export interface GatePayoffReading {
   readonly tiers: Readonly<Record<Tier, TierReading>>;
   readonly unknown: { readonly prs: readonly number[]; readonly reasons: Readonly<Record<string, number>> };
   readonly conflicts: readonly { pr: number; trailer: Tier; lookup: Tier }[];
-  readonly cost: { readonly base: string | null; readonly weeklyCapUsd: number | null; readonly ledgerRecords: number; readonly reason?: string };
+  readonly cost: {
+    readonly formula: 'tokens-sum/1';      // P7: input + cacheWrite + cacheRead + output
+    readonly base: string;                 // which weekly cap, and its source; never empty
+    readonly weeklyCapTokens: number;      // finite, > 0, same formula
+    readonly ledgerRecords: number; readonly reason?: string;
+  };
   readonly repoWide: RepeatFixMeasure;      // readRepeatFixShare, unchanged (FR-5)
   readonly bias: readonly string[];         // fixed sentences, e.g. D2's prose-only miss
 }
@@ -223,13 +263,21 @@ export interface TierReading {
 export interface CostSummary {
   readonly prsWithRecords: number; readonly prsWithoutRecords: number;
   readonly tokens: { readonly input: number; readonly cacheWrite: number; readonly cacheRead: number; readonly output: number };
+  readonly totalTokens: number;                  // tokens-sum/1 over joined records
+  readonly meanTokensPerPr: number | undefined;  // over prsWithRecords; undefined when 0
+  readonly weeklyShareMean: number | undefined;  // meanTokensPerPr / weeklyCapTokens
+  readonly weeklyShareTotal: number | undefined; // totalTokens / weeklyCapTokens
+  // Additional column only (P7): never divided by the cap, never the base.
   readonly costUsd: number | undefined;          // undefined when any joined record has costUsd null
   readonly meanCostUsdPerPr: number | undefined; // over prsWithRecords
-  readonly weeklyShareMean: number | undefined;  // meanCostUsdPerPr / weeklyCapUsd
-  readonly weeklyShareTotal: number | undefined;
   readonly reason?: string;                      // why any of the above is undefined
 }
 ```
+
+There is no reading without a cost base: `cost.base` and `cost.weeklyCapTokens` are
+required fields, and the CLI refuses before computing when either flag is missing or
+invalid (*The CLI*). A JSON document on stdout therefore always carries ref, SHA, window,
+horizon, definition and cost base (FR-2).
 
 `JSON.stringify` drops `undefined`, so the CLI serialises through a replacer that writes
 `undefined` numbers as the string `"undefined"`. The literal `0%`, or a numeric `0` share,
@@ -239,7 +287,9 @@ is never printed for a tier with `prs: 0` (AC-3).
 
 Inputs: `units: MergedPr[]` (every first-parent commit up to the end of `today`, each
 `{ sha, date, pr, subject, body }`), `lookup: PrTierLookup | undefined`,
-`records: CostRecord[]`, `today`, `cap?: { usd, base }`.
+`records: CostRecord[]`, `today`, `cap: { tokens, base }` (required; the core also
+returns a refusal, not a reading, when `cap.tokens` is not a finite number > 0 or
+`cap.base` is blank, so a caller other than the CLI cannot get a base-less reading either).
 
 1. **Units.** A first-parent commit is a merged PR when its subject ends `(#N)` or starts
    `Merge pull request #N `. Others are skipped (direct pushes). Window by committer
@@ -265,16 +315,22 @@ Inputs: `units: MergedPr[]` (every first-parent commit up to the end of `today`,
 6. **Linkable fixes (P5).** Over fix PRs merged in `[windowStart, today]`: linked = has an
    origin issue or a `Root cause:` line citing any `#N` or SHA.
 7. **Shares.** For each tier: `prs = 0` -> `share: undefined`, reason `n=0`;
-   coverage `< 0.8` -> undefined, reason names classified/total; linkable `< 0.8` ->
+   the tier's own coverage `prs / (prs + |unknown|)` `< 0.8` (P5) -> undefined, reason
+   `coverage <prs>/<prs + unknown> < 0.8 (unknown PRs counted against this tier)`;
+   window-wide linkable `< 0.8` ->
    undefined, reason names linked/total; `prs < 20` -> undefined, reason `n=<prs> < 20`;
    else `repeats / prs`. Order of checks fixed so the reason is deterministic.
 8. **Cost.** A record joins a unit when `record.pr === unit.pr`, or
    `record.issue === unit.originIssue` (dispatch records carry only the issue). One record
    joins at most one unit: if an issue maps to several units in the window, the record goes
    to the earliest and the reading's `bias` says so. Records are de-duplicated by `runId`
-   (last wins). Ceremony stages sum to `ceremony`, `build` to `work` (P6). A tier's
-   `costUsd` is undefined if any joined record's `costUsd` is null. Weekly shares need
-   `cap`; without it they are undefined with reason `no --weekly-cap-usd/--cap-base given`.
+   (last wins). Ceremony stages sum to `ceremony`, `build` to `work` (P6). Token sums and
+   `totalTokens` (formula `tokens-sum/1`) are numbers over the records that joined;
+   `meanTokensPerPr` and both weekly shares are undefined when no record joined (reason
+   names the missing count) or when the reader marked the ledger incomplete (*The
+   reader*). Weekly shares are `meanTokensPerPr / cap.tokens` and `totalTokens /
+   cap.tokens`. A joined record whose `costUsd` is null makes the tier's USD columns
+   undefined and leaves the token shares numeric (USD is not the base, P7).
 9. **Ordering.** Every list sorted ascending; object keys emitted in a fixed order, so
    identical inputs give identical bytes (FR-7).
 
@@ -297,10 +353,14 @@ Inputs: `units: MergedPr[]` (every first-parent commit up to the end of `today`,
 ## The CLI (`scripts/gate-payoff.ts`)
 
 `npx tsx scripts/gate-payoff.ts [--repo-root D] [--ref R] [--today YYYY-MM-DD]
-[--lookup P] [--ledger P]... [--weekly-cap-usd N --cap-base "<name>"]`. Defaults: ref
-`origin/main`, lookup at the committed path, ledger at `ledgerPath()`. Prints one JSON
-document. Exit 0 when all four tiers have a share; 1 when any is undefined (FR-3) or the
-lookup is unreadable; 2 on bad arguments. npm script `measure:gate-payoff`. It is not wired
+[--lookup P] [--ledger P]... --weekly-cap-tokens N --cap-base "<name>"`. Defaults: ref
+`origin/main`, lookup at the committed path, ledger at `ledgerPath()`. The two cap flags
+are required: either missing, `N` not a finite number > 0, or a blank name -> nothing on
+stdout, one stderr line `gate-payoff: refusing to emit: no cost base (<which flag and
+why>); FR-2 requires the weekly cap in tokens and its name`, exit 2, checked before any
+git read. Otherwise prints one JSON document. Exit 0 when all four tiers have a share; 1
+when any is undefined (FR-3) or the lookup is unreadable; 2 on bad or missing arguments,
+including the cost base. npm script `measure:gate-payoff`. It is not wired
 into `lint`, `pretest` or CI: it is a measurement, not a gate (constitution invariant 2
 applies the day something gates on it, which is a separate decision).
 
@@ -329,8 +389,15 @@ applies the day something gates on it, which is a separate decision).
   naming the step and the state (no trailer; the PR still opens and its tier resolves via
   the lookup or `unknown`). Placing it before the egress guard keeps "scan, then push" as
   the last two steps. (c) Both `claude -p` runs switch to `--output-format json` piped
-  through `ledger filter --stage <build|specify|fix-round> --source dispatch-issue.sh
-  --issue "$ISSUE" [--pr N]`, before the existing `tee`.
+  through `ledger filter --stage "$COST_STAGE" --source dispatch-issue.sh --issue
+  "$ISSUE" [--pr N]`, before the existing `tee`. The stage is chosen by one function,
+  `cost_stage_for_run <run> <specify_only>`: the fix-round run is always `fix-round`; the
+  first (agent) run is `specify` when `SPECIFY_ONLY` is `1` and `build` when it is `0`.
+  `SPECIFY_ONLY` is the dispatcher's existing mode switch, set from the dispatch gate's
+  `ready` / `ready-specify` answer (an unrecognised affirmative already falls to `1`, the
+  restrictive reading), so the label follows the mode the run actually executed, never
+  the issue's labels. Any other `SPECIFY_ONLY` value prints a named stderr line and the
+  run records no cost (no guess between ceremony and work).
 
 ## The opt-in online scripts (dev-time, `scripts/`, DR-086 section 5)
 
@@ -350,8 +417,9 @@ applies the day something gates on it, which is a separate decision).
 `unknown` PR list, and a per-gate table for spec, plan, tasks, Clarify human read,
 ai-review panel and founder approval. Each row: which tiers the gate applies to (from the
 CLAUDE.md tier table), the arithmetic `expected avoided fix cost = (share of the tier
-below - share of this tier) x mean cost of a repeat fix` against `mean ceremony cost per PR
-of this tier`, and a verdict keep / remove / insufficient data. By measurement 3, every
+below - share of this tier) x mean tokens of a repeat fix` against `mean ceremony tokens
+per PR of this tier`, each also shown as a share of the named weekly cap (`tokens-sum/1`,
+P7), and a verdict keep / remove / insufficient data. By measurement 3, every
 cost term in the first window is undefined, so the first reading's verdicts are
 "insufficient data" on the cost side for every gate, with the date at which a re-run
 first can carry a cost term: 2026-11-15, when `windowEnd` (today minus 30 days) first
@@ -368,7 +436,10 @@ invariants).
   Cost-record failures print a named stderr line; the one deliberate ignore of its exit
   status carries `# swallow-ok:` with the reason, because the reading is not a gate today
   and the verdict must not depend on it.
-- **Blast radius (3).** Ledger under the clone's own `.git` or the CI runner temp dir;
+- **No number without its base (FR-2).** No cap in tokens with a named base -> no
+  reading on stdout, exit 2.
+- **Blast radius (3).** Ledger under the clone's own gitignored `.minspec/state/` or the
+  CI runner temp dir;
   lookup and readings in this repo's `docs/research/`. The writer is inert without
   `.minspec/` or an explicit ledger path.
 - **DR-108 tripwire (FR-5).** `scripts/lib/repeat-fix-share.ts` and its five readers are
@@ -382,6 +453,11 @@ invariants).
   coverage under the floor, every share is `undefined` and the reading says why. The
   remedy (a trailer writer for non-dispatched PRs) is a decision the first reading informs;
   task 7.2 files it as an issue only if the first reading's coverage is below the floor.
+  Because P5 counts every unknown PR against each tier, a small tier hits the floor first
+  (it needs four classified PRs per unknown one).
+- **No cap figure in tokens.** If the only weekly-cap figure available is in another unit,
+  task 7.1 stops rather than emit (FR-2); converting it onto `tokens-sum/1` is the
+  supplier's step, recorded in the `--cap-base` name.
 - **The amend touches the agent's commit.** It reruns the repo's commit hooks on an
   unchanged tree. A hook failure leaves the commit unamended (P1 fallback), never blocks
   the publish.
