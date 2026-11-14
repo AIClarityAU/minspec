@@ -7,6 +7,7 @@ import { epicRefValue } from './epic-manager';
 import { inspectAllStatusClaims, claimParagraphText } from './status-parity';
 import { ensureDirectory } from './opt-in';
 import { prepareText, readDocument, readDocumentText, restoreLineEndings } from './text-io';
+import { applyDrIndexDelta } from './dr-index-splice';
 export { slugify };
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -1250,6 +1251,62 @@ export function regenerateDrIndex(
   fs.writeFileSync(indexPath, prior ? restoreLineEndings(merged, prior.original) : merged, 'utf-8');
 
   return { filePath: indexPath, count };
+}
+
+/**
+ * Update <decisionsDir>/INDEX.md for the listed decisions only (#896).
+ *
+ * The file watcher used to call {@link regenerateDrIndex} on every DR create, change and
+ * delete. A full rebuild rewrites every entry, so creating DR-099 also "fixed" any other
+ * entry that had drifted from its file, and deleting DR-099 again (Source Control
+ * Discard Changes on the untracked file) rebuilt from disk instead of undoing the
+ * create. The drift fixes stayed, and INDEX.md stayed modified after the discard.
+ *
+ * Here the INDEX is changed only in the entries for `drIds`. Each one is taken from a
+ * full in-memory regeneration (so the rendering is identical to regenerateDrIndex), or
+ * removed when that regeneration has no entry for it. A create and a discard of the
+ * same file therefore cancel out byte for byte.
+ *
+ * Falls back to a full {@link regenerateDrIndex} when there is no INDEX yet, or when
+ * the INDEX is not a managed register a per-entry edit can handle (see
+ * `applyDrIndexDelta`). The file is written only when its content changes.
+ */
+export function regenerateDrIndexEntries(
+  rootDir: string,
+  drIds: readonly string[],
+  vscodeOverrides?: { decisionsDir?: string },
+  options: DrIndexOptions = {},
+): DrIndexResult {
+  const decisionsDir = resolveDecisionsDir(rootDir, vscodeOverrides);
+  const indexPath = path.join(decisionsDir, 'INDEX.md');
+  if (!fs.existsSync(indexPath)) return regenerateDrIndex(rootDir, vscodeOverrides, options);
+
+  const prior = readDocument(indexPath);
+  const { content, count } = buildDrIndexContent(rootDir, vscodeOverrides, options, prior.text);
+  const fresh = mergeDrIndex(prior.text, content);
+  const next = applyDrIndexDelta(prior.original, fresh, drIds)
+    ?? restoreLineEndings(fresh, prior.original);
+  if (next !== prior.original) fs.writeFileSync(indexPath, next, 'utf-8');
+  return { filePath: indexPath, count };
+}
+
+/**
+ * The decision id a DR file contributes to the INDEX: its frontmatter `id:` when the
+ * file exists and declares one, else the `DR-NNN` prefix of its file name (what
+ * {@link listAdrs} uses for a record without one). Null for a file that is not a DR
+ * file at all (INDEX.md, a README). A deleted file can only be named by its file name.
+ */
+export function drIdForFile(filePath: string): string | null {
+  const base = path.basename(filePath);
+  if (!ADR_FILE_RE.test(base)) return null;
+  const fromName = base.match(ADR_ID_RE)?.[0] ?? null;
+  try {
+    const fm = readDocumentText(filePath).match(FRONTMATTER_RE);
+    const id = fm ? parseFrontmatterYaml(fm[1]).id : undefined;
+    return typeof id === 'string' && id !== '' ? id : fromName;
+  } catch {
+    return fromName;
+  }
 }
 
 // ─── INDEX Status-Drift Validation (issue #220) ───────────────────────────────

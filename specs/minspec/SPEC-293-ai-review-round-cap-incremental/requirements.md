@@ -1,7 +1,7 @@
 ---
 id: SPEC-293
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the ai-review merge gate (same epic as SPEC-182 and the reuse/carry records it builds on)
@@ -13,9 +13,9 @@ implements_reason: >-
   Owned files are decided at Plan; none are claimed before then, so no shared file is frozen
   early by a spec whose design is not fixed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
