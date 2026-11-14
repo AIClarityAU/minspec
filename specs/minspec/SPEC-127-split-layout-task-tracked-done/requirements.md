@@ -1,7 +1,7 @@
 ---
 id: SPEC-127
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — a `done` signpost that does not check the task list is a DR-003 false signpost
@@ -9,9 +9,9 @@ relates_to: [DR-034, DR-069, DR-012, DR-031, DR-003, SPEC-022, SPEC-064, "#208",
 implements: none
 implements_reason: Specify phase only (T3 dispatch gate, DR-076/#1169) — no code is built by this document. The file:line citations in Context are evidence of today's behaviour, not a claim of ownership; Plan assigns `implements:`/`affects:` once the exact call sites are chosen (see Decisions needed).
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

@@ -66,6 +66,7 @@ import { epicRefSet } from '../../packages/minspec/src/lib/epic-manager';
 import { readShardIdFiles } from '../../packages/minspec/src/lib/spec-layout';
 import { assertOwnershipDeclaredForAdvance } from '../../packages/minspec/src/lib/ownership-advance-guard';
 import { setAdrStatus, regenerateDrIndex } from '../../packages/minspec/src/lib/adr-manager';
+import { scopeIndexToDr } from '../../packages/minspec/src/lib/dr-index-scope';
 
 /** Where the AI review panel's run lives. A comment outside one of its runs is not a verdict. */
 export const AI_REVIEW_WORKFLOW_PATH = '.github/workflows/ai-review.yml';
@@ -642,6 +643,9 @@ function writeLifecycle(repoRoot: string, abs: string, act: DelegatedAct): void 
   if (act === 'engineering-dr-acceptance') {
     setAdrStatus(abs, 'accepted');
     regenerateDrIndex(repoRoot);
+    // #581: the regen rebuilds every row from the working tree; keep only this DR's so an
+    // unrelated DR's uncommitted status change cannot ride into the approval commit.
+    scopeIndexToDr(repoRoot, path.join(path.dirname(abs), 'INDEX.md'), path.basename(abs, '.md'));
   } else {
     advanceSpecToImplementing(abs);
   }
