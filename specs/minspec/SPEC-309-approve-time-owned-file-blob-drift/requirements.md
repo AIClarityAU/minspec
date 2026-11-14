@@ -92,20 +92,30 @@ unverified here; Plan re-measures them with `npm run facts`.)
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 4 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
+
 1. **Which set to snapshot.** (a) `implements:` only **(rec)**, narrow and precise, as the issue
    proposes; cost: specs that only declare `affects:` are never measurable. (b) also `affects:`,
    wider coverage; cost: broad paths make formatting-only commits mark many specs drifted, the
    exact false-positive risk the issue names.
+
+   **Recorded selection: Option (a),** snapshot `implements:` only. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 2. **Directory or glob entries in `implements:`.** (a) Snapshot only exact file paths, report
    others under "ignored" **(rec)**, cheap and honest; cost: directory-owning specs unmeasured.
    (b) Expand to the tree sha / file list; cost: more schema and churn noise.
+
+   **Recorded selection: Option (a),** snapshot exact file paths only and report other entries under "ignored". Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 3. **Backfill.** (a) None; legacy sidecars stay NOT-MEASURABLE until re-approved **(rec)**; cost:
    little coverage at first. (b) A one-off command snapshotting current blobs for approved specs;
    cost: it asserts "no drift as of now" without the human having reviewed the code, which is a
    borrowed approval.
+
+   **Recorded selection: Option (a),** no backfill; legacy sidecars stay NOT-MEASURABLE until re-approved. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 4. **Blob key.** Blob sha of working-tree content vs HEAD content. Rec: HEAD blob via
    `git rev-parse HEAD:<path>`, reproducible; cost: uncommitted edits at approve time are not
    captured, so approve-time dirty owned files should be reported `UNMEASURED`.
+
+   **Recorded selection: the recommended key,** the HEAD blob via `git rev-parse HEAD:<path>`, with owned files dirty at approve time reported `UNMEASURED`. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ## Follow-ups (tracked)
 
