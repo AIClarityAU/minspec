@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-271-quota-cap-set-for-unreported-window-holds/requirements.md",
+  "specHash": "584dd9615975a4981ff4482ef468f6497c3e6e86da64050f5beb7f213e8c9f38",
+  "approvedAt": "2026-11-12T06:05:50.885Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-pile-1112a-implements",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3630#issuecomment-6815532762"
+}
