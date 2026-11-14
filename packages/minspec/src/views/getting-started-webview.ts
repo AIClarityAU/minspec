@@ -45,9 +45,9 @@ export interface PageDeps {
   readonly seedEmail: () => string;
   /**
    * The click-gated `gh api user` read. Null when `gh` is absent, signed out, or offline.
-   * OPTIONAL: the production command does not supply it yet (a new `gh` caller needs a README
-   * network row and a spawn-allowlist entry, both outside SPEC-042's file allowlist), and with
-   * no lookup the page renders no "Verify against GitHub" button rather than a dead one.
+   * The production command supplies `lookupGhUser` (lib/github.ts, listed in the README's
+   * network section). Optional so a host without it renders no "Verify against GitHub"
+   * button rather than a dead one.
    */
   readonly lookupGhIdentity?: () => Promise<GhIdentity | null>;
   /** Open the Settings editor at one setting. Navigation only: it writes nothing. */

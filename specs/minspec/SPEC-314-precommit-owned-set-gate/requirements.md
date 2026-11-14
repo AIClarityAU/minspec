@@ -286,6 +286,8 @@ unrelated `src/free.ts`.
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 4 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
+
 ### OQ-1 - Does an uncommitted local approval count at commit time?
 
 spec-gate.py falls back to the main checkout's `.minspec/approvals/` when the cwd has no
@@ -300,6 +302,8 @@ allow an edit on the strength of an approval that is in no commit.
 - (b) Staged view only. **Cost:** the Edit gate and the commit gate disagree. Work the agent
   was allowed to write cannot be committed until someone commits the approval, which on a
   dispatch means a founder action mid-run.
+
+**Recorded selection: Option (a),** honour the same common-dir fallback, and print a note that the approval is not in this commit. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ### OQ-2 - The bypass: which variable, and is it advertised?
 
@@ -318,6 +322,8 @@ allow an edit on the strength of an approval that is in no commit.
 Either way, no technical control stops an agent from setting the variable or using
 `--no-verify`; the audit line and the CI half (#861) are what make that visible.
 
+**Recorded selection: Option (a),** a dedicated `SPEC_COMMIT_GATE_OFF=1`, documented in the hook header and `docs/`, not printed in the refusal; `MINSPEC_GATE_OFF` does not disable it. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
+
 ### OQ-3 - Is this spec the right home, given #861?
 
 - **(a) (rec)** Yes: this spec covers the commit-time, specs-only slice (table in Context),
@@ -330,6 +336,8 @@ Either way, no technical control stops an agent from setting the variable or usi
   path rather than auto-merge. The commit-time check that is buildable today
   waits with it.
 
+**Recorded selection: Option (a),** yes, this spec covers the commit-time, specs-only slice and #861 keeps the CI half. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
+
 ### OQ-4 - What happens when `python3` is missing?
 
 - **(a) (rec)** If a staged path passed the FR-2 filter, refuse with a "did not run:
@@ -341,6 +349,8 @@ Either way, no technical control stops an agent from setting the variable or usi
 - (b) Warn with a loud banner and continue, like the gitleaks and lockfile gates.
   **Cost:** the gate is silently absent - in effect, if not in output - on exactly the
   machines where nobody notices the banner.
+
+**Recorded selection: Option (a),** when a staged path passed the FR-2 filter, refuse with "did not run: python3 not found". Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ## Alternatives considered
 
