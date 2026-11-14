@@ -7,13 +7,15 @@ product: minspec
 epic: EPIC-009  # concurrent multi-session coordination; the shared-checkout sweep rule belongs here
 aspects: [approval, commit-gate, shared-checkout, no-silent-gate, enforce-dont-trust]
 relates_to: [SPEC-140, SPEC-069, DR-081, DR-003, "#2041", "#1376", "#168"]
-implements: [scripts/approval-integrity.ts, packages/minspec/src/lib/approval-recover.ts, packages/minspec/src/commands/approve.ts]
 phases:
   specify: in-progress
   clarify: pending
   plan: pending
   tasks: pending
   implement: pending
+implements: none
+implements_reason: >-
+  Specify phase only. Which files this spec will own is decided at Plan.
 ---
 
 # SPEC-225: An approval's two halves land together, or only the safe half lands

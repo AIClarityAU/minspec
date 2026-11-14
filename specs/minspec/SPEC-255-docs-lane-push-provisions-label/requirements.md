@@ -7,13 +7,15 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a new opt-in forge write; DR-081 re-homed the sibling SPEC-050 from EPIC-009 for the same reason (EPIC-009 needs >1 actor sharing the repo)
 aspects: [docs-lane, consent, forge-write, blast-radius, adopter-parity]
 relates_to: [SPEC-039, SPEC-050, DR-098, DR-081, DR-071, "#2257", "#2243"]
-implements: [.github/workflows/docs-lane.yml, packages/minspec/src/lib/approval-pr.ts]
 phases:
   specify: in-progress
   clarify: pending
   plan: pending
   tasks: pending
   implement: pending
+implements: none
+implements_reason: >-
+  Specify phase only. Which files this spec will own is decided at Plan.
 ---
 
 # SPEC-255: "MinSpec: Push Docs Lane" lands in a repository that has no `docs-lane` label

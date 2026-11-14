@@ -7,13 +7,15 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a human act needs a witness the agent cannot forge
 aspects: [approval, dr-acceptance, extension-command, no-silent-gate]
 relates_to: [SPEC-251, SPEC-290, SPEC-041, DR-065, DR-056, DR-062, "#3017", "#3016", "#2861", "#2992", "#2628"]
-implements: [scripts/approval-provenance.py, packages/minspec/src/commands/adr.ts]
 phases:
   specify: in-progress
   clarify: pending
   plan: pending
   tasks: pending
   implement: pending
+implements: none
+implements_reason: >-
+  Specify phase only. Which files this spec will own is decided at Plan.
 ---
 
 # SPEC-311: One step to accept an amendment inside an already-accepted DR
