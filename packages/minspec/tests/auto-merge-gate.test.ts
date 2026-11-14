@@ -56,7 +56,7 @@ import type { AutoMergeDecision } from '../src/lib/auto-merge';
 import { decideAutoMerge } from '../src/lib/auto-merge';
 import type { ChangedFile } from '../src/lib/consequence-analyzers';
 import type { ClassificationSignal } from '../src/lib/classifier';
-import type { ReviewSignalsInput } from '@aiclarity/shared';
+import { renderReviewSignals, type ReviewSignalsInput } from '@aiclarity/shared';
 import { useShellTimeout } from './helpers/shell-timeout';
 
 // #2598: this suite's own `q()` wrapper around execFileSync builds a real git repo
@@ -842,5 +842,202 @@ describe('#490 / DR-058 — detectLowBlastDocsTest certifies a docs/test-only di
     expect(detectLowBlastDocsTest([cf({ path: 'docs/decisions/DR-001.md' })])?.name).toBe(
       'low_blast_docs_test_only',
     );
+  });
+});
+
+// ─── SPEC-024 AC-19 / AC-20 / AC-21 — main() driven end-to-end ────────────────
+//
+// The pure seams above (buildChangedFiles throws, applyAuditFailsafe, appendAudit)
+// are each unit-tested, but nothing drove main() itself, so three acceptance
+// clauses were code-only: AC-19 (main()'s catch converts a diff failure into an
+// emitted HOLD), AC-20 (the audit record main() writes has the shape FR-7 names),
+// and AC-21 (the `block` main() emits is the shared renderer's output with the
+// prover's verdict, the exact string dispatch posts in its hold comment).
+//
+// These run the gate as dispatch does: a separate process through tsx, against a
+// real throwaway git repo. They stay deterministic: no regression test is named,
+// so the prover short-circuits to "not proven" and never spawns a nested vitest
+// (the flake this file's injected-deps discipline exists to avoid).
+
+describe('SPEC-024 AC-19/20/21 — main() run as a process', () => {
+  const repoRoot = path.resolve(__dirname, '..', '..', '..');
+  const tsx = path.join(repoRoot, 'node_modules', '.bin', 'tsx');
+  const gate = path.join(repoRoot, 'scripts', 'auto-merge-gate.ts');
+
+  const q = (cwd: string, args: string[]): string =>
+    execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();
+
+  /** A repo with a base commit and one docs-only commit on top. Returns the base sha. */
+  function docsOnlyRepo(): { repo: string; base: string } {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'am-main-'));
+    q(repo, ['init', '-q']);
+    q(repo, ['config', 'user.email', 't@t']);
+    q(repo, ['config', 'user.name', 't']);
+    q(repo, ['config', 'commit.gpgsign', 'false']);
+    fs.writeFileSync(path.join(repo, 'README.md'), '# base\n');
+    q(repo, ['add', 'README.md']);
+    q(repo, ['commit', '-qm', 'base']);
+    const base = q(repo, ['rev-parse', 'HEAD']);
+    fs.mkdirSync(path.join(repo, 'docs'));
+    fs.writeFileSync(path.join(repo, 'docs', 'note.md'), '# a note\n');
+    q(repo, ['add', 'docs/note.md']);
+    q(repo, ['commit', '-qm', 'docs only']);
+    return { repo, base };
+  }
+
+  /**
+   * Run the gate as a CLI. VITEST is stripped: main() refuses to run under it.
+   * An `npx` that exits 1 with no output is put first on PATH, so a named
+   * regression test makes the prover read "nothing ran" (not proven) instead of
+   * spawning a nested vitest, or reaching the network for one, in the temp repo.
+   */
+  function runGate(args: string[]): Record<string, unknown> {
+    const binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'am-main-bin-'));
+    try {
+      fs.writeFileSync(path.join(binDir, 'npx'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+      const env: NodeJS.ProcessEnv = {};
+      for (const [k, v] of Object.entries(process.env)) {
+        if (!k.startsWith('VITEST')) env[k] = v;
+      }
+      env.PATH = `${binDir}${path.delimiter}${process.env.PATH ?? ''}`;
+      const out = execFileSync(tsx, [gate, ...args], {
+        cwd: repoRoot,
+        env,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      const lines = out.trim().split('\n');
+      return JSON.parse(lines[lines.length - 1]) as Record<string, unknown>;
+    } finally {
+      fs.rmSync(binDir, { recursive: true, force: true });
+    }
+  }
+
+  function auditRecords(repo: string): Record<string, unknown>[] {
+    const file = path.join(repo, '.minspec', 'auto-merge-audit.log');
+    return fs
+      .readFileSync(file, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as Record<string, unknown>);
+  }
+
+  it('AC-19: an unresolvable base ref makes main() EMIT a fail-safe HOLD, even opted in', () => {
+    const { repo } = docsOnlyRepo();
+    try {
+      const d = runGate([
+        '--worktree', repo,
+        '--base', 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+        '--mode', 'consequence-hybrid',
+        '--pr', '7',
+      ]);
+      expect(d.eligible).toBe(false);
+      expect(d.blast).toBe('high');
+      expect(d.failed).toEqual(['gate-error']);
+      expect(String(d.reason)).toMatch(/fail-safe hold/);
+      expect(String(d.reason)).toMatch(/cannot enumerate changed files/);
+      // The catch path is recorded too, so the hold is traceable.
+      const recs = auditRecords(repo);
+      expect(recs).toHaveLength(1);
+      expect(recs[0]).toMatchObject({ pr: '7', eligible: false, blast: 'high', failed: ['gate-error'] });
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('AC-19 control: the same repo with a RESOLVABLE base reaches a real decision, not gate-error', () => {
+    const { repo, base } = docsOnlyRepo();
+    try {
+      const d = runGate(['--worktree', repo, '--base', base, '--mode', 'consequence-hybrid', '--pr', '7']);
+      expect(d.failed).not.toContain('gate-error');
+      // No regression test named → the prover cannot vouch → still a hold, for
+      // the honest reason.
+      expect(d.eligible).toBe(false);
+      expect(d.failed).toContain('regression-unproven');
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
+  it('AC-20: each invocation appends one record carrying PR, decision, blast, prover and signal snapshot', () => {
+    const { repo, base } = docsOnlyRepo();
+    const signalsFile = path.join(repo, '..', `${path.basename(repo)}-signals.json`);
+    try {
+      fs.writeFileSync(
+        signalsFile,
+        JSON.stringify({
+          rootCause: 'note was missing',
+          changedFiles: ['docs/note.md'],
+          rootCauseFiles: ['docs/note.md'],
+          gate: { test: 'pass', lint: 'pass', build: 'pass', validate: 'pass' },
+        }),
+      );
+      const d = runGate(['--worktree', repo, '--base', base, '--mode', 'pr-gate', '--pr', '42', '--signals-file', signalsFile]);
+      const recs = auditRecords(repo);
+      expect(recs).toHaveLength(1);
+      const rec = recs[0];
+      // Shape: every field FR-7 names, with the right types.
+      expect(Object.keys(rec).sort()).toEqual(
+        ['base', 'blast', 'consequenceSignals', 'eligible', 'failed', 'hollowFindings', 'mode', 'pr', 'prover', 'reason', 'ts'].sort(),
+      );
+      expect(Number.isNaN(Date.parse(String(rec.ts)))).toBe(false);
+      expect(rec.pr).toBe('42');
+      expect(rec.base).toBe(base);
+      expect(rec.mode).toBe('pr-gate');
+      expect(rec.hollowFindings).toBe(0);
+      expect(rec.prover).toMatchObject({ baseRed: false, greenOnHead: false });
+      expect(String((rec.prover as { note: string }).note)).toMatch(/no regression test named/);
+      // The signal snapshot is the names the decision was made on: this
+      // docs-only diff carries the affirmative low-blast certification.
+      expect(rec.consequenceSignals).toContain('low_blast_docs_test_only');
+      // Content: the record is the decision main() emitted, not a paraphrase.
+      expect(rec.eligible).toBe(d.eligible);
+      expect(rec.blast).toBe(d.blast);
+      expect(rec.failed).toEqual(d.failed);
+      expect(rec.reason).toBe(d.reason);
+      expect(rec.failed).toEqual(['pr-gate-mode']);
+
+      // A second invocation APPENDS; it never rewrites the trail.
+      runGate(['--worktree', repo, '--base', base, '--mode', 'pr-gate', '--pr', '43']);
+      const after = auditRecords(repo);
+      expect(after).toHaveLength(2);
+      expect(after[0]).toEqual(rec);
+      expect(after[1].pr).toBe('43');
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+      fs.rmSync(signalsFile, { force: true });
+    }
+  });
+
+  it('AC-21: the emitted block is the shared renderer output, with the PROVER verdict, not the self-report', () => {
+    const { repo, base } = docsOnlyRepo();
+    const signalsFile = path.join(repo, '..', `${path.basename(repo)}-signals.json`);
+    // The agent names a test and CLAIMS it proven red→green; the prover cannot
+    // run it (the npx shim exits 1 with no results), so its verdict is "not proven".
+    const claimed: ReviewSignalsInput = {
+      rootCause: 'note was missing',
+      changedFiles: ['docs/note.md'],
+      rootCauseFiles: ['docs/note.md'],
+      regressionTest: 'docs.test.ts > note exists',
+      regressionProvenBaseRed: true,
+      regressionProvenHeadGreen: true,
+      gate: { test: 'pass', lint: 'pass', build: 'pass', validate: 'pass' },
+    };
+    try {
+      fs.writeFileSync(signalsFile, JSON.stringify(claimed));
+      const d = runGate(['--worktree', repo, '--base', base, '--mode', 'pr-gate', '--pr', '9', '--signals-file', signalsFile]);
+      const expected = renderReviewSignals({
+        ...claimed,
+        regressionProvenBaseRed: false,
+        regressionProvenHeadGreen: false,
+      });
+      expect(d.block).toBe(expected);
+      // Control: the self-reported rendering differs, so the equality above is
+      // proof the prover's verdict was substituted, not a coincidence.
+      expect(renderReviewSignals(claimed)).not.toBe(expected);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+      fs.rmSync(signalsFile, { force: true });
+    }
   });
 });

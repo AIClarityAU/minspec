@@ -580,3 +580,92 @@ describe('#490 — an opaque change (zero recognized signals) holds for a human'
     expect(d.eligible).toBe(true);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SPEC-024 AC-1 + AC-6 test gaps (Slice 6 of tasks.md, "the named missing tests").
+// The INV-1 property above asserts only `failed.length > 0`. AC-1 also requires
+// that `failed[]` NAMES the conjunct that went missing, and AC-6 requires the
+// absent-array case to carry the `hollow-findings-missing` key. A hold whose
+// reason does not name the gate that held it sends the human to the wrong place.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('SPEC-024 AC-1 — failed[] names the missing conjunct', () => {
+  // Each required input, and the key the gate must report when it is absent.
+  const expectedKey: Record<string, string> = {
+    reviewSignals: 'review-signals-missing',
+    hollowFindings: 'hollow-findings-missing',
+    consequenceSignals: 'consequence-signals-missing',
+    mode: 'mode-unknown',
+    // The prover is the SOLE authority for Signal-2 (INV-3): no prover result
+    // means the regression is unproven, whatever the agent self-reported.
+    proverResult: 'regression-unproven',
+  };
+
+  for (const [key, failKey] of Object.entries(expectedKey)) {
+    it(`omitting '${key}' → failed[] contains '${failKey}'`, () => {
+      const broken = { ...eligibleInput() } as Record<string, unknown>;
+      delete broken[key];
+      const d = decideAutoMerge(broken as unknown as AutoMergeInput);
+      expect(d.eligible).toBe(false);
+      expect(d.failed).toContain(failKey);
+      // The reason a human reads names the same key (never a generic "hold").
+      expect(d.reason).toContain(failKey);
+    });
+
+    it(`setting '${key}' to undefined → failed[] contains '${failKey}'`, () => {
+      const d = decideAutoMerge({ ...eligibleInput(), [key]: undefined } as unknown as AutoMergeInput);
+      expect(d.eligible).toBe(false);
+      expect(d.failed).toContain(failKey);
+    });
+  }
+
+  it('control: the full eligible input reports none of those keys', () => {
+    const d = decideAutoMerge(eligibleInput());
+    for (const failKey of Object.values(expectedKey)) expect(d.failed).not.toContain(failKey);
+  });
+
+  it('an entirely empty object never throws and names every missing conjunct', () => {
+    const d = decideAutoMerge({} as unknown as AutoMergeInput);
+    expect(d.eligible).toBe(false);
+    // With no reviewSignals at all, the per-signal checks (root cause, regression,
+    // gate) never run: 'review-signals-missing' is the key that names that hole,
+    // so 'regression-unproven' is subsumed rather than reported twice.
+    for (const [key, failKey] of Object.entries(expectedKey)) {
+      if (key === 'proverResult') continue;
+      expect(d.failed).toContain(failKey);
+    }
+  });
+});
+
+describe('SPEC-024 AC-6 — a missing hollowFindings array holds with its own key', () => {
+  it('absent hollowFindings → hollow-findings-missing, NOT hollow-tests', () => {
+    const broken = { ...eligibleInput() } as Record<string, unknown>;
+    delete broken.hollowFindings;
+    const d = decideAutoMerge(broken as unknown as AutoMergeInput);
+    expect(d.eligible).toBe(false);
+    expect(d.failed).toContain('hollow-findings-missing');
+    // Distinct from the present-finding path: nothing was scanned, so nothing
+    // was found hollow. The two keys tell a human different things.
+    expect(d.failed).not.toContain('hollow-tests');
+  });
+
+  it('a non-array hollowFindings (a stray object) is treated as missing, not as empty', () => {
+    const d = decideAutoMerge(
+      eligibleInput({ hollowFindings: { length: 0 } as unknown as TestFinding[] }),
+    );
+    expect(d.eligible).toBe(false);
+    expect(d.failed).toContain('hollow-findings-missing');
+  });
+
+  it('control: an EMPTY array is a real scan with no findings → no hollow key at all', () => {
+    const d = decideAutoMerge(eligibleInput({ hollowFindings: [] }));
+    expect(d.failed).not.toContain('hollow-findings-missing');
+    expect(d.failed).not.toContain('hollow-tests');
+    expect(d.eligible).toBe(true);
+  });
+
+  it('a stub finding holds with hollow-tests (the present-finding key)', () => {
+    const d = decideAutoMerge(eligibleInput({ hollowFindings: [stubFinding] }));
+    expect(d.failed).toContain('hollow-tests');
+    expect(d.failed).not.toContain('hollow-findings-missing');
+  });
+});
