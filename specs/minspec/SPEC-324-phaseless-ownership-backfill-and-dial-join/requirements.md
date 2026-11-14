@@ -11,7 +11,7 @@ relates_to: [SPEC-038, SPEC-051, SPEC-022, DR-088, DR-076, "#3650", "#1543", "#1
 # Ownership deliberately empty. This spec's deliverables are edits to existing specs'
 # frontmatter (12 files, owned by no one) and a one-line severity change in files that
 # SPEC-081 owns/affects. It creates no new production file, so there is nothing to own.
-implements: none
+implements: [scripts/validate-frontmatter.ts, packages/minspec/src/lib/template-registry.ts, packages/minspec/src/lib/spec-validator.ts]
 affects: [packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/template-registry.ts, scripts/validate-frontmatter.ts]
 phases:
   specify: in-progress
