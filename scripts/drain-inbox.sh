@@ -1692,25 +1692,31 @@ arm_delegated_spec_merges() {
   # Already-armed PRs are skipped (the arm stands); so are drafts and any PR with a
   # file outside specs/. Oldest first, so the longest-held spec goes first.
   #
-  # A PR carrying a plan artifact is skipped too, by name. The judge denies it whatever
-  # else is true (PLAN_ARTIFACT in scripts/lib/delegated-merge.ts, #2980; the parity test
-  # pins this regex to that one), so judging it only spends a slot of the cap. On
-  # 2026-10-30, 21 of 26 candidates were such PRs and a cycle ended "0 armed of 10 judged"
-  # with #3391 waiting behind them. Skipping only removes: nothing here admits a PR.
-  local plan_only
-  plan_only=$(printf '%s' "$rows" | jq -r '[.[]
-      | select(.isDraft | not) | select(.autoMergeRequest == null)
-      | select((.files | length) > 0 and all(.files[]; .path | startswith("specs/")))
-      | select(any(.files[]; .path | test("(^|/)(design|tasks)\\.md$")))
-      | .number] | sort | map("#\(.)") | (if length > 0 then "\(length) held PR(s) carry a plan artifact (#2980), not judged: \(join(" "))" else empty end)' 2>/dev/null) || {
+  # A PR carrying a plan artifact that the judge is CERTAIN to deny is skipped too, by name.
+  # On 2026-10-30, 21 of 26 candidates were plan PRs the judge refused by name (#2980), and
+  # a cycle ended "0 armed of 10 judged" with #3391 waiting behind them. DR-121 (accepted
+  # 2026-11-11, build #3586) admits a plan-only PR for ONE spec whose spec is approved on
+  # main, so those now reach the judge: skipping them was the starvation of 2026-11-14,
+  # when 27 such PRs sat "not judged" while every one of them met DR-121. A plan artifact
+  # mixed with any other path, or plans for two specs, is still denied whatever else is
+  # true (plan-mixed-diff, scripts/lib/delegated-merge.ts), so it still takes no slot.
+  # The regexes are pinned to the judge's PLAN_ARTIFACT and SPEC_PLAN_PATH by the parity
+  # test in drain-delegated-merge.test.ts. Skipping only removes: nothing here admits a PR.
+  local plan_only plan_jq
+  plan_jq='def plan: any(.files[]; .path | test("(^|/)(design|tasks)\\.md$"));
+    def oneplan: all(.files[]; .path | test("^specs/[^/]+/SPEC-[0-9]+-[^/]+/(design|tasks)\\.md$"))
+      and ([.files[].path | sub("/[^/]+$"; "")] | unique | length) == 1;
+    def held: select(.isDraft | not) | select(.autoMergeRequest == null)
+      | select((.files | length) > 0 and all(.files[]; .path | startswith("specs/")));'
+  plan_only=$(printf '%s' "$rows" | jq -r "${plan_jq}"' [.[] | held
+      | select(plan and (oneplan | not))
+      | .number] | sort | map("#\(.)") | (if length > 0 then "\(length) held PR(s) mix a plan artifact with other paths or specs (#2980, DR-121 s2.2), not judged: \(join(" "))" else empty end)' 2>/dev/null) || {
     echo "[drain] WARNING: delegated spec merge NOT run: could not filter the held PR list." >&2
     return 0
   }
   [[ -z "$plan_only" ]] || echo "[drain] delegated spec merge: ${plan_only}"
-  candidates=$(printf '%s' "$rows" | jq -r '[.[]
-      | select(.isDraft | not) | select(.autoMergeRequest == null)
-      | select((.files | length) > 0 and all(.files[]; .path | startswith("specs/")))
-      | select(any(.files[]; .path | test("(^|/)(design|tasks)\\.md$")) | not)
+  candidates=$(printf '%s' "$rows" | jq -r "${plan_jq}"' [.[] | held
+      | select((plan | not) or oneplan)
       | .number] | sort | .[]' 2>/dev/null) || {
     echo "[drain] WARNING: delegated spec merge NOT run: could not filter the held PR list." >&2
     return 0
@@ -1737,7 +1743,12 @@ arm_delegated_spec_merges() {
     out=$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -n 1 || true)  # swallow-ok: grep -v exits 1 when the seam printed nothing, which is reported below as an unreadable result
     case "$rc" in
       0) armed=$((armed + 1))
-         echo "[drain] delegated spec merge: #${pr} armed - $(printf '%s' "$out" | jq -r '"\(.delegationId) at \(.headSha)"' 2>/dev/null || echo "$out")" ;;
+         # A plan PR (DR-121 s2.4) is merged directly, not armed; the count is still one admitted.
+         if [[ "$(printf '%s' "$out" | jq -r '.mergeMode // ""' 2>/dev/null || true)" == "direct" ]]; then  # swallow-ok: wording only, an unreadable mode prints "armed" and decides nothing
+           echo "[drain] delegated spec merge: #${pr} merged (plan, DR-121) - $(printf '%s' "$out" | jq -r '"\(.delegationId) at \(.headSha)"' 2>/dev/null || echo "$out")"
+         else
+           echo "[drain] delegated spec merge: #${pr} armed - $(printf '%s' "$out" | jq -r '"\(.delegationId) at \(.headSha)"' 2>/dev/null || echo "$out")"
+         fi ;;
       1) echo "[drain] delegated spec merge: #${pr} held - $(printf '%s' "$out" | jq -r '"\(.reason): \(.detail)"' 2>/dev/null || echo "unreadable verdict: ${out:-<none>}")" ;;
       *) echo "[drain] WARNING: delegated spec merge: #${pr} was admitted but NOT armed (seam exit ${rc}): ${out:-<no output>}" >&2 ;;
     esac
