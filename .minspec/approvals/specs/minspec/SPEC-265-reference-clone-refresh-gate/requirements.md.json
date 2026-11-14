@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-265-reference-clone-refresh-gate/requirements.md",
+  "specHash": "6e813c8c90f3ffe1ba4eda9f19dbee96632b64d554de0ed91e2e22e93fda8197",
+  "approvedAt": "2026-11-12T04:37:51.005Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-pile-1112a-signpost",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3629#issuecomment-6814507333"
+}
