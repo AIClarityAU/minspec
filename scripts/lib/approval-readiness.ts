@@ -18,7 +18,8 @@
  * Scope boundary: SPEC-327 (specifying) specifies a corpus-wide validator for lifecycle prose
  * in spec bodies. This module is narrower: it answers one question at ask time, for one spec,
  * and also covers deferred-edit markers and self-declared not-ready text, which SPEC-327 does
- * not. When SPEC-327 lands, its validator should be called from here so the two cannot drift.
+ * not. When SPEC-327 lands, its validator should be called from here so the two cannot drift
+ * (follow-up tracked on #3691, SPEC-327's issue).
  *
  * What it cannot see: a requirement that silently contradicts a recorded Clarify selection
  * with no marker in the text. That needs reading, not a regex; the deferred-edit rule catches

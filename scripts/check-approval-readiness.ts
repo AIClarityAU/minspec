@@ -17,6 +17,10 @@
  * will flip, "not ready to approve", or an edit still owed such as "FR-10 needs rewriting").
  * See `lib/approval-readiness.ts` for why (the 2026-11-12 SPEC-213/217/227 re-approvals).
  *
+ * Enforcement: this script alone is advisory (no required check runs it). It becomes a gate
+ * when the runner's `tasks.py add` calls it and refuses on a non-zero exit; that patch is
+ * staged outside this repo (/home/jason/code/.cos-patches/appr-preflight-1114/).
+ *
  * Offline; reads only; writes nothing.
  */
 

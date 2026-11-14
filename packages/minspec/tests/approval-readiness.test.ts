@@ -1,4 +1,8 @@
 import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { resolveSpec } from '../../../scripts/check-approval-readiness';
 import { bodyReadinessProblems, readinessVerdict } from '../../../scripts/lib/approval-readiness';
 
 /**
@@ -142,5 +146,30 @@ describe('readinessVerdict', () => {
     const v = readinessVerdict({ status: 'specifying', notApprovable: undefined, content: PRE_227 });
     expect(v.ready).toBe(false);
     expect(v.reasons.some((r) => /^line 11 deferred-edit:/.test(r))).toBe(true);
+  });
+});
+
+describe('resolveSpec', () => {
+  const tree = (dirs: string[]): string => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'readiness-'));
+    for (const d of dirs) {
+      fs.mkdirSync(path.join(root, 'specs', d), { recursive: true });
+      fs.writeFileSync(path.join(root, 'specs', d, 'requirements.md'), '# x\n');
+    }
+    return root;
+  };
+  it('finds the one directory for SPEC-NNN, nested at any depth, case-insensitively', () => {
+    const root = tree(['minspec/SPEC-227-x', 'minspec/SPEC-2270-y', 'other/SPEC-22-z']);
+    expect(resolveSpec(root, 'spec-227')).toBe(path.join(root, 'specs/minspec/SPEC-227-x/requirements.md'));
+  });
+  it('throws (exit 2 in the CLI) on no match or on two matches, never picks one', () => {
+    const root = tree(['a/SPEC-5-x', 'b/SPEC-5-y']);
+    expect(() => resolveSpec(root, 'SPEC-9')).toThrow(/found 0/);
+    expect(() => resolveSpec(root, 'SPEC-5')).toThrow(/found 2/);
+  });
+  it('takes a path as-is and throws when it does not exist', () => {
+    const root = tree(['m/SPEC-1-a']);
+    expect(resolveSpec(root, 'specs/m/SPEC-1-a/requirements.md')).toBe(path.join(root, 'specs/m/SPEC-1-a/requirements.md'));
+    expect(() => resolveSpec(root, 'specs/nope.md')).toThrow(/no such file/);
   });
 });
