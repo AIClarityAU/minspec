@@ -1,7 +1,7 @@
 ---
 id: SPEC-096
 type: requirements
-status: implementing
+status: done
 tier: T4
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - DR-074 (blast radius, the opt-in marker) lives here; this is an invariant-3 defect in shipped commands
@@ -26,7 +26,7 @@ phases:
   clarify: done
   plan: done
   tasks: done
-  implement: in-progress
+  implement: done
 ---
 
 # SPEC-096: Only Initialize creates the .minspec/ opt-in marker

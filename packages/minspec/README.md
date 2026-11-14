@@ -246,6 +246,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type "MinSpec" to 
 | `Alt+A` | **MinSpec: Approve/Accept Active** |
 | `Alt+N` | **MinSpec: Go to Next Review Task** |
 | `Ctrl+K Ctrl+P` (`Cmd+K Cmd+P` on macOS) | **MinSpec: Push docs via lane** |
+| `Ctrl+K Ctrl+Y` (`Cmd+K Cmd+Y` on macOS) | **MinSpec: View Queued Phase-Advance Requests** |
 
 ### Setup and generated files
 
@@ -255,6 +256,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type "MinSpec" to 
 | **MinSpec: Refresh Harness Files** | Merge the installed version's templates into the generated files, keeping your edits |
 | **MinSpec: Getting Started** | Open the onboarding checklist page, which walks through setting MinSpec up in the current project |
 | **MinSpec: Commit Harness Refresh** | Offer again to commit generated files that are still uncommitted |
+| **MinSpec: View Queued Phase-Advance Requests** | List the requests waiting in `.minspec/queue/` and open the spec one is about. A status bar item shows the count whenever any are waiting |
 | **MinSpec: Tidy Checkout (discard redundant copies)** | List changed files that are identical to the default branch, and discard them after you confirm |
 | **MinSpec: Migrate Spec Layout (Flat ↔ Spec Kit)** | Convert specs between one file per spec and one folder per spec |
 | **MinSpec: Generate Example Spec** | Create a sample spec file for demo and learning purposes |

@@ -123,6 +123,8 @@ Any doubt falls through to the full review. Substantive doc bodies always get th
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 3 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
+
 - **D1: may a status-only flip of the approved artifact ride along?** The issue says "or trivial status
   flips". Approval PRs from the editor normally also flip `status:`/`phases:` in the artifact.
   - **(rec) A: yes, reuse the DR-111 rule** (artifact already on base, differs only in the frontmatter
@@ -131,6 +133,8 @@ Any doubt falls through to the full review. Substantive doc bodies always get th
     sidecar-only, and a bug there would pass a body edit unreviewed.
   - B: sidecar-only. Smallest surface and trivially safe. Cost: the editor's approval PRs usually include the
     status flip, so the fast-pass would rarely fire and the token saving is mostly lost.
+
+  **Recorded selection: Option A,** yes, a status-only flip of the approved artifact rides along under the DR-111 rule. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 - **D2: does the author matter?** DR-111 requires a founder-authored PR; DR-119 lets the bot author
   approvals. Because the pass here only replaces a model read of a hash match, and merge authority stays with
   docs-lane/other gates:
@@ -140,7 +144,11 @@ Any doubt falls through to the full review. Substantive doc bodies always get th
     gate (SPEC-022/045), which this spec does not re-implement.
   - B: require the sidecar's approver to be a founder email (DR-111 rule). Closes that hole here. Cost: the
     bot-authored delegated approvals (DR-119) never fast-pass, and a second identity list must be kept in sync.
+
+  **Recorded selection: Option A,** no author check; a forged but self-consistent sidecar is left to the approval gate (SPEC-022/045), as that option's cost states. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 - **D3: reuse by import or new judge?** `alta-approval-only.ts` imports from `packages/`. Options: (rec) A a
   new small judge that shares the record and hash helpers but not the author rules, cost: two judges with
   overlapping shape rules can drift (INV-5), mitigate with a shared-fixture test; or B refactor the DR-111
   judge into composable guards, cost: touches a merge-gating file and enlarges this PR's blast radius.
+
+  **Recorded selection: Option A,** a new small judge that shares the record and hash helpers but not the author rules, with a shared-fixture test. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
