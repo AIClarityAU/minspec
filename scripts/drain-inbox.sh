@@ -1692,25 +1692,31 @@ arm_delegated_spec_merges() {
   # Already-armed PRs are skipped (the arm stands); so are drafts and any PR with a
   # file outside specs/. Oldest first, so the longest-held spec goes first.
   #
-  # A PR carrying a plan artifact is skipped too, by name. The judge denies it whatever
-  # else is true (PLAN_ARTIFACT in scripts/lib/delegated-merge.ts, #2980; the parity test
-  # pins this regex to that one), so judging it only spends a slot of the cap. On
-  # 2026-10-30, 21 of 26 candidates were such PRs and a cycle ended "0 armed of 10 judged"
-  # with #3391 waiting behind them. Skipping only removes: nothing here admits a PR.
-  local plan_only
-  plan_only=$(printf '%s' "$rows" | jq -r '[.[]
-      | select(.isDraft | not) | select(.autoMergeRequest == null)
-      | select((.files | length) > 0 and all(.files[]; .path | startswith("specs/")))
-      | select(any(.files[]; .path | test("(^|/)(design|tasks)\\.md$")))
-      | .number] | sort | map("#\(.)") | (if length > 0 then "\(length) held PR(s) carry a plan artifact (#2980), not judged: \(join(" "))" else empty end)' 2>/dev/null) || {
+  # A PR carrying a plan artifact that the judge is CERTAIN to deny is skipped too, by name.
+  # On 2026-10-30, 21 of 26 candidates were plan PRs the judge refused by name (#2980), and
+  # a cycle ended "0 armed of 10 judged" with #3391 waiting behind them. DR-121 (accepted
+  # 2026-11-11, build #3586) admits a plan-only PR for ONE spec whose spec is approved on
+  # main, so those now reach the judge: skipping them was the starvation of 2026-11-14,
+  # when 27 such PRs sat "not judged" while every one of them met DR-121. A plan artifact
+  # mixed with any other path, or plans for two specs, is still denied whatever else is
+  # true (plan-mixed-diff, scripts/lib/delegated-merge.ts), so it still takes no slot.
+  # The regexes are pinned to the judge's PLAN_ARTIFACT and SPEC_PLAN_PATH by the parity
+  # test in drain-delegated-merge.test.ts. Skipping only removes: nothing here admits a PR.
+  local plan_only plan_jq
+  plan_jq='def plan: any(.files[]; .path | test("(^|/)(design|tasks)\\.md$"));
+    def oneplan: all(.files[]; .path | test("^specs/[^/]+/SPEC-[0-9]+-[^/]+/(design|tasks)\\.md$"))
+      and ([.files[].path | sub("/[^/]+$"; "")] | unique | length) == 1;
+    def held: select(.isDraft | not) | select(.autoMergeRequest == null)
+      | select((.files | length) > 0 and all(.files[]; .path | startswith("specs/")));'
+  plan_only=$(printf '%s' "$rows" | jq -r "${plan_jq}"' [.[] | held
+      | select(plan and (oneplan | not))
+      | .number] | sort | map("#\(.)") | (if length > 0 then "\(length) held PR(s) mix a plan artifact with other paths or specs (#2980, DR-121 s2.2), not judged: \(join(" "))" else empty end)' 2>/dev/null) || {
     echo "[drain] WARNING: delegated spec merge NOT run: could not filter the held PR list." >&2
     return 0
   }
   [[ -z "$plan_only" ]] || echo "[drain] delegated spec merge: ${plan_only}"
-  candidates=$(printf '%s' "$rows" | jq -r '[.[]
-      | select(.isDraft | not) | select(.autoMergeRequest == null)
-      | select((.files | length) > 0 and all(.files[]; .path | startswith("specs/")))
-      | select(any(.files[]; .path | test("(^|/)(design|tasks)\\.md$")) | not)
+  candidates=$(printf '%s' "$rows" | jq -r "${plan_jq}"' [.[] | held
+      | select((plan | not) or oneplan)
       | .number] | sort | .[]' 2>/dev/null) || {
     echo "[drain] WARNING: delegated spec merge NOT run: could not filter the held PR list." >&2
     return 0
@@ -1737,7 +1743,12 @@ arm_delegated_spec_merges() {
     out=$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -n 1 || true)  # swallow-ok: grep -v exits 1 when the seam printed nothing, which is reported below as an unreadable result
     case "$rc" in
       0) armed=$((armed + 1))
-         echo "[drain] delegated spec merge: #${pr} armed - $(printf '%s' "$out" | jq -r '"\(.delegationId) at \(.headSha)"' 2>/dev/null || echo "$out")" ;;
+         # A plan PR (DR-121 s2.4) is merged directly, not armed; the count is still one admitted.
+         if [[ "$(printf '%s' "$out" | jq -r '.mergeMode // ""' 2>/dev/null || true)" == "direct" ]]; then  # swallow-ok: wording only, an unreadable mode prints "armed" and decides nothing
+           echo "[drain] delegated spec merge: #${pr} merged (plan, DR-121) - $(printf '%s' "$out" | jq -r '"\(.delegationId) at \(.headSha)"' 2>/dev/null || echo "$out")"
+         else
+           echo "[drain] delegated spec merge: #${pr} armed - $(printf '%s' "$out" | jq -r '"\(.delegationId) at \(.headSha)"' 2>/dev/null || echo "$out")"
+         fi ;;
       1) echo "[drain] delegated spec merge: #${pr} held - $(printf '%s' "$out" | jq -r '"\(.reason): \(.detail)"' 2>/dev/null || echo "unreadable verdict: ${out:-<none>}")" ;;
       *) echo "[drain] WARNING: delegated spec merge: #${pr} was admitted but NOT armed (seam exit ${rc}): ${out:-<no output>}" >&2 ;;
     esac
@@ -2019,9 +2030,10 @@ SPECIFY_MAX_PENDING="${MINSPEC_DRAIN_SPECIFY_MAX_PENDING:-40}"
 # frontmatter `status:` is `new` or `specifying`, INTO a named variable. The tree is the
 # one the delegated-approval stage reads (the parent of the scripts the cycle runs, so
 # origin/main's verified run dir when self-refresh found it current). Only the
-# frontmatter counts: a body line quoting `status: specifying` is not a status. Returns 1
-# when the tree has no specs/ folder or the read fails: an absent folder is a count
-# nobody read, not zero (invariant 2).
+# frontmatter counts: a body line quoting `status: specifying` is not a status. Specs
+# named in an open `hold:human` issue are excluded (#3698), which needs a `gh issue list`
+# read. Returns 1 when the tree has no specs/ folder, the read fails, or the hold:human
+# read fails: an uncounted pile is a count nobody read, not zero (invariant 2).
 _pending_specs() {
   local -n _pend_out="$1"
   local root _pend_val
@@ -2040,11 +2052,41 @@ _pending_specs() {
     _pend_out=0
     return 0
   fi
-  _pend_val=$(awk '
-      FNR == 1 { fm = ($0 ~ /^---[[:space:]]*$/); next }
-      fm && /^---[[:space:]]*$/ { fm = 0; nextfile }
-      fm && /^status:[[:space:]]*["'\'']?(new|specifying)["'\'']?[[:space:]]*(#.*)?$/ { n++; fm = 0; nextfile }
-      END { print n + 0 }' "${_pend_files[@]}") || return 1
+  # Specs only a founder act can move do not count (#3698). A hold sits on an open issue OR an
+  # open pull request labelled `hold:human`; a spec counts as held only when the hold NAMES it:
+  # in its title, or a body line that leads with it (optionally after a list marker), possibly
+  # chained ("SPEC-1 and SPEC-2"). A passing mention ("see SPEC-123") excludes nothing, so any
+  # doubt counts the spec and pauses. A failed read of EITHER list returns 1: a hold list nobody
+  # read is not an empty one (invariant 2).
+  local _pend_held _pend_issues _pend_prs _pend_rc=0
+  local _pend_jq='.[] | ("@@TITLE@@ " + (.title // "")), (.body // "")'
+  _pend_issues=$(gh issue list --repo "$REPO" --state open --label hold:human --limit 1000 \
+    --json title,body --jq "$_pend_jq") || _pend_rc=$?
+  (( _pend_rc == 0 )) || return 1
+  _pend_prs=$(gh pr list --repo "$REPO" --state open --label hold:human --limit 1000 \
+    --json title,body --jq "$_pend_jq") || _pend_rc=$?
+  (( _pend_rc == 0 )) || return 1
+  _pend_held=$(printf '%s\n%s\n' "$_pend_issues" "$_pend_prs" | tr -d '\r' | awk '
+    function emit(t,   r) {
+      while (match(t, /SPEC-[0-9]+/)) { print substr(t, RSTART, RLENGTH); t = substr(t, RSTART + RLENGTH) }
+    }
+    /^@@TITLE@@ / { emit($0); next }
+    {
+      t = $0
+      sub(/^[[:space:]>*_`"-]*/, "", t)
+      while (match(t, /^SPEC-[0-9]+/)) {
+        print substr(t, RSTART, RLENGTH); t = substr(t, RSTART + RLENGTH)
+        if (!match(t, /^[[:space:]]*(,|and|&)[[:space:]]+SPEC-/)) break
+        sub(/^[[:space:]]*(,|and|&)[[:space:]]+/, "", t)
+      }
+    }' | sort -u | tr '\n' ' ')
+  _pend_val=$(awk -v held=" ${_pend_held}" '
+      function flush() { if (pend && !(index(held, " " sid " ") > 0)) n++; pend = 0; sid = "" }
+      FNR == 1 { flush(); fm = ($0 ~ /^---[[:space:]]*$/); next }
+      fm && /^---[[:space:]]*$/ { fm = 0; flush(); nextfile }
+      fm && /^id:[[:space:]]*/ { v = $0; sub(/^id:[[:space:]]*["'\'']?/, "", v); sub(/["'\''[:space:]#].*$/, "", v); sid = v }
+      fm && /^status:[[:space:]]*["'\'']?(new|specifying)["'\'']?[[:space:]]*(#.*)?$/ { pend = 1 }
+      END { flush(); print n + 0 }' "${_pend_files[@]}") || return 1
   [[ "$_pend_val" =~ ^[0-9]+$ ]] || return 1
   _pend_out="$_pend_val"
 }
@@ -2105,6 +2147,79 @@ _drop_pr_claimed() {
     fi
   done
   _drop_out="${_drop_kept%$'\n'}"
+}
+
+# _countermand_holds <varname> — INTO a named variable, one line `<issue> <label>` for each
+# open ready issue (either ready label) that also wears a countermanding label, naming the
+# first such label in the gate's order. Non-zero, and the variable untouched, when either
+# the gate's label set or the issue read cannot be had.
+#
+# Why (#2645): the queue read above sees issue numbers only, and the dispatcher's gate
+# (`dispatch-ready-check.sh`) is the one place the countermanding labels are checked. A
+# verdict hold, an escalation and the 2026-08-06 hold-label backfill each leave a ready
+# label beside the hold, by design, so those issues were offered and refused on every
+# cycle. On 2026-11-13 that was all 28 ready issues: the cycle ended "NOTHING DISPATCHED
+# ... a stale stamp, re-triage it", a stall alarm for issues correctly waiting on a human.
+#
+# The label set is READ from the gate (`--countermand-labels`), next to the dispatcher this
+# cycle runs (the run dir once ensure_fresh_run_dir has moved DISPATCH there), never
+# copied. This is a cheaper first look, not a replacement: the dispatcher's own check is
+# unchanged, so a failure here costs the old behaviour (offer, refuse), never a dispatch.
+_countermand_holds() {
+  local -n _cmh_out="$1"
+  local _cmh_gate _cmh_set _cmh_json _cmh_jq _cmh_val _cmh_all="" _cmh_lbl _cmh_rc=0 _cmh_l
+  _cmh_gate="$(dirname "$DISPATCH")/dispatch-ready-check.sh"
+  _cmh_set="$(bash "$_cmh_gate" --countermand-labels)" || return $?
+  [[ -n "$_cmh_set" ]] || return 1
+  # Embedded in the jq program as a JSON array: `gh --jq` takes no --arg. Only label-safe
+  # names are accepted, so nothing the gate prints can change the program's meaning.
+  _cmh_json=""
+  while IFS= read -r _cmh_l; do
+    [[ "$_cmh_l" =~ ^[A-Za-z0-9:._-]+$ ]] || return 1
+    _cmh_json+="${_cmh_json:+,}\"${_cmh_l}\""
+  done <<<"$_cmh_set"
+  _cmh_jq='.[] | .number as $n | [.labels[].name] as $have
+    | ['"[${_cmh_json}]"'[] | select(. as $g | $have | index($g))] | select(length > 0)
+    | "\($n) \(.[0])"'
+  for _cmh_lbl in agent-ready agent-ready-specify; do
+    _cmh_rc=0
+    _cmh_val=$(gh issue list --repo "$REPO" --state open --label "$_cmh_lbl" --limit "$_ready_fetch_limit" \
+      --json number,labels --jq "$_cmh_jq") || _cmh_rc=$?
+    if (( _cmh_rc != 0 )) && gh_bot_reauth_read; then   # dead credential: re-mint in this shell, retry once (#3400)
+      echo "[drain] the '${_cmh_lbl}' held-for-a-human read failed and the credential was stale — re-minted, retrying once." >&2
+      _cmh_rc=0
+      _cmh_val=$(gh issue list --repo "$REPO" --state open --label "$_cmh_lbl" --limit "$_ready_fetch_limit" \
+        --json number,labels --jq "$_cmh_jq") || _cmh_rc=$?
+    fi
+    (( _cmh_rc == 0 )) || return "$_cmh_rc"
+    [[ -n "$_cmh_val" ]] && _cmh_all+="${_cmh_val}"$'\n'
+  done
+  _cmh_out="${_cmh_all%$'\n'}"
+}
+
+# _drop_held <varname> <holds> <issues> — INTO a named variable, <issues> (one per line)
+# without those <holds> (from _countermand_holds) names. One line names every issue left
+# out and its label, so the set stays visible and is never mistaken for a stall (#2645).
+_drop_held() {
+  local -n _dh_out="$1"
+  local _dh_kept="" _dh_n _dh_label _dh_named="" _dh_count=0
+  local -A _dh_by=()
+  while read -r _dh_n _dh_label; do
+    [[ -n "$_dh_n" && -z "${_dh_by[$_dh_n]:-}" ]] && _dh_by[$_dh_n]="$_dh_label"
+  done <<<"$2"
+  for _dh_n in $3; do
+    if [[ -n "${_dh_by[$_dh_n]:-}" ]]; then
+      _dh_named+=" #${_dh_n} (${_dh_by[$_dh_n]})"
+      _dh_count=$(( _dh_count + 1 ))
+    else
+      _dh_kept+="${_dh_n}"$'\n'
+    fi
+  done
+  if (( _dh_count > 0 )); then
+    echo "[drain] not offered: ${_dh_count} ready issue(s) held for a human by a countermanding label the dispatcher would refuse (#2645):${_dh_named}" >&2
+    echo "[drain]   Not a stall: each waits on a human (an escalation or a verdict hold). Clearing the hold label, or scripts/triage-inbox.sh <N>, puts it back in the queue." >&2
+  fi
+  _dh_out="${_dh_kept%$'\n'}"
 }
 
 # _read_queue <varname> <label> — read one label's queue INTO a named variable, and
@@ -2327,7 +2442,7 @@ run_cycle() {
           echo "[drain] spec-writing is PAUSED: MINSPEC_DRAIN_SPECIFY_MAX_PENDING=$(printf '%q' "$SPECIFY_MAX_PENDING") is not a whole number, so it is read as 0, the setting that spends nothing: ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
         elif ! _pending_specs pending; then
           specify_on=0
-          echo "[drain] spec-writing is PAUSED: the unapproved specs on main could not be counted (no specs/ folder or an unreadable one under $(printf '%q' "$(dirname "$REMEDIATE")/..")), and a count nobody read is not zero (#3344): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+          echo "[drain] spec-writing is PAUSED: the unapproved specs on main could not be counted (either no specs/ folder or an unreadable one under $(printf '%q' "$(dirname "$REMEDIATE")/.."), or the read of open hold:human issues failed: see the gh error above), and a count nobody read is not zero (#3344): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
         elif (( 10#$pending >= 10#$SPECIFY_MAX_PENDING )); then
           specify_on=0
           echo "[drain] spec-writing is PAUSED: ${pending} spec(s) on main waiting for Clarify or sign-off (status new or specifying), at or above the cap ${SPECIFY_MAX_PENDING} (MINSPEC_DRAIN_SPECIFY_MAX_PENDING, #3344): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
@@ -2378,8 +2493,18 @@ run_cycle() {
     all_ready=""
   else
     _drop_pr_claimed all_ready "$pr_claims" "$all_ready"
+    # Held for a human (#2645): left out here, before ranking and the cap, so a queue of
+    # held issues reads as what it is rather than as a stall. A failed read filters
+    # nothing: the dispatcher's own countermand check still refuses each one.
+    local human_holds="" held_rc=0
+    _countermand_holds human_holds || held_rc=$?
+    if (( held_rc != 0 )); then
+      echo "[drain] WARNING: could not read which ready issues are held for a human (exit ${held_rc}); offering all of them, and the dispatcher's own check refuses any that are (#2645)." >&2
+    else
+      _drop_held all_ready "$human_holds" "$all_ready"
+    fi
     if [[ -z "$all_ready" ]]; then
-      echo "[drain] nothing to dispatch this cycle: every ready issue is already closed by an open pull request. Going on to pull request remediation."
+      echo "[drain] nothing to dispatch this cycle: every ready issue is already closed by an open pull request or held for a human (each named above). Going on to pull request remediation."
     fi
   fi
   if [[ -z "$all_ready" ]]; then
