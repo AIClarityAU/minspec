@@ -6,7 +6,11 @@
  * sat held and the drain judged "0 armed of 8" while it starved (2026-11-14). Each test
  * below is one condition of DR-121 section 2; every one but the covered case must DENY.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { spawnSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { type Delegation } from '../../../scripts/lib/autonomy';
 import { type ReviewEvidence } from '../../../scripts/lib/delegated-approval';
 import { specHash } from '../../../packages/shared/src/canonical';
@@ -17,6 +21,7 @@ import {
   type MergeFile,
   type MergeInput,
   type MergePull,
+  type PlanCheckRun,
 } from '../../../scripts/lib/delegated-merge';
 
 const REPO = 'AIClarityAU/minspec';
@@ -92,6 +97,10 @@ const pf = (path: string, over: Partial<MergeFile> = {}): MergeFile => ({
   ...over,
 });
 
+const run = (name: string, conclusion: string | null, status = 'completed'): PlanCheckRun => ({ name, status, conclusion });
+/** Every latest check on the head green, one of each admitted conclusion (DR-119 item 10). */
+const GREEN: PlanCheckRun[] = [run('test', 'success'), run('docs-only', 'skipped'), run('advisory', 'neutral'), run('ai-review', 'success')];
+
 const decisions: Record<string, string> = { 'DR-108': 'accepted', 'DR-121': 'accepted' };
 
 function input(over: Partial<MergeInput> = {}): MergeInput {
@@ -109,6 +118,7 @@ function input(over: Partial<MergeInput> = {}): MergeInput {
     today: '2026-11-14',
     planSpec: { requirements: req(), sidecar: sidecar() },
     commitAuthors: [BOT, BOT],
+    planChecks: { sha: HEAD, runs: GREEN },
     ...over,
   };
 }
@@ -121,6 +131,9 @@ const reasonOf = (i: MergeInput) => {
 describe('DR-121 covered case (#2872 regression)', () => {
   it('a plan-only PR for an approved spec, with a pass on its head, is cleared and bound to that head', () => {
     expect(planDelegatedMerge(input())).toMatchObject({ arm: true, delegationId: 'DLG-001', headSha: HEAD, verdictBy: VERDICT_URL, classesAfter: [] });
+  });
+  it('a cleared plan is merged directly, never by native auto-merge (DR-121 s2.4, item 11)', () => {
+    expect(planDelegatedMerge(input())).toMatchObject({ arm: true, mergeMode: 'direct' });
   });
   it.each(['planning', 'implementing', 'done'])('spec status %s on the base is admitted', (st) => {
     const c = req(st);
@@ -222,6 +235,58 @@ describe('DR-121 s2.4: the DR-119 pins', () => {
   });
 });
 
+describe('DR-121 s2.4: CI green on the head - EVERY latest check, required or not (DR-119 item 10)', () => {
+  // Native auto-merge waits only for REQUIRED checks; a plan is merged directly, so the
+  // judge itself must see every latest check run green (review rv-3746-a0f08b04).
+  it.each(['failure', 'cancelled', 'timed_out', 'action_required', 'stale', 'startup_failure'])(
+    'a non-required check concluding %s denies',
+    (c) => {
+      expect(reasonOf(input({ planChecks: { sha: HEAD, runs: [...GREEN, run('optional-lint', c)] } }))).toBe('plan-ci-not-green');
+    },
+  );
+  it('a completed check with no conclusion denies', () => {
+    expect(reasonOf(input({ planChecks: { sha: HEAD, runs: [...GREEN, run('odd', null)] } }))).toBe('plan-ci-not-green');
+  });
+  it.each(['queued', 'in_progress', 'waiting', 'pending'])('a check still %s denies', (st) => {
+    expect(reasonOf(input({ planChecks: { sha: HEAD, runs: [...GREEN, run('slow', null, st)] } }))).toBe('plan-ci-pending');
+  });
+  it('zero check runs denies: none reported is not green', () => {
+    expect(reasonOf(input({ planChecks: { sha: HEAD, runs: [] } }))).toBe('plan-ci-none');
+  });
+  it('unreadable check runs deny', () => {
+    expect(reasonOf(input({ planChecks: { sha: HEAD, runs: undefined } }))).toBe('plan-ci-unreadable');
+  });
+  it('check-run facts never gathered deny', () => {
+    expect(reasonOf(input({ planChecks: undefined }))).toBe('plan-ci-unreadable');
+  });
+  it('green checks read on another sha deny', () => {
+    expect(reasonOf(input({ planChecks: { sha: 'a'.repeat(40), runs: GREEN } }))).toBe('plan-ci-unreadable');
+  });
+  it('upper-case conclusions (GraphQL form) are read the same way', () => {
+    expect(reasonOf(input({ planChecks: { sha: HEAD, runs: [run('a', 'SUCCESS'), run('b', 'NEUTRAL'), run('c', 'SKIPPED')] } }))).toBe('ARMED');
+    expect(reasonOf(input({ planChecks: { sha: HEAD, runs: [run('a', 'SUCCESS'), run('b', 'FAILURE')] } }))).toBe('plan-ci-not-green');
+  });
+});
+
+describe('the spec arm is unchanged by the plan arm (DR-108)', () => {
+  const SPEC_REQ = 'specs/minspec/SPEC-228-ci-parity/requirements.md';
+  const specInput = (over: Partial<MergeInput> = {}) =>
+    input({
+      files: [pf(SPEC_REQ, { headContent: req('specifying'), baseContent: null })],
+      review: { ...review(), artifactAtHead: req('specifying'), pull: { ...review().pull, files: [SPEC_REQ] } },
+      planSpec: undefined,
+      commitAuthors: undefined,
+      planChecks: undefined,
+      ...over,
+    });
+  it('a covered spec PR still arms native auto-merge, and needs no check-run read', () => {
+    expect(planDelegatedMerge(specInput())).toMatchObject({ arm: true, mergeMode: 'auto' });
+  });
+  it('a red optional check does not enter the spec arm: required checks stay GitHub\'s', () => {
+    expect(planDelegatedMerge(specInput({ planChecks: { sha: HEAD, runs: [run('x', 'failure')] } }))).toMatchObject({ arm: true, mergeMode: 'auto' });
+  });
+});
+
 describe('DR-121 s2.5: the delegation and its tripwire', () => {
   it('a tripped repeat-fix share denies', () => {
     expect(reasonOf(input({ repeatFixShare: 0.5 }))).toMatch(/^delegation-/);
@@ -235,6 +300,7 @@ describe('DR-121 s2.5: the delegation and its tripwire', () => {
 });
 
 describe('DR-121 gathering: plan facts are read from the base, failures deny', () => {
+  const GATHER_RUNS: PlanCheckRun[] = GREEN;
   const okGit = (args: readonly string[]): string => {
     if (args[0] === 'rev-parse' && args[1] === '--is-shallow-repository') return 'false\n';
     if (args[0] === 'cat-file') {
@@ -278,6 +344,10 @@ describe('DR-121 gathering: plan facts are read from the base, failures deny', (
     const r = review();
     if (route.startsWith(`repos/${REPO}/issues/${PR}/comments`)) {
       return JSON.stringify(r.comments.map((c) => ({ id: c.id, html_url: c.url, user: { login: c.login }, body: c.body, created_at: c.createdAt })));
+    }
+    if (route.includes('/check-runs?filter=latest')) {
+      const runs = GATHER_RUNS.map((c) => ({ name: c.name, status: c.status, conclusion: c.conclusion }));
+      return JSON.stringify({ total_count: runs.length, check_runs: runs });
     }
     if (route.includes('/check-runs')) {
       return JSON.stringify({
@@ -329,6 +399,47 @@ describe('DR-121 gathering: plan facts are read from the base, failures deny', (
     };
     expect(plan(deps({ gh }))).toMatchObject({ arm: false, reason: 'plan-commit-not-bot' });
   });
+  it('the latest check runs are read on the judged head, and a red optional one denies', () => {
+    const seen: string[] = [];
+    const gh = (a: readonly string[]) => {
+      const route = a[a.length - 1];
+      seen.push(route);
+      if (route.includes('/check-runs?filter=latest')) {
+        return JSON.stringify({ total_count: 2, check_runs: [{ name: 'test', status: 'completed', conclusion: 'success' }, { name: 'optional', status: 'completed', conclusion: 'failure' }] });
+      }
+      return okGh(a);
+    };
+    expect(plan(deps({ gh }))).toMatchObject({ arm: false, reason: 'plan-ci-not-green' });
+    expect(seen).toContain(`repos/${REPO}/commits/${HEAD}/check-runs?filter=latest&per_page=100&page=1`);
+  });
+  it('an unreadable check-run list denies', () => {
+    const gh = (a: readonly string[]) => {
+      if (a[a.length - 1].includes('/check-runs?filter=latest')) throw new Error('HTTP 502');
+      return okGh(a);
+    };
+    expect(plan(deps({ gh }))).toMatchObject({ arm: false, reason: 'plan-ci-unreadable' });
+  });
+  it('a short read (fewer runs than total_count) denies, never passes on what it saw', () => {
+    const gh = (a: readonly string[]) =>
+      a[a.length - 1].includes('/check-runs?filter=latest')
+        ? JSON.stringify({ total_count: 5, check_runs: [{ name: 'test', status: 'completed', conclusion: 'success' }] })
+        : okGh(a);
+    expect(plan(deps({ gh }))).toMatchObject({ arm: false, reason: 'plan-ci-unreadable' });
+  });
+  it('a check-run body with no total_count denies', () => {
+    const gh = (a: readonly string[]) =>
+      a[a.length - 1].includes('/check-runs?filter=latest')
+        ? JSON.stringify({ check_runs: [{ name: 'test', status: 'completed', conclusion: 'success' }] })
+        : okGh(a);
+    expect(plan(deps({ gh }))).toMatchObject({ arm: false, reason: 'plan-ci-unreadable' });
+  });
+  it('a pending check read through gathering denies', () => {
+    const gh = (a: readonly string[]) =>
+      a[a.length - 1].includes('/check-runs?filter=latest')
+        ? JSON.stringify({ total_count: 1, check_runs: [{ name: 'test', status: 'in_progress', conclusion: null }] })
+        : okGh(a);
+    expect(plan(deps({ gh }))).toMatchObject({ arm: false, reason: 'plan-ci-pending' });
+  });
   it('a missing approval record on the base denies', () => {
     const git = (a: readonly string[]) => {
       if (a[0] === 'cat-file' && String(a[2]).endsWith(SIDECAR)) throw new Error('absent');
@@ -343,4 +454,116 @@ describe('DR-121 gathering: plan facts are read from the base, failures deny', (
     };
     expect(plan(deps({ git }))).toMatchObject({ arm: false, reason: 'plan-artifact' });
   });
+});
+
+// ─── the seam: a plan is merged directly, never armed (DR-121 s2.4, item 11) ──────────────
+
+describe('the dispatch seam merges a plan directly - never --auto, never --admin', () => {
+  const ROOT = path.resolve(__dirname, '../../..');
+  const DISPATCH = path.join(ROOT, 'scripts', 'dispatch-issue.sh');
+  const TIMEOUT = 60_000;
+  const ARMED = {
+    arm: true,
+    reason: 'covered',
+    detail: 'covered by DLG-001',
+    delegationId: 'DLG-001',
+    verdictBy: VERDICT_URL,
+    headSha: HEAD,
+    classesAfter: [] as string[],
+  };
+  const VIEW = { headRefName: 'cos/plan-b-1028', closingIssuesReferences: [], comments: [], author: { login: 'app/minspec-sdd' }, body: 'Refs #3586' };
+  let tmp: string;
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dlg-plan-seam-'));
+    fs.mkdirSync(path.join(tmp, 'bin'));
+  });
+  afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+  function seam(o: { judge: Record<string, unknown>; diff: string; mergeExit?: number }) {
+    const ghLog = path.join(tmp, 'gh.log');
+    fs.writeFileSync(
+      path.join(tmp, 'bin', 'gh'),
+      `#!/usr/bin/env bash
+printf 'TOKEN=%s ARGS=%s\\n' "\${GH_TOKEN:-}" "$*" >> ${JSON.stringify(ghLog)}
+case "$1 $2" in
+  "pr diff") printf '%s\\n' ${JSON.stringify(o.diff)} ;;
+  "pr view") printf '%s\\n' ${JSON.stringify(JSON.stringify(VIEW))} ;;
+  "pr merge") exit ${o.mergeExit ?? 0} ;;
+esac
+exit 0
+`,
+      { mode: 0o755 },
+    );
+    const judge = path.join(tmp, 'judge.sh');
+    fs.writeFileSync(judge, `#!/usr/bin/env bash\nprintf '%s\\n' ${JSON.stringify(JSON.stringify(o.judge))}\n`, { mode: 0o755 });
+    const token = path.join(tmp, 'token.sh');
+    fs.writeFileSync(token, '#!/usr/bin/env bash\necho stub-bot-installation-token\n', { mode: 0o755 });
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATH: `${path.join(tmp, 'bin')}:${process.env.PATH ?? ''}`,
+      MINSPEC_DELEGATED_MERGE_JUDGE_CMD: judge,
+      MINSPEC_GH_APP_TOKEN_SCRIPT: token,
+      MINSPEC_AUTONOMY: 'act',
+      MINSPEC_FRESHNESS_CHECKED: '1',
+      MINSPEC_AUTOMERGE_NATIVE: '1',
+    };
+    delete env.MINSPEC_AUTOMERGE_MODE;
+    delete env.GH_TOKEN;
+    delete env.GITHUB_TOKEN;
+    delete env.MINSPEC_GH_BOT_TOKEN_STAMP;
+    const r = spawnSync('bash', [DISPATCH, '--delegated-spec-merge', String(PR), '--arm'], { encoding: 'utf-8', env });
+    const lines = (r.stdout ?? '').split('\n').filter((l) => l.trim().startsWith('{'));
+    const gh = fs.existsSync(ghLog) ? fs.readFileSync(ghLog, 'utf-8').split('\n').filter(Boolean) : [];
+    return {
+      status: r.status,
+      stderr: r.stderr ?? '',
+      verdict: lines.length > 0 ? JSON.parse(lines[lines.length - 1]) : undefined,
+      merges: gh.filter((l) => l.includes('ARGS=pr merge')),
+      edits: gh.filter((l) => l.includes('ARGS=pr edit')),
+    };
+  }
+  const PLAN_DIFF = `${DESIGN}\n${TASKS}`;
+
+  it('a plan the judge cleared is merged at the judged head with --squash and NO --auto', () => {
+    const r = seam({ judge: { ...ARMED, mergeMode: 'direct' }, diff: PLAN_DIFF });
+    expect(r.status).toBe(0);
+    expect(r.merges).toEqual([`TOKEN=stub-bot-installation-token ARGS=pr merge ${PR} --repo ${REPO} --squash --match-head-commit ${HEAD}`]);
+    expect(r.merges.join('\n')).not.toMatch(/--auto|--admin/);
+    expect(r.verdict).toMatchObject({ proceed: true, mergeMode: 'direct', merged: true, armed: false });
+  }, TIMEOUT);
+
+  it('a plan diff forces a direct merge even if the judge says auto: the seam is a second witness', () => {
+    const r = seam({ judge: { ...ARMED, mergeMode: 'auto' }, diff: PLAN_DIFF });
+    expect(r.merges).toHaveLength(1);
+    expect(r.merges[0]).not.toContain('--auto');
+    expect(r.merges[0]).toContain(`--squash --match-head-commit ${HEAD}`);
+  }, TIMEOUT);
+
+  it('a judge that names no mergeMode still cannot arm auto-merge on a plan diff', () => {
+    const r = seam({ judge: ARMED, diff: TASKS });
+    expect(r.merges).toHaveLength(1);
+    expect(r.merges[0]).not.toContain('--auto');
+  }, TIMEOUT);
+
+  it('a direct merge GitHub refuses exits 2, held for the next cycle, and arms nothing instead', () => {
+    const r = seam({ judge: { ...ARMED, mergeMode: 'direct' }, diff: PLAN_DIFF, mergeExit: 1 });
+    expect(r.status).toBe(2);
+    expect(r.merges).toHaveLength(1);
+    expect(r.merges.join('\n')).not.toContain('--auto');
+    expect(r.verdict).toMatchObject({ merged: false, error: 'merge-failed' });
+    expect(r.stderr).toContain('next cycle');
+  }, TIMEOUT);
+
+  it('the spec arm is unchanged: a spec PR still arms --auto --squash at the judged head', () => {
+    const r = seam({ judge: { ...ARMED, mergeMode: 'auto' }, diff: 'specs/minspec/SPEC-228-ci-parity/requirements.md' });
+    expect(r.status).toBe(0);
+    expect(r.merges).toEqual([`TOKEN=stub-bot-installation-token ARGS=pr merge ${PR} --repo ${REPO} --auto --squash --match-head-commit ${HEAD}`]);
+    expect(r.edits).toHaveLength(1);
+    expect(r.verdict).toMatchObject({ armed: true, mergeMode: 'auto' });
+  }, TIMEOUT);
+
+  it('the spec arm is unchanged for an older judge that names no mergeMode', () => {
+    const r = seam({ judge: ARMED, diff: 'specs/minspec/SPEC-228-ci-parity/requirements.md' });
+    expect(r.merges).toEqual([`TOKEN=stub-bot-installation-token ARGS=pr merge ${PR} --repo ${REPO} --auto --squash --match-head-commit ${HEAD}`]);
+  }, TIMEOUT);
 });

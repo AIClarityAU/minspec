@@ -54,6 +54,8 @@ function run(
     listStderr?: string;
     failFirst?: number;
     seamExit?: Record<number, number>;
+    /** PRs whose seam answer is a direct plan merge (DR-121 s2.4), not an arm. */
+    direct?: number[];
     env?: Record<string, string>;
     /** gh_bot_reauth_read stub: 'new' = a different credential is now in hand; 'same' = broker gave the same one. */
     reauth?: 'new' | 'same';
@@ -76,16 +78,22 @@ function run(
   const codes = Object.entries(o.seamExit ?? {})
     .map(([pr, c]) => `  ${pr}) code=${c} ;;`)
     .join('\n');
+  const direct = (o.direct ?? []).map((n) => `  ${n}) mode=direct ;;`).join('\n');
   const seam = path.join(tmp, 'dispatch.sh');
   fs.writeFileSync(
     seam,
     `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> ${JSON.stringify(calls)}
 code=0
+mode=auto
 case "$2" in
 ${codes}
 esac
-if [ "$code" = 0 ]; then echo '{"proceed":true,"armed":true,"delegationId":"DLG-001","headSha":"abc"}';
+case "$2" in
+${direct}
+esac
+if [ "$code" = 0 ] && [ "$mode" = direct ]; then echo '{"proceed":true,"armed":false,"merged":true,"mergeMode":"direct","delegationId":"DLG-001","headSha":"abc"}';
+elif [ "$code" = 0 ]; then echo '{"proceed":true,"armed":true,"mergeMode":"auto","delegationId":"DLG-001","headSha":"abc"}';
 else echo '{"proceed":false,"reason":"delegation-plan-artifact","detail":"nope"}'; fi
 exit $code
 `,
@@ -212,6 +220,14 @@ describe('a plan PR the judge must deny takes no judgement slot (T3, 2026-10-30)
     const r = run([{ number: 3280, files: [plan(66), tasks(66)] }]);
     expect(r.seamCalls).toEqual(['--delegated-spec-merge 3280 --arm']);
     expect(r.stdout).not.toContain('not judged');
+  });
+
+  it('a plan PR the seam merged directly is reported as merged, not armed (DR-121 s2.4)', () => {
+    const r = run([{ number: 3280, files: [plan(66), tasks(66)] }, { number: 3281, files: [spec(67)] }], { direct: [3280] });
+    expect(r.stdout).toContain('#3280 merged (plan, DR-121) - DLG-001 at abc');
+    expect(r.stdout).not.toContain('#3280 armed');
+    expect(r.stdout).toContain('#3281 armed - DLG-001 at abc');
+    expect(r.stdout).toContain('2 armed of 2 judged');
   });
 
   it('plans for two specs in one PR are skipped, as the judge denies them', () => {

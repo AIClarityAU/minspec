@@ -28,8 +28,11 @@
  *   - OR (DR-121, build #3586) the diff is plan artifacts only (`design.md`/`tasks.md`)
  *     for ONE spec whose `requirements.md` is approved on the base (a non-stale approval
  *     record, status planning/implementing/done), authored and committed by the bot
- *     only, and DR-121 is `accepted` on the base. Until it is, a plan artifact is refused
- *     by name (#2980). See `planArmFacts` below;
+ *     only, every latest check run on the head finished SUCCESS, SKIPPED or NEUTRAL
+ *     (DR-121 s2.4, DR-119 item 10), and DR-121 is `accepted` on the base. Until it is, a
+ *     plan artifact is refused by name (#2980). A plan is merged DIRECTLY at the judged
+ *     head (`mergeMode: 'direct'`), never by native auto-merge (DR-121 s2.4, item 11),
+ *     because native auto-merge waits only for the REQUIRED checks. See `planArmFacts`;
  *   - each spec's `status:` is `new` or `specifying` at the head, and on the base when the
  *     file exists there: a pull request that moves a spec's lifecycle, or edits a spec
  *     past specifying, is an approval in disguise and stays the founder's;
@@ -94,6 +97,8 @@ export const SPEC_PLAN_PATH = /^(specs\/[^/]+\/SPEC-\d+-[^/]+)\/(design|tasks)\.
 export const PLAN_DECISION = 'DR-121';
 /** DR-121 section 2.3: the planned spec's status on the base. Anything else waits. */
 export const PLAN_SPEC_APPROVED_STATUSES: ReadonlySet<string> = new Set(['planning', 'implementing', 'done']);
+/** DR-119 section 1 item 10, as DR-121 section 2.4 applies it: the only green conclusions. */
+export const PLAN_GREEN_CONCLUSIONS: ReadonlySet<string> = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL']);
 /** DR-119 section 1 item 2, as DR-121 section 2.4 applies it: the bot, keyed on type. */
 export const PLAN_BOT_LOGIN = 'minspec-sdd[bot]';
 /** A spec that has not been approved yet. Anything later is the founder's. */
@@ -125,6 +130,21 @@ export interface PlanSpecFacts {
   readonly sidecar: string | null | undefined;
 }
 
+/** One latest check run on a commit, as GitHub reports it. */
+export interface PlanCheckRun {
+  readonly name: string;
+  /** queued, in_progress, completed, ... */
+  readonly status: string;
+  /** success, failure, neutral, ...; null while not completed. */
+  readonly conclusion: string | null;
+}
+
+/** DR-121 s2.4 (DR-119 item 10): every latest check run on `sha`; runs undefined = unreadable. */
+export interface PlanChecks {
+  readonly sha: string;
+  readonly runs: readonly PlanCheckRun[] | undefined;
+}
+
 export interface MergeFile {
   readonly path: string;
   /** GitHub's file status: added, modified, removed, renamed, ... */
@@ -154,6 +174,8 @@ export interface MergeInput {
   readonly planSpec?: PlanSpecFacts;
   /** DR-121: the author login of EVERY commit, merge commits included; '' = no linked account. */
   readonly commitAuthors?: readonly string[];
+  /** DR-121: every latest check run on the head; read only for a plan diff; undefined = not read. */
+  readonly planChecks?: PlanChecks;
 }
 
 export type MergePlan =
@@ -165,6 +187,11 @@ export type MergePlan =
       readonly verdictBy: string;
       readonly headSha: string;
       readonly classesAfter: readonly StopClass[];
+      /**
+       * How the caller merges. `auto`: arm GitHub native auto-merge (the spec arm, DR-108).
+       * `direct`: merge now, pinned to `headSha`, never native auto-merge (a plan, DR-121 s2.4).
+       */
+      readonly mergeMode: 'auto' | 'direct';
     }
   | { readonly arm: false; readonly reason: string; readonly detail: string };
 
@@ -298,6 +325,7 @@ export function planDelegatedMerge(input: MergeInput): MergePlan {
     verdictBy: pass.url,
     headSha: pull.headSha,
     classesAfter: after,
+    mergeMode: planFile === undefined ? 'auto' : 'direct',
   };
 }
 
@@ -383,6 +411,27 @@ function planArmFacts(
   const strays = commits.filter((a) => a !== PLAN_BOT_LOGIN);
   if (strays.length > 0) {
     return no('plan-commit-not-bot', `#${pull.number} has ${strays.length} commit(s) not by ${PLAN_BOT_LOGIN}: ${[...new Set(strays.map((a) => a || '<no account>'))].join(', ')}`);
+  }
+  // 2.4 (DR-119 item 10): CI green on the head - EVERY latest check run, required or not,
+  // because a plan is merged directly and nothing else waits on an optional check. Zero,
+  // unreadable, pending or any other conclusion denies; the next drain cycle retries.
+  const checks = input.planChecks;
+  if (checks === undefined || checks.runs === undefined || checks.sha !== pull.headSha) {
+    return no('plan-ci-unreadable', `the check runs on ${pull.headSha} could not be read`);
+  }
+  if (checks.runs.length === 0) {
+    return no('plan-ci-none', `no check run has reported on ${pull.headSha}; zero checks is not green (${PLAN_DECISION} s2.4)`);
+  }
+  const pending = checks.runs.filter((c) => c.status !== 'completed');
+  if (pending.length > 0) {
+    return no('plan-ci-pending', `${pending.length} check run(s) on ${pull.headSha} have not finished: ${pending.map((c) => c.name || '<unnamed>').join(', ')}`);
+  }
+  const red = checks.runs.filter((c) => !PLAN_GREEN_CONCLUSIONS.has(String(c.conclusion ?? '').toUpperCase()));
+  if (red.length > 0) {
+    return no(
+      'plan-ci-not-green',
+      `check run(s) on ${pull.headSha} did not finish SUCCESS, SKIPPED or NEUTRAL: ${red.map((c) => `${c.name || '<unnamed>'}=${String(c.conclusion)}`).join(', ')} (${PLAN_DECISION} s2.4)`,
+    );
   }
   return { tier: tier as Tier };
 }
@@ -504,6 +553,7 @@ export function gatherMergeInput(args: MergeArgs, deps: MergeDeps): MergeInput {
   // that holds a plan artifact, so the spec arm's reads are unchanged.
   let planSpec: PlanSpecFacts | undefined;
   let commitAuthors: string[] | undefined;
+  let planChecks: PlanChecks | undefined;
   const planDir = files?.map((f) => SPEC_PLAN_PATH.exec(f.path)?.[1]).find((d) => d !== undefined);
   if (planDir !== undefined) {
     const reqPath = `${planDir}/requirements.md`;
@@ -524,6 +574,35 @@ export function gatherMergeInput(args: MergeArgs, deps: MergeDeps): MergeInput {
     } catch {
       commitAuthors = undefined;
     }
+    // DR-121 s2.4: every LATEST check run on the head (filter=latest drops superseded
+    // re-runs). A short read (fewer rows than total_count) is unreadable, never a pass.
+    const headSha = pull?.headSha ?? '';
+    let runs: PlanCheckRun[] | undefined;
+    try {
+      if (!/^[0-9a-f]{40}$/.test(headSha)) throw new Error('no head sha');
+      const rows: Json[] = [];
+      let total = -1;
+      for (let page = 1; ; page++) {
+        if (page > 10) throw new Error('more than 10 pages of check runs');
+        const body = JSON.parse(
+          deps.gh([`repos/${repo}/commits/${headSha}/check-runs?filter=latest&per_page=100&page=${page}`]),
+        ) as Json;
+        const items = body?.check_runs;
+        if (!Array.isArray(items) || typeof body.total_count !== 'number') throw new Error('not a check-run list');
+        total = body.total_count;
+        rows.push(...(items as Json[]));
+        if (items.length < 100 || rows.length >= total) break;
+      }
+      if (rows.length !== total) throw new Error(`read ${rows.length} of ${total} check runs`);
+      runs = rows.map((c) => ({
+        name: s(c.name),
+        status: s(c.status),
+        conclusion: typeof c.conclusion === 'string' ? c.conclusion : null,
+      }));
+    } catch {
+      runs = undefined;
+    }
+    planChecks = { sha: headSha, runs };
   }
 
   const delegationsText = baseOk ? show('.minspec/delegations.json') : undefined;
@@ -548,6 +627,7 @@ export function gatherMergeInput(args: MergeArgs, deps: MergeDeps): MergeInput {
     today: deps.today(),
     planSpec,
     commitAuthors,
+    planChecks,
   };
 }
 

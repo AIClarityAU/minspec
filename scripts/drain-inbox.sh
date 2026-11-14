@@ -1743,7 +1743,12 @@ arm_delegated_spec_merges() {
     out=$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -n 1 || true)  # swallow-ok: grep -v exits 1 when the seam printed nothing, which is reported below as an unreadable result
     case "$rc" in
       0) armed=$((armed + 1))
-         echo "[drain] delegated spec merge: #${pr} armed - $(printf '%s' "$out" | jq -r '"\(.delegationId) at \(.headSha)"' 2>/dev/null || echo "$out")" ;;
+         # A plan PR (DR-121 s2.4) is merged directly, not armed; the count is still one admitted.
+         if [[ "$(printf '%s' "$out" | jq -r '.mergeMode // ""' 2>/dev/null || true)" == "direct" ]]; then  # swallow-ok: wording only, an unreadable mode prints "armed" and decides nothing
+           echo "[drain] delegated spec merge: #${pr} merged (plan, DR-121) - $(printf '%s' "$out" | jq -r '"\(.delegationId) at \(.headSha)"' 2>/dev/null || echo "$out")"
+         else
+           echo "[drain] delegated spec merge: #${pr} armed - $(printf '%s' "$out" | jq -r '"\(.delegationId) at \(.headSha)"' 2>/dev/null || echo "$out")"
+         fi ;;
       1) echo "[drain] delegated spec merge: #${pr} held - $(printf '%s' "$out" | jq -r '"\(.reason): \(.detail)"' 2>/dev/null || echo "unreadable verdict: ${out:-<none>}")" ;;
       *) echo "[drain] WARNING: delegated spec merge: #${pr} was admitted but NOT armed (seam exit ${rc}): ${out:-<no output>}" >&2 ;;
     esac
