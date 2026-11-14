@@ -11,8 +11,8 @@ implements_reason: Plan document for a back-fill spec that builds nothing. requi
 phases:
   specify: done
   clarify: done
-  plan: in-progress
-  tasks: pending
+  plan: done
+  tasks: done
   implement: pending
 ---
 
@@ -173,9 +173,11 @@ otherwise. The backfill is #898, and it is the same step 1 that D1 depends on.
   a reason rather than a placeholder awaiting Plan.
 - No re-approval of `requirements.md` is owed: nothing above edits it, and this shard has no
   sidecar of its own.
-- `phases.plan` can move to `done` once this file is reviewed; `tasks` stays `pending`
-  because D1's three steps are owned by #898, SPEC-059 FR-2 and #1807 rather than by a task
-  list here.
+- `phases.plan` moves to `done` with this plan's review. `tasks` moves to `done` as well:
+  D1's three steps stay owned outside this spec, but AC-1, AC-2, AC-3, AC-4, AC-7 and part of
+  AC-8 have no test or fix anywhere else, so [tasks.md](tasks.md) carries those. Corrected
+  2026-10-31: this line used to keep `tasks` at `pending` on the grounds that nothing here
+  needed a task list, which left those acceptance criteria unowned.
 
 ## Traceability
 
