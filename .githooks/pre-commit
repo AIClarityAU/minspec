@@ -455,7 +455,19 @@ fi
 # staged too (deliberate re-approval), and refuse a staged sidecar that does not match
 # the staged file. Fails CLOSED if the checker cannot run. Scoped to its own bypass.
 # Bypass: APPROVAL_RACE_GATE_OFF=1 git commit ...
-if [ "${APPROVAL_RACE_GATE_OFF:-}" != "1" ] && git diff --cached --name-only | grep -qE '\.md$|^\.minspec/approvals/'; then
+# Cheap git-only prefilter: spawning tsx costs seconds, so only do it when a staged path is
+# a sidecar or has a committed sidecar (an ordinary commit has neither and pays nothing).
+approval_race_relevant() {
+  local f
+  while IFS= read -r f; do
+    case "$f" in
+      .minspec/approvals/*) return 0 ;;
+      *.md) git cat-file -e "HEAD:.minspec/approvals/$f.json" 2>/dev/null && return 0 ;;
+    esac
+  done < <(git diff --cached --name-only)
+  return 1
+}
+if [ "${APPROVAL_RACE_GATE_OFF:-}" != "1" ] && approval_race_relevant; then
   race_script="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/scripts/check-approval-sidecar-race.ts"
   if [ -f "$race_script" ]; then
     if ! race_out="$(npx --no-install tsx "$race_script" 2>&1)"; then
