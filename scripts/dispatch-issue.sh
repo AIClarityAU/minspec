@@ -840,16 +840,29 @@ autonomy_may_merge_delegated() {
     printf "$deny_fmt" "judge-unreadable" "the judge's verdict names no head SHA or delegation; failing closed"
     return 1
   fi
+  # How the merge happens (DR-121 s2.4). A plan PR is merged DIRECTLY at the judged head,
+  # never by native auto-merge: auto-merge waits only for the REQUIRED checks, and a plan
+  # needs every latest check green, which the judge has just read. Two witnesses, either
+  # one forces direct: the judge's mergeMode, and this seam's own read of the diff (a plan
+  # artifact in it). Only when both say spec does the spec arm's native auto-merge run.
+  local mode="auto" judge_mode=""
+  judge_mode=$(printf '%s' "$judged" | jq -r '.mergeMode // ""' 2>/dev/null || true)  # swallow-ok: an unreadable mode falls to the diff witness below, and a plan diff forces direct regardless
+  if [[ "$judge_mode" == "direct" ]] || grep -qE '(^|/)(design|tasks)\.md$' <<<"$changed"; then
+    mode="direct"
+  fi
+  local action="arm GitHub-native auto-merge on spec PR #${pr} at ${head} under delegation ${dlg} (DR-108, #2981)"
+  [[ "$mode" == "auto" ]] \
+    || action="merge plan PR #${pr} directly at ${head} under delegation ${dlg} (DR-121 s2.4: every latest check green, no native auto-merge)"
   local verdict=""
   if ! verdict=$(autonomy_may_proceed \
-      "arm GitHub-native auto-merge on spec PR #${pr} at ${head} under delegation ${dlg} (DR-108, #2981)" \
+      "$action" \
       "$after" \
       "hold the spec PR for the founder's merge keystroke - he has said that keystroke is not needed for a spec covered by ${dlg} (queue item dlg2981, 2026-10-21), so holding stalls the drain on the held cap for no check"); then
     printf '%s\n' "$verdict"
     return 1
   fi
-  printf '%s' "$verdict" | jq -c --argjson j "$judged" \
-    '. + {headSha:$j.headSha, delegationId:$j.delegationId, verdictBy:$j.verdictBy}' 2>/dev/null \
+  printf '%s' "$verdict" | jq -c --argjson j "$judged" --arg mode "$mode" \
+    '. + {headSha:$j.headSha, delegationId:$j.delegationId, verdictBy:$j.verdictBy, mergeMode:$mode}' 2>/dev/null \
     || { printf "$deny_fmt" "verdict-unreadable" "the autonomy verdict could not be combined with the judge's; failing closed"; return 1; }
 }
 
@@ -860,6 +873,11 @@ autonomy_may_merge_delegated() {
 # never --admin. GitHub then merges only when the required checks (ready-to-merge: a
 # provenance-verified ai-review:pass on the head) are green. Exit 0 = armed (or would be),
 # 1 = denied, 2 = admitted but the arm failed.
+# A plan PR (mergeMode "direct", DR-121 s2.4) is NOT armed: it is merged now with
+# `--squash --match-head-commit <judged head>`, no --auto, no --admin, because the judge
+# has already required every latest check on that head to be green. A refused merge
+# (head moved, behind, a required check GitHub still wants) exits 2 and leaves it held;
+# the next drain cycle judges it again.
 if [[ "${ISSUE:-}" == "--delegated-spec-merge" ]]; then
   _dsm_pr="${2-}" _dsm_mode="${3-}"
   if [[ -n "$_dsm_mode" && "$_dsm_mode" != "--arm" ]]; then
@@ -885,6 +903,19 @@ if [[ "${ISSUE:-}" == "--delegated-spec-merge" ]]; then
   _dsm_head=$(printf '%s' "$_dsm_verdict" | jq -r '.headSha')
   _dsm_dlg=$(printf '%s' "$_dsm_verdict" | jq -r '.delegationId')
   _dsm_by=$(printf '%s' "$_dsm_verdict" | jq -r '.verdictBy')
+  _dsm_mode_m=$(printf '%s' "$_dsm_verdict" | jq -r '.mergeMode // ""')
+  if [[ "$_dsm_mode_m" == "direct" ]]; then
+    # DR-121 s2.4: a plan merges directly at the judged head - never --auto, never --admin.
+    if ! gh pr merge "$_dsm_pr" --repo "$REPO" --squash --match-head-commit "$_dsm_head" >/dev/null 2>&1; then
+      printf '%s\n' "$_dsm_verdict" | jq -c '. + {merged:false, error:"merge-failed"}'
+      echo "WARNING: PR #${_dsm_pr}: the delegation admitted the plan merge but GitHub refused it at ${_dsm_head} (head moved, behind, already merged, or a required check pending); left held, the next cycle judges it again." >&2
+      exit 2
+    fi
+    gh pr comment "$_dsm_pr" --repo "$REPO" --body "$(printf '## Delegated plan merge - minspec-sdd[bot], not the founder (DR-121)\n\nThis plan pull request was merged directly at `%s` under delegation **%s** (DR-108, DR-121). The founder did not press merge: DR-121 admits the design.md and tasks.md of a spec already approved on main once an independent AI review passes.\n\n- Independent verdict on this head: %s\n- Every latest check run on this head had finished SUCCESS, SKIPPED or NEUTRAL when it was judged (DR-121 section 2.4).\n- Merged pinned to the judged head, without native auto-merge and without --admin.\n\nRejected alternative (DR-086 section 4): arm native auto-merge, which waits only for the required checks.' "$_dsm_head" "$_dsm_dlg" "$_dsm_by")" >/dev/null 2>&1 \
+      || echo "WARNING: PR #${_dsm_pr}: merged, but the audit comment could not be posted." >&2
+    printf '%s\n' "$_dsm_verdict" | jq -c '. + {armed:false, merged:true}'
+    exit 0
+  fi
   # Flag order is `--auto --squash`, the reverse of step 6b's, on purpose: the step-6b
   # source-text suites (drain-selfheal, autonomy-merge-gate SITE A) locate THAT arm by
   # its literal flag pair. This arm's gating is pinned behaviourally instead, in
