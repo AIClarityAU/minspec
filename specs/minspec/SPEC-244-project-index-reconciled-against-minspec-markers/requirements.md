@@ -1,7 +1,7 @@
 ---
 id: SPEC-244
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a canonical project list that is trusted rather than computed makes a missing project read as "no such project"
@@ -14,8 +14,8 @@ implements_reason: >-
   ~/.claude scripts, or the product) is Decision D1; ownership is declared at Plan.
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
