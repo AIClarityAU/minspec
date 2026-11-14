@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-227-spec-id-sees-unmerged-claims/requirements.md",
+  "specHash": "0cb46a385c0fecd234f80f343a3e9e6672f809bd9d50257472b271a3cb3a933f",
+  "approvedAt": "2026-11-13T05:41:09.797Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:spec/fix-selfcontradictions-213-217-227",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3696#issuecomment-6839243437"
+}
