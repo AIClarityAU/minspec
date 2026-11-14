@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-296-delegated-approval-merge-lane/requirements.md",
+  "specHash": "5b94e5fe2afee14c451ec660e1e631b0009029debbb44cef36281e906c616585",
+  "approvedAt": "2026-11-13T05:14:15.996Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-pile-1112a-clarify",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3631#issuecomment-6815676235"
+}

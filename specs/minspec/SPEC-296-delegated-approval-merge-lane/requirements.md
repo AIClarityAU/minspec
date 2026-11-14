@@ -1,7 +1,7 @@
 ---
 id: SPEC-296
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - same epic as DR-119 (the delegated-approval merge lane record)
@@ -14,9 +14,9 @@ implements_reason: >-
   `scripts/alta-self-merge.ts`, one new judge under `scripts/lib/`, and new tests. None of
   it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
