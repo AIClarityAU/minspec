@@ -24,6 +24,7 @@ import {
   type ApprovalRecord,
 } from '../lib/approval';
 import { sidecarPath, writeRecord } from '../lib/approval-store';
+import { scopeIndexToDr } from '../lib/dr-index-scope';
 
 function decisionsDirOverride(): { decisionsDir: string } | undefined {
   const decisionsDir = vscode.workspace
@@ -261,6 +262,9 @@ async function applyStatus(
     // Pre-MinSpec DRs have no frontmatter. `setAdrStatus` will synthesize one,
     // but that mutates the file beyond a one-line status flip — so offer it
     // first rather than silently rewriting a hand-authored doc (#201).
+    // SPEC-095 FR-6: a record that opens with `---` but whose block cannot be read is NOT
+    // "no frontmatter": `adrHasFrontmatter` throws for it, so the catch below shows the
+    // error (naming the file) before any write, and no offer to add a second block.
     if (!adrHasFrontmatter(filePath)) {
       const ADD = 'Add Frontmatter';
       const choice = await vscode.window.showWarningMessage(
@@ -329,18 +333,32 @@ async function applyStatus(
     // Only the Accept path opts in — a manual Set Status is not an approval, so
     // it leaves the change staged for the user to commit.
     let suffix = '';
+    let stranded = false;
     if (opts.commit && folder) {
       const indexPath = path.join(path.dirname(filePath), 'INDEX.md');
-      suffix = (
-        await commitApprovalIfEnabled(
-          folder,
-          sidecarAbs ? [filePath, indexPath, sidecarAbs] : [filePath, indexPath],
-          `chore(accept): ${id} → ${status}`,
-        )
-      ).suffix;
+      // #2021: the regen above rewrote EVERY row from disk; keep only this DR's so an
+      // unrelated DR's uncommitted status change cannot ride into this approval commit.
+      scopeIndexToDr(folder, indexPath, id);
+      const committed = await commitApprovalIfEnabled(
+        folder,
+        sidecarAbs ? [filePath, indexPath, sidecarAbs] : [filePath, indexPath],
+        `chore(accept): ${id} → ${status}`,
+      );
+      suffix = committed.suffix;
+      stranded = committed.stranded === true;
     }
 
-    vscode.window.showInformationMessage(`MinSpec: ${id} → ${status}${suffix}`);
+    // #1163: an acceptance that sits only in the working tree is invisible to everyone
+    // else and one discard from gone. Never report it with the plain success toast —
+    // a warning that states the state, so it cannot be mistaken for a landed acceptance.
+    if (stranded) {
+      vscode.window.showWarningMessage(
+        `MinSpec: ${id} → ${status}, but the acceptance is NOT committed${suffix} — ` +
+          `it exists only as an uncommitted edit in your working tree. Commit it on a branch to keep it.`,
+      );
+    } else {
+      vscode.window.showInformationMessage(`MinSpec: ${id} → ${status}${suffix}`);
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     vscode.window.showErrorMessage(`MinSpec: Failed to set status — ${message}`);

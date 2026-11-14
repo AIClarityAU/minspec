@@ -30,9 +30,9 @@
 # Testable pure seam (no gh/git/claude):
 #   scripts/lib/shepherd-pr.sh --decide <action> <merged:yes|no> <holds:yes|no> \
 #       <attempts> <max_attempts> <elapsed_secs> <max_secs> \
-#       <checks_pending:yes|no> <automerge_armed:yes|no>
+#       <checks_pending:yes|no> <automerge_armed:yes|no> [<human_held:yes|no>]
 #     → prints ONE token: stop-merged | stand-down | stop-timeout | stop-not-automation
-#       | stop-conflict | stop-capped | stop-awaiting-human | do-rebase | do-fix | wait
+#       | stop-conflict | stop-capped | stop-awaiting-human | stop-human-held | do-rebase | do-fix | wait
 #       | wait-unknown | stop-unhandled-state | stop-unclassified
 #     wait-unknown and stop-unhandled-state route classify_pr's two #1803 tokens
 #     (retry-unknown, skip-unhandled-state — an UNKNOWN or never-seen
@@ -62,7 +62,7 @@ SHEPHERD_MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"  # shares the drain
 #   4. then the classify_pr token decides the action.
 shepherd_decide() {
   local action="$1" merged="$2" holds="$3" attempts="$4" max_attempts="$5" elapsed="$6" max_secs="$7"
-  local checks_pending="${8:-no}" automerge_armed="${9:-no}"
+  local checks_pending="${8:-no}" automerge_armed="${9:-no}" human_held="${10:-no}"
 
   if [[ "$merged" == "yes" ]]; then
     echo "stop-merged"; return 0
@@ -100,7 +100,15 @@ shepherd_decide() {
       #     dispatch for an hour and then emit a "reached its ceiling" hand-off on a
       #     perfectly healthy PR — a self-contradicting false signpost. Exit honestly
       #     instead, and leave the PR to the gate that already labelled it.
-      if [[ "$checks_pending" == "yes" || "$automerge_armed" == "yes" ]]; then
+      #   • human-held, NOT armed   ⇒ (#3179) a green check unlocks only a human merge,
+      #     so polling for running checks buys nothing, and holding the dispatch slot
+      #     starves the drain (476 s mean, 59 of 60 runs). A later RED check is
+      #     remediated by the drain's PR sweep (shares the attempt cap), so stop.
+      if [[ "$automerge_armed" == "yes" ]]; then
+        echo "wait"
+      elif [[ "$human_held" == "yes" && "$checks_pending" == "yes" ]]; then
+        echo "stop-human-held"
+      elif [[ "$checks_pending" == "yes" ]]; then
         echo "wait"
       else
         echo "stop-awaiting-human"
@@ -153,10 +161,10 @@ shepherd_decide() {
 # ── Pure seam dispatch ────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--decide" ]]; then
   shift
-  if [[ $# -ne 9 ]]; then
-    echo "Usage: shepherd-pr.sh --decide <action> <merged> <holds> <attempts> <max_attempts> <elapsed_secs> <max_secs> <checks_pending> <automerge_armed>" >&2
+  if [[ $# -ne 9 && $# -ne 10 ]] || [[ $# -eq 10 && "${10}" != "yes" && "${10}" != "no" ]]; then
+    echo "Usage: shepherd-pr.sh --decide <action> <merged> <holds> <attempts> <max_attempts> <elapsed_secs> <max_secs> <checks_pending> <automerge_armed> [<human_held>]" >&2
     exit 2
   fi
-  shepherd_decide "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9"
+  shepherd_decide "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "${10:-no}"
   exit 0
 fi
