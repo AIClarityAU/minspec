@@ -479,6 +479,18 @@ class ScopedGateTests(unittest.TestCase):
         )
 
 
+class FmListTrailingSpaceTests(unittest.TestCase):
+    """#3653: a trailing space/tab after a block-form key must not drop the list."""
+
+    def test_block_header_with_trailing_whitespace_keeps_all_paths(self):
+        for pad in (" ", "\t", "  \t"):
+            fm = "implements:" + pad + "\n  - packages/a/src/lost.ts\n  - packages/b.ts"
+            self.assertEqual(
+                spec_gate_module.fm_list(fm, "implements"),
+                ["packages/a/src/lost.ts", "packages/b.ts"],
+            )
+
+
 class Select958VerdictTests(unittest.TestCase):
     """#958 regression, unit-level. `select_verdict` is the pure function the
     fix introduced to replace the old order-dependent `if sid in seen_ids:
