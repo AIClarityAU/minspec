@@ -303,8 +303,9 @@ their gate.
   document, it is on `HEAD` and differs from `HEAD` only in lifecycle (frontmatter
   `status:` and `phases:`, and the body's status word, compared in the approval hash's
   canonical form). The sidecar goes first: if it cannot be proven or retired, nothing is
-  touched and the record is removed, so the approval is never recorded nowhere. An
-  untracked document is never removed. The step never changes the index or `HEAD`, makes
+  touched and the approval stays in the working tree, so it is never recorded nowhere; the
+  record is kept, so the follow pass still moves the checkout once main carries the
+  approval, and FR-21 alone clears it. An untracked document is never removed. The step never changes the index or `HEAD`, makes
   no network call, and runs whatever FR-1's setting says, because it only takes back the
   extension's own output and only where the remote already holds the same bytes. Every
   path it keeps is named with its reason, in the approval's completion message and the
@@ -369,7 +370,7 @@ All on real git fixtures (a bare origin and a clone), not stubbed git.
   list and the spec catalog.
 - **AC-15** The same with one path edited after the push, or with a staged change: that
   path is kept and named, its bytes unchanged; with the sidecar unprovable, nothing is
-  touched and no record remains.
+  touched and the record still exists, cleared only once the approval lands (AC-17).
 - **AC-16** One record only: after a recovery push, exactly one pending-approval file
   exists for the document, in the per-worktree git directory, and the follow pass (FR-6)
   and the overlay (FR-20) both read that file; a sibling worktree of the same repository

@@ -2,6 +2,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { CommandRunner } from './ruleset-advisor';
 import { resolveRemotes, githubSlug } from './git-remotes';
+import { parseGhUser, type GhIdentity } from './onboarding-settings';
 
 const execFileAsync = promisify(execFile);
 
@@ -53,4 +54,24 @@ const run: CommandRunner = async (cmd, args) => {
  */
 export async function getRepoFromRemote(rootDir: string): Promise<string | null> {
   return githubSlug(await resolveRemotes(run, rootDir));
+}
+
+/**
+ * SPEC-042 D4 - the account `gh` is signed in as, for the Getting Started page's
+ * "Verify against GitHub" button. Runs `gh api user` (a read; it writes nothing on
+ * GitHub) and is only ever called from that click, never on render (INV-1 / AC-14).
+ *
+ * Best-effort by design: `gh` missing, signed out, offline, timed out, or answering
+ * with something that is not an account all return null, and the page keeps the
+ * offline value. This is a comparison hint for the user, not a gate - DR-056 still
+ * adjudicates the approver identity at approve time - so null is an honest "could not
+ * check", never a pass.
+ */
+export async function lookupGhUser(runner: CommandRunner = run): Promise<GhIdentity | null> {
+  try {
+    const { code, stdout } = await runner('gh', ['api', 'user']);
+    return code === 0 ? parseGhUser(stdout) : null;
+  } catch {
+    return null;
+  }
 }

@@ -1251,8 +1251,12 @@ describe('ENFORCE: check-name constants bound to producers (#820)', () => {
     ].map((m) => m[1]);
     // The script's purpose depends on singling out the reviewer's own check, so it
     // MUST contain at least one such filter; every one must name AI_REVIEW_CHECK.
-    expect(nameFilterLiterals.length).toBeGreaterThan(0);
-    for (const lit of new Set(nameFilterLiterals)) expect(lit).toBe(AI_REVIEW_CHECK);
+    expect(nameFilterLiterals).toContain(AI_REVIEW_CHECK);
+    // #3023: the failing-check derivation also excludes the `ready-to-merge` merge gate
+    // (no commit can turn it green), so that name is the one other legitimate literal.
+    for (const lit of new Set(nameFilterLiterals)) {
+      expect([AI_REVIEW_CHECK, READY_TO_MERGE_CHECK]).toContain(lit);
+    }
   });
 });
 

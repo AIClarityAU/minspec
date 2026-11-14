@@ -21,6 +21,7 @@ import * as path from 'path';
 import { specHash } from '../../shared/src/canonical';
 import { BOT_ACTOR, type Delegation } from '../../../scripts/lib/autonomy';
 import {
+  ACTOR_FIELDS,
   checkApprovalActor,
   frontmatterField,
   isReviewCommentUrl,
@@ -98,6 +99,46 @@ const check = (rec: Record<string, unknown>, w = W(), art: { path: string; conte
   checkApprovalActor(rec, art, w);
 const firstCheck = (r: ReturnType<typeof check>) => r.failures[0]?.check;
 
+/** Every `.json` file under `dir`, recursively. */
+function sidecarFiles(dir: string): string[] {
+  const files: string[] = [];
+  const walk = (d: string) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith('.json')) files.push(p);
+    }
+  };
+  walk(dir);
+  return files;
+}
+
+/**
+ * What is wrong with one committed sidecar, or undefined when it is sound.
+ *
+ * A record with no actor fields must be founder-legacy (invariant 1). A record WITH
+ * actor fields is judged with no witnesses, so it must get through every rule that needs
+ * none (shape, identity, author independence, a cited verdict) and stop only at the
+ * first witness. The delegation verdict itself is not re-judged here: it holds at merge
+ * time against the merge base (`scripts/approval-integrity.ts`), and witnesses such as
+ * the PR that last changed the content, today's date and the repeat-fix share move after
+ * the record lands, so re-judging them on main would redden a record that was valid when
+ * approved (#3033).
+ */
+function corpusProblem(f: string): string | undefined {
+  const rec = JSON.parse(fs.readFileSync(f, 'utf-8')) as Record<string, unknown>;
+  const r = check(rec, NO_WITNESSES, { path: String(rec.specPath), content: null });
+  const hasActorFields = ACTOR_FIELDS.some((k) => rec[k] !== undefined);
+  if (!hasActorFields) {
+    if (r.cls?.kind === 'founder-legacy' && r.failures.length === 0) return undefined;
+  } else if (r.cls?.kind === 'founder' && r.failures.length === 0) {
+    return undefined;
+  } else if (rec.actor === BOT_ACTOR && r.failures.length === 1 && r.failures[0].check === 'witness-missing') {
+    return undefined;
+  }
+  return `${f}: ${r.cls?.kind ?? r.failures.map((x) => x.check).join(', ')}`;
+}
+
 describe('T0 invariant 1 — records with no actor stay valid founder records', () => {
   it('a record with no actor fields classifies as founder-legacy with no failures, whatever the witnesses', () => {
     const legacy = { specPath: SPEC, specHash: 'x', approvedAt: 'y', approvedBy: 'github@harvest316.com', tier: 'T3', migrated: false };
@@ -108,30 +149,44 @@ describe('T0 invariant 1 — records with no actor stay valid founder records', 
     }
   });
 
-  it('every approval sidecar on disk classifies as founder-legacy', () => {
+  it('every approval sidecar on disk passes the corpus check', () => {
     const root = path.resolve(__dirname, '../../..');
-    const dir = path.join(root, '.minspec', 'approvals');
-    const files: string[] = [];
-    const walk = (d: string) => {
-      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-        const p = path.join(d, e.name);
-        if (e.isDirectory()) walk(p);
-        else if (e.name.endsWith('.json')) files.push(p);
-      }
-    };
-    walk(dir);
+    const files = sidecarFiles(path.join(root, '.minspec', 'approvals'));
     expect(files.length).toBeGreaterThan(10);
-    for (const f of files) {
-      const rec = JSON.parse(fs.readFileSync(f, 'utf-8')) as Record<string, unknown>;
-      const r = check(rec, NO_WITNESSES, { path: String(rec.specPath), content: null });
-      expect({ f, kind: r.cls?.kind, failures: r.failures }).toEqual({ f, kind: 'founder-legacy', failures: [] });
-    }
+    expect(files.map(corpusProblem).filter(Boolean)).toEqual([]);
   });
 
   it('a founder record that names itself classifies as founder', () => {
     const r = check({ approvedBy: 'Founder@Example.com', actor: 'founder@example.com', basis: 'founder' });
     expect(r.failures).toEqual([]);
     expect(r.cls).toEqual({ kind: 'founder', actor: 'founder@example.com' });
+  });
+});
+
+describe('T3 #3033 — a merged delegated sidecar does not turn the corpus check red', () => {
+  const tmpSidecar = (rec: Record<string, unknown>) => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'corpus-'));
+    const f = path.join(d, 'requirements.md.json');
+    fs.writeFileSync(f, JSON.stringify(rec));
+    return f;
+  };
+
+  it('a well-formed delegated record (the #3033 SPEC-130 shape) passes', () => {
+    expect(corpusProblem(tmpSidecar(botRecord()))).toBeUndefined();
+  });
+
+  it('CONTROL: a bot record carrying the founder identity still fails', () => {
+    expect(corpusProblem(tmpSidecar(botRecord({ approvedBy: 'founder@example.com' })))).toMatch(
+      /founder-identity-on-delegated-act/,
+    );
+  });
+
+  it('CONTROL: a delegated record whose actor is its author still fails', () => {
+    expect(corpusProblem(tmpSidecar(botRecord({ author: BOT_ACTOR })))).toMatch(/actor-is-author/);
+  });
+
+  it('CONTROL: a delegated record with no independent verdict still fails', () => {
+    expect(corpusProblem(tmpSidecar(botRecord({ verdictBy: undefined })))).toMatch(/no-independent-verdict/);
   });
 });
 

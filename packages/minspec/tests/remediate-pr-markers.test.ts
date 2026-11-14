@@ -30,6 +30,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 
@@ -42,7 +43,7 @@ const CAPPED = '<!-- minspec-remediate-capped -->';
 
 // The constants above must BE the script's constants, or every test below is theatre.
 function markersInSource(): string[] {
-  return ['ATTEMPT_MARKER', 'CRASH_MARKER', 'CAPPED_MARKER'].map((name) => {
+  return ['ATTEMPT_MARKER', 'CRASH_MARKER', 'CAPPED_MARKER', 'RERUN_MARKER'].map((name) => {
     const m = new RegExp(`^${name}="([^"]+)"`, 'm').exec(SRC);
     if (!m) throw new Error(`${name} not found in remediate-pr.sh`);
     return m[1];
@@ -64,7 +65,13 @@ function countMarkers(marker: string, comments: Comment[] | string, authors?: st
 // first argument, so "exit code 1" alone cannot tell a gate REJECTING its input from a
 // build that never had the gate. Tests below assert the distinguishing message.
 function run(args: string[], input?: string): { code: number; stdout: string; stderr: string } {
-  const r = spawnSync('bash', [SCRIPT, ...args], { encoding: 'utf-8', input: input ?? '' });
+  // MINSPEC_CAVEMAN_MODE=off: sourcing agent-context.sh prints a "Caveman trial" notice on
+  // stderr whenever the trial is on (default), which is not what these tests assert about.
+  const r = spawnSync('bash', [SCRIPT, ...args], {
+    encoding: 'utf-8',
+    input: input ?? '',
+    env: { ...process.env, MINSPEC_CAVEMAN_MODE: 'off' },
+  });
   return { code: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
@@ -172,24 +179,30 @@ describe('remediate-pr.sh --count-markers: only this automation authors a budget
     expect(countMarkers(ATTEMPT, comments, 'minspec-sdd[bot]')).toBe('1');
     expect(countMarkers(ATTEMPT, comments, 'MINSPEC-SDD[BOT]')).toBe('1');
     expect(countMarkers(ATTEMPT, comments, 'minspec-sdd[bot], SECOND-Operator')).toBe('1');
-    // Still whole-login, still not loose: a different account does not match.
-    expect(countMarkers(ATTEMPT, comments, 'minspec-sdd')).toBe('0');
+    // `[bot]` is normalised on both sides (#3037: gh reports App authors without it), but
+    // the match stays whole-login — a different account does not match.
+    expect(countMarkers(ATTEMPT, comments, 'minspec-sdd')).toBe('1');
+    expect(countMarkers(ATTEMPT, comments, 'minspec')).toBe('0');
   });
 
-  it('an allowlist of only whitespace/commas names NOBODY and degrades to any-author', () => {
+  it('an allowlist of only whitespace/commas names NOBODY and counts nothing (#3592)', () => {
     // `" , "` is a non-empty STRING that survives `[[ -n … ]]` but lists no login. It
     // must be treated as unresolvable authorship, not as a working filter.
     const comments: Comment[] = [{ author: { login: 'some-human' }, body: `x\n${ATTEMPT}` }];
-    expect(countMarkers(ATTEMPT, comments, ' , ')).toBe('1');
+    expect(countMarkers(ATTEMPT, comments, ' , ')).toBe('0');
   });
 
-  it('an EMPTY allowlist degrades to any-author — the over-counting (caps sooner) direction', () => {
-    // Deliberate: an unresolvable login must never silently un-bound the loop. The
-    // script emits a visible NOTE on this path and refuses to dedup the cap notice.
+  it('an EMPTY allowlist counts NOTHING — a foreign author is never charged (#3592)', () => {
+    // Regression: it used to fall open to any author, so a failed own-login lookup charged
+    // every commenter's marker to the budget and capped green PRs early. The script now
+    // skips the sweep visibly instead of spending an agent on an uncounted budget.
     const comments = [reviewerQuotingTheDiff];
-    expect(countMarkers(ATTEMPT, comments, '')).toBe('0'); // position layer still holds
-    expect(countMarkers(CAPPED, comments, '')).toBe('1'); // terminal marker, foreign author
+    expect(countMarkers(CAPPED, comments, '')).toBe('0'); // terminal marker, foreign author
+    expect(countMarkers(CAPPED, comments)).toBe('0'); // no allowlist argument at all
+    const human: Comment[] = [{ author: { login: 'some-human' }, body: `x\n${ATTEMPT}` }];
+    expect(countMarkers(ATTEMPT, human, '')).toBe('0');
   });
+
 });
 
 describe('remediate-pr.sh --count-markers: fail-soft (a broken read must not un-bound the loop)', () => {
@@ -204,7 +217,7 @@ describe('remediate-pr.sh --count-markers: fail-soft (a broken read must not un-
   });
 
   it('a comment with no author/body does not crash the count', () => {
-    expect(countMarkers(ATTEMPT, [{}, { body: `x\n${ATTEMPT}` }], '')).toBe('1');
+    expect(countMarkers(ATTEMPT, [{}, { author: { login: 'op' }, body: `x\n${ATTEMPT}` }], 'op')).toBe('1');
   });
 
   it('rejects a wrong arg count with a usage error', () => {
@@ -249,7 +262,7 @@ describe('remediate-pr.sh --check-markers: the isolation gate compares by POSITI
     expect(r.stderr).not.toMatch(/Unknown arg/);
   });
 
-  it('accepts the three markers the script actually ships', () => {
+  it('accepts the four markers the script actually ships', () => {
     const r = run(['--check-markers', ...markersInSource()]);
     expect(r.code).toBe(0);
     expect(r.stderr).toBe('');
@@ -274,6 +287,7 @@ describe('remediate-pr.sh --cap-notice-decision: the "capped — needs a human" 
     return r.stdout.trim();
   };
 
+  const phantomFallback: Comment = { author: { login: 'reviewer' }, body: `quoted: ${CAPPED}` };
   const ourNotice: Comment = { author: { login: 'drain-operator' }, body: `## 🛑 capped\n${CAPPED}` };
   // A phantom: an ai-review comment quoting this file, ending with the capped marker.
   const phantomNotice: Comment = { author: { login: 'minspec-sdd[bot]' }, body: `quoting the diff:\n${CAPPED}` };
@@ -305,6 +319,19 @@ describe('remediate-pr.sh --cap-notice-decision: the "capped — needs a human" 
     // `" , "` passes `[[ -n … ]]` but survives the trim as zero logins.
     expect(decide([ourNotice], ' , ')).toBe('post');
     expect(decide([ourNotice], '   ')).toBe('post');
+  });
+
+  it('unprovable authorship: our own prior notice (heading + marker) still dedups (#3054)', () => {
+    const real: Comment = {
+      author: { login: 'minspec-sdd[bot]' },
+      body: `## 🛑 Auto-remediation capped — needs a human\n\nbody\n${CAPPED}`,
+    };
+    expect(decide([real])).toBe('skip');
+    expect(decide([real], ' , ')).toBe('skip');
+  });
+
+  it('unprovable authorship: a phantom quoting the marker without the heading still posts', () => {
+    expect(decide([phantomFallback])).toBe('post');
   });
 
   it('rejects a wrong arg count with a usage error', () => {
@@ -414,5 +441,105 @@ describe('remediate-pr.sh: the guard is structural, not a comment (enforce, do n
   it('no marker is interpolated into a comment body by any other call site', () => {
     // Any `_MARKER"` inside a `--body` argument would be a second, unsanitised emitter.
     expect(SRC).not.toMatch(/--body[^\n]*_MARKER/);
+  });
+});
+
+describe('remediate-pr.sh: a failed `gh api user` never becomes the author allowlist (#3037)', () => {
+  const BODY = '{"message":"Resource not accessible by integration","status":"403"}';
+  const marked: Comment[] = [
+    { author: { login: 'minspec-sdd' }, body: `a\n${ATTEMPT}` },
+    { author: { login: 'minspec-sdd' }, body: `b\n${ATTEMPT}` },
+  ];
+
+  function resolveWith(ghScript: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ghstub-'));
+    fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env bash\n${ghScript}\n`, { mode: 0o755 });
+    const r = spawnSync('bash', [SCRIPT, '--resolve-self-login'], {
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+    });
+    return r.stdout.trim();
+  }
+
+  it('a 403 body on stdout with exit 1 resolves to NO login', () => {
+    expect(resolveWith(`echo '${BODY}'; exit 1`)).toBe('');
+  });
+
+  it('a 403 body on stdout even with exit 0 is rejected as not login-shaped', () => {
+    expect(resolveWith(`echo '${BODY}'; exit 0`)).toBe('');
+  });
+
+  it('a real login still resolves', () => {
+    expect(resolveWith(`echo 'minspec-sdd'`)).toBe('minspec-sdd');
+  });
+
+  it('the 403 body used as an allowlist is not provable and counts nothing', () => {
+    // resolve_self_login yields '' for the 403; the sweep itself uses
+    // resolve_author_identity (below), which maps that 403 to the App's bot login.
+    const login = resolveWith(`echo '${BODY}'; exit 1`);
+    expect(countMarkers(ATTEMPT, marked, login)).toBe('0');
+    // Even if the blob reaches the seam directly, it must not dedup the cap notice.
+    const ours: Comment[] = [{ author: { login: 'minspec-sdd' }, body: `n\n${CAPPED}` }];
+    const r = run(['--cap-notice-decision', BODY], JSON.stringify({ comments: ours }));
+    expect(r.stdout.trim()).toBe('post'); // unprovable authorship never dedups
+  });
+
+  // #3592: the identity the sweep counts under. An App installation token always gets the
+  // 403, so this is the production path, not an edge case.
+  function identityWith(ghScript: string, env: Record<string, string> = {}): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ghstub-'));
+    fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env bash\n${ghScript}\n`, { mode: 0o755 });
+    const r = spawnSync('bash', [SCRIPT, '--resolve-author-identity'], {
+      encoding: 'utf-8',
+      env: { ...process.env, MINSPEC_REMEDIATE_APP_SLUG: '', ...env, PATH: `${dir}:${process.env.PATH}` },
+    });
+    return r.stdout.trim();
+  }
+  const APP_403 = `echo '${BODY}'; echo 'gh: Resource not accessible by integration (HTTP 403)' >&2; exit 1`;
+
+  it('an App installation token (the 403) resolves to the App bot login, and its markers count (#3592)', () => {
+    const who = identityWith(APP_403);
+    expect(who).toBe('minspec-sdd[bot]');
+    expect(countMarkers(ATTEMPT, marked, who)).toBe('2');
+    const foreign: Comment[] = [{ author: { login: 'some-human' }, body: `x\n${ATTEMPT}` }];
+    expect(countMarkers(ATTEMPT, foreign, who)).toBe('0');
+  });
+
+  it('the 403 recognised from stderr alone still resolves to the App', () => {
+    expect(identityWith(`echo 'gh: Resource not accessible by integration (HTTP 403)' >&2; exit 1`)).toBe('minspec-sdd[bot]');
+  });
+
+  it('MINSPEC_REMEDIATE_APP_SLUG names a different App, with or without [bot]', () => {
+    expect(identityWith(APP_403, { MINSPEC_REMEDIATE_APP_SLUG: 'other-app' })).toBe('other-app[bot]');
+    expect(identityWith(APP_403, { MINSPEC_REMEDIATE_APP_SLUG: 'other-app[bot]' })).toBe('other-app[bot]');
+    expect(identityWith(APP_403, { MINSPEC_REMEDIATE_APP_SLUG: 'not a login' })).toBe('');
+  });
+
+  it('a failure that is NOT the installation 403 establishes no identity', () => {
+    expect(identityWith(`echo 'HTTP 401: Bad credentials' >&2; exit 1`)).toBe('');
+    expect(identityWith(`echo 'dial tcp: i/o timeout' >&2; exit 1`)).toBe('');
+    expect(identityWith(`echo '${BODY}'; exit 0`)).toBe(''); // exit 0 with an unshaped answer
+  });
+
+  it('a user token still resolves to its own login', () => {
+    expect(identityWith(`echo 'fixture-operator'`)).toBe('fixture-operator');
+  });
+
+  it('`[bot]` is normalised on both sides', () => {
+    expect(countMarkers(ATTEMPT, marked, 'minspec-sdd[bot]')).toBe('2');
+    const bot: Comment[] = [{ author: { login: 'minspec-sdd[bot]' }, body: `a\n${ATTEMPT}` }];
+    expect(countMarkers(ATTEMPT, bot, 'minspec-sdd')).toBe('1');
+  });
+});
+
+describe('rejected push charges an attempt (#3583)', () => {
+  it('posts ATTEMPT_MARKER in the agent push-failure branch before exiting', () => {
+    const start = SRC.indexOf('Clean → push the new commits');
+    expect(start).toBeGreaterThan(-1);
+    const tail = SRC.slice(start);
+    const failIdx = tail.indexOf('WARNING: push failed for $BRANCH — worktree left at');
+    expect(failIdx).toBeGreaterThan(-1);
+    const branch = tail.slice(failIdx, tail.indexOf('exit 0', failIdx));
+    expect(branch).toContain('post_marked_comment "$ATTEMPT_MARKER"');
   });
 });

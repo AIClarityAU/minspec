@@ -4,6 +4,15 @@
 
 minspec-monorepo, managed with MinSpec SDD methodology.
 
+## Core tenets
+
+Ranked; every rule in this file must trace to one (`.minspec/constitution.md`; its decision record, the core-tenets record, is proposed).
+
+1. **Make the founder's job smaller** - minimise human involvement. A human gate names the error only it catches, and is retired once rubber-stamped.
+2. **Minimise tokens, counting rework** - spend on ceremony only where it is cheaper than the expected fix.
+
+Tenet 1 wins a conflict unless it costs more than 2% of the weekly budget per decision; then tenet 2 wins and the decision record says so.
+
 ## Invariants
 
 These rules must never be violated. All changes must preserve them.

@@ -37,7 +37,8 @@ Offline: git plumbing + sha256 only. No network.
 
 Usage:
     scripts/approval-provenance.py <base> <head>
-Prints an empty string (exit 0) when the range touches no approval sidecar.
+Prints an empty string (exit 0) when the range touches no approval sidecar, flips no
+DR to `accepted`, and accepts no amendment inside an already-accepted DR (#3016).
 """
 from __future__ import annotations
 
@@ -58,6 +59,18 @@ SHORT = 8  # hash prefix length shown; full hashes are noise in a prompt
 DR_PATH_RE = re.compile(r'(^|/)DR-\d+[^/]*\.md$')
 _FRONTMATTER_RE = re.compile(r'^---\r?\n([\s\S]*?)\r?\n---')
 _STATUS_RE = re.compile(r'^status:[ \t]*["\']?([A-Za-z-]+)', re.M)
+
+# Amendment acceptance inside an already-accepted DR (#3016). The frontmatter `status:`
+# never moves for this act, so `changed_dr_accepts` cannot see it. An amendment's state
+# lives in its HEADING by corpus convention ("## Amendment B (2026-10-17) - PROPOSED, not
+# accepted: ..."). A heading is the TRIGGER for reporting only, never evidence: whatever
+# it says, the verdict is decided by the same committed record the status-flip path reads.
+_AMENDMENT_HEADING_RE = re.compile(r'^#{2,6}[ \t]+(.*\bamendment\b.*?)[ \t]*$', re.M | re.I)
+_ACCEPTED_WORD_RE = re.compile(r'\baccepted\b', re.I)
+_NOT_ACCEPTED_RE = re.compile(
+    r'\b(proposed|withdrawn|superseded|rejected|deprecated|draft)\b|\b(not|never|un)[ \t-]*accepted\b',
+    re.I,
+)
 
 # Mirror of BUILTIN_AGENT_IDENTITIES in packages/minspec/src/lib/approval.ts (DR-056).
 # Keep in lockstep; the `[bot]` substring test below is a deliberate superset so a new
@@ -300,10 +313,12 @@ def _is_agent_identity(email: object) -> str | None:
     return None
 
 
-def dr_accept_report(head: str, dr_path: str) -> list[str]:
-    """Fact lines for one DR flipped to `accepted`. VERIFIED needs a record that is
-    present, matches the DR as merged, is not `migrated`, and names a non-agent approver."""
-    lines = [f'DR acceptance: {_sanitize(dr_path)}']
+def _dr_record_reason(head: str, dr_path: str) -> tuple[str | None, dict]:
+    """(why the DR's acceptance record does NOT prove a human act, parsed record).
+
+    The reason is None only for a record that is present, matches the DR as merged, is not
+    `migrated`, and names a non-agent approver. Shared by the status-flip path and the
+    amendment path (#3016) so the two can never drift to different strengths."""
     raw = _show(head, f'{SIDECAR_PREFIX}{dr_path}{SIDECAR_SUFFIX}')
     reason: str | None = None
     data: dict = {}
@@ -324,9 +339,77 @@ def dr_accept_report(head: str, dr_path: str) -> list[str]:
             reason = 'record is a backfill (migrated: true), not a human acceptance'
         else:
             reason = _is_agent_identity(data.get('approvedBy'))
+    return reason, data
+
+
+def dr_accept_report(head: str, dr_path: str) -> list[str]:
+    """Fact lines for one DR flipped to `accepted`. VERIFIED needs a record that is
+    present, matches the DR as merged, is not `migrated`, and names a non-agent approver."""
+    lines = [f'DR acceptance: {_sanitize(dr_path)}']
+    reason, data = _dr_record_reason(head, dr_path)
     if reason is None:
         lines.append(f"  approvedBy:        {_sanitize(str(data.get('approvedBy')))}")
         lines.append('  VERDICT:           VERIFIED — a human-gated record matches the DR as merged')
+    else:
+        lines.append(f'  VERDICT:           UNVERIFIED — {reason}')
+    return lines
+
+
+def _accepted_amendment_headings(raw: str | None) -> list[str]:
+    """Amendment headings whose text marks them accepted (and not proposed/withdrawn/...)."""
+    if not raw:
+        return []
+    return [
+        m.group(1)
+        for m in _AMENDMENT_HEADING_RE.finditer(raw.replace('\r\n', '\n'))
+        if _ACCEPTED_WORD_RE.search(m.group(1)) and not _NOT_ACCEPTED_RE.search(m.group(1))
+    ]
+
+
+def changed_dr_amendment_accepts(base: str, head: str) -> list[tuple[str, list[str]]]:
+    """(DR path, newly accepted amendment headings) for DRs that are `accepted` at BOTH
+    base and head and gain an amendment heading marked accepted (#3016).
+
+    A DR that flips status in this range is excluded: `changed_dr_accepts` already judges
+    the whole document on the same record, and reporting it twice would only add noise."""
+    out = _git('diff', '--name-only', f'{base}...{head}')
+    found = []
+    for p in sorted(line.strip() for line in out.splitlines()):
+        if not DR_PATH_RE.search(p):
+            continue
+        at_head = _show(head, p)
+        at_base = _show(base, p)
+        if _fm_status(at_head) != 'accepted' or _fm_status(at_base) != 'accepted':
+            continue
+        before = set(_accepted_amendment_headings(at_base))
+        new = [h for h in _accepted_amendment_headings(at_head) if h not in before]
+        if new:
+            found.append((p, new))
+    return found
+
+
+def dr_amendment_report(base: str, head: str, dr_path: str, headings: list[str]) -> list[str]:
+    """Fact lines for one amendment acceptance inside an already-accepted DR.
+
+    VERIFIED needs everything the status-flip path needs (a present, non-migrated record
+    whose hash matches the DR as merged and names a non-agent approver) PLUS a record that
+    was written in THIS range. The second clause is what makes the record evidence of the
+    acceptance rather than of the DR's original acceptance: a record carried over from
+    base was hashed over bytes that did not yet say the amendment was accepted. The
+    heading text itself proves nothing; anyone can type ACCEPTED into a DR body."""
+    lines = [f'DR amendment acceptance: {_sanitize(dr_path)}']
+    for h in headings:
+        lines.append(f'  amendment:         {_sanitize(h)}')
+    sidecar = f'{SIDECAR_PREFIX}{dr_path}{SIDECAR_SUFFIX}'
+    reason, data = _dr_record_reason(head, dr_path)
+    if reason is None and _show(base, sidecar) == _show(head, sidecar):
+        reason = 'approval record was not re-written in this change (it predates the amendment acceptance)'
+    if reason is None:
+        lines.append(f"  approvedBy:        {_sanitize(str(data.get('approvedBy')))}")
+        lines.append(
+            '  VERDICT:           VERIFIED — a human-gated record, written in this change, '
+            'matches the DR as merged'
+        )
     else:
         lines.append(f'  VERDICT:           UNVERIFIED — {reason}')
     return lines
@@ -336,7 +419,8 @@ def build_report(base: str, head: str) -> str:
     base = merge_base(base, head)   # agree with `git diff base...head` (see merge_base)
     sidecars = changed_sidecars(base, head)
     dr_flips = changed_dr_accepts(base, head)
-    if not sidecars and not dr_flips:
+    dr_amends = changed_dr_amendment_accepts(base, head)
+    if not sidecars and not dr_flips and not dr_amends:
         return ''
     body: list[str] = [
         'These facts are computed by scripts/approval-provenance.py from this',
@@ -363,6 +447,18 @@ def build_report(base: str, head: str) -> str:
         ])
         for d in dr_flips:
             body.extend(dr_accept_report(head, d))
+            body.append('')
+    if dr_amends:
+        body.extend([
+            'Amendment acceptances inside an already-accepted DR (#3016) leave the',
+            'frontmatter status alone, so they are judged on the SAME record the Accept',
+            'ADR command writes, which must be re-written in this change. The heading',
+            'text saying ACCEPTED is NOT evidence; only a VERIFIED verdict below is.',
+            'Same strength and same limit as the status flip above: not cryptographic.',
+            '',
+        ])
+        for d, headings in dr_amends:
+            body.extend(dr_amendment_report(base, head, d, headings))
             body.append('')
     return '\n'.join(body).rstrip() + '\n'
 
