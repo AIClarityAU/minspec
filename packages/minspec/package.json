@@ -85,6 +85,10 @@
         "title": "MinSpec: Tidy Checkout (discard redundant copies)"
       },
       {
+        "command": "minspec.viewQueue",
+        "title": "MinSpec: View Queued Phase-Advance Requests"
+      },
+      {
         "command": "minspec.constitutionShowPrompt",
         "title": "MinSpec: Show Constitution Generation Prompt"
       },
@@ -285,6 +289,12 @@
         "command": "minspec.pushDocsLane",
         "key": "ctrl+k ctrl+p",
         "mac": "cmd+k cmd+p",
+        "when": "workspaceFolderCount != 0"
+      },
+      {
+        "command": "minspec.viewQueue",
+        "key": "ctrl+k ctrl+y",
+        "mac": "cmd+k cmd+y",
         "when": "workspaceFolderCount != 0"
       }
     ],
