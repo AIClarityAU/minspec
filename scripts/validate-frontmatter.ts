@@ -591,6 +591,9 @@ try {
 function loadReferenceExemptions(reg: ReferenceRegistry): Set<string> {
   const file = join(ROOT, 'scripts', 'reference-check-exemptions.json');
   const ids = new Set<string>();
+  // An ABSENT list is the declared "no exemptions" state (any other corpus); only a
+  // list that exists and cannot be used is reported.
+  if (!existsSync(file)) return ids;
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf-8')) as { exemptions?: Array<{ id?: unknown; reason?: unknown }> };
     if (!Array.isArray(parsed.exemptions)) throw new Error('missing "exemptions" array');
