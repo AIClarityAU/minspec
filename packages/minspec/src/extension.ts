@@ -32,10 +32,14 @@ import {
   MinSpecNextTaskStatusBar,
   MinSpecScaffoldCommitStatusBar,
   MinSpecTidyPrimaryStatusBar,
+  MinSpecQueueDepthStatusBar,
+  resolveKeybinding,
   resolveNextTaskKeybinding,
 } from './views/status-bar';
 import { classifyPrimary } from './lib/tidy-primary';
 import { tidyPrimaryCommand } from './commands/tidy-primary';
+import { viewQueueCommand } from './commands/view-queue';
+import { listQueuedRequests } from './lib/phase-advance-queue';
 import { fromFrontmatter } from './lib/spec-progress';
 import { nextTaskCommand, computeNextTask } from './commands/next-task';
 import { SpecPanel } from './views/spec-panel';
@@ -245,6 +249,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // PR that merged while the window was unfocused clears its badge
       // promptly instead of waiting on the next unrelated file event.
       refreshTidyPrimaryStatusBar();
+      refreshQueueDepth();
     }),
     // Re-scan when the set of workspace folders changes (#549). The Specs/DRs
     // providers read the LIVE folder list on every getChildren, so a plain
@@ -334,6 +339,20 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   refreshTidyPrimaryStatusBar();
 
+  // Phase-advance queue-depth indicator (#737): enqueued requests must never
+  // silently rot with no consumer running. Read-only; hidden at zero.
+  const queueDepthStatusBar = new MinSpecQueueDepthStatusBar(
+    resolveKeybinding(context.extension?.packageJSON, 'minspec.viewQueue'),
+  );
+  const refreshQueueDepth = () => {
+    try {
+      queueDepthStatusBar.update(workspaceRoot ? listQueuedRequests(workspaceRoot) : []);
+    } catch {
+      queueDepthStatusBar.update([]);
+    }
+  };
+  refreshQueueDepth();
+
   // CodeLens providers (Phase 7)
   const codeLensProvider = new MinSpecCodeLensProvider(workspaceRoot);
   const specFileLensProvider = new MinSpecSpecFileLensProvider(workspaceRoot);
@@ -403,6 +422,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await tidyPrimaryCommand(workspaceRoot, presence.sessionId);
       refreshTidyPrimaryStatusBar();
     }),
+    vscode.commands.registerCommand('minspec.viewQueue', () => viewQueueCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.constitutionShowPrompt', constitutionShowPromptCommand),
     vscode.commands.registerCommand('minspec.constitutionCompact', constitutionCompactCommand),
     vscode.commands.registerCommand('minspec.constitutionPropose', constitutionProposeCommand),
@@ -521,6 +541,7 @@ export function activate(context: vscode.ExtensionContext): void {
     nextTaskStatusBar,
     scaffoldCommitStatusBar,
     tidyPrimaryStatusBar,
+    queueDepthStatusBar,
   );
 
   // Watch spec files — refresh tree + status bar on changes
@@ -677,6 +698,18 @@ export function activate(context: vscode.ExtensionContext): void {
   epicsWatcher.onDidCreate(onEpicsChanged);
   epicsWatcher.onDidDelete(onEpicsChanged);
   context.subscriptions.push(epicsWatcher);
+
+  // Queue watcher (#737): created after the spec/ADR/epic watchers so their
+  // creation order is unchanged.
+  if (workspaceRoot) {
+    const queueWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(workspaceRoot, '.minspec/queue/**'),
+    );
+    queueWatcher.onDidChange(refreshQueueDepth);
+    queueWatcher.onDidCreate(refreshQueueDepth);
+    queueWatcher.onDidDelete(refreshQueueDepth);
+    context.subscriptions.push(queueWatcher);
+  }
 
   // Drift detection: monitor file saves
   if (workspaceRoot) {
