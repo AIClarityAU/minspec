@@ -166,7 +166,7 @@ This is the only slice that introduces an external read — every one of them is
       row's first render; before that click the row shows the offline value with zero
       network; on an air-gapped host (spawn fails / `gh` absent) the page renders without
       hanging and the offline value stands.
-- [ ] `getting-started.test.ts` — **INV-4 / AC-5**: entering a valid email writes
+- [x] `getting-started.test.ts` — **INV-4 / AC-5**: entering a valid email writes
       **neither** `minspec.approverEmail` (no `getConfiguration('minspec').update` call for
       that key) **nor any approval record**; an invalid string shows a format error; the
       **"Open in Settings"** click runs `workbench.action.openSettings` with
@@ -196,7 +196,7 @@ This is the only slice that introduces an external read — every one of them is
 ### Implementation
 - [x] `onboarding-settings.ts` — `ApproverIdentity` compute (offline seed + format check;
       divergence computable only post-verify).
-- [ ] `getting-started-webview.ts` — the approver email field (offline seed, editable, not
+- [x] `getting-started-webview.ts` — the approver email field (offline seed, editable, not
       hard-locked, validated but **never saved** by the page), the **"Open in Settings"**
       button (opens VS Code Settings at `minspec.approverEmail`; FR-5), the click-gated **Verify against GitHub** action (best-effort
       `gh api user` shell-out — D4), and the **non-blocking amber** divergence line

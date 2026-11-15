@@ -31,7 +31,7 @@ set -uo pipefail
 # (invariant 1) and a differently named scratch dir still gets through.
 # Runs BEFORE the App-token/workflow logic below, which exits early for most pushes.
 # Bypass: MINSPEC_ALLOW_SCRATCH_PUSH=1 git push …
-refs_input=$(cat)
+refs=$(cat)
 if [ "${MINSPEC_ALLOW_SCRATCH_PUSH:-0}" != "1" ]; then
   _zero='0000000000000000000000000000000000000000'
   _bad=''
@@ -53,7 +53,7 @@ if [ "${MINSPEC_ALLOW_SCRATCH_PUSH:-0}" != "1" ]; then
     fi
     _f=$(git diff --name-only --diff-filter=AMR "$_r" 2>/dev/null | grep -E '(^|/)\.scratch[^/]*/' || true)
     [ -n "$_f" ] && _bad="${_bad}$(printf '%s\n' "$_f" | sed 's/^/  scratch path: /')"$'\n'
-  done <<< "$refs_input"
+  done <<< "$refs"
   if [ -n "$_bad" ]; then
     {
       echo "pre-push: refusing — scratch/rescue content must not reach a remote (#3100):"
@@ -61,6 +61,29 @@ if [ "${MINSPEC_ALLOW_SCRATCH_PUSH:-0}" != "1" ]; then
       echo "Keep salvage local (copy files or \`git bundle\`). Override: MINSPEC_ALLOW_SCRATCH_PUSH=1 git push …"
     } >&2
     exit 1
+  fi
+fi
+
+# Template edit => version bump (#1989). Runs first, before the workflow guard's early exits.
+# Blocks ONLY on exit 17 (VIOLATION_EXIT_CODE in scripts/lib/template-version-bump.ts), the
+# check's own "proven violation" code. Every other non-zero (2 = could not determine; 1 = npx
+# without tsx installed, or the script failed to load/crashed) WARNS and lets the push through.
+# Checks each pushed local sha (stdin: <local ref> <local sha> <remote ref> <remote sha>), not HEAD.
+# LOCAL ONLY: no CI job or release step runs this check yet, and TEMPLATE_VERSION_GATE_OFF=1 (or
+# --no-verify, or an unarmed core.hooksPath) skips it. Release-job wiring: see the follow-up issue.
+# Bypass: TEMPLATE_VERSION_GATE_OFF=1 git push ...
+zero='0000000000000000000000000000000000000000'
+if [ "${TEMPLATE_VERSION_GATE_OFF:-0}" != "1" ]; then
+  repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+  if [ -f "$repo_root/scripts/check-template-version-bump.ts" ]; then
+    while read -r _lref lsha _rref _rsha; do
+      [ -n "${lsha:-}" ] || continue
+      [ "$lsha" = "$zero" ] && continue          # branch deletion
+      (cd "$repo_root" && npx --no-install tsx scripts/check-template-version-bump.ts --head "$lsha" </dev/null)
+      rc=$?
+      [ "$rc" = "17" ] && exit 1
+      [ "$rc" != "0" ] && echo "pre-push: template-version check could not run (exit $rc); NOT blocking the push." >&2
+    done <<< "$refs"
   fi
 fi
 
@@ -81,8 +104,7 @@ workflow_push_allowed && exit 0
 # because git has already resolved it; $1 is the fallback, and `origin` the last one.
 push_credential_is_app_token "${2:-${1:-origin}}" || exit 0
 
-# git feeds one line per ref: <local ref> <local sha> <remote ref> <remote sha>
-zero='0000000000000000000000000000000000000000'
+# git feeds one line per ref: <local ref> <local sha> <remote ref> <remote sha> (read above)
 touched=''
 
 while read -r _local_ref local_sha _remote_ref remote_sha; do
@@ -125,7 +147,7 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
   [ -n "$files" ] || continue
   hits=$(printf '%s\n' "$files" | grep -E "$WORKFLOW_PATH_RE" || true)
   [ -n "$hits" ] && touched="${touched}${hits}"$'\n'
-done <<< "$refs_input"
+done <<< "$refs"
 
 [ -n "$touched" ] || exit 0
 

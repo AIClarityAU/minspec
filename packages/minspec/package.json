@@ -85,6 +85,10 @@
         "title": "MinSpec: Tidy Checkout (discard redundant copies)"
       },
       {
+        "command": "minspec.viewQueue",
+        "title": "MinSpec: View Queued Phase-Advance Requests"
+      },
+      {
         "command": "minspec.constitutionShowPrompt",
         "title": "MinSpec: Show Constitution Generation Prompt"
       },
@@ -285,6 +289,12 @@
         "command": "minspec.pushDocsLane",
         "key": "ctrl+k ctrl+p",
         "mac": "cmd+k cmd+p",
+        "when": "workspaceFolderCount != 0"
+      },
+      {
+        "command": "minspec.viewQueue",
+        "key": "ctrl+k ctrl+y",
+        "mac": "cmd+k cmd+y",
         "when": "workspaceFolderCount != 0"
       }
     ],
@@ -624,6 +634,7 @@
     "build:shared": "tsc -p ../shared/tsconfig.json",
     "prebuild": "npm run build:shared",
     "build": "../../scripts/build-extension.sh",
+    "postbuild": "node -e \"const p=process.env.GITHUB_PATH;if(!p)process.exit(0);const fs=require('fs'),path=require('path');const d=[path.resolve('node_modules/.bin'),path.resolve('../../node_modules/.bin')].filter(x=>fs.existsSync(x));if(!d.some(x=>fs.existsSync(path.join(x,'tsc')))){console.error('postbuild (#3563): no tsc in any node_modules/.bin, cannot put it on PATH');process.exit(1)}fs.appendFileSync(p,d.join('\\n')+'\\n');console.log('postbuild (#3563): added to PATH for later CI steps: '+d.join(', '))\"",
     "build:prod": "npm run build",
     "watch": "npm run build -- --watch --sourcemap",
     "supply-chain:check": "../../scripts/check-supply-chain.sh",

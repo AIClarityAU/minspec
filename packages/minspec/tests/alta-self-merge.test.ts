@@ -25,6 +25,11 @@ import {
   type Gh,
   type RunDeps,
 } from '../../../scripts/alta-self-merge';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: every fixture builds a real git repository through this suite's own `run()`
+// wrapper around execFileSync; the literal call-site count alone understates it.
+useShellTimeout();
 
 const REPO = 'AIClarityAU/minspec';
 const SPEC = 'specs/minspec/SPEC-900-fixture/requirements.md';

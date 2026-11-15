@@ -1177,6 +1177,12 @@ const unquoted = (t: string) => t.replace(/'[^']*'/g, "''");
  * second command cannot ride on the end of an accepted one.
  */
 const WORKTREE_SHAPES: { name: string; is: (t: string) => boolean }[] = [
+  {
+    // The install runs through "$AGENT_LAUNCH_ENV" inside the helper, in the agent's scrubbed
+    // environment with the tree's lifecycle scripts off; the line only hands the path over.
+    name: 'has its dependencies installed in the agent environment, or the run is skipped',
+    is: (t) => t === 'if [[ "$ACTION" != "rebase-only" ]] && ! provision_worktree_modules "$WORKTREE"; then',
+  },
   { name: 'asks whether it exists', is: (t) => /^if \[\[ -d "\$WORKTREE" \]\]; then$/.test(t) },
   // Words only: the path is printed, in a message or in a prompt.
   { name: 'says where it is', is: (t) => /^echo "[^"`]*"(?: >&2)?$/.test(t) && !/\$\(/.test(t) },
@@ -1257,6 +1263,7 @@ describe('T0: a launcher runs nothing as itself out of a worktree it gave an age
       'launcher_git -C "$REPO_ROOT" worktree remove "$WORKTREE" --force 2>/dev/null || true',
       'launcher_git -C "$REPO_ROOT" worktree add -b "$BRANCH" "$WORKTREE" origin/main',
       'agent_worktree_pin "$WORKTREE"',
+      'if [[ "$ACTION" != "rebase-only" ]] && ! provision_worktree_modules "$WORKTREE"; then',
       'if ! MATCHES=$(agent_worktree_function agent_egress_scan "$WORKTREE" "$PRE_SHA" "${WORKTREE}/.agent-summary.md"); then',
       '(cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$fix_prompt" --model "$RUN_MODEL" 2>&1 | tee -a "$LOG") || true',
       'if ( cd "$WORKTREE" && timeout --kill-after=30s "${budget}s" bash "$AGENT_LAUNCH_ENV" "$@" >/dev/null 2>&1 ); then',

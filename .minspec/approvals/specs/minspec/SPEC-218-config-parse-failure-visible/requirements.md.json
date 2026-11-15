@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-218-config-parse-failure-visible/requirements.md",
+  "specHash": "f07ece22ba8d152246c1aa3dc82ab025b550efe00a4a8d013b540c0b43760f33",
+  "approvedAt": "2026-10-31T06:03:34.192Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/specifying-1025",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3083#issuecomment-6537527421"
+}

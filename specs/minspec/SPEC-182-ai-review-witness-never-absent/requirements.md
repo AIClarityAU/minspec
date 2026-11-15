@@ -133,23 +133,50 @@ from the head, with no version handshake (#1834), which makes the failure reacha
 
 ## Decisions needed (Clarify)
 
+5 of 6 decisions are answered, not ratified. D6 has a selection recorded from the answer to
+task-queue item clr1027 (2026-10-26: "All rec (Recommended)"), an answer the queue attributes to the
+founder. A queue answer is not consent and is not verified here: DR-108 (delegated approval) section
+4 holds that a queue item cannot carry consent, because any session can write the queue. D1 to D4
+carry the option this document already recommended, recorded by an agent session; no human chose
+them. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and
+engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted it.
+It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and that
+approval may overturn it. D5 is not answered: it names no recommended option, and its delivery step
+is a human act (the App cannot push `.github/workflows/`), so it stays open and `phases.clarify`
+stays `pending`.
+
 - **D1 - Preflight placement.** (a) Separate early step that fails the job before the
   review runs **(rec)**: fastest, clearest signal; costs a CI step and a failed job that
   burns no review quota but also blocks the review on an optional-only skew if mis-classified.
   (b) Fold the check into the verdict step: no new step, but the failure arrives after the
   review spend.
+  **Recorded selection: Option (a),** a separate early step fails the job before any review spend,
+  so the signal is fastest and clearest.
 - **D2 - No App token.** (a) Exit non-zero **(rec)**: consistent with FR-1; costs red runs
   on forks or repos where the App is intentionally not installed, unless gated by
   `steps.guard.outputs.configured` (already the step's condition, so likely a non-issue).
   (b) Keep warn + exit 0: preserves current behaviour but leaves the witness silently absent.
+  **Recorded selection: Option (a),** exit non-zero, consistent with FR-1; the step already runs
+  only when `steps.guard.outputs.configured` is set.
 - **D3 - Sibling steps.** Apply the same fail-visible rule to `machinery-review-required`
   now **(rec)**, closes the sibling hole, widens the machinery diff and review; or file a
   follow-up and keep this PR to the one step.
+  **Recorded selection: Option (apply now),** applying the same fail-visible rule to
+  `machinery-review-required` closes the sibling hole in the same change.
 - **D4 - Failure-conclusion wording.** `failure` (as the issue proposes) versus
   `action_required`. `failure` **(rec)**: unambiguous red; cost is it cannot be told
   apart from a changes verdict except by title, so the title must say "could not compute".
+  **Recorded selection: Option (`failure`),** an unambiguous red, with a title that says
+  "could not compute" so it is not read as a changes verdict.
 - **D5 - Delivery.** The change is in `.github/workflows/`, which the App cannot push
   (#1120), and it is machinery so it needs a human `--admin` merge. A human must push it.
 - **D6 - Record a DR?** FR-2's guard-free second witness and the FR-5/FR-6 preflight contract
   are design choices. Clarify/Plan decides whether they need a DR (constitution invariant 2,
   "independent second witness") or stay spec-only.
+  - **Option (write a DR).** Record FR-2's guard-free second witness and the FR-5/FR-6
+    preflight contract in a decision record, so the design choice outlives this spec.
+  **Recorded selection: Option (write a DR),** drafted as DR-113 (`proposed`), which records
+  the guard-free second witness and the preflight contract as this spec describes them.
+  Source: the answer to task-queue item clr1027, 2026-10-26 ("All rec (Recommended)"). A queue
+  answer is not consent (DR-108 section 4), so this selection is unverified and binds only on
+  approval of this spec; DR-113 takes effect only on its acceptance.
