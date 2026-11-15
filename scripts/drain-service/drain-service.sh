@@ -105,6 +105,23 @@ drain_holder() {
 }
 
 # paused: the drain's own predicate, so the marker path is decided in one place.
+PRIMARY="${MINSPEC_DRAIN_PRIMARY_ROOT:-$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd))}"
+
+# run_dir_drain (#3747): refresh the run dir (the drain's own --refresh-run-dir seam) and
+# print its drain-inbox.sh when the run dir sits at the checkout's origin/main. Fails
+# (prints nothing) when MINSPEC_DRAIN_SERVICE_DRAIN is set explicitly (an override wins),
+# or when the run dir is missing or not verified; the caller then runs in place, and the
+# drain's own STALE line says so. Never fatal.
+run_dir_drain() {
+  [[ -n "${MINSPEC_DRAIN_SERVICE_DRAIN:-}" ]] && return 1
+  local run="${MINSPEC_DRAIN_RUN_DIR-/tmp/minspec-drain-run}" head origin
+  [[ -n "$run" && "${MINSPEC_DRAIN_SELF_REFRESH:-1}" != "0" ]] || return 1
+  head="$(MINSPEC_DRAIN_PRIMARY_ROOT="$PRIMARY" "$DRAIN" --refresh-run-dir 2>/dev/null 9>&- | tail -n 1)" || return 1
+  origin="$(git -C "$PRIMARY" rev-parse origin/main 2>/dev/null)" || return 1
+  [[ -n "$head" && "$head" == "$origin" && -x "$run/scripts/drain-inbox.sh" ]] || return 1
+  printf '%s\n' "$run/scripts/drain-inbox.sh"
+}
+
 paused() { "$DRAIN" --paused >/dev/null 2>&1 9>&-; }
 
 log_size() { stat -c %s "$DRAIN_LOG" 2>/dev/null || echo 0; }
@@ -214,11 +231,17 @@ cmd_run() {
     (( was_paused )) && say "RESUMED: pause marker gone."
     was_paused=0
     off="$(log_size)"
-    say "starting the drain: $DRAIN --continuous"
+    # #3747: run the drain from the verified run dir, not from this (possibly behind)
+    # checkout, so the code that runs is the code that was verified.
+    local drain="$DRAIN" run_script
+    if run_script="$(run_dir_drain)"; then
+      drain="$run_script"
+    fi
+    say "starting the drain: $drain --continuous"
     rc=0
     # 9>&-: the drain's loop outlives this call, and must not inherit this script's
     # lock, or a restarted supervisor would find the lock held and exit 75.
-    MINSPEC_SESSION_PID=$$ "$DRAIN" --continuous 9>&- || rc=$?
+    MINSPEC_SESSION_PID=$$ MINSPEC_DRAIN_PRIMARY_ROOT="$PRIMARY" "$drain" --continuous 9>&- || rc=$?
     if (( rc != 0 )); then
       say "FAILED: drain launch exited $rc (see the lines above)."
       retry_wait delay; continue

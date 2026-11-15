@@ -1024,7 +1024,18 @@ ensure_fresh_run_dir() {
     DISPATCH="${DRAIN_RUN_DIR}/scripts/dispatch-issue.sh"
     REMEDIATE="${DRAIN_RUN_DIR}/scripts/remediate-pr.sh"
     export MINSPEC_FRESHNESS_CHECKED=1
-    echo "[drain] run dir verified at origin/main (${run_head:0:7}) — pipeline scripts are current."
+    # The line below vouches for the run dir only. This script's own logic runs from
+    # wherever it was started (#3747: the primary checkout, held behind main by an
+    # uncommitted approval), so compare the EXECUTING file's blob with origin/main's and
+    # say STALE when they differ, never "current" for code that is not the code running.
+    local self_blob main_blob
+    self_blob="$(git -C "$DRAIN_RUN_DIR" hash-object -- "$DRAIN_SELF" 2>/dev/null || echo '')"
+    main_blob="$(git -C "$DRAIN_RUN_DIR" rev-parse "HEAD:scripts/drain-inbox.sh" 2>/dev/null || echo '')"
+    if [[ -n "$self_blob" && "$self_blob" == "$main_blob" ]]; then
+      echo "[drain] run dir verified at origin/main (${run_head:0:7}) — pipeline scripts are current; executing drain-inbox.sh matches origin/main."
+    else
+      echo "[drain] STALE: run dir verified at origin/main (${run_head:0:7}) but the executing $DRAIN_SELF (blob ${self_blob:0:7}) differs from origin/main's (blob ${main_blob:0:7}) — the drain's own logic is NOT current; run it from the run dir (drain-service.sh does) (#3747)." >&2
+    fi
   else
     echo "[drain] WARNING: run dir NOT verified at origin/main (run=${run_head:0:7} origin=${origin_head:0:7}) — running in place; children re-check freshness (#481)." >&2
   fi
