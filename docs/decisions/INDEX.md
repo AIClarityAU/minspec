@@ -941,7 +941,7 @@ The bot records delegated spec approvals, and no rule lets anything but the foun
 
 ## [DR-120 — MinSpec owns minspec-ci-parity.yml as a managed template - the first file it claims that adopters wrote by hand, taken over only with consent, and changed afterwards only through a human-pushed refresh](DR-120.md)
 
-*Status: proposed · Date: 2026-10-31*
+*Status: accepted · Date: 2026-10-31*
 
 <!-- dr-summary:DR-120 auto=71d14efeb889 -->
 Adopters check MinSpec's review files with a workflow MinSpec does not ship, so the check rejects what a sanctioned refresh writes and its file list falls behind what MinSpec scaffolds.

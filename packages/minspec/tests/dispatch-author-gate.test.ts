@@ -132,6 +132,9 @@ const NOT_LISTED: [string, Actor][] = [
   ["a mannequin with the founder's number", { __typename: 'Mannequin', login: 'harvest316', databaseId: 4125483 }],
   ["a number that begins with the founder's", user('harvest316', 41254830)],
   ["a number the founder's begins with", user('harvest316', 412548)],
+  ["an App with the work account's number: the kind differs", bot('paulharveyf5', 318474157)],
+  ["the work account's login on another account", user('paulharveyf5', 318474158)],
+  ["a number one below the work account's", user('paulharveyf5', 318474156)],
   ['a kind spelled in another case', { __typename: 'user', login: 'harvest316', databaseId: 4125483 }],
   ['a kind with the number folded into it', { __typename: 'User:4125483', login: 'harvest316', databaseId: 0 }],
 ];
@@ -157,6 +160,17 @@ describe('scripts/lib/dispatch-author-gate.sh: the list is accounts, by kind and
     const r = check({ author: a });
     expect(r.status, r.stdout).toBe(0);
     expect(r.stdout).toBe(`${a.login} (${a.__typename} ${String(a.databaseId)})\n`);
+  });
+
+  // The founder's work account, added 2026-11-04 AEDT (first for #3568). Kept out of the shared
+  // TRUSTED fixture so the other suites' "every listed account" rows are unchanged.
+  it("the founder's work account (paulharveyf5, User 318474157) passes, and says who", () => {
+    const work = user('paulharveyf5', 318474157);
+    const r = check({ author: work });
+    expect(r.status, r.stdout).toBe(0);
+    expect(r.stdout).toBe('paulharveyf5 (User 318474157)\n');
+    expect(check({ author: user('renamed-since', 318474157) }).status).toBe(0);
+    expect(check({ author: STRANGER }).status).toBe(1);
   });
 
   it('the login plays no part: a listed account passes under any name', () => {
