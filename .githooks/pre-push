@@ -22,6 +22,30 @@
 
 set -uo pipefail
 
+# Template edit => version bump (#1989). Runs first, before the workflow guard's early exits.
+# Blocks ONLY on exit 17 (VIOLATION_EXIT_CODE in scripts/lib/template-version-bump.ts), the
+# check's own "proven violation" code. Every other non-zero (2 = could not determine; 1 = npx
+# without tsx installed, or the script failed to load/crashed) WARNS and lets the push through.
+# Checks each pushed local sha (stdin: <local ref> <local sha> <remote ref> <remote sha>), not HEAD.
+# LOCAL ONLY: no CI job or release step runs this check yet, and TEMPLATE_VERSION_GATE_OFF=1 (or
+# --no-verify, or an unarmed core.hooksPath) skips it. Release-job wiring: see the follow-up issue.
+# Bypass: TEMPLATE_VERSION_GATE_OFF=1 git push ...
+zero='0000000000000000000000000000000000000000'
+refs=$(cat)
+if [ "${TEMPLATE_VERSION_GATE_OFF:-0}" != "1" ]; then
+  repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+  if [ -f "$repo_root/scripts/check-template-version-bump.ts" ]; then
+    while read -r _lref lsha _rref _rsha; do
+      [ -n "${lsha:-}" ] || continue
+      [ "$lsha" = "$zero" ] && continue          # branch deletion
+      (cd "$repo_root" && npx --no-install tsx scripts/check-template-version-bump.ts --head "$lsha" </dev/null)
+      rc=$?
+      [ "$rc" = "17" ] && exit 1
+      [ "$rc" != "0" ] && echo "pre-push: template-version check could not run (exit $rc); NOT blocking the push." >&2
+    done <<< "$refs"
+  fi
+fi
+
 hook_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 lib="$hook_dir/../scripts/lib/workflow-paths.sh"
 
@@ -39,8 +63,7 @@ workflow_push_allowed && exit 0
 # because git has already resolved it; $1 is the fallback, and `origin` the last one.
 push_credential_is_app_token "${2:-${1:-origin}}" || exit 0
 
-# git feeds one line per ref: <local ref> <local sha> <remote ref> <remote sha>
-zero='0000000000000000000000000000000000000000'
+# git feeds one line per ref: <local ref> <local sha> <remote ref> <remote sha> (read above)
 touched=''
 
 while read -r _local_ref local_sha _remote_ref remote_sha; do
@@ -83,7 +106,7 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
   [ -n "$files" ] || continue
   hits=$(printf '%s\n' "$files" | grep -E "$WORKFLOW_PATH_RE" || true)
   [ -n "$hits" ] && touched="${touched}${hits}"$'\n'
-done
+done <<< "$refs"
 
 [ -n "$touched" ] || exit 0
 
