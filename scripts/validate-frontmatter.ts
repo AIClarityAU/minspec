@@ -582,9 +582,35 @@ try {
   warn(`Pending DR-amendment check could not run (${err instanceof Error ? err.message : String(err)}) — the Rule 16 advisory validated NOTHING this run.`);
 }
 
+// Parent-register exemptions for Rule 9 (#3752). `scripts/reference-check-exemptions.json`
+// lists ids that name an artifact in another repo's register, written bare in prose. Each
+// entry carries a reason. Fails VISIBLE, never silent (invariant 2): an unreadable or
+// malformed list warns that the exemptions were NOT applied (so the corpus reads red, not
+// falsely green), and an exempt id that now resolves locally warns so the list cannot rot
+// into a blanket look-away.
+function loadReferenceExemptions(reg: ReferenceRegistry): Set<string> {
+  const file = join(ROOT, 'scripts', 'reference-check-exemptions.json');
+  const ids = new Set<string>();
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf-8')) as { exemptions?: Array<{ id?: unknown; reason?: unknown }> };
+    if (!Array.isArray(parsed.exemptions)) throw new Error('missing "exemptions" array');
+    for (const e of parsed.exemptions) {
+      if (typeof e.id !== 'string' || !/^(SPEC|DR|EPIC)-\d{3,}$/.test(e.id)) throw new Error(`bad exemption id ${JSON.stringify(e.id)}`);
+      if (typeof e.reason !== 'string' || e.reason.trim() === '') throw new Error(`exemption ${e.id} has no written reason`);
+      const local = e.id.startsWith('SPEC') ? reg.specs : e.id.startsWith('DR') ? reg.decisions : reg.epics;
+      if (local.has(e.id)) warn(`ref-check exemption ${e.id} now resolves locally — remove it from scripts/reference-check-exemptions.json.`);
+      ids.add(e.id);
+    }
+  } catch (err) {
+    reportUnrunnable('Rule 9', 'the parent-register exemption list could not be loaded, so NO exemptions were applied', err, false, file);
+    return new Set();
+  }
+  return ids;
+}
+
 // Rule 9 (non-fatal — Slice-1, #161): dangling-reference checker. Scans every
 // spec + DR for SPEC/DR/EPIC/file:line citations and WARNS on any that resolve to
-// no existing artifact or file (DR-355 phantoms, drifted line citations, broken
+// no existing artifact or file (phantom ids, drifted line citations, broken
 // research-doc paths). Warn-first by design: the corpus today carries known
 // cross-repo refs (SPEC-100/101/102 @ scroogellm) that this slice surfaces rather
 // than blocks; tightening to a hard failure is a follow-up once the corpus is
@@ -595,6 +621,7 @@ try {
   let registryOk = true;
   try {
     registry = buildReferenceRegistry();
+    registry.externalIds = loadReferenceExemptions(registry);
   } catch (err) {
     // Without the registry every citation would read as dangling; say so once and skip.
     registryOk = false;
