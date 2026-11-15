@@ -3380,7 +3380,7 @@ function collectTestTitles(source) {
   const code = codeTokensOf(source);
   if (code === null) return null;
   const titles = new Set();
-  const re = /(?<![\w$])test\s*\(/g;
+  const re = /(?<![\w$.])test\s*\(/g;
   let m;
   while ((m = re.exec(code)) !== null) {
     let j = re.lastIndex;
