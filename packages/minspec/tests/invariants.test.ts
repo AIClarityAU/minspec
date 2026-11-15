@@ -167,6 +167,11 @@ describe('Invariant 2: No backend — no network calls', () => {
     // no network, never pushes — same Tier-0 posture as approval.ts. See
     // approve-commit.ts commitApproval.
     'lib/approve-commit.ts',
+    // #2021: confines an approval commit's INDEX.md to one decision by reading the
+    // committed copy (`git show HEAD:<index>`). Local git read only, no network,
+    // never writes/pushes - same Tier-0 posture as approve-commit.ts.
+    // See dr-index-scope.ts committedIndex.
+    'lib/dr-index-scope.ts',
     // Push-on-approve: the fix for approvals stranded on one machine (Alt+A commits
     // but never pushes; approvals are made on protected `main`, where a direct push
     // is rejected). UNLIKE every other entry above, this one DOES make a network

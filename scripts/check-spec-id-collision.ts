@@ -1,7 +1,7 @@
 #!/usr/bin/env -S npx tsx
 /**
- * check-spec-id-collision.ts — advisory spec-id collision check (#3164), run by hand, the
- * sibling of check-dr-id-collision.ts.
+ * check-spec-id-collision.ts — the by-hand entry to the spec-id collision check (#3164),
+ * the sibling of check-dr-id-collision.ts.
  *
  *   npx tsx scripts/check-spec-id-collision.ts --repo OWNER/NAME --pr 3153 --base main
  *
@@ -9,13 +9,20 @@
  * Exit 1 = a clash, OR the check could not look (fail closed, DR-066) — never a green
  * because it didn't run. Decision logic is the pure `lib/spec-id-claims.ts`.
  *
- * NOT WIRED INTO CI YET: no workflow runs this script (unlike its DR sibling's
- * dr-id-collision.yml), so today it is run by hand. Only the allocator half
- * (next-spec-id.ts, called from dispatch-issue.sh) runs automatically.
+ * No workflow runs THIS file. CI runs the same decision and the same base listing through
+ * check-dr-id-collision.ts (#1327), inside the `dr-id-collision` job, which is advisory
+ * until that check is made required. The allocator half (next-spec-id.ts, called from
+ * dispatch-issue.sh) also runs automatically.
  */
 
-import { openPrSpecClaims, baseSpecDirs, prSpecDirs, SpecIdGateError } from './lib/open-pr-spec-claims';
-import { decideSpecIdCollision } from './lib/spec-id-claims';
+import {
+  baseSpecDirs,
+  openPrSpecClaims,
+  prSpecFileEntries,
+  reportSpecIdVerdict,
+  SpecIdGateError,
+} from './lib/open-pr-spec-claims';
+import { claimedSpecDirsFromPrFiles, decideSpecIdCollision, vacatedSpecDirsFromPrFiles } from './lib/spec-id-claims';
 
 function arg(name: string, fallback?: string): string {
   const i = process.argv.indexOf(`--${name}`);
@@ -32,23 +39,19 @@ try {
   if (!Number.isFinite(pr) || pr <= 0) throw new SpecIdGateError('--pr must be a positive number');
   const specsDir = arg('specs-dir', 'specs').replace(/\/+$/, '');
 
+  const entries = prSpecFileEntries(repo, pr);
   const verdict = decideSpecIdCollision({
     baseRef: base,
     baseDirs: baseSpecDirs(repo, base, specsDir),
-    subject: { pr, dirs: prSpecDirs(repo, pr, specsDir) },
+    subject: {
+      pr,
+      dirs: claimedSpecDirsFromPrFiles(entries, specsDir),
+      vacatedDirs: vacatedSpecDirsFromPrFiles(entries, specsDir),
+    },
     otherPrs: openPrSpecClaims(repo, specsDir, pr),
   });
-  if (verdict.ok) {
-    console.log(verdict.message);
-  } else {
-    console.error(verdict.message);
-    if (process.env.GITHUB_ACTIONS) {
-      console.error(
-        `::error title=Spec id collision::${verdict.findings.map((f) => f.id).join(', ')} already claimed — renumber to ${verdict.nextFreeId}`,
-      );
-    }
-    process.exitCode = 1;
-  }
+  reportSpecIdVerdict(verdict);
+  if (!verdict.ok) process.exitCode = 1;
 } catch (e) {
   const why = e instanceof SpecIdGateError ? e.message : `unexpected error: ${(e as Error).message}`;
   console.error(`Spec id collision check FAILED CLOSED — ${why}`);

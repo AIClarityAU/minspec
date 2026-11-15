@@ -123,6 +123,12 @@ export interface DrainFixture {
    */
   heldPrs?: number | 'fail';
   /**
+   * Real held-PR rows (#3570): the stub runs the drain's own `--jq` expression over these
+   * with jq, so a test pins WHICH pull requests the count includes. Takes precedence over
+   * a numeric `heldPrs`.
+   */
+  heldRows?: { head: string; files: string[] | null }[];
+  /**
    * Specs on the tree the drain runs from whose frontmatter `status:` is `new` or
    * `specifying` (#3344): drafts that merged without an approval. A number writes that
    * many under `specs/`, beside approved ones and one whose BODY mentions the status, so
@@ -131,6 +137,20 @@ export interface DrainFixture {
    * spec-writing on.
    */
   pendingSpecs?: number | 'missing';
+  /**
+   * Bodies of the open `hold:human` issues (#3698). A `SPEC-NNN` named in one is a spec only
+   * the founder can move, so it must not count toward the pending cap. `'fail'` makes that
+   * one query exit 1. Unset answers an empty list.
+   */
+  holdHumanBodies?: string[] | 'fail';
+  /** Titles of the open `hold:human` issues, answered as the drain's `@@TITLE@@ ` rows. */
+  holdHumanTitles?: string[];
+  /**
+   * Titles and bodies of the open `hold:human` PULL REQUESTS (#3698 review): a hold sits on a
+   * pull request as often as on an issue. `'fail'` makes that one query exit 1.
+   */
+  holdPrBodies?: string[] | 'fail';
+  holdPrTitles?: string[];
   /** The reading on disk when the drain starts. `null` = no file at all. */
   reading: Reading | null;
   /** What the meter reads once the dispatch of that issue has finished. */
@@ -274,6 +294,8 @@ function build(f: DrainFixture): Built {
   fs.mkdirSync(bin);
   fs.mkdirSync(path.join(dir, 'root'));
   if (f.pendingSpecs !== 'missing') writePendingSpecs(path.join(dir, 'specs', 'minspec'), f.pendingSpecs ?? 0);
+  fs.writeFileSync(path.join(dir, 'hold-human-bodies'), [...(f.holdHumanTitles ?? []).map((t) => '@@TITLE@@ ' + t), ...(Array.isArray(f.holdHumanBodies) ? f.holdHumanBodies : [])].map((l) => l + '\n').join(''));
+  fs.writeFileSync(path.join(dir, 'hold-pr-bodies'), [...(f.holdPrTitles ?? []).map((t) => '@@TITLE@@ ' + t), ...(Array.isArray(f.holdPrBodies) ? f.holdPrBodies : [])].map((l) => l + '\n').join(''));
   const quota = path.join(dir, 'quota.json');
   const logFile = path.join(dir, 'log');
   const stub = (name: string, body: string) =>
@@ -287,6 +309,15 @@ function build(f: DrainFixture): Built {
     throw new Error(
       'drain-harness: this fixture lists inbox issues, but scripts/drain-inbox.sh has no ' +
         'MINSPEC_DRAIN_TRIAGE seam, so the REAL triage script would run. Refusing.',
+    );
+  }
+
+  if (f.heldRows) {
+    fs.writeFileSync(
+      path.join(dir, 'held-rows.json'),
+      JSON.stringify(
+        f.heldRows.map((r) => ({ headRefName: r.head, files: r.files === null ? null : r.files.map((p) => ({ path: p })) })),
+      ),
     );
   }
 
@@ -322,6 +353,7 @@ if [[ "$1" == "issue" && "$2" == "list" ]]; then
     agent-ready)         cat "${dir}/queue.ready" ;;
     agent-ready-specify) cat "${dir}/queue.specify" ;;
     inbox)               cat "${dir}/queue.inbox" ;;
+    hold:human)          ${f.holdHumanBodies === 'fail' ? 'echo "HTTP 502: Bad Gateway" >&2; exit 1' : `cat "${dir}/hold-human-bodies"`} ;;
   esac
   exit 0
 fi
@@ -329,9 +361,14 @@ if [[ "$1" == "issue" && "$2" == "view" ]]; then
   [[ -f "${dir}/issue.$3.json" ]] && cat "${dir}/issue.$3.json"
   exit 0
 fi
+if [[ "$1" == "pr" && "$2" == "list" && "$label" == "hold:human" ]]; then
+  ${f.holdPrBodies === 'fail' ? 'echo "HTTP 502: Bad Gateway" >&2; exit 1' : `cat "${dir}/hold-pr-bodies"; exit 0`}
+fi
 if [[ "$1" == "pr" && "$2" == "list" && "$label" == "needs-human-review" ]]; then
   echo "pr list --label needs-human-review" >> "${dir}/held-asked"
-  ${f.heldPrs === 'fail' ? 'echo "HTTP 502: Bad Gateway (https://api.github.com/graphql)" >&2; exit 1' : `echo ${f.heldPrs ?? 0}; exit 0`}
+  ${f.heldRows ? `expr=""; prev=""
+  for a in "$@"; do [[ "$prev" == "--jq" ]] && expr="$a"; prev="$a"; done
+  jq -r "$expr" "${dir}/held-rows.json"; exit $?` : f.heldPrs === 'fail' ? 'echo "HTTP 502: Bad Gateway (https://api.github.com/graphql)" >&2; exit 1' : `echo ${f.heldPrs ?? 0}; exit 0`}
 fi
 if [[ "$1" == "pr" && "$2" == "list" && " $* " == *" --state open "* ]]; then
   # Honour --limit the way gh does (default 30), and answer in the row shape the drain's

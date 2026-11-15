@@ -15,6 +15,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { detectBuildSkew, skewMessage, buildSha } from '../src/lib/build-provenance';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite's own `git()` wrapper around execFileSync builds a real git history
+// across several calls; the literal call-site count alone understates it.
+useShellTimeout();
 
 let repo: string;
 let sideSha: string;

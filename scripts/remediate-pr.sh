@@ -374,6 +374,27 @@ checks_in_flight() {
          | if length > 0 then "yes" else "no" end' <<<"$1"
 }
 
+# is_deterministic_drift_log: reads a failed-run log on stdin; exit 0 when it carries the
+# generated-file drift verdict (#3546). That failure is deterministic: it fails the same way on
+# every rerun, so spending the one free rerun on it only delays the remediation agent a sweep.
+is_deterministic_drift_log() {
+  grep -qF 'stale — drifted'
+}
+
+# drop_drift_run_ids <run_ids_newline_separated> → the ids whose failed log is NOT drift.
+# A log that cannot be fetched keeps its id (fail toward the rerun, never toward skipping).
+drop_drift_run_ids() {
+  local id log
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    if log=$(gh run view "$id" --repo "$REPO" --log-failed 2>/dev/null) && is_deterministic_drift_log <<<"$log"; then
+      echo "  Run $id failed on generated-file drift (#3546) — a rerun cannot clear it; straight to remediation." >&2
+      continue
+    fi
+    printf '%s\n' "$id"
+  done <<<"$1"
+}
+
 # rerun_decision <rerun_markers_already_posted> <run_ids_newline_separated>
 #   → rerun | agent
 # Rerun only when it has not been tried on this PR AND there is a run to rerun. Any
@@ -411,12 +432,15 @@ rerun_decision() {
 #   3. AUTHORSHIP — the counter only accepts comments written by this automation's own
 #      login, so a human's or the reviewer bot's comment can never be charged.
 # Each layer alone is bypassable; together, cross-counting is unreachable. If layer 3
-# cannot be applied (no resolvable login) the counter falls back to ANY author and can
-# only OVER-count — for the two BUDGET counters that caps sooner, never un-bounds the
-# loop. The one place over-counting is the DANGEROUS direction is the cap-notice dedup
-# (a phantom CAPPED_MARKER would suppress the "needs a human" notice — a silent gate),
-# so that decision lives in cap_notice_decision() below, which refuses to dedup at all
-# unless authorship is provable.
+# cannot be applied (no allowlist) the counter reports 0 (#3592): it used to fall back to
+# ANY author, which charged a human's or the reviewer's comments to the budget and tripped
+# the cap early, labelling green PRs needs-human-review. Counting nothing would un-bound the
+# loop, so the caller (below) always supplies an allowlist: the token's own login, or — on an
+# App installation token, which cannot read `gh api user` — the App's bot login
+# (resolve_author_identity). When neither can be established it spends no agent and hands
+# the PR to a human with a label. The cap-notice dedup (a phantom
+# CAPPED_MARKER would suppress the "needs a human" notice — a silent gate) lives in
+# cap_notice_decision() below, which refuses to dedup unless authorship is provable.
 ATTEMPT_MARKER="<!-- minspec-auto-remediation -->"
 CRASH_MARKER="<!-- minspec-remediate-crash -->"
 CAPPED_MARKER="<!-- minspec-remediate-capped -->"
@@ -460,8 +484,10 @@ sanitize_comment_body() { printf '%s' "${1-}" | sed -e 's/<!--/<!- -/g' -e 's/--
 
 # Count the comments the runaway guard charges to $1.
 #   $2 — the `gh pr view --json comments` JSON.
-#   $3 — CSV of author logins to accept; EMPTY means "any author" (the degraded,
-#        deliberately over-counting direction).
+#   $3 — CSV of author logins to accept; EMPTY (or naming nobody) counts NOTHING (#3592):
+#        an unprovable author is never charged. Callers must not spend budget-bounded
+#        work on a 0 that came from an empty allowlist.
+#   $4 — optional body prefix; with it, an EMPTY allowlist counts by marker+prefix instead (#3054).
 # A comment counts only when the marker is the LAST non-whitespace text of its body —
 # the one position post_marked_comment ever writes one. Fail-soft: any jq/parse failure
 # yields 0 and the caller proceeds, as before.
@@ -475,26 +501,28 @@ sanitize_comment_body() { printf '%s' "${1-}" | sed -e 's/<!--/<!- -/g' -e 's/--
 # comment would have counted zero for the same reason. Both are the UN-BOUNDING
 # direction — those attempts spend no budget, the cap never trips, remediation loops.
 count_markers_json() {
-  local marker="$1" json="$2" authors="${3:-}" out
-  out=$(jq --arg m "$marker" --arg authors "$authors" '
+  local marker="$1" json="$2" authors="${3:-}" prefix="${4:-}" out
+  out=$(jq --arg m "$marker" --arg authors "$authors" --arg prefix "$prefix" '
     ($authors
       | split(",")
       | map(sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "") | ascii_downcase | sub("\\[bot\\]$"; ""))
       | map(select(length > 0))) as $allow
-    | [ .comments[]?
+    | if ($allow | length) == 0 and $prefix == "" then [] else
+      [ .comments[]?
         | (((.author.login) // "") | ascii_downcase | sub("\\[bot\\]$"; "")) as $login
         | select(($allow | length) == 0 or (($allow | index($login)) != null))
         | ((.body // "") | sub("[[:space:]]+$"; ""))
         | select(endswith($m))
-      ] | length' <<<"$json" 2>/dev/null) || out=""
+        | select($prefix == "" or startswith($prefix))
+      ] end | length' <<<"$json" 2>/dev/null) || out=""
   [[ "$out" =~ ^[0-9]+$ ]] || out=0
   printf '%s\n' "$out"
 }
 
 # Is authorship PROVABLE from this allowlist — i.e. does it name at least one login?
 # Deliberately not `[[ -n "$csv" ]]`: after the trim above, a value like `" , "` is a
-# non-empty STRING that names nobody, and count_markers_json degrades it to any-author.
-# Treating that as provable would let the cap-notice dedup below run on an any-author
+# non-empty STRING that names nobody, and count_markers_json counts nothing for it.
+# Treating that as provable would let the cap-notice dedup below run on an unprovable
 # count — the exact silent gate it exists to prevent. One character that is neither
 # whitespace nor a comma is necessary and sufficient for a surviving element.
 # It must ALSO look like a GitHub login (#3037): a `gh api user` 403 body printed on stdout
@@ -526,6 +554,41 @@ resolve_self_login() {
   return 0
 }
 
+# Which account posts this automation's comments? Prints a login, or nothing (#3592).
+#   1. `gh api user` exits 0 with a login-shaped value → that login (a user token).
+#   2. It fails with GitHub's installation-token rejection ("Resource not accessible by
+#      integration", a 403) → this is an App installation token, which never has a user,
+#      and the drain's writes are made through scripts/lib/gh-bot.sh, which mints them
+#      from the MinSpec App (`gh-app-token.sh`). That App comments as `<slug>[bot]`, so the
+#      allowlist is that login: `minspec-sdd[bot]`, the slug the other drain scripts name
+#      (scripts/lib/delegated-approval.ts REVIEWER_APP_SLUG, review-churn-report.sh
+#      REVIEWER_SLUG). MINSPEC_REMEDIATE_APP_SLUG overrides it for a different App.
+#   3. Anything else (a 401, a network or 5xx failure, an unshaped answer) → nothing: the
+#      caller then cannot count a budget and hands the PR to a human.
+# Only the POSITIVE installation rejection is read as "this is the App". A failure that
+# merely says nothing is not evidence of who we are (the same rule gh-bot.sh applies
+# before it lets an inherited token write). resolve_self_login above is unchanged: it
+# answers only "does this token have a user login".
+resolve_author_identity() {
+  local out err rc errf app
+  errf=$(mktemp)
+  out=$(gh api user --jq '.login' 2>"$errf") && rc=0 || rc=$?
+  err=$(cat "$errf" 2>/dev/null); rm -f "$errf"
+  if (( rc == 0 )); then
+    out="${out%%$'\n'*}"
+    login_shaped "$out" && printf '%s\n' "$out"
+    return 0
+  fi
+  # A here-string, not a pipe: `grep -q` exits on the first match, and under pipefail the
+  # writer's SIGPIPE would turn a positive match into a failure.
+  if grep -qi 'not accessible by integration' <<<"${out}"$'\n'"${err}"; then
+    app="${MINSPEC_REMEDIATE_APP_SLUG:-minspec-sdd}"
+    app="${app%"[bot]"}"
+    login_shaped "$app" && printf '%s[bot]\n' "$app"
+  fi
+  return 0
+}
+
 # Should the one-shot "capped — needs a human" notice be posted this sweep?
 #   $1 — the author allowlist CSV (as passed to count_markers_json)
 #   $2 — the `gh pr view --json comments` JSON
@@ -537,10 +600,19 @@ resolve_self_login() {
 # the PR over with a label and no message, the silent gate constitution invariant #2
 # forbids. So dedup is attempted ONLY when authorship is provable; otherwise this always
 # says `post`. A repeated notice is noise; a missing one is a silent gate.
+#
+# When authorship is NOT provable (an App installation token cannot `gh api user`, #3054),
+# the author filter is unavailable, so the dedup instead requires the body to OPEN with
+# the notice's own heading as well as END with the marker. A quote of the marker in a
+# review comment or diff hunk does not begin with that heading, so it cannot suppress
+# the notice; without this fallback the notice re-posted on every 20-minute sweep.
+CAP_NOTICE_HEADING="## 🛑 Auto-remediation capped"
 cap_notice_decision() {
   local authors="${1-}" json="${2-}" capped=0
   if authors_provable "$authors"; then
     capped=$(count_markers_json "$CAPPED_MARKER" "$json" "$authors")
+  else
+    capped=$(count_markers_json "$CAPPED_MARKER" "$json" "" "$CAP_NOTICE_HEADING")
   fi
   if [[ "${capped:-0}" -eq 0 ]]; then printf 'post\n'; else printf 'skip\n'; fi
 }
@@ -596,6 +668,10 @@ if [[ "${1:-}" == "--content-push-allowed" ]]; then
   content_push_allowed "${2:-}" "${3:-}"
   exit 0
 fi
+if [[ "${1:-}" == "--is-drift-log" ]]; then
+  is_deterministic_drift_log && echo yes || echo no
+  exit 0
+fi
 if [[ "${1:-}" == "--rerun-decision" ]]; then
   shift
   if [[ $# -ne 2 ]]; then
@@ -616,6 +692,10 @@ if [[ "${1:-}" == "--count-markers" ]]; then
 fi
 if [[ "${1:-}" == "--resolve-self-login" ]]; then
   resolve_self_login
+  exit 0
+fi
+if [[ "${1:-}" == "--resolve-author-identity" ]]; then
+  resolve_author_identity
   exit 0
 fi
 if [[ "${1:-}" == "--check-markers" ]]; then
@@ -963,19 +1043,31 @@ if [[ "$ACTION" == agent-* || "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "
   # "Attempt 1/2" forever. Realistic, not contrived — a GITHUB_TOKEN sweep posting as
   # `github-actions[bot]` while the operator configured `minspec-sdd[bot]`.
   #
-  # Budget counters must only ever degrade toward OVER-counting (cap sooner: annoying but
-  # safe). UNDER-counting un-bounds the loop, so an unresolved identity falls all the way
-  # back to any-author rather than trusting an operator string we cannot corroborate.
-  SELF_LOGIN=$(resolve_self_login)  # empty on any failure: authors_provable is false for empty, which routes to any-author counting and always-post (the safe direction, documented above)
+  # Budget counters must never count a comment whose author is unprovable (#3592): the old
+  # any-author fallback charged humans' and bots' comments, so the cap tripped early and
+  # green PRs got needs-human-review. Counting nothing would un-bound the loop. So the
+  # allowlist is always an identity we can establish (resolve_author_identity):
+  #   - a user token → its login;
+  #   - an App installation token (the drain's normal case: `gh api user` answers 403,
+  #     #3037) → the App's bot login, `minspec-sdd[bot]`;
+  # either one widened by MINSPEC_REMEDIATE_AUTHOR_LOGINS. The env var only widens an
+  # established identity, never stands in for a missing one (see above).
+  #   - neither (a 401, a network failure) → no budget can be counted, so no agent runs,
+  #     and the PR is labelled needs-human-review so it reaches a human rather than sitting
+  #     unremediated with only a stderr line (constitution invariant 2, no silent gate).
+  SELF_LOGIN=$(resolve_author_identity)  # empty when no identity can be established
   if authors_provable "$SELF_LOGIN"; then
     AUTHOR_ALLOW="${SELF_LOGIN}${MINSPEC_REMEDIATE_AUTHOR_LOGINS:+,${MINSPEC_REMEDIATE_AUTHOR_LOGINS}}"
   else
-    # Say so out loud rather than degrade quietly. Any-author can only over-count, never
-    # un-bound the loop — and the cap notice below stops deduplicating altogether, which
-    # is the safe direction for IT (a repeated notice is noise; a missing one is a silent
-    # gate). The two consumers of "is authorship provable" have opposite safe directions.
-    AUTHOR_ALLOW=""
-    echo "  NOTE: could not resolve this token's login (\`gh api user\` failed) — counting marker comments from ANY author this sweep (MINSPEC_REMEDIATE_AUTHOR_LOGINS widens a resolved identity, it cannot replace one)." >&2
+    echo "  NOTE: could not establish which account posts this automation's comments (\`gh api user\` failed, and not with an App installation token's 403) — remediation budgets cannot be counted, so no agent runs; leaving for a human." >&2
+    if [[ "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "yes" ]]; then
+      dlg_to_human "could not establish this automation's identity, so its rerun and update budgets cannot be counted"
+    else
+      gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
+        --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
+      gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+    fi
+    exit 0
   fi
   # One API read, three local counts. A comment is charged to a budget only when the
   # marker is the terminal text of a body this automation authored, so no comment can
@@ -1008,7 +1100,7 @@ if [[ "$ACTION" == agent-* || "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "
     # constitution invariant #2 hangs on, so it lives in the pure, tested
     # cap_notice_decision() seam above rather than inline here.
     if [[ "$(cap_notice_decision "$AUTHOR_ALLOW" "$COMMENTS_JSON")" == "post" ]]; then
-      post_marked_comment "$CAPPED_MARKER" "$(printf '## 🛑 Auto-remediation capped — needs a human\n\nThis PR hit an automated-remediation cap — **%s** — without clearing its gate, so automated attempts have stopped. It is labelled `needs-human-review`; a human needs to take it from here.' "$CAP_HIT")"
+      post_marked_comment "$CAPPED_MARKER" "$(printf '%s — needs a human\n\nThis PR hit an automated-remediation cap — **%s** — without clearing its gate, so automated attempts have stopped. It is labelled `needs-human-review`; a human needs to take it from here.' "$CAP_NOTICE_HEADING" "$CAP_HIT")"
     fi
     exit 0
   fi
@@ -1025,6 +1117,7 @@ if [[ "$ACTION" == agent-* || "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "
       RERUN_NOTICE='A required check or the review is red on this delegated-approval PR. Re-running the failed jobs and the review once: a fault outside this PR (rate limit, network) clears on rerun. No agent edits this branch. If it is still red on the next sweep, it is labelled `needs-human-review`.'
     else
       FAILED_RUN_IDS=$(derive_failed_run_ids "$PR_JSON")
+      FAILED_RUN_IDS=$(drop_drift_run_ids "$FAILED_RUN_IDS")
       RERUN_NOTICE='A required check is red. Before spending a remediation agent, re-running the failed jobs once: a fault outside this PR (rate limit, network) clears on rerun. If the check is still red on the next sweep, remediation proceeds.'
     fi
     if [[ "$(rerun_decision "$RERUNS" "$FAILED_RUN_IDS")" == "rerun" ]]; then
@@ -1293,6 +1386,9 @@ while true; do
       echo "  Pushed remediation ($SHA) to $BRANCH — CI will re-review PR #$PR."
     else
       echo "  WARNING: push failed for $BRANCH — worktree left at $WORKTREE for inspection." >&2
+      # #3583: a rejected push still spent an agent run, so it is charged as an attempt
+      # (else MAX_ATTEMPTS never trips and e.g. a .github/workflows/ PR retries forever).
+      post_marked_comment "$ATTEMPT_MARKER" "$(printf 'Auto-remediation produced a fix but the push to `%s` was rejected (for example the App lacks the `workflows` permission for changes under `.github/workflows/`). Nothing was published; this counts as an attempt. Left for a human; the worktree `%s` is kept for inspection.' "$BRANCH" "$WORKTREE")"
       exit 0
     fi
   else

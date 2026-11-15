@@ -271,14 +271,14 @@ gh issue edit "$ISSUE" --repo "$REPO" --add-label "agent-ready" >/dev/null
 # `approve-issue-countermanding-labels.test.ts`, which extracts both lists from source
 # and fails if they diverge by anything other than the named exception above — a
 # comment claiming alignment is not a check (#2644).
-CLEAR_LABELS="needs-review,needs-info,needs-human-review,inbox,agent-done,agent-escalated"
+CLEAR_LABELS="needs-review,needs-info,needs-human-review,inbox,agent-done,agent-escalated,agent-crashed"
 if ! gh issue edit "$ISSUE" --repo "$REPO" \
      --remove-label "$CLEAR_LABELS" >/dev/null 2>&1; then
   # `gh` fails the whole request if ANY named label is absent from the repo, which
   # would leave every one of them in place. Retry singly so one unknown name cannot
   # veto the rest.
   failed=""
-  for one in needs-review needs-info needs-human-review inbox agent-done agent-escalated; do
+  for one in needs-review needs-info needs-human-review inbox agent-done agent-escalated agent-crashed; do
     gh issue edit "$ISSUE" --repo "$REPO" --remove-label "$one" >/dev/null 2>&1 || failed+="${one} "
   done
   if [[ -n "$failed" ]]; then

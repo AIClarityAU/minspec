@@ -15,6 +15,7 @@ import { execFileSync } from 'node:child_process';
 import {
   claimedSpecDirsFromPrFiles,
   specDirsFromPaths,
+  type SpecIdVerdict,
   type SpecPrClaims,
   type SpecPrFileEntry,
 } from './spec-id-claims';
@@ -58,18 +59,25 @@ function rows(text: string, what: string): Record<string, unknown>[] {
   return out;
 }
 
+/**
+ * How to run one `gh` read. Injected so a caller with its own runner keeps its own
+ * behaviour: `check-dr-id-collision.ts` passes the one that waits out a rate limit (#3077).
+ * It must throw on failure, never return an empty string.
+ */
+export type GhRead = (args: string[], what: string) => string;
+
 /** Contents listing of a directory at a ref. A 404 on the root `specs` dir is a red. */
-function listDir(repo: string, dir: string, ref: string): Record<string, unknown>[] {
+function listDir(repo: string, dir: string, ref: string, read: GhRead): Record<string, unknown>[] {
   const endpoint = `repos/${repo}/contents/${dir}?ref=${encodeURIComponent(ref)}`;
-  return rows(ghOrFail(['api', endpoint, '--paginate', '--slurp'], `list ${dir} on ${ref}`), `${dir}@${ref} listing`);
+  return rows(read(['api', endpoint, '--paginate', '--slurp'], `list ${dir} on ${ref}`), `${dir}@${ref} listing`);
 }
 
 /** Every spec directory (`specs/<product>/SPEC-N-slug`) on the base branch's current tip. */
-export function baseSpecDirs(repo: string, base: string, specsDir: string): string[] {
-  const products = listDir(repo, specsDir, base).filter((r) => r.type === 'dir').map((r) => String(r.path ?? ''));
+export function baseSpecDirs(repo: string, base: string, specsDir: string, read: GhRead = ghOrFail): string[] {
+  const products = listDir(repo, specsDir, base, read).filter((r) => r.type === 'dir').map((r) => String(r.path ?? ''));
   const dirs: string[] = [];
   for (const product of products) {
-    for (const r of listDir(repo, product, base)) {
+    for (const r of listDir(repo, product, base, read)) {
       if (r.type === 'dir') dirs.push(`${String(r.path ?? '')}/`);
     }
   }
@@ -80,14 +88,33 @@ export function baseSpecDirs(repo: string, base: string, specsDir: string): stri
   return specDirsFromPaths(dirs.map((d) => `${d}x`));
 }
 
-/** The spec directories one PR adds. */
-export function prSpecDirs(repo: string, pr: number, specsDir: string): string[] {
+/** Every file one PR touches, with its status and any rename source. */
+export function prSpecFileEntries(repo: string, pr: number): SpecPrFileEntry[] {
   const out = ghOrFail(['api', `repos/${repo}/pulls/${pr}/files`, '--paginate', '--slurp'], `list the files changed by PR #${pr}`);
-  const entries: SpecPrFileEntry[] = rows(out, `PR #${pr} file list`).map((r) => ({
+  return rows(out, `PR #${pr} file list`).map((r) => ({
     filename: String(r.filename ?? ''),
     status: String(r.status ?? ''),
+    ...(typeof r.previous_filename === 'string' ? { previous_filename: r.previous_filename } : {}),
   }));
-  return claimedSpecDirsFromPrFiles(entries, specsDir);
+}
+
+/** The spec directories one PR adds. */
+export function prSpecDirs(repo: string, pr: number, specsDir: string): string[] {
+  return claimedSpecDirsFromPrFiles(prSpecFileEntries(repo, pr), specsDir);
+}
+
+/** Print a verdict and its CI annotation. Exit code stays the caller's to set. */
+export function reportSpecIdVerdict(verdict: SpecIdVerdict): void {
+  if (verdict.ok) {
+    console.log(verdict.message);
+    return;
+  }
+  console.error(verdict.message);
+  if (process.env.GITHUB_ACTIONS) {
+    console.error(
+      `::error title=Spec id collision::${verdict.findings.map((f) => f.id).join(', ')} already claimed — renumber to ${verdict.nextFreeId}`,
+    );
+  }
 }
 
 /**

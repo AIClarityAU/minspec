@@ -41,7 +41,7 @@ beforeAll(() => {
   // `command -v go` is a genuine miss rather than accidentally finding a real toolchain
   // from the developer's PATH. `sed` is additional to that file's list — check_go_version
   // (#1746) is the first caller in this script to need it.
-  for (const tool of ['git', 'date', 'sh', 'uname', 'mkdir', 'ls', 'rm', 'sort', 'tail', 'sed']) {
+  for (const tool of ['git', 'date', 'sh', 'uname', 'mkdir', 'ls', 'rm', 'sort', 'tail', 'sed', 'mktemp', 'grep', 'cat']) {
     const found = spawnSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf-8' }).stdout.trim();
     if (found) {
       try {
@@ -89,6 +89,7 @@ function runScript(opts: { home: string; pathDirs: string[] }): RunResult {
   const env: NodeJS.ProcessEnv = {
     HOME: opts.home,
     PATH: [...opts.pathDirs, basePathDir].join(':'),
+    CGO_ENABLED: '0', // compiler probe (#1913) is covered in check-supply-chain-cc.test.ts
   };
   const r = spawnSync('sh', [SCRIPT], { env, encoding: 'utf-8', cwd: tmpRoot });
   return { status: r.status, stderr: r.stderr ?? '' };

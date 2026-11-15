@@ -41,10 +41,21 @@ import process from 'node:process';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-// picomatch is what the extension itself bundles and calls. Using the same library
-// (rather than re-implementing glob semantics) is the point: a re-implementation
-// would be a second thing that can drift from the extension.
+// picomatch is the library `atkeson.nodejs-testing` bundles and calls. Using the same
+// LIBRARY (rather than re-implementing glob semantics) avoids a second, hand-written
+// matcher that could drift.
+//
+// CAVEAT — PARITY IS ASSUMED, NOT VERIFIED (#1159). This is OUR copy of picomatch
+// (a devDependency, `^4.0.4`). Nothing here establishes that it behaves like the copy
+// vendored inside the installed extension: `^` can float onto a later 4.x while the
+// extension stays pinned to whatever it shipped, and the extension's version lives in a
+// minified bundle that is not reliably readable. If the two diverge on a matching edge
+// case, this check can report PASS while the panel is empty. Treat a PASS as "matches
+// picomatch <version printed at run time>", not as proof about the installed extension.
+// To close the gap, compare the printed version against the extension's bundle by hand
+// after upgrading either side.
 const picomatch = require('picomatch');
+const PICOMATCH_VERSION = require('picomatch/package.json').version;
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const WORKSPACE_ROOT = path.resolve(REPO_ROOT, '..');
@@ -201,6 +212,11 @@ function main() {
     console.error('FAIL  no nodejs-testing configuration found in either location.');
     process.exit(1);
   }
+
+  console.log(
+    `note: using picomatch ${PICOMATCH_VERSION}; parity with the copy bundled in ` +
+      `atkeson.nodejs-testing is ASSUMED, not verified.\n`,
+  );
 
   let failures = 0;
   let checked = 0;

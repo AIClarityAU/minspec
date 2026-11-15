@@ -2,7 +2,7 @@
   "name": "minspec",
   "displayName": "MinSpec",
   "description": "Scope-adaptive spec-driven development. Classifies each change by how far it reaches and applies proportional ceremony: one sentence of spec for a small change, the full treatment for a far-reaching one.",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "private": true,
   "publisher": "aiclarity",
   "license": "MIT",
@@ -83,6 +83,10 @@
       {
         "command": "minspec.tidyPrimary",
         "title": "MinSpec: Tidy Checkout (discard redundant copies)"
+      },
+      {
+        "command": "minspec.viewQueue",
+        "title": "MinSpec: View Queued Phase-Advance Requests"
       },
       {
         "command": "minspec.constitutionShowPrompt",
@@ -285,6 +289,12 @@
         "command": "minspec.pushDocsLane",
         "key": "ctrl+k ctrl+p",
         "mac": "cmd+k cmd+p",
+        "when": "workspaceFolderCount != 0"
+      },
+      {
+        "command": "minspec.viewQueue",
+        "key": "ctrl+k ctrl+y",
+        "mac": "cmd+k cmd+y",
         "when": "workspaceFolderCount != 0"
       }
     ],
