@@ -23,9 +23,6 @@ phases:
   plan: pending
   tasks: pending
   implement: pending
-implements: none
-implements_reason: >-
-  Deferred to Plan: DQ-1 to DQ-3 are unresolved, and the file list a Clarify answer produces is what implements: binds.
 ---
 
 # SPEC-098: Dependency-graph explorer — specs/DRs/epics as clickable, colour-coded nodes
