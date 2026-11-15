@@ -159,6 +159,12 @@ on the account's kind, which is the property the issue asks for.
 
 ## Decisions needed (Clarify)
 
+3 of 4 decisions are answered, not ratified: an agent session selected, for D1, D2 and D4, the option this document
+already recommended. No human chose them, and no delegation covers authoring Clarify answers
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). D3 is not answered: it asks
+the founder to register a GitHub login, which only a human can do, so it stays open for him. This spec is
+unapproved, so the three recorded answers bind nothing until a human or a covered delegation approves it.
+
 - **D1 - Bare entries in `AI_REVIEW_BOT_LOGINS`.** The variable accepts user logins on purpose
   (`ai-review-guard.js:1396`), so an adopter can run a reviewer as a machine user.
   - **(a) (rec)** Keep the variable. An entry ending in `[bot]` matches only an actor whose kind
@@ -170,6 +176,7 @@ on the account's kind, which is the property the issue asks for.
     is retired.
   - (c) Reject bare entries outright. Cost: breaks any adopter running a user-account reviewer
     (invariant 3 concern); none is known in this repo, unverified for adopters.
+  **Recorded selection: Option (a),** keep the variable; a `[bot]` entry matches only a Bot-kind actor and a bare entry only a User-kind actor. An agent session copied this document's (rec) option; no human chose this item.
 - **D2 - Remediation budget counter (S10).**
   - **(a) (rec)** Add `__typename` to the comment read and count only Bot-kind authors for
     `[bot]` allowlist entries (and User-kind for bare ones). Cost: one more field on an existing
@@ -177,6 +184,7 @@ on the account's kind, which is the property the issue asks for.
     because 0 is the un-bounding direction.
   - (b) Leave it; over-count only delays remediation. Cost: a squatter can stall the
     remediation loop on any PR by posting markers; that stall is silent today.
+  **Recorded selection: Option (a),** add `__typename` to the comment read and count only Bot-kind authors for `[bot]` entries. An agent session copied this document's (rec) option; no human chose this item.
 - **D3 - Register the `minspec-sdd` user login (founder action).** Whether it is free was not
   checked: this dispatch may make no network call.
   - **(a) (rec)** Check; if free, register it as a held machine account with 2FA and no
@@ -191,6 +199,7 @@ on the account's kind, which is the property the issue asks for.
     machinery and needs founder `--admin` merge.
   - (b) Leave them, document why each is safe. Cost: FR-10's guard must carry exceptions, and
     the next reader has to redo the reasoning.
+  **Recorded selection: Option (a),** convert S4/S5/S6 anyway (FR-2), so the property is keyed on kind or id everywhere. An agent session copied this document's (rec) option; no human chose this item.
 
 ## Out of scope
 

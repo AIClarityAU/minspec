@@ -501,6 +501,28 @@ function writeScaffoldDefaults(rootDir: string): void {
 }
 
 /**
+ * True only when `rootDir` is itself the top level of a git work tree. A folder
+ * merely NESTED in some other repo (a monorepo subfolder, the e2e fixture under
+ * this repo's own checkout) resolves every `git` call to the ENCLOSING repo, so a
+ * scaffold write of `core.hooksPath` / the index would rewrite a repository the
+ * user never opted in (constitution invariant 3, #3566). Fails closed: any git
+ * error answers false and the caller skips its git write.
+ */
+export function isOwnGitRoot(rootDir: string): boolean {
+  try {
+    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: rootDir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (!top) return false;
+    return fs.realpathSync(top) === fs.realpathSync(rootDir);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Untrack any path MinSpec declares machine-local that git is nonetheless tracking.
  *
  * WHY THIS EXISTS. Writing an entry into `.gitignore` does NOT make a file ignored —
@@ -527,6 +549,7 @@ export function untrackDeclaredMachineLocalPaths(rootDir: string): string[] {
   // All entries go in ONE invocation — per-entry calls meant a subprocess spawn
   // for each of the eight on every generate/refresh, for a list that is almost
   // always empty.
+  if (!isOwnGitRoot(rootDir)) return [];
   const pathspecs = MINSPEC_GITIGNORE_ENTRIES.map((e) => (e.endsWith('/') ? e.slice(0, -1) : e));
 
   let tracked = '';
@@ -978,6 +1001,7 @@ function recordExecutableBitInIndex(
   fullPath: string,
   addIfUntracked: boolean,
 ): ExecutableBitIndexChange | null {
+  if (!isOwnGitRoot(rootDir)) return null;
   try {
     // git pathspecs want forward slashes even when `path.relative` gives back
     // platform separators (backslashes on win32).
@@ -1091,6 +1115,7 @@ function migrateLegacyClaudeSlashCommandShims(rootDir: string): void {
  * gates such repos on push.
  */
 function ensureHooksPath(rootDir: string): void {
+  if (!isOwnGitRoot(rootDir)) return;
   try {
     let current = '';
     try {

@@ -6,6 +6,7 @@
 # Usage:
 #   shadow-triage.sh record --issue N --repo OWNER/REPO \
 #                           --prompt-file FILE --live-fields FILE
+#                           [--named-spec-status STATUS]
 #   shadow-triage.sh report [--log FILE] [--json]
 #
 # Pure seams (exist so the properties below are testable as BEHAVIOUR, not by
@@ -175,13 +176,14 @@ esac
 MODE="${1:-}"
 shift || true
 
-ISSUE="" REPO="" PROMPT_FILE="" LIVE_FIELDS_FILE="" REPORT_JSON=""
+ISSUE="" REPO="" PROMPT_FILE="" LIVE_FIELDS_FILE="" REPORT_JSON="" NAMED_SPEC_STATUS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --issue)       ISSUE="$2"; shift 2 ;;
     --repo)        REPO="$2"; shift 2 ;;
     --prompt-file) PROMPT_FILE="$2"; shift 2 ;;
     --live-fields) LIVE_FIELDS_FILE="$2"; shift 2 ;;
+    --named-spec-status) NAMED_SPEC_STATUS="$2"; shift 2 ;;
     --log)         SHADOW_LOG="$2"; shift 2 ;;
     --json)        REPORT_JSON="--json"; shift ;;
     *) note "unknown argument: $1"; exit 0 ;;
@@ -330,7 +332,12 @@ fi
 # would be a second parser of a format the gate already owns, which is exactly how a
 # gate and its record start disagreeing (the reason triage-inbox.sh takes `--fields`
 # rather than re-reading the agent's raw text).
-SHADOW_FIELDS="$(printf '%s\n' "$SHADOW_OUT" | "$DECIDE" --fields 2>/dev/null)"
+# The live call was handed the status of the spec the issue names (#3282), so the shadow
+# call gets the SAME value, forwarded by triage-inbox.sh rather than looked up a second
+# time. Without it a shadow agent-ready verdict on an already-built spec comes out as
+# specify/agent-ready while the live side is built-spec, and the log records a
+# disagreement the model did not cause.
+SHADOW_FIELDS="$(printf '%s\n' "$SHADOW_OUT" | "$DECIDE" --fields "--named-spec-status=${NAMED_SPEC_STATUS}" 2>/dev/null)"
 LIVE_JSON="$(shadow_fields_to_json < "$LIVE_FIELDS_FILE")"
 SHADOW_JSON="$(printf '%s\n' "$SHADOW_FIELDS" | shadow_fields_to_json)"
 [[ "$CONFORMANT" == "true" ]] || SHADOW_JSON='{}'

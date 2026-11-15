@@ -1,7 +1,7 @@
 ---
 id: SPEC-256
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - Alt+A is the one-keystroke approve/accept for every approvable
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Files this spec will own are decided at Plan, after Decision D1
   (which approve path) is resolved.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

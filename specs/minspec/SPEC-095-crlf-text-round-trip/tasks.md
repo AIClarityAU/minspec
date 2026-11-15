@@ -131,7 +131,8 @@ ownership signal stays as narrow as the change.
 
 ## 6 - Slice 2 (not in this change)
 
-None of these is started here; they are listed so the slice has its task list.
+None of these was started by Slice 1; they are listed so the slice has its task list. 6.4
+landed on its own, ahead of 6.1 (whose #2404 commit edits the approval-hash twins).
 
 - [ ] **6.1** Adopt the #2404 commit (`814ce538`, a leading byte order mark) as the slice's
   first commit if it has not merged, then move its mark strip from parseSpec into the
@@ -145,9 +146,15 @@ None of these is started here; they are listed so the slice has its task list.
   the survive-CRLF readers that still read raw text in files Slice 1 touched
   (fileEntryExists in parking-lot.ts, the spec id sniff behind nextSpecId in
   spec-manager.ts) and the two #2481 detectors (design finding 2).
-- [ ] **6.4** FR-6: setAdrStatus decides by the record's first non-blank line, and the Accept
+- [x] **6.4** FR-6: setAdrStatus decides by the record's first non-blank line, and the Accept
   and Set Decision Status path in the decision commands shows that error with no offer to add
   frontmatter.
+  *Done when:* the named FR-6 cases in adr-unreadable-frontmatter.test.ts are red on the code
+  before them and green after. Observed: 16 of 23 red on 715c144f (the 7 controls green), 23
+  of 23 green after; with the classifier mutated to never report a block it cannot read, 11
+  red. One classifier, adrFrontmatterState in adr-manager.ts, is shared by setAdrStatus and
+  adrHasFrontmatter; the latter throws for such a record, so the command's existing error
+  path shows it before any write (no born commit, no offer). No existing suite changed.
 - [ ] **6.5** FR-10: the inventory test, text-io-inventory.test.ts, with its two pins, shown
   to fail on the code before it.
 - [ ] **6.6** AC-1, AC-5, AC-11, AC-14, AC-18 and the rest of AC-17.

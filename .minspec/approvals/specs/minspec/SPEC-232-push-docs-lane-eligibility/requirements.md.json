@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-232-push-docs-lane-eligibility/requirements.md",
+  "specHash": "50eadfca7f89101b53f3abb5e7585b642848c67616d46edd153dd3aad0a10524",
+  "approvedAt": "2026-10-31T08:49:31.514Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T2",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-b",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3181#issuecomment-6541017306"
+}

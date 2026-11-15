@@ -178,7 +178,7 @@ describe('dispatch-issue.sh — an unconfirmed closing link withholds native aut
     return m[0];
   }
 
-  function run(closingRefs: string): { out: string; ghCalls: string[] } {
+  function run(closingRefs: string, o: { specifyOnly?: boolean; readExit?: number } = {}): { out: string; ghCalls: string[] } {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'closing-link-withhold-'));
     try {
       const bin = path.join(tmp, 'bin');
@@ -193,7 +193,7 @@ describe('dispatch-issue.sh — an unconfirmed closing link withholds native aut
         '#!/usr/bin/env bash\n' +
           `printf '%s\\n' "$*" >> ${JSON.stringify(log)}\n` +
           'case "$*" in\n' +
-          `  *closingIssuesReferences*) cat ${JSON.stringify(refsFile)} ;;\n` +
+          `  *closingIssuesReferences*) cat ${JSON.stringify(refsFile)}; exit ${o.readExit ?? 0} ;;\n` +
           "  *'pr diff'*) printf 'packages/minspec/src/lib/foo.ts\\n' ;;\n" +
           'esac\nexit 0\n',
         { mode: 0o755 },
@@ -202,6 +202,7 @@ describe('dispatch-issue.sh — an unconfirmed closing link withholds native aut
         'set -euo pipefail',
         'REPO="AIClarityAU/minspec"',
         'ISSUE="2228"',
+        `SPECIFY_ONLY="${o.specifyOnly ? 1 : 0}"`,
         classifierFn(),
         // Native auto-merge on, and autonomy permits the merge: every OTHER reason to
         // withhold is switched off, so the closing link is the only variable.
@@ -240,6 +241,31 @@ describe('dispatch-issue.sh — an unconfirmed closing link withholds native aut
   it('does NOT arm when the refs name only OTHER issues', () => {
     const { ghCalls } = run('900\n2229\n');
     expect(armed(ghCalls), ghCalls.join('\n')).toBe(false);
+  });
+
+  // #3348: a specify-only PR is the spec for issue N, and N carries the build, so the
+  // witness is inverted: it arms only on a READ, EMPTY closing list.
+  it('specify-only: arms when the PR closes nothing', () => {
+    const { out, ghCalls } = run('', { specifyOnly: true });
+    expect(armed(ghCalls), ghCalls.join('\n')).toBe(true);
+    expect(out).not.toContain('WITHHELD');
+  });
+
+  it.each([
+    ['closes its own issue', '2228\n'],
+    ['closes another issue', '900\n'],
+  ])('specify-only: does NOT arm when the spec PR %s, and says why', (_n, refs) => {
+    const { out, ghCalls } = run(refs, { specifyOnly: true });
+    expect(armed(ghCalls), ghCalls.join('\n')).toBe(false);
+    expect(out).toMatch(/spec PR closes an issue/);
+    expect(out).toMatch(/WITHHELD on PR #4242 .*could close build issue #2228/);
+    expect(ghCalls.some((c) => c.includes('--add-label needs-human-review'))).toBe(true);
+  });
+
+  it('specify-only: an unreadable closing list is never read as empty', () => {
+    const { ghCalls } = run('', { specifyOnly: true, readExit: 1 });
+    expect(armed(ghCalls), ghCalls.join('\n')).toBe(false);
+    expect(ghCalls.some((c) => c.includes('--add-label needs-human-review'))).toBe(true);
   });
 
   it('CONTROL: DOES arm when the link is confirmed, so the harness can observe an arm at all', () => {

@@ -11,6 +11,11 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite's own `run()` wrapper around execFileSync is called per-case; the
+// literal call-site count alone understates it.
+useShellTimeout();
 
 const DISPATCH = path.resolve(__dirname, '../../../scripts/dispatch-issue.sh');
 const LEASE = path.resolve(__dirname, '../../../scripts/lib/issue-lease.sh');

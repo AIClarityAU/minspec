@@ -1,7 +1,7 @@
 ---
 id: SPEC-263
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a refresh that replaces a commit gate and says nothing is a false signpost
@@ -11,9 +11,9 @@ relates_to: ["#2615", "#1698", "#2303", "#2391", "#1697", DR-037, DR-066, DR-089
 implements: [packages/minspec/tests/managed-region-edit-hold.test.ts]  # NEW - the T0 this spec owns (the #1698 regression test and its two controls)
 affects: [packages/minspec/src/lib/scaffold.ts, packages/minspec/src/lib/template-registry.ts, packages/minspec/src/lib/merge-refresh.ts, packages/minspec/src/commands/init.ts]  # scaffold.ts is OWNED by SPEC-043 (harness refresh manifest consistency, specs/minspec/SPEC-043-harness-refresh-manifest-consistency/requirements.md:12); this spec only affects it. One owner per file.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -206,6 +206,19 @@ workflows) are the ones invariant 2 cares about most.
 - **Direction (older bundle over newer repo)** - SPEC-068.
 
 ## Decisions needed (Clarify)
+
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers (DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
+- **D1 - Recorded selection: Option `b`,** the existing per-region entry in machine-local
+  `.minspec/template-baseline.json`; held entries are no longer re-stamped (FR-5).
+- **D2 - Recorded selection: Option `d`,** one aggregated notice listing all held files on every
+  refresh a human runs.
+- **D3 - Recorded selection: Option `f`,** this spec stops the loss; a sanctioned home for a project
+  rule config cannot express stays separate work, tracked by #1698 (harness refresh deletes a
+  project's commit gate, no sanctioned extension point), which this spec does not close.
 
 Agent recommendations below are proposals; no human has chosen any of them. Approving this
 spec with a recommendation in place accepts it.

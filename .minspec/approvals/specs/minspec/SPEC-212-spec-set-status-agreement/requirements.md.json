@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-212-spec-set-status-agreement/requirements.md",
+  "specHash": "f509fdc60441c55a5b4af4e2eec1bcd8eda99fa54de5fa7cdb620632b48e7a7b",
+  "approvedAt": "2026-11-12T05:38:53.372Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-pile-1112a-implements",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3630#issuecomment-6815532762"
+}

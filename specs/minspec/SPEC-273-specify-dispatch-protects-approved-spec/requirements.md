@@ -1,7 +1,7 @@
 ---
 id: SPEC-273
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a founder's sign-off must keep meaning the text he signed
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan, after Decisions D1-D3.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -107,6 +107,18 @@ Resolving #1698's remaining scope (tracked as #2615 for the refresh half), and t
 SPEC-076 id fault (#2185), which is the opposite error (a second id minted where one existed).
 
 ## Decisions needed (Clarify)
+
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers (DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
+- **D1 - Recorded selection: Option (a),** the issue's existing spec is one whose frontmatter
+  `relates_to` lists `#N`.
+- **D2 - Recorded selection: Option (a),** the issue keeps `hold:specify` and the comment names the
+  spec and offers the two paths (new spec id, or the FR-6 override).
+- **D3 - Recorded selection: Option (a),** refuse when the open-PR query cannot run, naming the
+  missing witness.
 
 - **D1 How is "the issue's existing spec" found?**
   - (a) **(rec)** A spec whose frontmatter `relates_to` lists `#N`. Cheap, deterministic.

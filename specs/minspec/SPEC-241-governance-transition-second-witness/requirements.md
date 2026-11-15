@@ -1,7 +1,7 @@
 ---
 id: SPEC-241
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute - the unattended merge actors and the ready-to-merge merge gate live here (same epic as SPEC-222)
@@ -17,8 +17,8 @@ implements_reason: >-
 affects: [.github/scripts/ai-review-guard.js, .github/scripts/ai-review-guard.test.js, .github/workflows/ready-to-merge.yml, packages/minspec/src/lib/ci-review-templates.ts, packages/minspec/tests/governance-lane-eligibility.test.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

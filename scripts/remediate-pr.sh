@@ -26,7 +26,8 @@
 #
 # Scope guard: only AUTOMATION branches — the agent/fix/feat prefixes, delimited by
 # EITHER a slash or a dash (agent/*, fix/*, feat/*, and agent-*, fix-*, feat-*). A
-# hand-crafted human PR is never auto-edited under this sweep.
+# hand-crafted human PR is never auto-edited under this sweep. dlg-approve/* is also in
+# scope, for mechanical actions only (#3036, see DELEGATED_BRANCH_RE).
 #
 # Security model (identical to dispatch-issue.sh, reused not re-implemented):
 #   • the agent is started WITHOUT this script's token: its environment is built from
@@ -51,7 +52,7 @@
 #       <labels_csv> <failing_non_review:yes|no> <ai_review_bad:yes|no> \
 #       [<live_nonself_claim:yes|no>]
 #     → prints ONE action token: skip-not-automation | skip-live-owned | skip-conflict |
-#       agent-remediate-checks | agent-remediate-review | rebase-only | retry-unknown |
+#       agent-remediate-checks | agent-remediate-review | dlg-rerun | rebase-only | retry-unknown |
 #       skip-clean | skip-unhandled-state
 #     The 7th argument is OPTIONAL and defaults to "no", so the creator-shepherd's
 #     existing 6-argument call keeps working and is never told to stand down from the
@@ -121,6 +122,24 @@ MAX_CRASHES="${MINSPEC_REMEDIATE_MAX_CRASHES:-2}"
 # real delimiter, so it never over-matches human branches like `fixture-…` (the
 # char after `fix` there is a letter, not `/` or `-`).
 AUTOMATION_BRANCH_RE='^(agent|fix|feat)[/-]'
+# #3036: the delegated-approval caller's PRs (scripts/lib/delegated-approval-caller.ts
+# BRANCH_PREFIX) carry a spec sidecar bound by hash to the spec body. They are in the
+# drain's scope for MECHANICAL actions only (rerun failed jobs / re-review, update the
+# branch from main). Never an agent edit: a hand edit of the sidecar or spec breaks the
+# hash binding. content_push_allowed below is the refusal seam.
+DELEGATED_BRANCH_RE='^dlg-approve/'
+
+# content_push_allowed <branch> <action> -> yes|no. An agent run commits CONTENT; on a
+# delegated-approval branch that is never allowed. Mechanical actions (merge of main,
+# job rerun) add no authored content, so they pass.
+content_push_allowed() {
+  local branch="$1" action="$2"
+  if [[ "$branch" =~ $DELEGATED_BRANCH_RE && "$action" == agent-* ]]; then
+    echo "no"
+  else
+    echo "yes"
+  fi
+}
 
 # ── Pure fork-guard (no gh/git/claude — safe to unit-test in isolation) ────────
 # #1894: `headRefName` alone is not enough to know which repo a branch lives in — a
@@ -140,8 +159,16 @@ same_repo() {
 # ── Pure classifier (no gh/git/claude — safe to unit-test in isolation) ────────
 # Decide, from a PR's already-fetched attributes, what remediation (if any) applies.
 # Priority: real check failures before a re-review; conflicts are never touched;
-# behind-base last (a review/check re-push would also refresh it). Fail toward
-# "skip" for anything unrecognised.
+# behind-base last (a review/check re-push would also refresh it), except on a
+# delegated-approval branch, where no agent re-push exists and BEHIND comes first (#3036).
+# Fail toward "skip" for anything unrecognised.
+# delegated_is_red <failing_non_review> <ai_review_bad> <labels_csv> -> status 0 when a
+# delegated-approval PR has something a rerun or a branch update could clear. The classifier
+# and the update budget in the sweep both ask this, so the two cannot disagree on "red".
+delegated_is_red() {
+  [[ "$1" == "yes" || "$2" == "yes" || ",$3," == *",ai-review:changes,"* ]]
+}
+
 classify_pr() {
   local branch="$1" mergeable="$2" merge_state="$3" labels_csv="$4" failing_non_review="$5" ai_review_bad="$6"
   # SPEC-044 D5/FR-6: does a LIVE claim (owned by someone other than this caller) hold
@@ -154,8 +181,11 @@ classify_pr() {
   # of being merged-into on every cycle (which restarts CI on every green PR).
   local sweep_defer_pass="${8:-no}"
 
-  # 1. Scope gate — only automation branches.
-  if ! [[ "$branch" =~ $AUTOMATION_BRANCH_RE ]]; then
+  # 1. Scope gate — only automation branches (and, #3036, delegated-approval branches,
+  #    which are limited to mechanical actions below).
+  local delegated=no
+  [[ "$branch" =~ $DELEGATED_BRANCH_RE ]] && delegated=yes
+  if [[ "$delegated" != "yes" ]] && ! [[ "$branch" =~ $AUTOMATION_BRANCH_RE ]]; then
     echo "skip-not-automation"; return 0
   fi
   # 2. Owner gate (SPEC-044 FR-6/INV-4) — the drain is an ORPHAN-FALLBACK, not the
@@ -170,6 +200,17 @@ classify_pr() {
   # 3. Conflicts — surface only, never auto-resolve.
   if [[ "$mergeable" == "CONFLICTING" || "$merge_state" == "DIRTY" ]]; then
     echo "skip-conflict"; return 0
+  fi
+  # 3b. (#3036) A delegated-approval PR with a red check, a red ai-review or an
+  #     ai-review:changes label is never handed to an agent, which would edit the
+  #     hash-bound sidecar/spec. BEHIND comes first: a rerun keeps the old GITHUB_SHA and
+  #     re-tests the old merge commit, so only a branch update can pick up a fix on main,
+  #     and that update brings a new head and new CI. A current branch gets the one rerun.
+  if [[ "$delegated" == "yes" ]] && delegated_is_red "$failing_non_review" "$ai_review_bad" "$labels_csv"; then
+    if [[ "$merge_state" == "BEHIND" ]]; then
+      echo "rebase-only"; return 0
+    fi
+    echo "dlg-rerun"; return 0
   fi
   # 4. A required check (other than ai-review) is red → fix the code first.
   if [[ "$failing_non_review" == "yes" ]]; then
@@ -264,6 +305,24 @@ def self_cert_gate:
   ((.name // .context // "") | test("^ai-review"))
   or ((.name // .context // "") == "ready-to-merge")
   or ((.workflowName // "") == "ready-to-merge");
+# #3036: is the review verdict bad? The same two signals the sweep classifies on: a red
+# `ai-review` check, or the ai-review:changes label. Not the `ai-review/pass` status alone:
+# ai-review.yml holds that red by design on a machinery ai-review:pass.
+def review_bad:
+  ((.labels // []) | any(.name == "ai-review:changes"))
+  or ([ latest_checks[] | select((.name // "") == "ai-review") | (.conclusion // "")
+        | select(. == "FAILURE" or . == "ERROR") ] | length > 0);
+# The run that produced the verdict. Neither verdict check carries its id: the App posts
+# `ai-review` with no details_url, so its URL is the App homepage, and `ai-review/pass` has
+# no target_url. The id is on the job of workflow `ai-review-runner` (ai-review.yml), read
+# from this rollup on #3382 and #3378. A skipped run never reviewed, so rerunning it would
+# only spend the one rerun.
+def review_run_ids:
+  if review_bad then
+    latest_checks[] | select((.workflowName // "") == "ai-review-runner")
+    | select(outcome != "SKIPPED")
+    | ((.detailsUrl // "") | capture("/actions/runs/(?<id>[0-9]+)")? | .id)
+  else empty end;
 '
 derive_failing_non_review() {
   jq -r "$ROLLUP_LATEST_JQ"'
@@ -284,13 +343,56 @@ derive_failing_non_review() {
 # check's detailsUrl — never a log, never free text. A red check with no such URL (a
 # status context) yields no id; the caller then falls through to the agent.
 derive_failed_run_ids() {
-  jq -r "$ROLLUP_LATEST_JQ"'
-    [ latest_checks[]
-      | select(self_cert_gate | not)
-      | select(outcome == "FAILURE" or outcome == "ERROR"
-               or outcome == "TIMED_OUT" or outcome == "CANCELLED")
-      | ((.detailsUrl // .targetUrl // "") | capture("/actions/runs/(?<id>[0-9]+)")? | .id) ]
+  # $2 = "with-review" (#3036) also keeps the review run when the verdict is bad, so a
+  # delegated-approval PR can be re-reviewed; the ready-to-merge gate is always excluded.
+  jq -r --arg inc "${2:-}" "$ROLLUP_LATEST_JQ"'
+    [ ( latest_checks[]
+        | select(self_cert_gate | not)
+        | select(outcome == "FAILURE" or outcome == "ERROR"
+                 or outcome == "TIMED_OUT" or outcome == "CANCELLED")
+        | ((.detailsUrl // .targetUrl // "") | capture("/actions/runs/(?<id>[0-9]+)")? | .id) ),
+      ( if $inc == "with-review" then review_run_ids else empty end ) ]
     | map(select(. != null)) | unique | .[]' <<<"$1"
+}
+
+# derive_review_run_ids: of those, the runs that must be rerun IN FULL (#3036). The review
+# job stays green on a `changes` verdict, so `gh run rerun --failed` has nothing to rerun
+# there. ai-review.yml: "A RE-RUN ALWAYS REVIEWS".
+derive_review_run_ids() {
+  jq -r "$ROLLUP_LATEST_JQ"'[ review_run_ids ] | map(select(. != null)) | unique | .[]' <<<"$1"
+}
+
+# checks_in_flight: yes when any check is unfinished, else no. Over the RAW rollup, not
+# latest_checks: a queued rerun has no startedAt yet and would sort behind the verdict it is
+# about to replace. While a re-review runs, the old `ai-review` check and label still read
+# red, so acting on them would spend the PR's budget against a stale verdict.
+checks_in_flight() {
+  jq -r '[ (.statusCheckRollup // [])[]
+           | select((.status // "") == "QUEUED" or (.status // "") == "IN_PROGRESS"
+                    or (.status // "") == "PENDING" or (.status // "") == "WAITING"
+                    or (.status // "") == "REQUESTED" or (.state // "") == "PENDING") ]
+         | if length > 0 then "yes" else "no" end' <<<"$1"
+}
+
+# is_deterministic_drift_log: reads a failed-run log on stdin; exit 0 when it carries the
+# generated-file drift verdict (#3546). That failure is deterministic: it fails the same way on
+# every rerun, so spending the one free rerun on it only delays the remediation agent a sweep.
+is_deterministic_drift_log() {
+  grep -qF 'stale — drifted'
+}
+
+# drop_drift_run_ids <run_ids_newline_separated> → the ids whose failed log is NOT drift.
+# A log that cannot be fetched keeps its id (fail toward the rerun, never toward skipping).
+drop_drift_run_ids() {
+  local id log
+  while IFS= read -r id; do
+    [[ -n "$id" ]] || continue
+    if log=$(gh run view "$id" --repo "$REPO" --log-failed 2>/dev/null) && is_deterministic_drift_log <<<"$log"; then
+      echo "  Run $id failed on generated-file drift (#3546) — a rerun cannot clear it; straight to remediation." >&2
+      continue
+    fi
+    printf '%s\n' "$id"
+  done <<<"$1"
 }
 
 # rerun_decision <rerun_markers_already_posted> <run_ids_newline_separated>
@@ -330,17 +432,21 @@ rerun_decision() {
 #   3. AUTHORSHIP — the counter only accepts comments written by this automation's own
 #      login, so a human's or the reviewer bot's comment can never be charged.
 # Each layer alone is bypassable; together, cross-counting is unreachable. If layer 3
-# cannot be applied (no resolvable login) the counter falls back to ANY author and can
-# only OVER-count — for the two BUDGET counters that caps sooner, never un-bounds the
-# loop. The one place over-counting is the DANGEROUS direction is the cap-notice dedup
-# (a phantom CAPPED_MARKER would suppress the "needs a human" notice — a silent gate),
-# so that decision lives in cap_notice_decision() below, which refuses to dedup at all
-# unless authorship is provable.
+# cannot be applied (no allowlist) the counter reports 0 (#3592): it used to fall back to
+# ANY author, which charged a human's or the reviewer's comments to the budget and tripped
+# the cap early, labelling green PRs needs-human-review. Counting nothing would un-bound the
+# loop, so the caller (below) always supplies an allowlist: the token's own login, or — on an
+# App installation token, which cannot read `gh api user` — the App's bot login
+# (resolve_author_identity). When neither can be established it spends no agent and hands
+# the PR to a human with a label. The cap-notice dedup (a phantom
+# CAPPED_MARKER would suppress the "needs a human" notice — a silent gate) lives in
+# cap_notice_decision() below, which refuses to dedup unless authorship is provable.
 ATTEMPT_MARKER="<!-- minspec-auto-remediation -->"
 CRASH_MARKER="<!-- minspec-remediate-crash -->"
 CAPPED_MARKER="<!-- minspec-remediate-capped -->"
 #   RERUN_MARKER   — (#3042) the one free rerun of a red check, spent BEFORE any agent; in
 #                    NEITHER budget counter, so a rerun never consumes remediation quota.
+#                    Counted per PR, not per head, so a review is rerun this way at most once.
 RERUN_MARKER="<!-- minspec-remediate-rerun -->"
 
 # Pairwise isolation gate. Compared by POSITION, never by value: an earlier version
@@ -378,8 +484,10 @@ sanitize_comment_body() { printf '%s' "${1-}" | sed -e 's/<!--/<!- -/g' -e 's/--
 
 # Count the comments the runaway guard charges to $1.
 #   $2 — the `gh pr view --json comments` JSON.
-#   $3 — CSV of author logins to accept; EMPTY means "any author" (the degraded,
-#        deliberately over-counting direction).
+#   $3 — CSV of author logins to accept; EMPTY (or naming nobody) counts NOTHING (#3592):
+#        an unprovable author is never charged. Callers must not spend budget-bounded
+#        work on a 0 that came from an empty allowlist.
+#   $4 — optional body prefix; with it, an EMPTY allowlist counts by marker+prefix instead (#3054).
 # A comment counts only when the marker is the LAST non-whitespace text of its body —
 # the one position post_marked_comment ever writes one. Fail-soft: any jq/parse failure
 # yields 0 and the caller proceeds, as before.
@@ -393,26 +501,28 @@ sanitize_comment_body() { printf '%s' "${1-}" | sed -e 's/<!--/<!- -/g' -e 's/--
 # comment would have counted zero for the same reason. Both are the UN-BOUNDING
 # direction — those attempts spend no budget, the cap never trips, remediation loops.
 count_markers_json() {
-  local marker="$1" json="$2" authors="${3:-}" out
-  out=$(jq --arg m "$marker" --arg authors "$authors" '
+  local marker="$1" json="$2" authors="${3:-}" prefix="${4:-}" out
+  out=$(jq --arg m "$marker" --arg authors "$authors" --arg prefix "$prefix" '
     ($authors
       | split(",")
       | map(sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "") | ascii_downcase | sub("\\[bot\\]$"; ""))
       | map(select(length > 0))) as $allow
-    | [ .comments[]?
+    | if ($allow | length) == 0 and $prefix == "" then [] else
+      [ .comments[]?
         | (((.author.login) // "") | ascii_downcase | sub("\\[bot\\]$"; "")) as $login
         | select(($allow | length) == 0 or (($allow | index($login)) != null))
         | ((.body // "") | sub("[[:space:]]+$"; ""))
         | select(endswith($m))
-      ] | length' <<<"$json" 2>/dev/null) || out=""
+        | select($prefix == "" or startswith($prefix))
+      ] end | length' <<<"$json" 2>/dev/null) || out=""
   [[ "$out" =~ ^[0-9]+$ ]] || out=0
   printf '%s\n' "$out"
 }
 
 # Is authorship PROVABLE from this allowlist — i.e. does it name at least one login?
 # Deliberately not `[[ -n "$csv" ]]`: after the trim above, a value like `" , "` is a
-# non-empty STRING that names nobody, and count_markers_json degrades it to any-author.
-# Treating that as provable would let the cap-notice dedup below run on an any-author
+# non-empty STRING that names nobody, and count_markers_json counts nothing for it.
+# Treating that as provable would let the cap-notice dedup below run on an unprovable
 # count — the exact silent gate it exists to prevent. One character that is neither
 # whitespace nor a comma is necessary and sufficient for a surviving element.
 # It must ALSO look like a GitHub login (#3037): a `gh api user` 403 body printed on stdout
@@ -444,6 +554,41 @@ resolve_self_login() {
   return 0
 }
 
+# Which account posts this automation's comments? Prints a login, or nothing (#3592).
+#   1. `gh api user` exits 0 with a login-shaped value → that login (a user token).
+#   2. It fails with GitHub's installation-token rejection ("Resource not accessible by
+#      integration", a 403) → this is an App installation token, which never has a user,
+#      and the drain's writes are made through scripts/lib/gh-bot.sh, which mints them
+#      from the MinSpec App (`gh-app-token.sh`). That App comments as `<slug>[bot]`, so the
+#      allowlist is that login: `minspec-sdd[bot]`, the slug the other drain scripts name
+#      (scripts/lib/delegated-approval.ts REVIEWER_APP_SLUG, review-churn-report.sh
+#      REVIEWER_SLUG). MINSPEC_REMEDIATE_APP_SLUG overrides it for a different App.
+#   3. Anything else (a 401, a network or 5xx failure, an unshaped answer) → nothing: the
+#      caller then cannot count a budget and hands the PR to a human.
+# Only the POSITIVE installation rejection is read as "this is the App". A failure that
+# merely says nothing is not evidence of who we are (the same rule gh-bot.sh applies
+# before it lets an inherited token write). resolve_self_login above is unchanged: it
+# answers only "does this token have a user login".
+resolve_author_identity() {
+  local out err rc errf app
+  errf=$(mktemp)
+  out=$(gh api user --jq '.login' 2>"$errf") && rc=0 || rc=$?
+  err=$(cat "$errf" 2>/dev/null); rm -f "$errf"
+  if (( rc == 0 )); then
+    out="${out%%$'\n'*}"
+    login_shaped "$out" && printf '%s\n' "$out"
+    return 0
+  fi
+  # A here-string, not a pipe: `grep -q` exits on the first match, and under pipefail the
+  # writer's SIGPIPE would turn a positive match into a failure.
+  if grep -qi 'not accessible by integration' <<<"${out}"$'\n'"${err}"; then
+    app="${MINSPEC_REMEDIATE_APP_SLUG:-minspec-sdd}"
+    app="${app%"[bot]"}"
+    login_shaped "$app" && printf '%s[bot]\n' "$app"
+  fi
+  return 0
+}
+
 # Should the one-shot "capped — needs a human" notice be posted this sweep?
 #   $1 — the author allowlist CSV (as passed to count_markers_json)
 #   $2 — the `gh pr view --json comments` JSON
@@ -455,10 +600,19 @@ resolve_self_login() {
 # the PR over with a label and no message, the silent gate constitution invariant #2
 # forbids. So dedup is attempted ONLY when authorship is provable; otherwise this always
 # says `post`. A repeated notice is noise; a missing one is a silent gate.
+#
+# When authorship is NOT provable (an App installation token cannot `gh api user`, #3054),
+# the author filter is unavailable, so the dedup instead requires the body to OPEN with
+# the notice's own heading as well as END with the marker. A quote of the marker in a
+# review comment or diff hunk does not begin with that heading, so it cannot suppress
+# the notice; without this fallback the notice re-posted on every 20-minute sweep.
+CAP_NOTICE_HEADING="## 🛑 Auto-remediation capped"
 cap_notice_decision() {
   local authors="${1-}" json="${2-}" capped=0
   if authors_provable "$authors"; then
     capped=$(count_markers_json "$CAPPED_MARKER" "$json" "$authors")
+  else
+    capped=$(count_markers_json "$CAPPED_MARKER" "$json" "" "$CAP_NOTICE_HEADING")
   fi
   if [[ "${capped:-0}" -eq 0 ]]; then printf 'post\n'; else printf 'skip\n'; fi
 }
@@ -507,7 +661,15 @@ if [[ "${1:-}" == "--derive-failing" ]]; then
   exit 0
 fi
 if [[ "${1:-}" == "--derive-failed-runs" ]]; then
-  derive_failed_run_ids "$(cat)"
+  derive_failed_run_ids "$(cat)" "${2:-}"
+  exit 0
+fi
+if [[ "${1:-}" == "--content-push-allowed" ]]; then
+  content_push_allowed "${2:-}" "${3:-}"
+  exit 0
+fi
+if [[ "${1:-}" == "--is-drift-log" ]]; then
+  is_deterministic_drift_log && echo yes || echo no
   exit 0
 fi
 if [[ "${1:-}" == "--rerun-decision" ]]; then
@@ -530,6 +692,10 @@ if [[ "${1:-}" == "--count-markers" ]]; then
 fi
 if [[ "${1:-}" == "--resolve-self-login" ]]; then
   resolve_self_login
+  exit 0
+fi
+if [[ "${1:-}" == "--resolve-author-identity" ]]; then
+  resolve_author_identity
   exit 0
 fi
 if [[ "${1:-}" == "--check-markers" ]]; then
@@ -596,11 +762,15 @@ source "${SCRIPT_DIR}/lib/dispatch-author-gate.sh"
 # final line — the exact position count_markers_json matches. Keeping emission in one
 # function is what makes the "one body ends with at most one marker" property hold by
 # construction instead of by convention.
+# POST_MARKED_RC keeps gh's exit status: callers that spend paid CI only after a marker
+# is on record (#3036, the delegated paths) read it. The rest stay best-effort.
+POST_MARKED_RC=0
 post_marked_comment() {
   local marker="$1" body="$2"
+  POST_MARKED_RC=0
   gh pr comment "$PR" --repo "$REPO" \
     --body "$(sanitize_comment_body "$body")
-${marker}" 2>/dev/null || true
+${marker}" 2>/dev/null || POST_MARKED_RC=$?
 }
 
 # ── What the remediation agent is started with ───────────────────────────────
@@ -764,6 +934,14 @@ if [[ -n "$ITEM" && "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
 fi
 
 ACTION=$(classify_pr "$BRANCH" "$MERGEABLE" "$MERGE_STATE" "$LABELS_CSV" "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD" "$LIVE_NONSELF_CLAIM" yes)
+# #3036: updating a RED delegated PR restarts CI and a paid review, and it stays red if main
+# did not hold the fix. While main keeps moving it would be BEHIND again on every sweep, so
+# this update, unlike a green one, is charged to the attempt budget below.
+DLG_RED_UPDATE=no
+if [[ "$ACTION" == "rebase-only" && "$BRANCH" =~ $DELEGATED_BRANCH_RE ]] \
+   && delegated_is_red "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD" "$LABELS_CSV"; then
+  DLG_RED_UPDATE=yes
+fi
 echo "PR #$PR [$BRANCH] mergeable=$MERGEABLE state=$MERGE_STATE failing_checks=$FAILING_NON_REVIEW ai_review_bad=$AI_REVIEW_BAD item=${ITEM:-none} live_owned=$LIVE_NONSELF_CLAIM → $ACTION"
 
 case "$ACTION" in
@@ -826,13 +1004,30 @@ if [[ "$ACTION" != "rebase-only" && "$AI_REVIEW_PENDING" == "yes" ]]; then
   echo "  ai-review is still running from a prior push — deferring remediation to the next cycle."
   exit 0
 fi
+# #3036: the same on a delegated PR, for every check. A re-review posts `ai-review` only when
+# it finishes, so until then the old verdict reads as "still red after the rerun". An update
+# pushed now would also cancel the review underway. A run still going cannot be rerun either.
+if [[ "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "yes" ]] \
+   && [[ "$(checks_in_flight "$PR_JSON")" == "yes" ]]; then
+  echo "  Checks are in flight on this delegated-approval PR — deferring to the next sweep."
+  exit 0
+fi
+
+# The one way a delegated-approval PR leaves automation (#3036): it is never handed to an
+# agent, because a content edit breaks the sidecar's hash binding.
+dlg_to_human() {
+  echo "  Delegated-approval PR: $1 — no agent edit allowed; leaving for a human."
+  gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
+    --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
+  gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+}
 
 # Runaway guard: TWO independent budgets, both counted from marker comments on this
 # PR (no stateful store). Genuine attempts spend MAX_ATTEMPTS; agent crashes — which
 # produce no fix — spend MAX_CRASHES instead, so neither class can exhaust the other's
 # quota. Whichever cap trips first stops automation and hands the PR to a human, and
 # the notice names WHICH one. Worst case is MAX_ATTEMPTS + MAX_CRASHES runs: finite.
-if [[ "$ACTION" == agent-* ]]; then
+if [[ "$ACTION" == agent-* || "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "yes" ]]; then
   # Whose comments count? Only the ones THIS automation wrote — a human or the ai-review
   # bot quoting a marker (e.g. in a diff hunk of this very script) must never spend a
   # budget. The posting identity is the login of the token we hold, so ask for it; extra
@@ -848,24 +1043,46 @@ if [[ "$ACTION" == agent-* ]]; then
   # "Attempt 1/2" forever. Realistic, not contrived — a GITHUB_TOKEN sweep posting as
   # `github-actions[bot]` while the operator configured `minspec-sdd[bot]`.
   #
-  # Budget counters must only ever degrade toward OVER-counting (cap sooner: annoying but
-  # safe). UNDER-counting un-bounds the loop, so an unresolved identity falls all the way
-  # back to any-author rather than trusting an operator string we cannot corroborate.
-  SELF_LOGIN=$(resolve_self_login)  # empty on any failure: authors_provable is false for empty, which routes to any-author counting and always-post (the safe direction, documented above)
+  # Budget counters must never count a comment whose author is unprovable (#3592): the old
+  # any-author fallback charged humans' and bots' comments, so the cap tripped early and
+  # green PRs got needs-human-review. Counting nothing would un-bound the loop. So the
+  # allowlist is always an identity we can establish (resolve_author_identity):
+  #   - a user token → its login;
+  #   - an App installation token (the drain's normal case: `gh api user` answers 403,
+  #     #3037) → the App's bot login, `minspec-sdd[bot]`;
+  # either one widened by MINSPEC_REMEDIATE_AUTHOR_LOGINS. The env var only widens an
+  # established identity, never stands in for a missing one (see above).
+  #   - neither (a 401, a network failure) → no budget can be counted, so no agent runs,
+  #     and the PR is labelled needs-human-review so it reaches a human rather than sitting
+  #     unremediated with only a stderr line (constitution invariant 2, no silent gate).
+  SELF_LOGIN=$(resolve_author_identity)  # empty when no identity can be established
   if authors_provable "$SELF_LOGIN"; then
     AUTHOR_ALLOW="${SELF_LOGIN}${MINSPEC_REMEDIATE_AUTHOR_LOGINS:+,${MINSPEC_REMEDIATE_AUTHOR_LOGINS}}"
   else
-    # Say so out loud rather than degrade quietly. Any-author can only over-count, never
-    # un-bound the loop — and the cap notice below stops deduplicating altogether, which
-    # is the safe direction for IT (a repeated notice is noise; a missing one is a silent
-    # gate). The two consumers of "is authorship provable" have opposite safe directions.
-    AUTHOR_ALLOW=""
-    echo "  NOTE: could not resolve this token's login (\`gh api user\` failed) — counting marker comments from ANY author this sweep (MINSPEC_REMEDIATE_AUTHOR_LOGINS widens a resolved identity, it cannot replace one)." >&2
+    echo "  NOTE: could not establish which account posts this automation's comments (\`gh api user\` failed, and not with an App installation token's 403) — remediation budgets cannot be counted, so no agent runs; leaving for a human." >&2
+    if [[ "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "yes" ]]; then
+      dlg_to_human "could not establish this automation's identity, so its rerun and update budgets cannot be counted"
+    else
+      gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
+        --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
+      gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+    fi
+    exit 0
   fi
   # One API read, three local counts. A comment is charged to a budget only when the
   # marker is the terminal text of a body this automation authored, so no comment can
   # ever be counted by more than one of them.
-  COMMENTS_JSON=$(gh pr view "$PR" --repo "$REPO" --json comments 2>/dev/null || echo '{"comments":[]}')
+  COMMENTS_READ=ok
+  COMMENTS_JSON=$(gh pr view "$PR" --repo "$REPO" --json comments 2>/dev/null) \
+    || { COMMENTS_READ=failed; COMMENTS_JSON='{"comments":[]}'; }
+  # #3036: a failed read counts as "no rerun or update yet", and count_markers_json reads
+  # garbage as 0. On a delegated PR that would spend CI on a read that said nothing.
+  if [[ "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "yes" ]] \
+     && { [[ "$COMMENTS_READ" != "ok" ]] \
+          || ! jq -e '.comments | type == "array"' >/dev/null 2>&1 <<<"$COMMENTS_JSON"; }; then
+    dlg_to_human "could not read its comments, so its rerun and update budgets are unknown"
+    exit 0
+  fi
   count_marker() { count_markers_json "$1" "$COMMENTS_JSON" "$AUTHOR_ALLOW"; }
   ATTEMPTS=$(count_marker "$ATTEMPT_MARKER")
   CRASHES=$(count_marker "$CRASH_MARKER")
@@ -883,7 +1100,7 @@ if [[ "$ACTION" == agent-* ]]; then
     # constitution invariant #2 hangs on, so it lives in the pure, tested
     # cap_notice_decision() seam above rather than inline here.
     if [[ "$(cap_notice_decision "$AUTHOR_ALLOW" "$COMMENTS_JSON")" == "post" ]]; then
-      post_marked_comment "$CAPPED_MARKER" "$(printf '## 🛑 Auto-remediation capped — needs a human\n\nThis PR hit an automated-remediation cap — **%s** — without clearing its gate, so automated attempts have stopped. It is labelled `needs-human-review`; a human needs to take it from here.' "$CAP_HIT")"
+      post_marked_comment "$CAPPED_MARKER" "$(printf '%s — needs a human\n\nThis PR hit an automated-remediation cap — **%s** — without clearing its gate, so automated attempts have stopped. It is labelled `needs-human-review`; a human needs to take it from here.' "$CAP_NOTICE_HEADING" "$CAP_HIT")"
     fi
     exit 0
   fi
@@ -891,16 +1108,36 @@ if [[ "$ACTION" == agent-* ]]; then
   # jobs ONCE, before any agent is spent; remediate only if a later sweep still sees red.
   # The marker is posted BEFORE the rerun so a lost marker can never mean an unbounded
   # rerun loop; it sits in neither budget counter.
-  if [[ "$ACTION" == "agent-remediate-checks" ]]; then
+  if [[ "$ACTION" == "agent-remediate-checks" || "$ACTION" == "dlg-rerun" ]]; then
     RERUNS=$(count_marker "$RERUN_MARKER")
-    FAILED_RUN_IDS=$(derive_failed_run_ids "$PR_JSON")
+    REVIEW_RUN_IDS=""
+    if [[ "$ACTION" == "dlg-rerun" ]]; then
+      FAILED_RUN_IDS=$(derive_failed_run_ids "$PR_JSON" with-review)
+      REVIEW_RUN_IDS=$(derive_review_run_ids "$PR_JSON")
+      RERUN_NOTICE='A required check or the review is red on this delegated-approval PR. Re-running the failed jobs and the review once: a fault outside this PR (rate limit, network) clears on rerun. No agent edits this branch. If it is still red on the next sweep, it is labelled `needs-human-review`.'
+    else
+      FAILED_RUN_IDS=$(derive_failed_run_ids "$PR_JSON")
+      FAILED_RUN_IDS=$(drop_drift_run_ids "$FAILED_RUN_IDS")
+      RERUN_NOTICE='A required check is red. Before spending a remediation agent, re-running the failed jobs once: a fault outside this PR (rate limit, network) clears on rerun. If the check is still red on the next sweep, remediation proceeds.'
+    fi
     if [[ "$(rerun_decision "$RERUNS" "$FAILED_RUN_IDS")" == "rerun" ]]; then
-      post_marked_comment "$RERUN_MARKER" 'A required check is red. Before spending a remediation agent, re-running the failed jobs once: a fault outside this PR (rate limit, network) clears on rerun. If the check is still red on the next sweep, remediation proceeds.'
+      post_marked_comment "$RERUN_MARKER" "$RERUN_NOTICE"
+      # #3036: a review rerun is paid. With no marker on record nothing bounds the next one.
+      if [[ "$ACTION" == "dlg-rerun" && "$POST_MARKED_RC" -ne 0 ]]; then
+        dlg_to_human "could not record its one rerun, so none was started"
+        exit 0
+      fi
       RERUN_FAILED=0
       while IFS= read -r RUN_ID; do
         [[ -n "$RUN_ID" ]] || continue
-        if gh run rerun "$RUN_ID" --repo "$REPO" --failed >/dev/null 2>&1; then
-          echo "  Re-ran failed jobs of run $RUN_ID (#3042 rerun-first) — no agent spent this sweep."
+        # A review run is green on a `changes` verdict, so it has no failed job to rerun.
+        RERUN_ARGS=(--failed)
+        if [[ $'\n'"$REVIEW_RUN_IDS"$'\n' == *$'\n'"$RUN_ID"$'\n'* ]]; then RERUN_ARGS=(); fi
+        if gh run rerun "$RUN_ID" --repo "$REPO" "${RERUN_ARGS[@]}" >/dev/null 2>&1; then
+          echo "  Re-ran run $RUN_ID ${RERUN_ARGS[*]:-in full} (#3042 rerun-first) — no agent spent this sweep."
+        elif [[ "$ACTION" == "dlg-rerun" ]]; then
+          echo "  WARNING: could not rerun run $RUN_ID — it goes to a human, never an agent, on this branch." >&2
+          RERUN_FAILED=1
         else
           echo "  WARNING: could not rerun run $RUN_ID — it will be remediated by an agent instead." >&2
           RERUN_FAILED=1
@@ -909,7 +1146,19 @@ if [[ "$ACTION" == agent-* ]]; then
       if (( RERUN_FAILED == 0 )); then exit 0; fi
     fi
   fi
+  # #3036: the one rerun is spent or impossible, so a delegated-approval PR is a human's.
+  if [[ "$ACTION" == "dlg-rerun" ]]; then
+    dlg_to_human "still red after its one rerun, or nothing to rerun"
+    exit 0
+  fi
   echo "  Attempt $((ATTEMPTS + 1))/$MAX_ATTEMPTS (crashes so far: $CRASHES/$MAX_CRASHES)."
+fi
+
+# #3036 refusal: no agent (content) push onto a delegated-approval branch, whatever the
+# classifier said — a second witness independent of classify_pr.
+if [[ "$(content_push_allowed "$BRANCH" "$ACTION")" != "yes" ]]; then
+  echo "ERROR: refusing a content push on delegated-approval branch $BRANCH (action $ACTION) — it would break the hash binding." >&2
+  exit 0
 fi
 
 # ── Build a worktree on the PR's EXISTING branch ───────────────────────────────
@@ -956,6 +1205,15 @@ if [[ "$ACTION" != "rebase-only" ]] && ! provision_worktree_modules "$WORKTREE";
 fi
 
 # ── rebase-only: mechanical merge of origin/main, no agent ─────────────────────
+# #3036: a red delegated PR's update goes on the attempt budget before the push, so a failed
+# push over-counts, the safe direction. No budget entry on record means no push.
+charge_dlg_red_update() {
+  [[ "$DLG_RED_UPDATE" == "yes" ]] || return 0
+  post_marked_comment "$ATTEMPT_MARKER" 'This delegated-approval PR is red and behind `main`, so `main` was merged in: a fix there can only reach this PR through a new head. No agent edited it. If it stays red, its update budget ends in `needs-human-review`.'
+  (( POST_MARKED_RC == 0 )) && return 0
+  echo "  WARNING: could not record this update on PR #$PR — not pushing it." >&2
+  return 1
+}
 if [[ "$ACTION" == "rebase-only" ]]; then
   echo "  Merging origin/main into $BRANCH (mechanical, no agent)..."
   # Merge (not rebase) so we never rewrite the PR branch's published history.
@@ -963,7 +1221,7 @@ if [[ "$ACTION" == "rebase-only" ]]; then
        merge origin/main --no-edit 2>&1; then
     if [[ "$(agent_worktree_git rev-parse HEAD)" == "$PRE_SHA" ]]; then
       echo "  Already up to date — nothing to push."
-    elif agent_worktree_git push origin "HEAD:${BRANCH}" 2>&1; then
+    elif charge_dlg_red_update && agent_worktree_git push origin "HEAD:${BRANCH}" 2>&1; then
       echo "  Pushed merge of main into $BRANCH (PR #$PR refreshed)."
     else
       echo "  WARNING: push failed for $BRANCH — left for a human." >&2
@@ -1128,6 +1386,9 @@ while true; do
       echo "  Pushed remediation ($SHA) to $BRANCH — CI will re-review PR #$PR."
     else
       echo "  WARNING: push failed for $BRANCH — worktree left at $WORKTREE for inspection." >&2
+      # #3583: a rejected push still spent an agent run, so it is charged as an attempt
+      # (else MAX_ATTEMPTS never trips and e.g. a .github/workflows/ PR retries forever).
+      post_marked_comment "$ATTEMPT_MARKER" "$(printf 'Auto-remediation produced a fix but the push to `%s` was rejected (for example the App lacks the `workflows` permission for changes under `.github/workflows/`). Nothing was published; this counts as an attempt. Left for a human; the worktree `%s` is kept for inspection.' "$BRANCH" "$WORKTREE")"
       exit 0
     fi
   else

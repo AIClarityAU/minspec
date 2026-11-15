@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-293-ai-review-round-cap-incremental/requirements.md",
+  "specHash": "4cb3cad6f73020fa16352e9c2ce2db7d8980d3809737e1725b4c0f73e4210d44",
+  "approvedAt": "2026-11-12T06:06:03.553Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-pile-1112a-implements",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3630#issuecomment-6815532762"
+}

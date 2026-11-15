@@ -100,7 +100,11 @@ DRAIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/drain-inbox.sh"
 # permanently OFF and the banner lying "OFF" while the pref said "on". Delegating
 # to `--pref-path` keeps a single source of truth (regression: #415).
 PREF="$("$DRAIN" --pref-path 2>/dev/null || true)"  # swallow-ok: an advisory session banner, not a gate; empty simply omits it
-if [[ -x "$DRAIN" ]]; then
+# A drain-dispatched agent (#2817) must never start a drain of its own: its session start
+# would launch a nested drain from the temp clone with default settings whenever the
+# singleton lock is free. agent-context.sh stamps MINSPEC_HEADLESS_AGENT=1 on every
+# dispatched launch (#1914), so that marker is the single signal (no second contract).
+if [[ -x "$DRAIN" && -z "${MINSPEC_HEADLESS_AGENT:-}" ]]; then
   if [[ -n "$PREF" && "$(cat "$PREF" 2>/dev/null || echo off)" == "on" ]]; then
     "$DRAIN" --auto 2>/dev/null || true
   else

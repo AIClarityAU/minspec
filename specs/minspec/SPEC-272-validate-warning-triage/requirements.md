@@ -1,7 +1,7 @@
 ---
 id: SPEC-272
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a validator warning that stays on every run teaches readers to skip the validator
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. The work edits four existing specs' own files plus (maybe) a validator
   rule; which of those this spec owns is decided at Plan, after Decisions D1-D2.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -73,6 +73,16 @@ Both rules ship at `warn` (FR-7 ratchet, `scripts/validate-frontmatter.ts` Rule 
 - The unrelated pre-existing warnings (`split-coverage`, `ref-check` for SPEC-011/015) seen in the same run.
 
 ## Decisions needed (Clarify)
+
+All 3 decisions are answered, not ratified: an agent session selected, for each, the option this
+document already recommended. No human chose them, and no delegation covers authoring Clarify
+answers (DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
+unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+
+- **D1 - Recorded selection: Option A,** build SPEC-095 task 6.5, so the warning clears on its own.
+- **D2 - Recorded selection: Option A,** no change to the evidence rule.
+- **D3 - Recorded selection: Option A,** one short "Status note" paragraph in each body, claims
+  re-verified.
 
 **D1 — SPEC-095's `text-io-inventory.test.ts` warning.**
 - **A (rec) — Build task 6.5, warning clears on its own.** True state is "unbuilt"; the warning is accurate and clears when FR-10's test lands. Cost: the warning persists on every run until then, which is the very "skip the validator's output" habit the issue warns about; mitigated only if 6.5 is scheduled soon.

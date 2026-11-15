@@ -284,6 +284,24 @@ function statusFromGit(
 }
 
 /**
+ * Expand git's diffstat rename compression back to a real path pair.
+ * `git diff --stat` renders a rename as `dir/{old => new}/tail` (common prefix
+ * and suffix factored out) or bare `old => new` when nothing is shared.
+ * Returns `null` for an ordinary path.
+ */
+export function expandRenamePath(p: string): { from: string; to: string } | null {
+  const braced = /^(.*)\{(.*) => (.*)\}(.*)$/.exec(p);
+  if (braced) {
+    const [, pre, a, b, post] = braced;
+    const join = (mid: string) => (pre + mid + post).replace(/\/{2,}/g, '/');
+    return { from: join(a), to: join(b) };
+  }
+  const bare = /^(.*) => (.*)$/.exec(p);
+  if (bare) return { from: bare[1], to: bare[2] };
+  return null;
+}
+
+/**
  * Build the pure {@link ConsequenceInput} for the consequence analyzers from the
  * current git diff. **This is the IO seam** (INV-1): all git/disk reads live here
  * in the analyzer-adjacent IO layer; the analyzers themselves stay pure and
@@ -341,7 +359,12 @@ export async function buildConsequenceInput(
   const changedFiles: ChangedFile[] = [];
 
   for (const file of files) {
-    const status = statusFromGit(file.file, created, deleted, renamed);
+    // A rename arrives as git's compressed `dir/{old => new}` stat form; resolve
+    // it to the destination path (new content) and source path (old content).
+    const expanded = expandRenamePath(file.file);
+    const filePath = expanded ? expanded.to : file.file;
+    const oldPath = expanded ? expanded.from : file.file;
+    const status = expanded ? 'renamed' : statusFromGit(filePath, created, deleted, renamed);
 
     let content: string | undefined;
     let oldContent: string | undefined;
@@ -352,12 +375,12 @@ export async function buildConsequenceInput(
       // working tree directly when not staged.
       try {
         if (staged) {
-          content = await git.show([`:${file.file}`]);
+          content = await git.show([`:${filePath}`]);
         } else {
           // Working-tree content: read from disk relative to repo root.
-          const abs = path.isAbsolute(file.file)
-            ? file.file
-            : path.join(repoPath, file.file);
+          const abs = path.isAbsolute(filePath)
+            ? filePath
+            : path.join(repoPath, filePath);
           content = await fsReadFile(abs);
         }
       } catch {
@@ -367,14 +390,14 @@ export async function buildConsequenceInput(
 
     if (status !== 'added') {
       try {
-        oldContent = await git.show([`HEAD:${file.file}`]);
+        oldContent = await git.show([`HEAD:${oldPath}`]);
       } catch {
         oldContent = undefined;
       }
     }
 
     changedFiles.push({
-      path: file.file,
+      path: filePath,
       insertions: file.insertions,
       deletions: file.deletions,
       status,

@@ -1,7 +1,7 @@
 ---
 id: SPEC-249
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - the gate's verdict must not depend on which sibling doc it happened to read
@@ -15,9 +15,9 @@ implements_reason: >-
   (declared as affects: at Plan, not now, so this spec does not freeze the gate while it is
   being specified).
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
