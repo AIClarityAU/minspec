@@ -77,9 +77,11 @@ change.
 
 ## 4 - Single copy of each case
 
-- [ ] **4.1** Delete `packages/minspec/tests/voter-survivor-reuse.test.ts` and
-  `packages/minspec/tests/review-protocol-tokens.test.ts`.
-  Deferred: the file stays until DR-097's citations are repointed (#3679 - DR-097 stale citations).
+- [x] **4.1a** Delete `packages/minspec/tests/review-protocol-tokens.test.ts`. Done in this
+  PR: nothing outside this spec cites it, and the ported guard suite covers its cases.
+- [ ] **4.1b** Delete `packages/minspec/tests/voter-survivor-reuse.test.ts`.
+  Deferred: that file stays on disk until DR-097's citations are repointed (task 4.2;
+  #3679 - DR-097 stale citations). Do not delete it before 4.2 is done.
 - [ ] **4.2** `docs/decisions/DR-097.md` - repoint its two citations of the deleted voter
   file to the shipped suite, keeping the `#2163 @ <sha>` addresses. No other wording.
   *Done when:* the FR-3 `git grep` in requirements.md returns only lines carrying a
