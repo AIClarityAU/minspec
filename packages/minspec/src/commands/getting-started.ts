@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { resolveApproverEmail } from './approve';
 import { installGitHubPrExtension } from './init';
+import { lookupGhUser } from '../lib/github';
 import {
   BOOTSTRAP_STEPS,
   hasOptInMarker,
@@ -17,7 +18,8 @@ import { GettingStartedPanel, OnboardingPage, type PageDeps } from '../views/get
  * SPEC-042 - `MinSpec: Getting Started` (`minspec.gettingStarted`).
  *
  * Opening the page reads settings and local git config and writes nothing. Every
- * network, mutating or external action hangs off a click message (see
+ * network, mutating or external action (including the `gh api user` read behind
+ * "Verify against GitHub") hangs off a click message (see
  * `OnboardingPage.handle`), so the command itself is as cheap as any other palette entry.
  */
 
@@ -83,6 +85,8 @@ export function buildPageDeps(
     runCommand: (commandId, ...args) => Promise.resolve(vscode.commands.executeCommand(commandId, ...args)),
     installGitHubPrExtension: () => installGitHubPrExtension(),
     seedEmail: () => seedForField(resolveApproverEmail(rootDir)),
+    // Click-gated (D4): only the page's "Verify against GitHub" handler calls this.
+    lookupGhIdentity: () => lookupGhUser(),
     openSettingsEditor: async (settingId) => {
       await vscode.commands.executeCommand('workbench.action.openSettings', settingId);
     },

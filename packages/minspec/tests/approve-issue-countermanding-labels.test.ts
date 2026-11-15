@@ -6,7 +6,7 @@
  * fixed set of labels that would otherwise countermand that `agent-ready` at dispatch
  * (`dispatch-ready-check.sh`'s `countermanded` arm). Its own comment claimed the
  * cleared set was "kept BYTE-ALIGNED" with the gate's list — it was not: the gate's
- * list (`dispatch-ready-check.sh`'s `for gate in ...` line) included `agent-done` and
+ * list (`dispatch-ready-check.sh`'s countermand list, now `COUNTERMAND_LABELS`) included `agent-done` and
  * `agent-escalated`, and the script's `--remove-label` list did not. An issue
  * approved while wearing either label ended up with `agent-ready` beside a
  * countermanding label, and the dispatcher refused it forever with no label and no
@@ -29,24 +29,28 @@
 import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import { spawnSync } from 'child_process';
 
 const GATE_PATH = path.resolve(__dirname, '../../../scripts/dispatch-ready-check.sh');
 const APPROVE_PATH = path.resolve(__dirname, '../../../scripts/approve-issue.sh');
 
-const GATE_SRC = fs.readFileSync(GATE_PATH, 'utf-8');
 const APPROVE_SRC = fs.readFileSync(APPROVE_PATH, 'utf-8');
 
-/** The gate's countermanding set — same extractor as drain-refused-slot.test.ts. */
-function extractGateList(src: string): string[] {
-  const m = src.match(/^for gate in ([a-z -]+); do$/m);
-  if (!m) {
+/**
+ * The gate's countermanding set, as the gate itself publishes it (`--countermand-labels`,
+ * #2645) - the same array its refusal loop walks, read the way drain-refused-slot.test.ts reads it.
+ */
+function extractGateList(): string[] {
+  const r = spawnSync('bash', [GATE_PATH, '--countermand-labels'], { encoding: 'utf-8' });
+  const set = r.status === 0 ? r.stdout.split('\n').filter(Boolean) : [];
+  if (set.length === 0) {
     throw new Error(
-      'Could not read the countermanding-label list out of dispatch-ready-check.sh. Fix this ' +
+      'Could not read the countermanding-label list from dispatch-ready-check.sh --countermand-labels. Fix this ' +
         'extractor rather than deleting the test: it is what proves approve-issue.sh clears ' +
         'the same labels the gate countermands on (#2644).',
     );
   }
-  return m[1].trim().split(/\s+/);
+  return set;
 }
 
 /** The set approve-issue.sh clears before/with the `agent-ready` it adds. */
@@ -67,7 +71,7 @@ function extractClearedList(src: string): string[] {
 const DELIBERATE_EXCEPTIONS = new Set(['agent-quarantined']);
 
 describe('#2644: approve-issue.sh clears every gate countermanding label it can', () => {
-  const gateList = extractGateList(GATE_SRC);
+  const gateList = extractGateList();
   const clearedList = extractClearedList(APPROVE_SRC);
 
   it('the gate list is non-trivial (sanity on the extractor)', () => {
