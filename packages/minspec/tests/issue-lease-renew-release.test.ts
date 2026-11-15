@@ -481,6 +481,31 @@ describe('lease renew survives a token that died under the ticker (#3501)', () =
     expect(calls().filter((a) => !a.includes('-X'))).toHaveLength(1);
   });
 
+  // #3735: verify-holds is the read that decides stand-down vs publish. A 401 on it used
+  // to read as "claim lost"; it must re-mint and retry once, and stay closed if that fails.
+  const renewLive = `_gh_bot_adopt ${LIVE} >/dev/null; lease_renew ${ITEM} || { echo SETUP-RENEW-FAILED; exit 90; }\n`;
+
+  it('lease_verify_holds re-mints after a 401 on the first read and still holds (#3735)', () => {
+    const r = run(`${renewLive}${holdDead}\nlease_verify_holds ${ITEM}; echo verify=$?`, {
+      FAKE_GH_REQUIRE_TOKEN: LIVE,
+      MINSPEC_GH_APP_TOKEN_SCRIPT: mintScript(),
+    });
+    expect(r.stdout, r.stderr).toContain('verify=0');
+    expect(r.stderr).toContain('HTTP 401');
+    expect(r.stderr).toContain('succeeded after a token re-mint');
+  });
+
+  it('lease_verify_holds stays closed when the retry also fails (#3735)', () => {
+    const same = path.join(dir, 'same.sh');
+    fs.writeFileSync(same, `#!/usr/bin/env bash\necho ${DEAD}\n`, { mode: 0o755 });
+    const r = run(`${renewLive}${holdDead}\nlease_verify_holds ${ITEM}; echo verify=$?`, {
+      FAKE_GH_REQUIRE_TOKEN: LIVE,
+      MINSPEC_GH_APP_TOKEN_SCRIPT: same,
+    });
+    expect(r.stdout).toContain('verify=1');
+    expect(r.stderr).toContain('Bad credentials (HTTP 401)');
+  });
+
   it('a ticker forked with a token that starts returning 401 renews after a re-mint', () => {
     const errFile = path.join(dir, 'ticker.err');
     const r = run(
