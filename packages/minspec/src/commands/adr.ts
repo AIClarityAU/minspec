@@ -262,6 +262,9 @@ async function applyStatus(
     // Pre-MinSpec DRs have no frontmatter. `setAdrStatus` will synthesize one,
     // but that mutates the file beyond a one-line status flip — so offer it
     // first rather than silently rewriting a hand-authored doc (#201).
+    // SPEC-095 FR-6: a record that opens with `---` but whose block cannot be read is NOT
+    // "no frontmatter": `adrHasFrontmatter` throws for it, so the catch below shows the
+    // error (naming the file) before any write, and no offer to add a second block.
     if (!adrHasFrontmatter(filePath)) {
       const ADD = 'Add Frontmatter';
       const choice = await vscode.window.showWarningMessage(

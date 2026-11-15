@@ -27,7 +27,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 
 import { generateHarnessFiles, refreshHarnessFiles } from '../src/lib/scaffold';
 import {
@@ -39,6 +39,9 @@ import {
   renderManagedBlock,
 } from '../src/lib/template-registry';
 import { splitManagedRegion } from '../src/lib/merge-refresh';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+useShellTimeout();
 
 const PRE_COMMIT = `${MINSPEC_HOOKS_DIR}/pre-commit`;
 const COMMIT_MSG = `${MINSPEC_HOOKS_DIR}/commit-msg`;
@@ -693,5 +696,95 @@ describe('python validate.py mirrors the Node validator core checks (#246)', () 
       const py = runValidatePy();
       expect(py.code, py.stderr).toBe(0);
     });
+  });
+});
+
+describe('pre-commit committed-symlink gate (#922) — executed behavior', { timeout: 60_000 }, () => {
+  let repo: string;
+  const git = (...args: string[]) =>
+    execFileSync('git', args, { cwd: repo, stdio: 'pipe' });
+
+  beforeEach(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-922-symlink-'));
+    git('init', '-q');
+    git('config', 'user.email', 'dev@example.com');
+    git('config', 'user.name', 'dev');
+    generateHarnessFiles(repo);
+  });
+
+  afterEach(() => {
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
+  function runHook(env: Record<string, string> = {}): { code: number; stderr: string } {
+    const hook = path.join(repo, PRE_COMMIT);
+    // `sh` (not bash) — the scaffolded hook is POSIX sh. Run on a branch so the
+    // protected-branch guard (no origin/HEAD → fails open) stays out of the way.
+    const res = spawnSync('sh', [hook], {
+      cwd: repo,
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: process.env.PATH ?? '', SYMLINK_GATE_OFF: '', ...env },
+    });
+    return { code: res.status ?? -1, stderr: res.stderr };
+  }
+
+  function stageLink(rel: string, target: string): void {
+    const full = path.join(repo, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.symlinkSync(target, full);
+    git('add', '-f', '--', rel);
+  }
+
+  it('template carries the gate and its bypass', () => {
+    const c = byPath(PRE_COMMIT).content;
+    expect(c).toContain('SYMLINK_GATE_OFF');
+    expect(c).toContain('120000');
+  });
+
+  it('refuses a node_modules symlink at the root, whatever the target', () => {
+    stageLink('node_modules', 'vendor');
+    const r = runHook();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("'node_modules' symlink");
+  });
+
+  it('refuses a node_modules symlink at depth', () => {
+    stageLink('packages/a/node_modules', 'sibling');
+    const r = runHook();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('packages/a/node_modules');
+  });
+
+  it('refuses a symlink with an absolute target', () => {
+    stageLink('link', '/home/dev/code/primary/thing');
+    const r = runHook();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('absolute path');
+  });
+
+  it('refuses a symlink whose target escapes the repo root', () => {
+    stageLink('a/link', '../../outside');
+    const r = runHook();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('escapes the repository root');
+  });
+
+  it('allows an in-repo relative symlink', () => {
+    fs.writeFileSync(path.join(repo, 'real.txt'), 'x\n');
+    stageLink('a/link', '../real.txt');
+    const r = runHook();
+    expect(r.stderr).not.toContain('refusing staged symlink');
+  });
+
+  it('SYMLINK_GATE_OFF=1 bypasses the gate', () => {
+    stageLink('node_modules', 'vendor');
+    const r = runHook({ SYMLINK_GATE_OFF: '1' });
+    expect(r.stderr).not.toContain('refusing staged symlink');
+  });
+
+  it('MINSPEC_GATE_OFF=1 bypasses the whole hook', () => {
+    stageLink('node_modules', 'vendor');
+    const r = runHook({ MINSPEC_GATE_OFF: '1' });
+    expect(r.code).toBe(0);
   });
 });
