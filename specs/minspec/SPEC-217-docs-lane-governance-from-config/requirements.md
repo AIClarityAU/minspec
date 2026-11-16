@@ -1,7 +1,7 @@
 ---
 id: SPEC-217
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - docs-lane.yml is a harness file shipped byte-for-byte to every adopter
@@ -17,8 +17,8 @@ implements_reason: >-
 affects: [.github/workflows/docs-lane.yml, packages/minspec/src/lib/ci-review-templates.ts, packages/minspec/src/lib/governance-transition.ts, scripts/lib/governance-transition.sh, scripts/push-docs.sh, packages/minspec/src/lib/approval-pr.ts, packages/minspec/tests/governance-lane-eligibility.test.ts, packages/minspec/tests/approval-pr.test.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -199,8 +199,10 @@ an agent session copied; no human chose them (each says so). Delegation DLG-001 
 of these selections and covers spec approval and engineering-DR acceptance only. An agent-recorded
 selection carries no consent, whoever prompted it. It is ratified only by approval of this spec, the
 founder's or the bot's under DLG-001, and that approval may overturn it. Every decision has a
-recorded selection, but the evidence gap under DQ-3 stays open and that text leaves it to the
-founder, so `phases.clarify` stays `pending`.
+recorded selection. The evidence gap under DQ-3 stays open as a finding for the approver to weigh
+(it is not a pending Clarify item); approval of this spec's text is the confirmation or reversal
+of every selection above, and `phases.clarify` is `done` only as a result of such an approval,
+which this text does not record.
 
 **DQ-1 — `.minspec/` present but `config.json` absent.** The extension treats this as "all
 defaults" (`config.ts:210-212`).
@@ -234,10 +236,10 @@ item c217, 2026-10-27 ("Yes (Recommended)"). A queue answer is not consent (DR-1
 4), so this selection is unverified and binds only if the founder approves this spec's text
 with it in place.
 
-The evidence gap stays open: no record yet decides whether an epic `status:` change is a
-human act, the search for one was partial, and the note below still stands. This selection
-does not close that gap. The founder confirms or reverses it, with the gap in view, when
-approving this spec's text.
+The evidence gap is a finding, not an unmade decision: no record yet decides whether an epic
+`status:` change is a human act, the search for one was partial, and the note below still
+stands. This selection does not close that gap. The approver confirms or reverses it, with the
+gap in view, by approving or refusing this spec's text.
 
 - `a` **(rec)** Include `epicsDir` (default `docs/epics`) in this change. *Cost:* it changes
   behaviour for this repo: an epic `status:` edit, for example `active` to `done`, now needs a

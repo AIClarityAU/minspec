@@ -38,7 +38,7 @@ push (no `workflows` scope): the founder pushes and merges it. Group 6 is founde
 
 ## 1 - Foundations
 
-- [ ] **1.1** (INV-4, FR-3) `packages/minspec/src/lib/ruleset-advisor.ts` - add `export` to
+- [x] **1.1** (INV-4, FR-3) `packages/minspec/src/lib/ruleset-advisor.ts` - add `export` to
   `rulesetGuardsDefaultBranchChecks`, `extractRequiredContexts` and the `RulesetFull`
   interface. No body changes.
   Test (`describe('INV-4 exports')`): each helper is importable and behaves as today on a
@@ -46,7 +46,7 @@ push (no `workflows` scope): the founder pushes and merges it. Group 6 is founde
   `null`.
   *Done when:* green, and the existing ruleset-advisor tests and `npm run typecheck` pass
   unchanged.
-- [ ] **1.2** (FR-5, DQ-1, DQ-3, AC-6 data) `scripts/lib/gate-manifest.ts` (new, owned) - the
+- [x] **1.2** (FR-5, DQ-1, DQ-3, AC-6 data) `scripts/lib/gate-manifest.ts` (new, owned) - the
   `SignalMechanism`, `GateWitness`, `GateEntry` types, `GATE_MANIFEST` with the seven entries
   in design.md "The manifest", and `GATE_LABEL_PATTERNS`. No IO, no imports beyond types.
   Test (`describe('FR-5 manifest')`): `ready-to-merge` has two witnesses of different
@@ -66,7 +66,7 @@ push (no `workflows` scope): the founder pushes and merges it. Group 6 is founde
 
 All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
 
-- [ ] **2.1** (FR-1 write predicate, DQ-7) `isGateSignalWrite` for shell text: status
+- [x] **2.1** (FR-1 write predicate, DQ-7) `isGateSignalWrite` for shell text: status
   (`gh api .../statuses/`), check-run writes (`.../check-runs` with `-X POST|PATCH`,
   `--method`, or any `-f`/`-F`/`--input`), label writes (`gh pr|issue edit` with
   `--add-label`/`--remove-label`) whose label matches `GATE_LABEL_PATTERNS` or is a variable.
@@ -74,7 +74,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   does not; `gh label create "ai-review:pass"` does not (the DQ-7 narrower predicate);
   `--remove-label agent-ready` does not; `--add-label "$LABEL"` does.
   *Done when:* green.
-- [ ] **2.2** (FR-1 unobserved/unsurfaced, FR-6 corollary, DQ-7, AC-1, AC-2) the shell
+- [x] **2.2** (FR-1 unobserved/unsurfaced, FR-6 corollary, DQ-7, AC-1, AC-2) the shell
   exit-status model of design.md: `errexit` and `pipefail` per unit, continuation joining, and the
   classification table, with the surfacing-forms constant.
   Test (`describe('FR-1 shell model')`): AC-1, `gh api .../statuses/... || true` is
@@ -91,7 +91,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   --add-label ready-to-merge && echo done` (write non-final in an `&&` list) is unobserved, while
   `echo go && gh pr edit --add-label ready-to-merge` (write last) is ok.
   *Done when:* green.
-- [ ] **2.3** (FR-1 inputs, P1) workflow extraction: line-based `run:` and `actions/github-script`
+- [x] **2.3** (FR-1 inputs, P1) workflow extraction: line-based `run:` and `actions/github-script`
   `script:` blocks with source line mapping, each step's `shell:` applied to the unit's initial
   `errexit`.
   Test (`describe('FR-1 workflow extraction')`): literal, strip-literal and folded block forms
@@ -99,7 +99,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   `errexit` off; `shell: bash` keeps it; an unrecognised block shape throws the scanner's
   could-not-run error rather than returning no units.
   *Done when:* green.
-- [ ] **2.4** (FR-1 JavaScript) the JavaScript model of design.md, via the `typescript`
+- [x] **2.4** (FR-1 JavaScript) the JavaScript model of design.md, via the `typescript`
   compiler API: awaited-not-caught is ok, floating promise is unobserved, `.catch` and
   `try/catch` handlers judged by the JavaScript surfacing forms or a rethrow, one level of
   same-block helper followed.
@@ -108,7 +108,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   `catch (e) { core.warning(...) }` is ok; `catch (e) { if (!isBenign(e)) throw e; }` is ok;
   `catch (e) { console.log(e) }` is unsurfaced; `issues.createLabel` is not a write.
   *Done when:* green.
-- [ ] **2.5** (FR-2, DQ-2, AC-3) annotations: `gate-signal-allow: <reason>` on the line
+- [x] **2.5** (FR-2, DQ-2, AC-3) annotations: `gate-signal-allow: <reason>` on the line
   immediately above, `#` or `//` leader; bare and orphan annotations are findings; the waiver
   summary renderer, which always renders, including `0 waivers honoured`.
   Test (`describe('FR-2 annotations')`): AC-3, the AC-1 fixture with a reasoned annotation
@@ -119,7 +119,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
 
 ## 3 - FR-1 entry point and the FR-3 checker
 
-- [ ] **3.1** (FR-1 IO, FR-7, AC-1 exit, AC-8) the IO entry of `scripts/check-gate-signals.ts`
+- [x] **3.1** (FR-1 IO, FR-7, AC-1 exit, AC-8) the IO entry of `scripts/check-gate-signals.ts`
   under a main guard (walk, read, print, exit 0/1/2, fail closed on unreadable file or zero
   workflows walked; `ci-review-templates.ts` and tests excluded), and `package.json` script
   `"check:gate-signals": "npx tsx scripts/check-gate-signals.ts"` with an optional `--root`
@@ -129,14 +129,14 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   AC-8 static audit, `check-gate-signals.ts` and `gate-manifest.ts` import no `child_process`,
   `node:http`, `node:https`, `fetch(` or `octokit`.
   *Done when:* green.
-- [ ] **3.2** (AC-4) the real-file regression. Test (`describe('AC-4 #810 regression')`): a
+- [x] **3.2** (AC-4) the real-file regression. Test (`describe('AC-4 #810 regression')`): a
   fixture of the pre-#854 `gh api "repos/$REPO/statuses/$SHA" ... || true` line is a finding;
   run on the real `.github/workflows/ai-review.yml`, the scanner reports nothing for the line
   holding `statuses/$PR_HEAD_SHA` nor for either `-X POST "repos/$REPO/check-runs"` line
   (located by content).
   *Done when:* green on `main` as it stands, with no workflow edit (the other findings in that
   file are expected and not asserted here).
-- [ ] **3.3** (FR-3, DQ-3, AC-5, AC-6, AC-10) `scripts/audit-gate-witnesses.ts` (new, owned)
+- [x] **3.3** (FR-3, DQ-3, AC-5, AC-6, AC-10) `scripts/audit-gate-witnesses.ts` (new, owned)
   pure part: `evaluateWitnesses(required, manifest, self)` and the `SELF_CONTEXTS` constant
   (`lint`, `gate-witnesses`), with the four finding kinds and the stale-entry notice of
   design.md.
@@ -146,7 +146,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   finding; AC-10, `required` lacking `gate-witnesses` yields `not a required context` and the
   output lists every observed context; an unrequired manifest entry is a notice, not a finding.
   *Done when:* green.
-- [ ] **3.4** (FR-3 read, DQ-6, INV-4) same file: the read through an injected runner, the
+- [x] **3.4** (FR-3 read, DQ-6, INV-4) same file: the read through an injected runner, the
   selection loop with exported `rulesetGuardsDefaultBranchChecks` and `extractRequiredContexts`,
   union across guarding rulesets, every read and parse failure as could-not-run.
   Test (`describe('FR-3 read')`, fake runner): list call exits non-zero, exit 2 and stderr
@@ -156,7 +156,7 @@ All in `scripts/check-gate-signals.ts` (new, owned), as exported pure functions.
   `disabled` ruleset is skipped; the file imports both helpers from `ruleset-advisor` and
   contains no `required_status_checks` string of its own.
   *Done when:* green.
-- [ ] **3.5** (FR-3 IO, FR-7, AC-8) same file's IO entry under a main guard: repo from `--repo`
+- [x] **3.5** (FR-3 IO, FR-7, AC-8) same file's IO entry under a main guard: repo from `--repo`
   or `GITHUB_REPOSITORY` (neither is exit 2), the honoured-`failClosed` summary printed every
   run, exit 0/1/2; `package.json` script
   `"audit:gate-witnesses": "npx tsx scripts/audit-gate-witnesses.ts"`.
