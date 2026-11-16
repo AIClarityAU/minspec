@@ -62,8 +62,12 @@ Verified against `origin/main` at `722e7b57` (2026-10-02); `approve.ts` line cit
   this document: `approve.ts:70-100` → the function is now `approve.ts:222-462` and, more to
   the point, it gained **two more refusal gates** since this spec was written (the #1317
   ownership-advance check (now the shared `assertOwnershipDeclaredForAdvance` guard) and the DR-056 approver-identity check) — FR-10 and
-  the Blast-Radius section below now name all three; `spec-panel-html.ts:131-138` →
+  the Blast-Radius section below now name every gate (including the `.minspec/` opt-in
+  marker check and the terminal-status filter); `spec-panel-html.ts:131-138` →
   `spec-panel-html.ts:144-151`.
+- **Re-approval needed.** This refresh edits the approved body (FR-10, risk 4, checklist,
+  touch-surface list), so the 2026-09-22 approval of this spec reads as stale until the
+  founder re-approves it (unverified: hash not recomputed here).
 - A new interaction this spec did not know about when written: `approveSpecCommand` now also
   fires a DR-057 post-approve phase-advance toast. Recorded as **FR-OQ3** (new open question)
   and in Blast-Radius, not resolved here — it is a plan-phase sequencing choice.
@@ -229,25 +233,35 @@ for content-bearing artifacts (specs, ADRs).
 
 ### Approve + chain to next (the signpost walk)
 
-- **FR-10 (Approve runs the DR-012 gate, never bypasses it — THREE refusal checks, not
+- **FR-10 (Approve runs the DR-012 gate, never bypasses it — FIVE refusal checks, not
   one).** `approveSpecCommand` ([`approve.ts:222-462`](../../../packages/minspec/src/commands/approve.ts#L222-L462))
-  has grown two refusal gates since this spec was first written, and the scroll-bottom
-  primary action MUST reuse all three, in the same order, or the pretty door is the R2
+  has grown refusal gates since this spec was first written, and the scroll-bottom
+  primary action MUST reuse every one, in the same order, or the pretty door is the R2
   bypass this spec exists to prevent:
+  0. The `.minspec/` opt-in marker (`hasOptInMarker` / `notOptedInMessage`, SPEC-096 FR-6,
+     backing constitution invariant 3) — refuse when the folder is not opted in. It runs twice:
+     before the spec picker (the `!hasOptInMarker(rootDir)` check near the top of
+     `approveSpecCommand`, `approve.ts:239-242`) and again after the dialogs and before the
+     status flip (the "SPEC-096 FR-6, again" comment, `approve.ts:365-368`).
+  0a. Terminal-lifecycle filter (#440) — `done`/`archived`/`superseded` specs are dropped from
+     the picker via `isTerminalSpecStatus` (`approve.ts:257`). A spec passed in from the tree
+     skips this filter by design, so the webview, which opens one specific artifact, must
+     decide explicitly whether to refuse terminal-status specs rather than inherit either
+     behaviour silently.
   1. `validateSpec` — refuse on blocking violations
-     ([`approve.ts:273-299`](../../../packages/minspec/src/commands/approve.ts#L273-L299)).
+     (the `validateSpec` call in `approveSpecCommand`, [`approve.ts:273-299`](../../../packages/minspec/src/commands/approve.ts#L273-L299)).
   2. `assertOwnershipDeclaredForAdvance` (#1317 / #1806) — the shared guard
      (`ownership-advance-guard.ts`, which wraps `violationsIntroducedByApproval`); refuse when
      the status/phase advance approval itself triggers would newly violate a rule that did not
      apply before the advance. `approve.ts` calls the shared guard, it does not carry its own
-     inline copy ([`approve.ts:301-330`](../../../packages/minspec/src/commands/approve.ts#L301-L330)).
+     inline copy (the `assertOwnershipDeclaredForAdvance` call, [`approve.ts:301-330`](../../../packages/minspec/src/commands/approve.ts#L301-L330)).
   3. The DR-056 approver-identity check — refuse an agent/bot or absent identity before
-     any status flip ([`approve.ts:332-358`](../../../packages/minspec/src/commands/approve.ts#L332-L358)).
+     any status flip (the "DR-056 Decision 2" block, [`approve.ts:332-358`](../../../packages/minspec/src/commands/approve.ts#L332-L358)).
 
   Surfacing blocking violations for whichever gate refuses. On success it records the
   approval (re-hash) / acceptance / promotion appropriate to the node kind. The webview
   MUST NOT be a softer path to approval than the existing command — "gate parity" means
-  parity with all three gates, not just the first.
+  parity with every gate above, not just `validateSpec`.
 - **FR-11 (Approve advances, does not close).** After a successful decision the panel MUST
   **not** close. It MUST request the next human task from the SPEC-012 resolver and load
   that artifact into the same panel. The panel closes only when the resolver reports the
@@ -322,10 +336,10 @@ that pin it.
    FR-17 import-ban both collapse and must be re-split. Establish the boundary in the first
    module, not after.
 4. **Gate-call reuse of `approveSpecCommand` (FR-10, INV — Gate parity).** FR-10 requires the
-   webview reuse `approve.ts:222-462`'s three refusal gates (`validateSpec`,
+   webview reuse `approve.ts:222-462`'s refusal gates (opt-in marker, terminal-status filter, `validateSpec`,
    `assertOwnershipDeclaredForAdvance`, the DR-056 approver-identity check) *verbatim*, not a
    fork of any one of them. A copied-then-drifted validator path is the exact bypass R2
-   warns of, and it is now a three-way target, not a one-way one, because two gates were
+   warns of, and it is now a multi-way target, not a one-way one, because several gates were
    added to `approveSpecCommand` after this spec was first written — exactly the drift this
    seam is ranked to warn against. Refactoring two divergent approval paths back into one
    later is far costlier than wiring the single shared call now.
@@ -414,7 +428,7 @@ Checkbox DoD tracing the FRs. The feature is "done" only when all hold.
   with a non-colour "changed · rev N" label/tooltip (WCAG 1.4.1); cleared on approve (FR-7,
   FR-7a, FR-8).
 - [ ] **Approve is never softer than the command** — the scroll-bottom action runs, and
-  refuses on, all three `approveSpecCommand` gates (`validateSpec`,
+  refuses on, every `approveSpecCommand` gate (opt-in marker, terminal-status filter, `validateSpec`,
   `assertOwnershipDeclaredForAdvance`, the DR-056 approver-identity check —
   `approve.ts:222-462`), not only the first; a revision forces a visible re-hash so prior
   approval goes `stale` (FR-9, FR-10, INV — Gate parity).
@@ -482,15 +496,15 @@ Checkbox DoD tracing the FRs. The feature is "done" only when all hold.
 Beyond the `depends_on: SPEC-012` link above, the declared touch-surface and the failure
 each change would trigger:
 
-- **`approve.ts:222-462` (`approveSpecCommand`, now THREE refusal gates, not one)** — FR-10
-  reuses all of it verbatim: `validateSpec` (`:273-299`), the #1317/#1806
+- **`approve.ts:222-462` (`approveSpecCommand`, now FIVE refusal checks, not one)** — FR-10
+  reuses all of it verbatim: the `.minspec/` opt-in marker (`:239-242`, `:365-368`), the terminal-status filter (`:257`), `validateSpec` (`:273-299`), the #1317/#1806
   `assertOwnershipDeclaredForAdvance` shared guard (`:301-330`), and the DR-056 approver-identity check
   (`:332-358`). The last two did not exist when this spec was first written — FR-10 was
   originally scoped to `validateSpec` alone — so any implementer working from an older reading
   of this spec would wire only the first gate and leave the webview's Approve weaker than the
   command, which is exactly the R2 bypass this spec exists to prevent. If any gate's signature
   or refusal behaviour changes, the webview's Approve silently diverges from
-  `minspec.approveSpec` → INV — Gate parity breaks (R2). Any edit to any of the three must
+  `minspec.approveSpec` → INV — Gate parity breaks (R2). Any edit to any of these gates must
   re-run the gate-parity test for both surfaces.
 - **`spec-validator.ts` (DR-012 gate)** — the validator the gate calls. A new violation class
   added there must surface in FR-2's header and be refused by FR-10; a missing-vs-dangling
