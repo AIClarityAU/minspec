@@ -31,7 +31,7 @@ phases:
 > this, answers the questions under **Decisions needed (Clarify)**, and approves the spec
 > through the normal spec-approval gate before any Plan/Tasks/Implement work starts.
 
-Materializes **[#35](https://github.com/AIClarityAU/minspec/issues/35)** — surfaced
+Materializes **#35 (unrelated test failures raise no issue)** — surfaced
 2026-05-30 while fixing two status-bar bugs: the test run showed 5 unrelated failures
 (`spec-tree-provider` grouping ×3, `creates three file system watchers` ×1, and one more)
 caused by other in-flight, uncommitted work (DR-362 HITL gate + a spec-tree-provider change),
@@ -50,8 +50,8 @@ authority — if it reports a collision at review time, renumber to the id it re
 MinSpec's test suite (`npm test` → `vitest run`) and its agent-dispatch roles
 (`scripts/dispatch-issue.sh`) both run the full suite as part of normal workflow — a dev
 fixing one bug, or an agent implementing one issue, sees whatever else is red in the tree at
-that moment. With ~15 concurrent sessions typical in this repo (per `CLAUDE.md`'s
-Concurrent-session-branches note) and frequent in-flight uncommitted work, unrelated failures
+that moment. With several sessions often sharing one checkout (unquantified; no count is claimed here) and
+frequent in-flight uncommitted work, unrelated failures
 in a test run are common, not exceptional. Today nothing distinguishes "this failure is from
 my change" from "this failure was already there" — a human or agent has to read test names and
 reason about it by hand, every run, and a wrong guess either (a) ships a change that silently
