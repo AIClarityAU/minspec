@@ -9,7 +9,7 @@ aspects: [approval, dr-acceptance, extension-command, no-silent-gate]
 relates_to: [SPEC-251, SPEC-290, SPEC-041, DR-065, DR-056, DR-062, "#3017", "#3016", "#2861", "#2992", "#2628"]
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
