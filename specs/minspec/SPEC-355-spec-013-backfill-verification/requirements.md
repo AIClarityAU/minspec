@@ -1,5 +1,5 @@
 ---
-id: SPEC-097
+id: SPEC-355
 type: requirements
 status: specifying
 tier: T4
@@ -104,11 +104,16 @@ the same class of miss RD-1's first pass is suspected of making.
 ### The approval-hash collision this pass will hit, repeatedly
 
 `specHash` (DR-012, amended by DR-034/SPEC-022) is canonical over the **whole spec body**
-minus `status:`/`phases:` (`packages/shared/src/canonical.ts`, `getSpecBodyOnly`). Editing
+minus the lifecycle fields (`packages/shared/src/canonical.ts`: `specHash` at :126 hashes
+`canonicalizeSpec` at :89; `getSpecBodyOnly` is the distinct SPEC-017 FR-4 baseline, not the
+approval hash). Editing
 a Risks or Consequences section to fix an L0/L1 finding edits those bytes. Measured on this
-branch: **78** specs already carry an approval record under `.minspec/approvals/` — so a
+branch: **183** SPEC requirements files already carry an approval record
+(`find .minspec/approvals/specs -name requirements.md.json | grep -c '/SPEC-'`; the
+product-level `specs/minspec` record is excluded because it is not a `SPEC-NNN` file; the
+count moves with every merge, so FR-7 recomputes it) — so a
 disposition that edits an already-approved spec's body will stale that approval, by
-design (DR-012's whole point), on every one of those 78 specs a finding touches. DRs carry
+design (DR-012's whole point), on every one of those specs a finding touches. DRs carry
 no such hash (DR-051: specs/DRs/epics commit direct on main, gated only by the pre-commit
 corpus check), so this collision is specs-only. **This is the single largest scope risk in
 this spec and is why DQ-1 below exists** — it is not a corner case, it is the expected
@@ -178,7 +183,10 @@ see DQ-1's Option C.
   Approve Spec flow (DR-012) before this spec's work is considered complete, and the set
   of specs needing re-approval MUST be named up front (derivable from FR-1's enumeration
   intersected with existing approval records) rather than discovered one stale-approval
-  warning at a time. See DQ-1 — this FR assumes DQ-1's Option A.
+  warning at a time. **Conditional on DQ-1:** this FR is the Option A form. If Clarify picks
+  Option B (report-only on approved specs), FR-7 instead requires the report to name the
+  deferred set and the matching acceptance criterion is replaced by "the deferred set is
+  named in the report"; approving this spec does not itself settle DQ-1.
 
 - **FR-8 (scope boundary — a catch-up pass, not a standing gate).** This spec ships no new
   CI check, editor warning, or validator rule that runs on every future save. Turning
@@ -196,7 +204,7 @@ see DQ-1's Option C.
 ## Acceptance Criteria
 
 - [ ] The report's per-artifact listing has zero set-difference against a fresh
-      `find specs -name requirements.md` / `find docs/decisions -name 'DR-*.md'` run at
+      `find specs -path 'specs/*/SPEC-*/requirements.md'` / `find docs/decisions -name 'DR-*.md'` run at
       report-generation time. (FR-1, FR-5)
 - [ ] Every artifact in that listing appears in the report with a disposition for every
       finding the run's active layers (FR-2) raised against it, or an explicit "no
@@ -234,7 +242,7 @@ see DQ-1's Option C.
 
 ### DQ-1 — How does the pass handle the approval-hash collision on already-approved specs?
 
-The Context section above measures 78 specs with a live approval record today; any
+The Context section above measures 183 SPEC requirements files with a live approval record today; any
 finding fixed on one of them stales that approval.
 
 - **Option A — accept the re-approval wave, named up front (rec).** Fix every finding
@@ -287,6 +295,19 @@ those files.
   run entirely, by a hard-coded cutoff.** **Cost:** a cutoff with no mechanical check that
   everything below it is actually legacy-shaped is the same unverified-exclusion risk this
   whole pass exists to close — an unchecked assumption standing in for a measurement.
+
+## Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|-----------|--------|------------|
+| Re-approval load: fixing findings stales many approvals at once | High | Founder re-approval queue | FR-7 names the set up front; DQ-1 chooses the handling |
+| SPEC-013 floor not shipped, so the pass cannot run | Medium | Spec stays blocked | FR-9 sequencing; DQ-2 layer scope |
+| Unparseable artifacts silently dropped | Medium | False "clean" corpus | FR-4 and the unparseable category; DQ-3 |
+
+## Consequences
+
+- A one-time wave of re-approvals lands on already-approved specs if DQ-1 resolves to Option A.
+- The corpus gains a consolidated, human-readable disposition report (FR-6); no standing gate is added (FR-8).
 
 ## Out of Scope
 
@@ -342,9 +363,8 @@ Recorded because this spec was written without a live conversation (DR-086 §4, 
 
 ## Id note
 
-This id was picked by taking the highest `SPEC-NNN` found under `specs/**/requirements.md`
-on this branch (`SPEC-096`) and adding one. This dispatch runs with no network access and
-is not permitted to check open pull requests or other local worktrees for a claimed
-`SPEC-097`, unlike the DR-id collision gate's own check (`scripts/check-dr-id-collision.ts`,
-which has no spec-id analogue today). If this id collides with another spec at review
-time, renumber per that same convention.
+Originally drafted as `SPEC-097`, which collided with the approved
+`SPEC-097-watcher-config-source` (caught by `npm run validate`'s duplicate-id check).
+Renumbered to `SPEC-355`: the highest `SPEC-NNN` claimed on any local branch was `SPEC-354`.
+Open pull requests are not visible from this no-network dispatch; if `SPEC-355` collides at
+review time, renumber per the same convention.
