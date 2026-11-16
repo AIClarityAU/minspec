@@ -329,6 +329,7 @@ const EXEMPT: Record<string, string> = {
   '15': 'ships as warn behind a config ratchet and fires only on T3/T4 specs past Clarify; covered by ownership tests',
   '21': 'needs the rendered CLAUDE.md template to be doubled; covered by doubled-sections tests',
   '22': 'ships as warn behind a config ratchet; covered by implement-evidence tests',
+  '27': 'warn-only Clarify wording check (#3390); covered by validate-frontmatter-clarify-wording.test.ts',
 };
 
 // ---- Suites ----------------------------------------------------------------
