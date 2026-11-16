@@ -61,11 +61,11 @@ at the product level, and its three line items are checked done in
 - **The command** `MinSpec: Declare Session Scope` (`packages/minspec/package.json:113`,
   registered `packages/minspec/src/extension.ts:437`) asks scope/project/type and an
   initial file allowlist (`packages/minspec/src/commands/session.ts`).
-- **The detector** is `handleFileSaveDriftCheck` (`packages/minspec/src/extension.ts:994-1010`):
+- **The detector** is `handleFileSaveDriftCheck` (`packages/minspec/src/extension.ts:1074-1089`):
   on every text-document save, it loads the session and calls `isFileInScope`
   (`session.ts:90-122`) against the **saved file's path**. A path outside the allowlist
   calls `showDriftWarning`.
-- **The warning** (`extension.ts:1013-1047`) is a one-shot `vscode.window.showWarningMessage`
+- **The warning** (`extension.ts:1112-1157`) is a one-shot `vscode.window.showWarningMessage`
   with three choices — **Park as Issue**, **Add to Scope**, **Dismiss** — already wired to
   `createParkingLotEntry` / `parkTopic` (`lib/parking-lot.ts`) and `addToScope` /
   `saveSession` (`lib/session.ts`). No status-bar item or CodeLens is involved; the
@@ -115,7 +115,7 @@ can watch (DQ-1).
 - **FR-1 - A second detector, additive to FR-7's.** This feature MUST be a new,
   independent check and MUST NOT replace, narrow, or change the behaviour of the
   existing file-path drift detector (`handleFileSaveDriftCheck`,
-  `extension.ts:994-1010`) or its warning (`:1013-1047`). Both can fire independently
+  `extension.ts:1074-1089`) or its warning (`:1112-1157`). Both can fire independently
   for the same save.
 
 - **FR-2 - `minspec.checkScopeDrift` command.** A command, contributed and registered
@@ -165,13 +165,13 @@ can watch (DQ-1).
 
 - **FR-5 - Status-bar indicator.** A new status-bar item (added to
   `packages/minspec/src/views/status-bar.ts`, alongside `MinSpecNextTaskStatusBar` /
-  `MinSpecScaffoldCommitStatusBar` / `MinSpecTidyPrimaryStatusBar`, `:105-165-223`)
+  `MinSpecScaffoldCommitStatusBar` / `MinSpecTidyPrimaryStatusBar`, `:112`, `:172`, `:230`)
   shows a neutral state when no trigger has fired since the session was declared (or
   no session is active) and a warning state after a match, with the matched phrase(s)
   in its tooltip. Clicking it offers the same three choices FR-7's warning already
   offers — Park as Issue / Add to Scope / Dismiss — reusing `createParkingLotEntry` /
   `parkTopic` / `addToScope` / `saveSession` exactly as `showDriftWarning`
-  (`extension.ts:1013-1047`) does, so the two detectors share one resolution path. The
+  (`extension.ts:1112-1157`) does, so the two detectors share one resolution path. The
   indicator MUST clear back to neutral on Dismiss, Add to Scope, or declaring a new
   session, and MUST persist its last-known state across a VS Code window reload for the
   same session. `SessionState` (`packages/minspec/src/lib/session.ts:8` onward) has **no
@@ -303,7 +303,7 @@ like Claude Code.
 ### DQ-2 - When does the automatic scan run?
 
 - **Option A - on save, alongside the existing file-path check (rec).** Reuses
-  `handleFileSaveDriftCheck`'s call site (`extension.ts:994` onward) as the hook point;
+  `handleFileSaveDriftCheck`'s call site (`extension.ts:1074` onward) as the hook point;
   one listener, two independent checks. *Cost:* misses drift visible only in unsaved
   text (a long comment or TODO typed but not yet saved).
 - **Option B - on every text change (`onDidChangeTextDocument`), debounced.** *Cost:* a
