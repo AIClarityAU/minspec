@@ -106,8 +106,6 @@ describe('review-decide.sh — blocked (reviewer could not run: quota/transient)
  * anchoring none: a marker one sees and another misses is a forgery channel (#1165).
  */
 describe('review-decide.sh — a prose mention is not a marker (#1157)', () => {
-  const BLOCKED = 'ai-review:blocked';
-
   it('inline `REVIEW_UNAVAILABLE` in prose does not force blocked', () => {
     const cited =
       '- **`ai-review.yml:560`** the `REVIEW_UNAVAILABLE_BEGIN/END` sed range. ✅ Confirmed.\n' +
@@ -307,5 +305,29 @@ describe('#1157 — the ambiguity guard shows its evidence', () => {
     const secret = 'SUPER_SECRET_DIFF_CONTENT';
     const { err } = run(`${secret}\n${TWO_BLOCKS}`);
     expect(err).not.toContain(secret);
+  });
+});
+
+describe('review-decide.sh — block completeness (#1456)', () => {
+  it('BEGIN with no END (truncated agent output) → changes', () => {
+    expect(decide('REVIEW_VERDICT_BEGIN\nverdict: pass\nblocking: 0\n')).toBe(CHANGES);
+  });
+
+  it('END with no BEGIN → changes', () => {
+    expect(decide('verdict: pass\nblocking: 0\nREVIEW_VERDICT_END\n')).toBe(CHANGES);
+  });
+
+  it('END before BEGIN with the block left unclosed → changes (#3484 second review)', () => {
+    expect(
+      decide('REVIEW_VERDICT_END\nREVIEW_VERDICT_BEGIN\nverdict: pass\nblocking: 0\n'),
+    ).toBe(CHANGES);
+  });
+
+  it('two ENDs → changes', () => {
+    expect(decide(block('pass', '0') + '\nREVIEW_VERDICT_END\n')).toBe(CHANGES);
+  });
+
+  it('a complete single block still greens', () => {
+    expect(decide(block('pass', '0'))).toBe(PASS);
   });
 });

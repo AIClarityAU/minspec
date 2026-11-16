@@ -2,12 +2,15 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { queueRequestPath, enqueuePhaseAdvance } from '../src/lib/phase-advance-queue';
+import { queueRequestPath, enqueuePhaseAdvance, listQueuedRequests } from '../src/lib/phase-advance-queue';
 
 let tmp: string;
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-queue-'));
+  // SPEC-096: the queue lives in `.minspec/`, so a request is written only in a
+  // folder that has opted in. The store used to create that directory itself.
+  fs.mkdirSync(path.join(tmp, '.minspec'));
 });
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -78,5 +81,39 @@ describe('enqueuePhaseAdvance() — LLM-free request write (DR-057 §2 / #733)',
     const p = queueRequestPath(tmp, 'specs/minspec/SPEC-009-bar/requirements.md');
     const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
     expect(parsed.specPath).toBe('specs/minspec/SPEC-009-bar/requirements.md');
+  });
+});
+
+describe('listQueuedRequests() — queue-depth visibility (#737)', () => {
+  it('is empty when there is no queue directory, and writes nothing', () => {
+    expect(listQueuedRequests(tmp)).toEqual([]);
+    expect(fs.existsSync(path.join(tmp, '.minspec', 'queue'))).toBe(false);
+  });
+
+  it('lists every enqueued spec, oldest first', () => {
+    enqueuePhaseAdvance(tmp, 'specs/a/requirements.md', 'alt-a-toast');
+    enqueuePhaseAdvance(tmp, 'specs/b/requirements.md', 'alt-a-toast');
+    const older = queueRequestPath(tmp, 'specs/b/requirements.md');
+    fs.writeFileSync(
+      older,
+      JSON.stringify({ specPath: 'specs/b/requirements.md', requestedAt: '2020-01-01T00:00:00.000Z', source: 'alt-a-toast' }),
+    );
+    const got = listQueuedRequests(tmp);
+    expect(got.map((r) => r.specPath)).toEqual(['specs/b/requirements.md', 'specs/a/requirements.md']);
+  });
+
+  it('re-enqueuing the same spec keeps depth at one', () => {
+    enqueuePhaseAdvance(tmp, 'specs/a/requirements.md', 'alt-a-toast');
+    enqueuePhaseAdvance(tmp, 'specs/a/requirements.md', 'alt-a-toast');
+    expect(listQueuedRequests(tmp)).toHaveLength(1);
+  });
+
+  it('still counts a malformed request file, recovering the spec path from its name', () => {
+    const p = queueRequestPath(tmp, 'specs/c/requirements.md');
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, '{not json');
+    expect(listQueuedRequests(tmp)).toEqual([
+      { specPath: 'specs/c/requirements.md', requestedAt: undefined },
+    ]);
   });
 });

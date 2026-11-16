@@ -55,8 +55,16 @@ const DR_ID_RE = /^DR-(\d+)$/;
 /** A decision FILE: `DR-` + digits, optional descriptor, `.md`. Mirrors adr-manager's ADR_FILE_RE. */
 const DR_FILE_RE = /^DR-(\d+).*\.md$/;
 
-/** The leading YAML frontmatter block. Mirrors adr-manager's FRONTMATTER_RE. */
-const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---/;
+/**
+ * The leading YAML frontmatter block. Mirrors adr-manager's FRONTMATTER_RE.
+ * `\r?\n`, not `\n` — a CRLF decision file (Windows checkout; `docs/decisions/**`
+ * is not LF-pinned in this repo's `.gitattributes`, #2465) must still match this
+ * anchor. A bare `\n` returns no match on CRLF content, which `declaredIdFromContent`/
+ * `frontmatterField` then read as "no frontmatter" rather than failing loudly —
+ * silently disabling the duplicate-id gate this module exists to run. Same fix
+ * already proven in `declaredSpecId` (spec-id-collision.ts).
+ */
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 
 /** PR file statuses that INTRODUCE a path. `modified` does not: that file already exists on base. */
 const CLAIMING_STATUSES = new Set(['added', 'renamed', 'copied']);
@@ -113,7 +121,19 @@ export function declaredIdFromContent(content: string): string | undefined {
 export function frontmatterField(content: string, field: string): string | undefined {
   const fm = content.match(FRONTMATTER_RE);
   if (!fm) return undefined;
-  const re = new RegExp(`^${field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*(.*)$`);
+  // Trailing `\r?` before `$`, NOT an `m` flag (#2465). This is tested against
+  // ONE line at a time, but on a CRLF file that line still carries a trailing
+  // `\r` (split only breaks on `\n`); without accounting for it, `$` anchors on
+  // the true end of the string and a `(.*)$` whose `.` cannot itself match `\r`
+  // (ECMA-262 excludes it as a LineTerminator) never reaches it — the whole
+  // match fails, same silent-"no frontmatter" shape as FRONTMATTER_RE's own
+  // `\n`-only anchor. Reaching for `m` instead would be the WRONG fix and is
+  // exactly the defect class `ownership-list-parity.test.ts` (#1961) guards
+  // against: this pattern's `\s*` matches a bare newline too, so under `m` a
+  // valueless key (`title:` with nothing after it) would cross into the NEXT
+  // line and report its content as this field's value. An explicit `\r?` says
+  // only "an optional trailing CR", carrying none of that risk.
+  const re = new RegExp(`^${field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*(.*)\\r?$`);
   for (const line of fm[1].split('\n')) {
     const match = line.match(re);
     if (match) {

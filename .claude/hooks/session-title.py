@@ -18,6 +18,8 @@ Rules:
     text), so reading `docs/decisions/INDEX.md` does not flood the title.
   - Most-recently-mentioned first, deduped, capped so the whole title fits the
     harness's 200-character limit.
+  - A session started with exactly `/chief-of-staff` keeps the fixed title
+    "Chief of Staff" regardless of refs.
   - No IDs found -> emit nothing, leaving Claude Code's own title untouched.
   - Every failure path is silent and non-blocking: a title is cosmetic, and a
     broken hook must never cost the user a turn.
@@ -36,6 +38,14 @@ MAX_TITLE = 200
 MAX_REFS = 6
 # Bound how much transcript we parse, so the hook stays fast on long sessions.
 MAX_TAIL_BYTES = 8 * 1024 * 1024
+
+# The founder's proxy session (started with /chief-of-staff) keeps this exact title.
+PROXY_TITLE = "Chief of Staff"
+# The start command sits at the very top of the transcript; the tail window can
+# miss it on a long session, so look at the head instead.
+HEAD_BYTES = 64 * 1024
+# Exact closing tag: /chief-of-staff-runner[-light] share the prefix, not the tag.
+PROXY_CMD = "<command-name>/chief-of-staff</command-name>"
 
 SEPARATOR = " — "
 
@@ -64,6 +74,34 @@ def read_tail(path: str) -> list[str]:
             fh.readline()  # drop the partial line we landed in the middle of
         data = fh.read()
     return data.decode("utf-8", "replace").splitlines()
+
+
+def is_proxy_session(path: str) -> bool:
+    """True when the transcript's opening user entries carry the exact
+    /chief-of-staff command (not /chief-of-staff-runner*)."""
+    with open(path, "rb") as fh:
+        data = fh.read(HEAD_BYTES)
+    lines = data.decode("utf-8", "replace").splitlines()[:-1]  # last may be cut
+    seen = 0
+    for line in lines:
+        if '"type":"user"' not in line and '"type": "user"' not in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+        if entry.get("type") != "user":
+            continue
+        content = (entry.get("message") or {}).get("content")
+        if not isinstance(content, str):
+            continue
+        if content.lstrip().startswith("<command-message>") or content.lstrip().startswith("<command-name>"):
+            if PROXY_CMD in content:
+                return True
+        seen += 1
+        if seen >= 5:  # the start command is among the first few user entries
+            break
+    return False
 
 
 def user_prompts(lines: list[str]) -> list[str]:
@@ -145,6 +183,22 @@ def main() -> int:
 
     prompts: list[str] = []
     transcript = envelope.get("transcript_path")
+    if transcript and os.path.isfile(transcript):
+        try:
+            proxy = is_proxy_session(transcript)
+        except Exception:
+            proxy = False
+        if proxy:
+            json.dump(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "UserPromptSubmit",
+                        "sessionTitle": PROXY_TITLE,
+                    }
+                },
+                sys.stdout,
+            )
+            return 0
     if transcript and os.path.isfile(transcript):
         try:
             lines = read_tail(transcript)

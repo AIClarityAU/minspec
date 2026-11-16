@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-139-zcode-plugin-shell/requirements.md",
+  "specHash": "de3265ffd4c423ebfab8048a426d42e974d455fe5df3a0789ab868325c3c4d05",
+  "approvedAt": "2026-10-18T20:26:22.725Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "128f5cda614d97659515e29a7f0422179eae70b1"
+}

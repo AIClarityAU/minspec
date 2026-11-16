@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Tier, Phase, SpecsLayout } from './config';
 import { hashLockReminder } from './approval-store';
+import { ensureDirectory } from './opt-in';
 import { loadConfig, PHASES, resolveAndValidate, DEFAULT_CONFIG } from './config';
 import type { SpecFrontmatter, ParsedSpec } from './spec';
 import { writeSpec, readSpecFile, writeSpecFile } from './spec';
@@ -20,7 +21,9 @@ import {
   readSpecKitDir,
   writeSpecKitDir,
   specKitDirName,
+  SPEC_KIT_FILES,
 } from './spec-layout';
+import { restoreLineEndings } from './text-io';
 
 /** Summary of a spec for listing/display */
 export interface SpecSummary {
@@ -342,6 +345,72 @@ function injectHashLockReminder(rootDir: string, specFilePath: string): void {
 }
 
 /**
+ * First line of the SPEC-051 ownership prompt — also its idempotency marker.
+ */
+export const OWNERSHIP_PROMPT_MARKER = '# 📦 Code ownership (SPEC-038)';
+
+/**
+ * The commented `implements:` prompt a NEW spec carries in its frontmatter (SPEC-051 T5,
+ * design.md §3 "Template prompt (Option C)").
+ *
+ * WHY. Approval advances `phases.plan` to `in-progress`, which arms SPEC-038's
+ * `ownership.implements.missing` rule for a T3/T4 primary spec. Adding `implements:`
+ * after approval edits hashed bytes and stales the human's sign-off, so the declaration
+ * has to be authored at Specify. The approve-path refusal (`ownership-advance-guard.ts`)
+ * is the backstop; this prompt is what makes that refusal rarely fire, by putting both
+ * legal shapes in front of the author from the moment the file exists.
+ *
+ * WHY COMMENTED. An empty or placeholder `implements:` would be read as a declaration —
+ * a fake path is valid greenfield ownership (SPEC-038 FR-4) and would block-list a file
+ * nobody chose. Every reader of the field (`parseSpec`, `validateOwnership`, the shipped
+ * Python gate's `raw_frontmatter_field`, `spec-gate.py`'s `fm_list`) anchors the key at
+ * column 0, so a `#`-prefixed line is invisible to all of them until the author removes
+ * the `# `.
+ *
+ * WHY EVERY TIER. `createSpec` defaults to T2 and the tier is routinely raised afterwards
+ * (classification, review). Emitting only for T3/T4 would miss exactly the specs that
+ * become T3/T4 later; for a spec that stays T1/T2 the lines are inert comments.
+ *
+ * The uncommented example lines are exact, valid syntax (pinned by
+ * `tests/spec-scaffold-ownership-prompt.test.ts`): removing `# ` from the `none` pair
+ * yields a declaration `validateOwnership` accepts.
+ */
+export function ownershipDeclarationPrompt(): string {
+  return [
+    OWNERSHIP_PROMPT_MARKER,
+    '# Required at T3/T4 BEFORE approval (SPEC-051). Declaring it after approval edits',
+    '# hashed bytes and stales the approval. Uncomment ONE form:',
+    '# implements: [src/feature.ts]',
+    '# or, when this spec creates/owns no source file:',
+    '# implements: none',
+    '# implements_reason: <one line - why this spec owns no code>',
+    '# Files it only modifies (owned by another spec) go under `affects:`.',
+  ].join('\n');
+}
+
+/**
+ * Insert the ownership prompt immediately above the `phases:` line of a freshly created
+ * spec (the position every hand-authored spec in the corpus puts `implements:`), or at
+ * the end of the frontmatter when there is no `phases:` line. Creation-only and
+ * idempotent, exactly like `injectHashLockReminder`: never called from a writer that
+ * round-trips an existing spec, because a full-line comment IS hashed content.
+ */
+function injectOwnershipPrompt(specFilePath: string): void {
+  const content = fs.readFileSync(specFilePath, 'utf-8');
+  if (content.includes(OWNERSHIP_PROMPT_MARKER)) return;
+  const fm = content.match(/^---\n([\s\S]*?)\n---\n?/);
+  if (!fm) return;
+  const lines = fm[1].split('\n');
+  const phasesIdx = lines.findIndex((l) => /^phases[ \t]*:/.test(l));
+  lines.splice(phasesIdx === -1 ? lines.length : phasesIdx, 0, ownershipDeclarationPrompt());
+  fs.writeFileSync(
+    specFilePath,
+    content.replace(/^---\n([\s\S]*?)\n---\n?/, `---\n${lines.join('\n')}\n---\n`),
+    'utf-8',
+  );
+}
+
+/**
  * Create a new spec with auto-generated ID and optional tier.
  * Storage layout (flat file vs. spec-kit directory) follows config.specsLayout.
  *
@@ -358,7 +427,7 @@ export function createSpec(
 ): SpecSummary {
   const config = loadConfig(rootDir);
   const specsDir = resolveAndValidate(rootDir, config.specsDir);
-  fs.mkdirSync(specsDir, { recursive: true });
+  ensureDirectory(specsDir); // SPEC-096 FR-4: never creates `.minspec/`
 
   const id = nextSpecId(specsDir, product);
   const slug = slugify(title);
@@ -411,6 +480,9 @@ export function createSpec(
   // purpose — emitting it from `serializeFrontmatter` would re-add it on every write
   // round-trip and change hashed bytes on already-approved specs.
   injectHashLockReminder(rootDir, displayPath);
+  // SPEC-051 T5: prompt for `implements:` while the spec is still unapproved, so the
+  // declaration lands in the approved bytes. Creation-only, for the same reason as above.
+  injectOwnershipPrompt(displayPath);
 
   const progress = phaseProgress(
     initialPhases as Record<Phase, import('./spec').PhaseStatus>,
@@ -635,6 +707,12 @@ export interface MigrationResult {
  *
  * Frontmatter and body content are preserved byte-for-byte (round-trip
  * tested in spec-layout.test.ts — see "no data loss" invariant).
+ *
+ * Line endings (SPEC-095 FR-5(a)): the files written hold the same text as the spec they
+ * replace, so they take that spec's line endings rather than LF, which every other file
+ * MinSpec creates is written in. Flat to spec-kit goes through `writeSpecKitDir`, which
+ * restores the new files against the flat spec's `source`; spec-kit to flat restores the
+ * new file against the directory's files, read before they are removed.
  */
 export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationResult {
   const specsDir = resolveSpecsDir(rootDir);
@@ -677,7 +755,15 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
           warning: `Target file already exists: ${fileName}`,
         };
       }
-      fs.writeFileSync(filePath, writeSpec(parsed), 'utf-8');
+      // The directory's files, in the order `readSpecKitDir` reads them: the text the new
+      // file holds, and so the line endings it takes.
+      const sources =
+        entry.kind === 'spec-kit'
+          ? SPEC_KIT_FILES.map((f) => path.join(entry.dirPath, f))
+              .filter((p) => fs.existsSync(p))
+              .map((p) => fs.readFileSync(p, 'utf-8'))
+          : [parsed.source ?? ''];
+      fs.writeFileSync(filePath, restoreLineEndings(writeSpec(parsed), sources), 'utf-8');
     }
 
     toDelete.push(entry);

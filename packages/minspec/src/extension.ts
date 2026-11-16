@@ -13,7 +13,8 @@ import { migrateLayoutCommand } from './commands/migrate';
 import { createAdrCommand, regenerateDrIndexCommand, acceptAdrCommand, setAdrStatusCommand } from './commands/adr';
 import { createEpicCommand, regenerateEpicIndexCommand, acceptEpicCommand } from './commands/epic';
 import { backfillEpicsCommand, type BackfillOptions } from './commands/backfill-epics';
-import { regenerateDrIndex } from './lib/adr-manager';
+import { regenerateDrIndex, regenerateDrIndexEntries, resolveDecisionsDir, listAdrs } from './lib/adr-manager';
+import { DrIndexDeltaTracker } from './lib/dr-index-delta';
 import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
 import { approveSpecCommand, revokeApprovalCommand } from './commands/approve';
 import { ApprovalDiffContentProvider, showChangesSinceApproval } from './lib/approval-diff';
@@ -31,18 +32,25 @@ import {
   MinSpecNextTaskStatusBar,
   MinSpecScaffoldCommitStatusBar,
   MinSpecTidyPrimaryStatusBar,
+  MinSpecQueueDepthStatusBar,
+  resolveKeybinding,
   resolveNextTaskKeybinding,
 } from './views/status-bar';
 import { classifyPrimary } from './lib/tidy-primary';
 import { tidyPrimaryCommand } from './commands/tidy-primary';
+import { viewQueueCommand } from './commands/view-queue';
+import { listQueuedRequests } from './lib/phase-advance-queue';
 import { fromFrontmatter } from './lib/spec-progress';
 import { nextTaskCommand, computeNextTask } from './commands/next-task';
 import { SpecPanel } from './views/spec-panel';
+import { GettingStartedPanel } from './views/getting-started-webview';
+import { gettingStartedCommand, hotkeysFromManifest } from './commands/getting-started';
 import { loadSession, saveSession, addToScope, isFileInScope } from './lib/session';
 import { SessionPresenceManager } from './lib/presence';
 import { detectTools, getToolFilePath, type DetectedTools } from './lib/tool-detector';
 import { injectContextToFile, removeContextFromFile, type ActiveSpecContext } from './lib/context-injector';
-import { parkTopic, createParkingLotEntry } from './lib/parking-lot';
+import { parkTopic, createParkingLotEntry, type ParkResult } from './lib/parking-lot';
+import { NotOptedInError } from './lib/opt-in';
 import {
   MinSpecCodeLensProvider,
   MinSpecSpecFileLensProvider,
@@ -50,8 +58,7 @@ import {
   goToCodeCommand,
   linkToSpecCommand,
 } from './views/codelens-provider';
-import { maybeShowNudge, recordInstallTimestamp, exportTraceability, setupConformanceWatcher } from './lib/bridge';
-import { runBootstrap, isWatchedGitPath, type BootstrapVsCode } from './lib/auto-bootstrap';
+import { runBootstrap, isWatchedGitPath, isMinspecInitialized, type BootstrapVsCode } from './lib/auto-bootstrap';
 import { findActiveSpec, trackActiveSpecEditor } from './lib/active-spec';
 import { parseSpec } from './lib/spec';
 import { loadConfig, resolveAndValidate } from './lib/config';
@@ -127,7 +134,24 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(presence); // FR-6 — presence.dispose() → stop() (never throws)
   // FR-11: expose this session's id to shell-driven agents in the integrated
   // terminal so their commit trailer / gate self-identify with the same id.
-  context.environmentVariableCollection?.replace('MINSPEC_SESSION_ID', presence.sessionId);
+  //
+  // Gated on the SAME opt-in predicate `presence.ts` uses (constitution
+  // invariant 3, #2356): a folder with no `.minspec/` — or no folder open at
+  // all — must see NO extension side effect, and a contributed terminal env
+  // var is one: VS Code surfaces it in the terminal UI, so a user who merely
+  // installed the extension would see it in unrelated projects. Re-run after
+  // `MinSpec: Initialize` (both the direct command and auto-bootstrap's
+  // `executeCommand` path run through the same registration) so a folder that
+  // opts in during this activation starts carrying the var without a window
+  // reload, matching presence's "opts in later" guarantee.
+  const syncSessionIdEnvVar = (): void => {
+    if (workspaceRoot !== '' && isMinspecInitialized(workspaceRoot)) {
+      context.environmentVariableCollection?.replace('MINSPEC_SESSION_ID', presence.sessionId);
+    } else {
+      context.environmentVariableCollection?.delete('MINSPEC_SESSION_ID');
+    }
+  };
+  syncSessionIdEnvVar();
 
   // Active spec panel
   const specPanel = new SpecPanel();
@@ -192,9 +216,18 @@ export function activate(context: vscode.ExtensionContext): void {
     t.provider.refresh();
   };
 
-  // Async refresh triggers: when a pane becomes visible, refetch its data.
+  // Async refresh triggers: when a pane becomes visible, re-read its data.
   // File watchers below catch in-VSCode edits; these hooks catch external
-  // changes (CLI edits, git checkout, GitHub issue updates).
+  // changes to the LOCAL files the Specs and Decisions panes read (CLI edits,
+  // git checkout).
+  //
+  // The Backlog is different, and deliberately so (SPEC-085, constitution
+  // invariant 1): none of these triggers contacts GitHub. `refreshIfStale()`
+  // and the no-argument `refresh()` only re-draw the Backlog from what it
+  // already holds - the not-loaded row, or the list and its loaded-at time.
+  // The one route to `gh issue list` is the `minspec.refreshBacklog`
+  // registration below. An issue changed on GitHub therefore shows up when the
+  // user refreshes, not when the window regains focus.
   context.subscriptions.push(
     specTreeView.onDidChangeVisibility(e => {
       if (e.visible) specTreeProvider.refresh();
@@ -206,7 +239,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (e.visible) backlogTreeProvider.refreshIfStale();
     }),
     // When VS Code window regains focus, refresh all three. Backlog uses the
-    // stale-only variant so we don't hammer `gh` on every alt-tab.
+    // rate-limited variant: a re-draw from memory, at most once per 30 seconds.
     vscode.window.onDidChangeWindowState(state => {
       if (!state.focused) return;
       specTreeProvider.refresh();
@@ -216,14 +249,15 @@ export function activate(context: vscode.ExtensionContext): void {
       // PR that merged while the window was unfocused clears its badge
       // promptly instead of waiting on the next unrelated file event.
       refreshTidyPrimaryStatusBar();
+      refreshQueueDepth();
     }),
     // Re-scan when the set of workspace folders changes (#549). The Specs/DRs
     // providers read the LIVE folder list on every getChildren, so a plain
     // refresh rebuilds each tree against the new set — a folder added to the
     // combined workspace surfaces its specs/DRs immediately, a removed one drops
-    // out. Backlog stays single-root (out of #549 scope) but still refreshes its
-    // own root; the stale-only variant avoids a `gh` storm when several folders
-    // are added at once.
+    // out. Backlog stays single-root (out of #549 scope) and only re-draws what
+    // it holds; the rate-limited variant draws it once when several folders are
+    // added at once. It starts no `gh` (SPEC-085).
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       specTreeProvider.refresh();
       adrTreeProvider.refresh();
@@ -305,6 +339,20 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   refreshTidyPrimaryStatusBar();
 
+  // Phase-advance queue-depth indicator (#737): enqueued requests must never
+  // silently rot with no consumer running. Read-only; hidden at zero.
+  const queueDepthStatusBar = new MinSpecQueueDepthStatusBar(
+    resolveKeybinding(context.extension?.packageJSON, 'minspec.viewQueue'),
+  );
+  const refreshQueueDepth = () => {
+    try {
+      queueDepthStatusBar.update(workspaceRoot ? listQueuedRequests(workspaceRoot) : []);
+    } catch {
+      queueDepthStatusBar.update([]);
+    }
+  };
+  refreshQueueDepth();
+
   // CodeLens providers (Phase 7)
   const codeLensProvider = new MinSpecCodeLensProvider(workspaceRoot);
   const specFileLensProvider = new MinSpecSpecFileLensProvider(workspaceRoot);
@@ -347,6 +395,7 @@ export function activate(context: vscode.ExtensionContext): void {
       async (folderArg?: string, deps?: Parameters<typeof initCommand>[1]) => {
         await initCommand(folderArg, deps);
         refreshScaffoldCommitStatusBar();
+        syncSessionIdEnvVar(); // #2356: a folder that just opted in gets the var now, not on next reload
       },
     ),
     vscode.commands.registerCommand(
@@ -354,7 +403,16 @@ export function activate(context: vscode.ExtensionContext): void {
       async (folderArg?: string, deps?: Parameters<typeof initRefreshCommand>[1]) => {
         await initRefreshCommand(folderArg, deps);
         refreshScaffoldCommitStatusBar();
+        // #2356: harmless re-sync. Refresh never opts a folder in (it refuses when
+        // there is no `.minspec/`, SPEC-096 FR-3), so this cannot be the call that
+        // first sets the var; it only keeps it in step with the marker.
+        syncSessionIdEnvVar();
       },
+    ),
+    // SPEC-042: opening the page is cheap and side-effect-free; no panel opens at activation.
+    vscode.commands.registerCommand(
+      'minspec.gettingStarted',
+      gettingStartedCommand(new GettingStartedPanel(), hotkeysFromManifest(context.extension?.packageJSON)),
     ),
     vscode.commands.registerCommand('minspec.commitHarnessRefresh', async (folderArg?: string) => {
       await commitHarnessRefreshCommand(folderArg);
@@ -364,6 +422,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await tidyPrimaryCommand(workspaceRoot, presence.sessionId);
       refreshTidyPrimaryStatusBar();
     }),
+    vscode.commands.registerCommand('minspec.viewQueue', () => viewQueueCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.constitutionShowPrompt', constitutionShowPromptCommand),
     vscode.commands.registerCommand('minspec.constitutionCompact', constitutionCompactCommand),
     vscode.commands.registerCommand('minspec.constitutionPropose', constitutionProposeCommand),
@@ -376,6 +435,10 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('minspec.createAdr', createAdrCommand),
     vscode.commands.registerCommand('minspec.regenerateDrIndex', regenerateDrIndexCommand),
+    // The three epic commands below re-draw all three panes, because epic
+    // grouping is read from local files they may have changed. For the Backlog
+    // that is a re-draw from memory: `refresh()` with no argument never
+    // contacts GitHub (SPEC-085 FR-4).
     vscode.commands.registerCommand('minspec.createEpic', async () => {
       await createEpicCommand();
       specTreeProvider.refresh();
@@ -408,7 +471,15 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('minspec.scoreWsjf', scoreWsjfCommand),
     vscode.commands.registerCommand('minspec.triageIssue', triageIssueCommand),
-    vscode.commands.registerCommand('minspec.refreshBacklog', () => backlogTreeProvider.refresh()),
+    // The Backlog gesture (SPEC-085 FR-2), and the ONLY call that may contact
+    // GitHub for the Backlog pane: the palette entry, the view-title button and
+    // the pane's own not-loaded row all run this command. It starts one
+    // `gh issue list` and returns at once; the pane updates when that settles.
+    // Not awaited on purpose, so the command does not take as long as `gh`
+    // does. The promise never rejects (a failed fetch becomes a row).
+    vscode.commands.registerCommand('minspec.refreshBacklog', () => {
+      void backlogTreeProvider.refresh({ contactGitHub: true });
+    }),
     vscode.commands.registerCommand('minspec.goToSpec', (specId?: string, reqKey?: string) =>
       goToSpecCommand(workspaceRoot, specId, reqKey)),
     vscode.commands.registerCommand('minspec.goToCode', (specId?: string, reqKey?: string) =>
@@ -422,7 +493,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('minspec.removeContext', () => removeContextCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.generateExample', generateExampleCommand),
     vscode.commands.registerCommand('minspec.migrateLayout', () => migrateLayoutCommand(workspaceRoot)),
-    vscode.commands.registerCommand('minspec.exportTraceability', () => exportTraceabilityCommand(workspaceRoot)),
     // approve/revoke already fire `minspec.refreshTree` internally — no extra
     // refresh here (it only added to the redundant burst; issue #154).
     vscode.commands.registerCommand('minspec.approveSpec', async (node) => {
@@ -471,6 +541,7 @@ export function activate(context: vscode.ExtensionContext): void {
     nextTaskStatusBar,
     scaffoldCommitStatusBar,
     tidyPrimaryStatusBar,
+    queueDepthStatusBar,
   );
 
   // Watch spec files — refresh tree + status bar on changes
@@ -504,30 +575,70 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
-  // Regenerate INDEX.md when a DR file changes (frontmatter edit, add, delete).
-  // Guard against self-trigger: regenerateDrIndex writes INDEX.md, which is a
+  // Update INDEX.md when a DR file changes (frontmatter edit, add, delete).
+  // Guard against self-trigger: the update writes INDEX.md, which is a
   // *.md under decisionsDir and would re-fire the watcher → infinite loop.
-  // Debounce coalesces bursts (e.g. multi-file save) into one regenerate.
+  // Debounce coalesces bursts (e.g. multi-file save) into one write.
+  //
+  // Only the entries of the decisions whose files fired are touched (#896). A full
+  // rebuild here also rewrote every OTHER entry that had drifted, so creating a DR
+  // and discarding it in Source Control left INDEX.md modified: the delete rebuilt
+  // from disk instead of undoing the create. The full rebuild stays on the palette
+  // command (MinSpec: Regenerate DR INDEX) and is the fallback when an event cannot
+  // be mapped to a decision id.
+  //
+  // Opt-in gate (#2461): a folder with no `.minspec/` never asked MinSpec to
+  // manage its decisions directory (constitution invariant 3 — blast radius).
+  // The watcher itself is unconditional (cheap, in-memory), but the *write* is
+  // re-checked every time the debounced timer fires, not once at activation,
+  // so a folder that runs `MinSpec: Initialize` mid-session starts getting an
+  // index without a window reload, and a folder that never does never gets one.
+  const adrIndexOverrides = decisionsDir ? { decisionsDir } : undefined;
+  const adrIndexDelta = new DrIndexDeltaTracker();
+  const resolvedDecisionsDir = (): string | null => {
+    try {
+      return resolveDecisionsDir(workspaceRoot, adrIndexOverrides);
+    } catch {
+      return null;
+    }
+  };
+  // Remember the id of every record already on disk, so discarding one whose
+  // frontmatter `id:` differs from its file name still removes the right entry.
+  try {
+    const existing = workspaceRoot ? listAdrs(workspaceRoot, adrIndexOverrides) : [];
+    for (const adr of existing) {
+      adrIndexDelta.remember(adr.filePath, adr.id);
+    }
+  } catch {
+    // An unresolvable register: its delete events fall back to the file-name id.
+  }
   let adrIndexTimer: ReturnType<typeof setTimeout> | undefined;
-  const onAdrsChanged = (uri?: vscode.Uri) => {
+  const onAdrEvent = (deleted: boolean) => (uri?: vscode.Uri) => {
     adrTreeProvider.refresh();
     // ADR status (proposed→accepted) is a resolver input — recompute the signpost.
     refreshNextTask();
     if (uri && path.basename(uri.fsPath).toLowerCase() === 'index.md') return;
     if (!workspaceRoot) return;
+    if (uri) adrIndexDelta.note(uri.fsPath, deleted, resolvedDecisionsDir());
+    else adrIndexDelta.markFull();
     if (adrIndexTimer) clearTimeout(adrIndexTimer);
     adrIndexTimer = setTimeout(() => {
+      // Not taken until the folder has opted in, so ids seen before
+      // `MinSpec: Initialize` still reach the first write after it.
+      if (!isMinspecInitialized(workspaceRoot)) return;
+      const delta = adrIndexDelta.take();
       try {
-        regenerateDrIndex(workspaceRoot, decisionsDir ? { decisionsDir } : undefined);
+        if (delta.full) regenerateDrIndex(workspaceRoot, adrIndexOverrides);
+        else if (delta.ids.length > 0) regenerateDrIndexEntries(workspaceRoot, delta.ids, adrIndexOverrides);
       } catch {
         // Non-fatal: tree already refreshed; index regen is best-effort.
       }
     }, 300);
   };
 
-  adrWatcher.onDidChange(onAdrsChanged);
-  adrWatcher.onDidCreate(onAdrsChanged);
-  adrWatcher.onDidDelete(onAdrsChanged);
+  adrWatcher.onDidChange(onAdrEvent(false));
+  adrWatcher.onDidCreate(onAdrEvent(false));
+  adrWatcher.onDidDelete(onAdrEvent(true));
 
   context.subscriptions.push(adrWatcher);
 
@@ -587,6 +698,18 @@ export function activate(context: vscode.ExtensionContext): void {
   epicsWatcher.onDidCreate(onEpicsChanged);
   epicsWatcher.onDidDelete(onEpicsChanged);
   context.subscriptions.push(epicsWatcher);
+
+  // Queue watcher (#737): created after the spec/ADR/epic watchers so their
+  // creation order is unchanged.
+  if (workspaceRoot) {
+    const queueWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(workspaceRoot, '.minspec/queue/**'),
+    );
+    queueWatcher.onDidChange(refreshQueueDepth);
+    queueWatcher.onDidCreate(refreshQueueDepth);
+    queueWatcher.onDidDelete(refreshQueueDepth);
+    context.subscriptions.push(queueWatcher);
+  }
 
   // Drift detection: monitor file saves
   if (workspaceRoot) {
@@ -699,19 +822,6 @@ export function activate(context: vscode.ExtensionContext): void {
     );
   }
 
-  // ScroogeLLM bridge: conformance auto-export watcher (Phase 10)
-  if (workspaceRoot) {
-    const conformanceWatcher = setupConformanceWatcher(workspaceRoot);
-    if (conformanceWatcher) {
-      context.subscriptions.push(conformanceWatcher);
-    }
-  }
-
-  // ScroogeLLM bridge: record install timestamp on first activation, then
-  // attempt the nudge (gated on 24h install age + 7d cooldown).
-  recordInstallTimestamp(context);
-  void maybeShowNudge(context);
-
   // #320: empty-constitution nudge with an offer-to-fix action. If the
   // constitution has no human-authored rules yet, surface a SOFT, NON-MODAL
   // toast whose primary action runs the deterministic Propose command. Advisory
@@ -819,27 +929,6 @@ async function surfaceConstitutionProposeNudge(
     }
   } catch {
     // best-effort — the nudge is advisory; never let it break activation.
-  }
-}
-
-/**
- * Command: Export traceability data for ScroogeLLM conformance checking.
- */
-function exportTraceabilityCommand(workspaceRoot: string): void {
-  if (!workspaceRoot) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return;
-  }
-
-  try {
-    const result = exportTraceability(workspaceRoot);
-    vscode.window.showInformationMessage(
-      `MinSpec: Exported traceability for ${result.specCount} spec(s) to ${path.basename(result.filePath)}.`,
-    );
-  } catch (err) {
-    vscode.window.showErrorMessage(
-      `MinSpec: Failed to export traceability — ${err instanceof Error ? err.message : String(err)}`,
-    );
   }
 }
 
@@ -1001,7 +1090,24 @@ function handleFileSaveDriftCheck(
 }
 
 /**
+ * Show a store's opt-in refusal as MinSpec's own message (SPEC-096 FR-8).
+ * Returns false, having shown nothing, for any other error.
+ */
+function showedOptInRefusal(err: unknown): boolean {
+  if (!(err instanceof NotOptedInError)) return false;
+  vscode.window.showErrorMessage(err.message);
+  return true;
+}
+
+/**
  * Show a drift warning with three action options.
+ *
+ * The warning is only ever shown for a folder with a session file, so one that
+ * has opted in. It then waits for the user, and the marker can be gone by the
+ * time a button is clicked. Both persisting actions refuse in that case
+ * (`.minspec/` is not theirs to recreate), and nothing awaits this function, so
+ * the refusal is shown here: left alone it would be an unhandled rejection and
+ * the user would see nothing at all.
  */
 async function showDriftWarning(
   filePath: string,
@@ -1026,7 +1132,13 @@ async function showDriftWarning(
       ['idea', 'inbox'],
     );
 
-    const result = await parkTopic(workspaceRoot, entry);
+    let result: ParkResult;
+    try {
+      result = await parkTopic(workspaceRoot, entry);
+    } catch (err) {
+      if (!showedOptInRefusal(err)) throw err;
+      return; // refused: no "Saved to" after it
+    }
     if (result.method === 'github') {
       vscode.window.showInformationMessage(`MinSpec: Created GitHub issue — ${result.url}`);
     } else {
@@ -1034,7 +1146,12 @@ async function showDriftWarning(
     }
   } else if (choice === 'Add to Scope') {
     const updatedSession = addToScope(session, filePath, workspaceRoot);
-    saveSession(workspaceRoot, updatedSession);
+    try {
+      saveSession(workspaceRoot, updatedSession);
+    } catch (err) {
+      if (!showedOptInRefusal(err)) throw err;
+      return; // refused: no "Added to session scope" after it
+    }
     vscode.window.showInformationMessage(`MinSpec: Added "${relativePath}" to session scope.`);
   }
 }

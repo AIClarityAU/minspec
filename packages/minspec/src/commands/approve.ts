@@ -1,10 +1,12 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { listSpecs, type SpecSummary } from '../lib/spec-catalog';
 import { isTerminalSpecStatus } from '../lib/spec-vocabulary';
 import { readSpecFile, advanceSpecToImplementing } from '../lib/spec';
 import { loadConfig } from '../lib/config';
-import { validateSpec, violationsIntroducedByApproval } from '../lib/spec-validator';
+import { validateSpec } from '../lib/spec-validator';
+import { assertOwnershipDeclaredForAdvance } from '../lib/ownership-advance-guard';
 import { epicRefSet } from '../lib/epic-manager';
 import { readShardIdFiles } from '../lib/spec-layout';
 import {
@@ -27,6 +29,7 @@ import {
   savePreferences,
   resolveProjectPreference,
 } from '../lib/preferences';
+import { hasOptInMarker, notOptedInMessage } from '../lib/opt-in';
 
 /** A tree node carrying a SpecSummary (from the spec tree context menu). */
 interface SpecNodeLike {
@@ -101,7 +104,7 @@ async function pickSpec(
  * unset/blank, preserving the pre-DR-056 behaviour for repos whose git identity is
  * already the human's. Tier-0/offline: `gitConfigEmail` reads local git config only.
  */
-function resolveApproverEmail(rootDir: string): string {
+export function resolveApproverEmail(rootDir: string): string {
   const configured = (
     vscode.workspace.getConfiguration('minspec').get<string>('approverEmail') ?? ''
   ).trim();
@@ -121,7 +124,7 @@ const ALWAYS = 'Always';
  * asked for; what changed in #1319 is what MinSpec itself WRITES (see
  * {@link enableAdvancePhaseOnApprove}).
  */
-function advancePhaseOnApproveEnabled(rootDir: string): boolean {
+export function advancePhaseOnApproveEnabled(rootDir: string): boolean {
   const setting = vscode.workspace
     .getConfiguration('minspec')
     .get<boolean>('advancePhaseOnApprove', false);
@@ -144,12 +147,29 @@ function advancePhaseOnApproveEnabled(rootDir: string): boolean {
  * reason: the approval itself already succeeded by the time this runs, so a
  * write error here must not throw into `approveSpecCommand`'s catch and paint a
  * false "Failed to approve" toast.
+ *
+ * "Never surfaces as a failure" is not "never surfaces" — `console.warn` alone
+ * lands in the Debug Console, which nobody watching an Alt+A toast ever opens,
+ * so before #2506 a refused write here was indistinguishable from a saved one:
+ * the toast had already said "Always" was accepted. Approve Spec refuses in a
+ * folder with no `.minspec/` before it asks or writes anything, and nothing in
+ * it creates that directory (SPEC-096), so the folder had opted in when this
+ * command started. The refusal this guards is the race where `.minspec/` is
+ * removed after the approval was recorded, which in practice means while the
+ * follow-up toast is open.
+ * Rare does not mean exempt from constitution invariant 2 (no silent gate) —
+ * surface it the same non-blocking way `enqueuePhaseAdvanceSafely` already does
+ * for the sibling queue write (#1512).
  */
 function enableAdvancePhaseOnApprove(rootDir: string): void {
   try {
     savePreferences(rootDir, { advancePhaseOnApprove: true });
   } catch (err) {
-    console.warn(`MinSpec: failed to persist advancePhaseOnApprove pref — ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`MinSpec: failed to persist advancePhaseOnApprove pref — ${message}`);
+    void vscode.window.showWarningMessage(
+      `MinSpec: "Always" was not remembered — ${message} Advancing the phase this once only.`,
+    );
   }
 }
 
@@ -211,6 +231,16 @@ export async function approveSpecCommand(
     : await resolveTargetFolder();
   if (!rootDir) return;
 
+  // SPEC-096 FR-6: an approval is recorded under `.minspec/`, and `.minspec/` is
+  // the opt-in marker. In a folder that has not opted in, refuse as soon as the
+  // folder is known - before the spec picker, and long before the status flip,
+  // the git blob and the record. One message, no button. This covers every way
+  // in: the palette, the Specs pane, and Alt+A (which runs this command).
+  if (!hasOptInMarker(rootDir)) {
+    vscode.window.showErrorMessage(notOptedInMessage(rootDir));
+    return;
+  }
+
   const spec = await pickSpec(rootDir, node, 'Select a spec to approve for implementation', {
     // Already-approved specs have nothing to do here; stale ones (edited since
     // approval) still need re-approval, so keep them.
@@ -246,6 +276,9 @@ export async function approveSpecCommand(
     // #439: sibling shard files (design.md/tasks.md/…) in this spec's directory,
     // so a diverging shard id refuses approval as an error.
     siblingShardFiles: readShardIdFiles(path.dirname(spec.filePath)),
+    // #1751: implement.claimed-without-evidence — resolved here, not inside
+    // spec-validator.ts (filesystem-free by design), against this workspace root.
+    pathExists: (relPath) => fs.existsSync(path.join(rootDir, relPath)),
   });
   const errors = result.violations.filter((v) => v.severity === 'error');
   const warnings = result.violations.filter((v) => v.severity === 'warning');
@@ -265,28 +298,28 @@ export async function approveSpecCommand(
     return;
   }
 
-  // #1317: the spec passed validation in the state it is LEAVING. Approval also
-  // ADVANCES its phase map, and some rules are gated on that map — so a spec can be
-  // complete now and violate an error the instant it is advanced. That gap put main
-  // in the red three times (SPEC-051 #1300, SPEC-048 + SPEC-049 #1348), each failing
-  // on an unrelated PR hours later, because nothing validated the state approval
-  // CREATES. Refuse here, before any write, naming only what the advance introduces.
-  const introduced = violationsIntroducedByApproval(parsed, config, {
-    knownEpicRefs: epicRefSet(rootDir),
-    siblingShardFiles: readShardIdFiles(path.dirname(spec.filePath)),
-  });
-  if (introduced.length > 0) {
-    const summary = introduced.map((v) => `• ${v.message}`).join('\n');
+  // #1317 / #1806: the spec passed validation in the state it is LEAVING. Approval
+  // also ADVANCES its phase map, and some rules are gated on that map — so a spec
+  // can be complete now and violate an error the instant it is advanced. That gap
+  // put main in the red three times (SPEC-051 #1300, SPEC-048 + SPEC-049 #1348),
+  // each failing on an unrelated PR hours later, because nothing validated the
+  // state approval CREATES. Refuse here, before any write, naming only what the
+  // advance introduces.
+  //
+  // Delegates to the SHARED guard (`ownership-advance-guard.ts`) — the same
+  // function `approval.ts` and `spec.ts` call — rather than re-running
+  // `violationsIntroducedByApproval` inline. Before #1806 this command carried
+  // its own independent copy of the check, which is the exact duplication shape
+  // #1520 already bit this codebase on: two implementations of "compute what the
+  // advance introduces and refuse" that could silently drift apart. One
+  // enforcement point now, reached from all three actors that cross a spec into
+  // the Plan build band (UI, `approveSpec`, `advanceSpecToImplementing` itself).
+  try {
+    assertOwnershipDeclaredForAdvance(spec.filePath, parsed);
+  } catch (err) {
     const choice = await vscode.window.showErrorMessage(
-      `MinSpec: ${spec.id} is not ready for the status it would be approved into — approval refused.\n\n${summary}`,
-      {
-        modal: true,
-        detail:
-          'Approving advances this spec past Clarify, which arms rules that do not apply to it yet. ' +
-          'Fixing this now costs one edit; approving first means the edit lands on an already-approved ' +
-          'spec, which stales the approval and needs a second human sign-off.\n\n' +
-          introduced.map((v) => `${v.message}\n   ↳ ${v.fixHint}`).join('\n\n'),
-      },
+      `MinSpec: ${spec.id} is not ready for the status it would be approved into — approval refused.`,
+      { modal: true, detail: err instanceof Error ? err.message : String(err) },
       'Open Spec',
     );
     if (choice === 'Open Spec') {
@@ -321,6 +354,16 @@ export async function approveSpecCommand(
           'or approve from a checkout whose git identity is yours — then re-run Approve.',
       },
     );
+    return;
+  }
+
+  // SPEC-096 FR-6, again: the picker and the dialogs above wait for the user, so
+  // the marker can be gone by now. The check has to PRECEDE the status flip at the
+  // top of the `try` below, or a refusal from the record would arrive after the
+  // spec file had been rewritten - a spec that reads as approved with nothing
+  // behind it.
+  if (!hasOptInMarker(rootDir)) {
+    vscode.window.showErrorMessage(notOptedInMessage(rootDir));
     return;
   }
 

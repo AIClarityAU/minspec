@@ -11,6 +11,7 @@ import {
   type IntegrateResult,
 } from '../lib/constitution-proposer';
 import { compactConstitution } from '../lib/constitution-compaction';
+import { ensureDirectory, hasOptInMarker, notOptedInMessage, NotOptedInError } from '../lib/opt-in';
 
 /**
  * SPEC-025 FR-2/FR-3 (manual path): assemble the deterministic context manifest +
@@ -104,16 +105,33 @@ export async function constitutionProposeCommand(folderArg?: string): Promise<vo
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
 
+  // SPEC-096 FR-6: the draft IS `.minspec/constitution.md`, and `.minspec/` is the
+  // opt-in marker. In a folder that has not opted in, refuse before reading or
+  // writing anything: one message, no button.
+  if (!hasOptInMarker(folder)) {
+    vscode.window.showErrorMessage(notOptedInMessage(folder));
+    return;
+  }
+
   let outcome: ProposeOutcome;
   try {
     outcome = proposeConstitutionDraft(folder, {
       readFile: (p) => (fs.existsSync(p) ? fs.readFileSync(p, 'utf-8') : ''),
       writeFile: (p, content) => {
-        fs.mkdirSync(path.dirname(p), { recursive: true });
+        // Through the shared guard (SPEC-096 FR-4, FR-5): it refuses rather than
+        // create `.minspec/`, so this write cannot be what opts a folder in even
+        // if the check above is ever bypassed.
+        ensureDirectory(path.dirname(p));
         fs.writeFileSync(p, content);
       },
     });
   } catch (err) {
+    if (err instanceof NotOptedInError) {
+      // The refusal is the whole message: nothing was written, so "could not
+      // propose a draft" wrapped around it would add nothing true.
+      vscode.window.showErrorMessage(err.message);
+      return;
+    }
     vscode.window.showErrorMessage(
       `MinSpec: Could not propose a constitution draft — ${
         err instanceof Error ? err.message : String(err)

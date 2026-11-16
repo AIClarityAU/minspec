@@ -27,7 +27,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 
 import { generateHarnessFiles, refreshHarnessFiles } from '../src/lib/scaffold';
 import {
@@ -39,6 +39,9 @@ import {
   renderManagedBlock,
 } from '../src/lib/template-registry';
 import { splitManagedRegion } from '../src/lib/merge-refresh';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+useShellTimeout();
 
 const PRE_COMMIT = `${MINSPEC_HOOKS_DIR}/pre-commit`;
 const COMMIT_MSG = `${MINSPEC_HOOKS_DIR}/commit-msg`;
@@ -112,8 +115,10 @@ describe('the scaffolded hook scripts actually enforce the SDD gates', () => {
     // Opt-in config key + the documented bypass.
     expect(c).toContain('minspec.allowedCommitEmails');
     expect(c).toContain('EMAIL_GATE_OFF');
-    // Reads the live identity, not a cached/assumed one.
-    expect(c).toContain('git config --get user.email');
+    // The VERDICT reads git's own resolved identity (git var GIT_AUTHOR_IDENT),
+    // not the user.email proxy. `git config --get user.email` still appears in
+    // the advisory message builder, so asserting on it would pass on the wrong line.
+    expect(c).toContain('git var GIT_AUTHOR_IDENT');
     // Names the actual symptom this gate exists to prevent, so the refusal is
     // self-explanatory rather than a bare "not allowed".
     expect(c).toMatch(/ghost/i);
@@ -127,7 +132,11 @@ describe('the scaffolded hook scripts actually enforce the SDD gates', () => {
     expect(c).toContain('not installed');
     // The gitleaks-absent branch (between `else` and its closing `fi`) warns and
     // does NOT exit non-zero — a missing optional tool degrades, never blocks.
-    const m = c.match(/\belse\b([\s\S]*?)\bfi\b/);
+    // Anchored to the block that starts at `command -v gitleaks`, and to a
+    // column-0 `else`/`fi` (the outer if), so an earlier stage's `else` or a
+    // comment containing the word cannot be inspected instead.
+    const fromGitleaks = c.slice(c.indexOf('command -v gitleaks'));
+    const m = fromGitleaks.match(/^else[ \t]*\n([\s\S]*?)^fi\b/m);
     expect(m, 'expected an else…fi block for the gitleaks-absent path').not.toBeNull();
     const elseBranch = m![1];
     expect(elseBranch).toContain('SKIPPED');
@@ -152,8 +161,11 @@ describe('the scaffolded hook scripts actually enforce the SDD gates', () => {
     const c = byPath(PRE_COMMIT).content;
     expect(c).toContain('npx --no-install @aiclarity/minspec-validator');
     expect(c).not.toContain('npx --yes @aiclarity/minspec-validator');
-    // Python tier only fires when both python3 and the script are present.
-    expect(c).toContain('command -v python3');
+    // Python tier only fires when a candidate interpreter actually RUNS, not
+    // merely resolves on PATH (#2400: Windows' python3.exe "app execution
+    // alias" placeholder passes `command -v` with no Python installed).
+    expect(c).not.toContain('command -v python3');
+    expect(c).toContain('sys.version_info[0]');
     expect(c).toContain('[ -f "$hook_dir/validate.py" ]');
     // The always-present shell gate is the terminal fallback.
     expect(c).toContain('minspec_shell_gate');
@@ -588,5 +600,191 @@ describe('python validate.py mirrors the Node validator core checks (#246)', () 
 
     const py = runValidatePy();
     expect(py.code).toBe(0);
+  });
+
+  // ── #1908: a quoted id: "SPEC-NNN" / id: 'SPEC-NNN' is well-formed YAML for
+  // the bare string and must not be refused. The old parser did `fm[key] =
+  // rest.strip()` with no quote handling, so SPEC_ID_RE (anchored, no quote in
+  // its class) never matched and a quoted-but-valid id read as "missing or
+  // invalid" — a message that named two possibilities and the file was
+  // neither. This is where python deliberately stops mirroring the Node
+  // validator, which still refuses a quoted id (#2297 tracks the Node side). ──
+  describe('#1908 — a quoted id is not refused', () => {
+    it.skipIf(!hasPy)('accepts a double-quoted SPEC id (id: "SPEC-001")', () => {
+      writeSpec('specs/spec-001/spec.md', '---\nid: "SPEC-001"\nstatus: specifying\n---\n# ok\n');
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)("accepts a single-quoted SPEC id (id: 'SPEC-001')", () => {
+      writeSpec('specs/spec-001/spec.md', "---\nid: 'SPEC-001'\nstatus: specifying\n---\n# ok\n");
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)('accepts a quoted id with a trailing inline comment (id: "SPEC-001"  # primary)', () => {
+      writeSpec('specs/spec-001/spec.md', '---\nid: "SPEC-001"  # primary\nstatus: specifying\n---\n# ok\n');
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)('accepts a double-quoted DR id (id: "DR-024")', () => {
+      writeSpec('docs/decisions/DR-024.md', '---\nid: "DR-024"\ntitle: x\nstatus: accepted\n---\n# ok\n');
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)('still rejects a genuinely malformed id, quoted or not, distinctly from "missing"', () => {
+      // "invalid" (present, wrong shape) must read differently from "missing"
+      // (absent) — the compound "missing or invalid" message named two
+      // possibilities and the reader could not tell which was true.
+      writeSpec('specs/spec-x/spec.md', '---\nid: "SPEC-abc"\n---\n# bad id\n');
+      const py = runValidatePy();
+      expect(py.code).toBe(1);
+      expect(py.stderr).toContain('invalid');
+      expect(py.stderr).not.toContain('missing `id: SPEC-NNN`');
+    });
+
+    it.skipIf(!hasPy)('#3595 — unterminated frontmatter keeps the "missing or invalid" wording adopters pin', () => {
+      writeSpec('specs/a/requirements.md', '---\nid: SPEC-001\nstatus: specifying\n# never closed\n');
+      const py = runValidatePy();
+      expect(py.code).toBe(1);
+      expect(py.stderr).toContain('missing or invalid `id: SPEC-NNN`');
+    });
+
+    it.skipIf(!hasPy)('reports "missing", not "invalid", when the id key is absent entirely', () => {
+      writeSpec('specs/spec-y/spec.md', '---\nstatus: specifying\n---\n# no id\n');
+      const py = runValidatePy();
+      expect(py.code).toBe(1);
+      expect(py.stderr).toContain('missing `id: SPEC-NNN`');
+      expect(py.stderr).not.toContain('invalid');
+    });
+  });
+
+  // ── #1908: the DR gate is keyed on the DIRECTORY (docs/decisions/), not on a
+  // DR-NNN.md filename — a decision record kept under any other name used to
+  // be skipped by is_dr entirely, silently: a skipped file and a passing file
+  // looked identical. INDEX.md (the register listing) and README.md (prose)
+  // are the two named exemptions, since neither carries an id of its own. The
+  // Node validator has no DR id rule to mirror yet (#2297). ──
+  describe('#1908 — the DR gate validates every docs/decisions/*.md, not just DR-NNN.md', () => {
+    it.skipIf(!hasPy)('flags a misnamed decision record with no frontmatter', () => {
+      writeSpec('docs/decisions/0024-thread-identity.md', '# thread identity\n\nno frontmatter\n');
+      const py = runValidatePy();
+      expect(py.code).toBe(1);
+      expect(py.stderr).toContain('docs/decisions/0024-thread-identity.md');
+      expect(py.stderr).toContain('id: DR-NNN');
+    });
+
+    it.skipIf(!hasPy)('accepts the same misnamed record once it carries id: DR-NNN frontmatter', () => {
+      writeSpec(
+        'docs/decisions/0024-thread-identity.md',
+        '---\nid: DR-024\ntitle: Thread identity\nstatus: accepted\n---\n# ok\n'
+      );
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)('still ignores INDEX.md, the register listing with no id of its own', () => {
+      writeSpec('docs/decisions/INDEX.md', '# Decision Register\n\n- DR-001\n');
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)('still ignores README.md, prose with no id of its own', () => {
+      writeSpec('docs/decisions/README.md', '# How this directory works\n');
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+  });
+});
+
+describe('pre-commit committed-symlink gate (#922) — executed behavior', { timeout: 60_000 }, () => {
+  let repo: string;
+  const git = (...args: string[]) =>
+    execFileSync('git', args, { cwd: repo, stdio: 'pipe' });
+
+  beforeEach(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-922-symlink-'));
+    git('init', '-q');
+    git('config', 'user.email', 'dev@example.com');
+    git('config', 'user.name', 'dev');
+    generateHarnessFiles(repo);
+  });
+
+  afterEach(() => {
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
+  function runHook(env: Record<string, string> = {}): { code: number; stderr: string } {
+    const hook = path.join(repo, PRE_COMMIT);
+    // `sh` (not bash) — the scaffolded hook is POSIX sh. Run on a branch so the
+    // protected-branch guard (no origin/HEAD → fails open) stays out of the way.
+    const res = spawnSync('sh', [hook], {
+      cwd: repo,
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: process.env.PATH ?? '', SYMLINK_GATE_OFF: '', ...env },
+    });
+    return { code: res.status ?? -1, stderr: res.stderr };
+  }
+
+  function stageLink(rel: string, target: string): void {
+    const full = path.join(repo, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.symlinkSync(target, full);
+    git('add', '-f', '--', rel);
+  }
+
+  it('template carries the gate and its bypass', () => {
+    const c = byPath(PRE_COMMIT).content;
+    expect(c).toContain('SYMLINK_GATE_OFF');
+    expect(c).toContain('120000');
+  });
+
+  it('refuses a node_modules symlink at the root, whatever the target', () => {
+    stageLink('node_modules', 'vendor');
+    const r = runHook();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("'node_modules' symlink");
+  });
+
+  it('refuses a node_modules symlink at depth', () => {
+    stageLink('packages/a/node_modules', 'sibling');
+    const r = runHook();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('packages/a/node_modules');
+  });
+
+  it('refuses a symlink with an absolute target', () => {
+    stageLink('link', '/home/dev/code/primary/thing');
+    const r = runHook();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('absolute path');
+  });
+
+  it('refuses a symlink whose target escapes the repo root', () => {
+    stageLink('a/link', '../../outside');
+    const r = runHook();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('escapes the repository root');
+  });
+
+  it('allows an in-repo relative symlink', () => {
+    fs.writeFileSync(path.join(repo, 'real.txt'), 'x\n');
+    stageLink('a/link', '../real.txt');
+    const r = runHook();
+    expect(r.stderr).not.toContain('refusing staged symlink');
+  });
+
+  it('SYMLINK_GATE_OFF=1 bypasses the gate', () => {
+    stageLink('node_modules', 'vendor');
+    const r = runHook({ SYMLINK_GATE_OFF: '1' });
+    expect(r.stderr).not.toContain('refusing staged symlink');
+  });
+
+  it('MINSPEC_GATE_OFF=1 bypasses the whole hook', () => {
+    stageLink('node_modules', 'vendor');
+    const r = runHook({ MINSPEC_GATE_OFF: '1' });
+    expect(r.code).toBe(0);
   });
 });

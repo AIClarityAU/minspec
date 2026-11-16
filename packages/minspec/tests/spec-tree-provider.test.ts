@@ -38,7 +38,6 @@ vi.mock('vscode', () => ({
 import type { ApprovalLookupFn } from '../src/views/spec-tree-provider';
 import type { SpecSummary } from '../src/lib/spec-manager';
 import { SpecTreeProvider, SpecGroupNode, SpecNode, RollupNode, STATUS_GROUPS, compressSpecId, stripProductPrefix } from '../src/views/spec-tree-provider';
-import { listSpecs } from '../src/lib/spec-catalog';
 import { EpicGroupNode } from '../src/views/epic-grouping';
 import { TreeExpansionMemory } from '../src/views/tree-expansion-memory';
 import type { EpicSummary } from '../src/lib/epic-manager';
@@ -429,6 +428,9 @@ describe('SpecTreeProvider — approval wiring (regression)', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-approval-wiring-'));
+    // SPEC-096: an approval record lives in `.minspec/`, so it is written only in a folder
+    // that has opted in. The store used to create that directory itself.
+    fs.mkdirSync(path.join(tmpDir, '.minspec'));
   });
 
   function writeSpec(id: string): string {

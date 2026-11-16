@@ -1,6 +1,8 @@
 # Initialize Your Project
 
-Run the **MinSpec: Initialize SDD Structure** command to set up SDD in your workspace.
+Run the **MinSpec: Initialize SDD Structure** command to set up SDD in your workspace. This
+is the one-time setup step; after this, the sidebar and status bar (coming up in step 4) take
+over telling you what to do next — you won't need to remember where things live.
 
 ## What gets created
 
@@ -28,4 +30,5 @@ Defaults work well for most projects. Customize when needed.
 
 Every spec is a standard markdown file with YAML frontmatter. No proprietary format, no lock-in. You can read and edit them with any tool.
 
-**Ready?** Click the button below to initialize your project.
+**Ready?** Click the button below to initialize your project. The next step covers the
+decision that actually shapes your day-to-day: classifying a task's tier.

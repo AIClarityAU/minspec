@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { hasOptInMarker, NotOptedInError } from './opt-in';
 
 /**
  * The project-local preference store: `.minspec/preferences.json`.
@@ -10,12 +11,13 @@ import * as path from 'path';
  * per-project), which satisfies DR-071's "personal decision" corollary and
  * constitution invariant 3 simultaneously, with no amendment to either.
  *
- * DELIBERATELY DEPENDENCY-FREE (`fs`/`path` only, no `vscode`). It was inlined
- * in `auto-bootstrap.ts` until #1319, but that module pulls in
- * `template-registry`, `epic-backfill`, `epic-manager`, `merge-refresh` and
- * `scaffold` — so any command wanting a preference dragged that whole chain in
- * with it. Keep this module's import list empty; a preference read must stay
- * cheap enough that nobody is tempted to reach for a global setting instead.
+ * DELIBERATELY LEAN (`fs`, `path` and the opt-in rule in `./opt-in`, which itself
+ * imports only `fs` and `path`; no `vscode`). It was inlined in
+ * `auto-bootstrap.ts` until #1319, but that module pulls in `template-registry`,
+ * `epic-backfill`, `epic-manager`, `merge-refresh` and `scaffold` - so any
+ * command wanting a preference dragged that whole chain in with it. Keep this
+ * module's import list that short; a preference read must stay cheap enough
+ * that nobody is tempted to reach for a global setting instead.
  *
  * `auto-bootstrap.ts` re-exports every symbol here, so existing importers are
  * unaffected.
@@ -143,38 +145,13 @@ export function loadPreferences(rootDir: string): BootstrapPreferences {
 }
 
 /**
- * Has this folder opted in to MinSpec?
- *
- * The opt-in marker is `.minspec/` at the workspace root (constitution
- * invariant 3). Defined HERE, in the dependency-free module, so the store can
- * gate its own write and a command that only wants a preference can ask the
- * question without importing `auto-bootstrap`. `isMinspecInitialized` there
- * delegates to this, so there is one definition, not two.
- *
- * An empty root means "no folder open". `path.join('', '.minspec')` resolves
- * against the process's working directory, so without the explicit check an
- * extension host that happened to start inside a MinSpec project would answer
- * "opted in" for a window with no folder at all.
+ * The opt-in predicate and the refusal error live in `./opt-in` (SPEC-096 FR-1),
+ * the one module that holds the rule. They are re-exported here because this is
+ * where they were defined when the preference store was the only thing that
+ * refused (#2355), and every importer of this module keeps working unchanged.
+ * There is still exactly one definition of each.
  */
-export function hasOptInMarker(rootDir: string): boolean {
-  return rootDir !== '' && fs.existsSync(path.join(rootDir, '.minspec'));
-}
-
-/**
- * Thrown by {@link savePreferences} when asked to persist into a folder that
- * has not opted in. A distinct class so a caller (or a test) can tell "this
- * folder never opted in" from an ordinary I/O failure.
- */
-export class NotOptedInError extends Error {
-  constructor(rootDir: string) {
-    super(
-      rootDir === ''
-        ? 'MinSpec: no folder is open, so there is no project to save a preference in.'
-        : `MinSpec: ${rootDir} has no .minspec/ directory (it has not opted in), so no preference was saved there. Run "MinSpec: Initialize" first.`,
-    );
-    this.name = 'NotOptedInError';
-  }
-}
+export { hasOptInMarker, NotOptedInError } from './opt-in';
 
 /**
  * Merge new preferences with existing ones and persist to disk.
@@ -188,12 +165,19 @@ export class NotOptedInError extends Error {
  * per-workspace memory. There is deliberately no `mkdir` left here at all: if
  * the marker vanishes between the check and the write, `writeFileSync` fails
  * with `ENOENT` rather than recreating it.
+ *
+ * The refusal says "no preference was saved there" and not the general "nothing
+ * was written there": here a preference WAS the write, and a caller may already
+ * have written something else by the time this refuses (the classify toast
+ * updates a workspace setting first).
  */
 export function savePreferences(
   rootDir: string,
   update: BootstrapPreferences,
 ): void {
-  if (!hasOptInMarker(rootDir)) throw new NotOptedInError(rootDir);
+  if (!hasOptInMarker(rootDir)) {
+    throw new NotOptedInError(rootDir, 'no preference was saved there');
+  }
   const current = loadPreferences(rootDir);
   const merged = { ...current, ...update };
   fs.writeFileSync(

@@ -58,10 +58,60 @@ describe('the autonomy setting is a boundary file', () => {
     expect(sig!.explain).toContain('.minspec/config.json');
   });
 
+  it('#1874 — the explain text does not misdescribe a governance-only diff as CI/build config', () => {
+    // detectBoundaryChange shares one `explain` string across every
+    // isBoundaryPath category (#1874). Before the fix, the string opened
+    // with "CI/build-config boundary file(s) changed" and cited a
+    // `curl … | sh` CI-workflow risk as if it applied to every match,
+    // including this repo-governance setting. The signal's DECISION was
+    // always correct (high-blast, hold) — only the stated reason was wrong
+    // for this input — so the assertion is on wording, not on eligibility
+    // (that end-to-end path is covered separately below).
+    const sig = detectBoundaryChange([{ path: '.minspec/config.json', status: 'modified' } as never]);
+    expect(sig!.explain).not.toMatch(/^CI\/build-config boundary file/);
+    expect(sig!.explain.toLowerCase()).toContain('governance');
+  });
+
   it('matches regardless of path spelling', () => {
     for (const p of ['./.minspec/config.json', '.minspec\\config.json']) {
       expect(isBoundaryPath(p)).toBe(true);
     }
+  });
+});
+
+describe('the delegation records are a boundary file too (DR-108)', () => {
+  // An agent may tighten or suspend a delegation, never widen one. That holds
+  // only if no edit to the record can auto-merge: the founder's merge keystroke
+  // is the witness, the same as for the autonomy setting.
+  it('.minspec/delegations.json is a boundary path, however spelled', () => {
+    for (const p of ['.minspec/delegations.json', './.minspec/delegations.json', '.minspec\\delegations.json']) {
+      expect(isBoundaryPath(p)).toBe(true);
+    }
+  });
+
+  it('a delegations-only diff is INELIGIBLE for auto-merge, end-to-end', () => {
+    const changed: ChangedFile[] = [cf('.minspec/delegations.json')];
+    const sig = detectBoundaryChange(changed);
+    expect(sig).toBeDefined();
+    const d = decideAutoMerge({
+      reviewSignals: {
+        rootCause: 'widen a delegation',
+        changedFiles: ['.minspec/delegations.json'],
+        rootCauseFiles: ['.minspec/delegations.json'],
+        regressionTest: 'x.test.ts > y',
+        gate: { test: 'pass', lint: 'pass', build: 'pass', validate: 'pass' },
+      },
+      hollowFindings: [],
+      consequenceSignals: sig ? [sig] : [],
+      mode: 'consequence-hybrid',
+      proverResult: { regressionProvenBaseRed: true, regressionGreenOnHead: true, note: 'proven' },
+    });
+    expect(d.eligible).toBe(false);
+    expect(d.failed).toContain('high-blast');
+  });
+
+  it('does not sweep a same-named file elsewhere', () => {
+    expect(isBoundaryPath('docs/delegations.json')).toBe(false);
   });
 });
 

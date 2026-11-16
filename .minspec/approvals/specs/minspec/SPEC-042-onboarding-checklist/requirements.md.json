@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-042-onboarding-checklist/requirements.md",
-  "specHash": "2fc24fb53bedea4b2e29944764512109e964b84772e9b0efccd7935576f05777",
-  "approvedAt": "2026-07-27T23:59:51.900Z",
+  "specHash": "44fd2b7100cbe27178a6455e6fc74b9af77d8a42429e91ddd8ad35370a920ab6",
+  "approvedAt": "2026-10-18T07:14:43.875Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T3",
   "migrated": false,
-  "baselineBlob": "66ccf9e88137c4ceb773221e3e5050161c134b0b"
+  "baselineBlob": "30af9b2d5ae2469510a0705076e503d3c204d6b8"
 }

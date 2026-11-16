@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-231-session-registry-stale-entries/requirements.md",
+  "specHash": "7ee0dfc0ef34990b9dcd970d5d5c20ecc065f9ca77ecd86924baa82642e15302",
+  "approvedAt": "2026-10-27T02:11:05.521Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T2",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-record-1027",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3125#issuecomment-6429269983"
+}

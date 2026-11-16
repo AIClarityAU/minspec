@@ -27,6 +27,7 @@ import type { Tier } from './config';
 // creates no runtime cycle. Verified by scripts/check-import-cycles.ts.
 import { parseSpec } from './spec';
 import { assertOwnershipDeclaredForAdvance } from './ownership-advance-guard';
+import { assertOptedIn, ensureDirectory } from './opt-in';
 import {
   readRecord,
   writeRecord,
@@ -98,11 +99,16 @@ export function refKey(specPath: string): string {
  * Write a gzip-compressed body snapshot to `.minspec/snapshots/<refKey>.json.gz`
  * as the DR-043 per-machine fallback when git blob pinning is unavailable.
  * Returns true on success, false on any error (so mintBaseline can degrade to '').
+ *
+ * `snapshots/` is created below an existing `.minspec/`, never together with it.
+ * In a folder that has not opted in that refusal lands in the `catch` below and
+ * reads as `false`, which is why this function cannot be the one that refuses:
+ * `approveSpec` does it, before anything here runs (SPEC-096 FR-5).
  */
 function writeGzipFallback(rootDir: string, specPath: string, bodyBuf: Buffer): boolean {
   try {
     const dir = path.join(rootDir, '.minspec', 'snapshots');
-    fs.mkdirSync(dir, { recursive: true });
+    ensureDirectory(dir);
     const gz = zlib.gzipSync(bodyBuf);
     fs.writeFileSync(path.join(dir, `${refKey(specPath)}.json.gz`), gz);
     return true;
@@ -527,6 +533,15 @@ export function approveSpec(
   // just the UI; the command layer pre-checks too for a friendlier message.
   assertHumanApprover(email);
 
+  // SPEC-096 FR-5: the opt-in gate, in the same place and for the same reason. An
+  // approval is recorded under `.minspec/`, the opt-in marker, and a folder that
+  // has not opted in has nowhere to hold one. Refuse BEFORE the first side effect:
+  // that is the git blob and ref `mintBaseline` writes below, not a file under
+  // `.minspec/`, so the store's own refusal (`writeRecord`) would arrive after a
+  // ref had been left in a repository that never asked for it. And the gzip
+  // fallback cannot refuse at all (it returns `false` on any error).
+  assertOptedIn(rootDir);
+
   // 0. Single read — hash and baseline both derive from THESE bytes (no double-read,
   //    no TOCTOU skew between specHash and baselineBlob).
   let raw: string;
@@ -539,18 +554,17 @@ export function approveSpec(
   // SPEC-051: ownership pre-check, at the LIB boundary for the same reason DR-056's
   // approver gate is here — approval ADVANCES the phase map, and some rules are gated on
   // that map, so a spec can be complete now and violate an error the instant it is
-  // advanced. #1317 closed the UI path (`commands/approve.ts`); this closes every other
-  // caller OF THIS FUNCTION — a script, a test, a future command, an agent driving
-  // `approveSpec`. Four red mains came through that gap.
+  // advanced. This closes every caller OF THIS FUNCTION — a script, a test, a future
+  // command, an agent driving `approveSpec` — independent of whatever the UI does.
+  // Four red mains came through that gap (#1317).
   //
-  // NOT closed here, stated plainly rather than implied: `advanceSpecToImplementing`
-  // (`spec.ts`) is the function that actually WRITES `phases.plan: in-progress`, and it
-  // remains unguarded. Guarding it needs `spec.ts` to import the validator, but
-  // `spec-validator.ts` value-imports `./spec` (`SPEC_STATUSES`, `SPEC_TYPES`,
-  // `stripInlineComment`) — a real runtime cycle, and dodging the cycle checker with a
-  // lazy `require` would hide it rather than remove it. Its ONLY production caller today
-  // is `commands/approve.ts:315`, which #1317 already refuses before reaching. So the
-  // exposure is a future direct caller, not a live hole. Tracked as tasks.md T4.2.
+  // `advanceSpecToImplementing` (`spec.ts`) — the function that actually WRITES
+  // `phases.plan: in-progress` — carries the SAME guard call at its own top, before its
+  // own write (#1446, once the `./spec-vocabulary` extraction removed the cycle that
+  // used to block it). `commands/approve.ts` — the UI a human actually drives — calls it
+  // too, before `advanceSpecToImplementing` (#1806; before that it inlined
+  // `violationsIntroducedByApproval` as an independent second implementation that could
+  // drift from this one). All three call sites now run the one function below.
   //
   // Reuses `violationsIntroducedByApproval` rather than a fresh predicate, which buys two
   // deliberate properties for free:

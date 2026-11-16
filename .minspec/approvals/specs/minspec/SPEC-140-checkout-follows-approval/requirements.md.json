@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-140-checkout-follows-approval/requirements.md",
+  "specHash": "6effc6d51114950d6e0675b2f3b698832255e53b9d73647f4fc21101646795ae",
+  "approvedAt": "2026-10-24T04:12:14.723Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "8e7f601138b3a42319871006be14a11fb6fbcc33"
+}

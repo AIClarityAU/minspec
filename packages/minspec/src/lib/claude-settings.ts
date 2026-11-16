@@ -31,6 +31,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 import { CLAUDE_HOOKS_DIR } from './template-registry';
+import { ensureDirectory } from './opt-in';
 
 /** Project-relative path of Claude Code's committed, project-scoped settings file. */
 export const CLAUDE_SETTINGS_PATH = '.claude/settings.json';
@@ -148,7 +149,7 @@ export function registerSessionTitleHook(rootDir: string): HookRegistrationResul
   if (!fs.existsSync(fullPath)) {
     const fresh: JsonObject = { hooks: { [SESSION_TITLE_HOOK_EVENT]: [sessionTitleHookGroup()] } };
     try {
-      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+      ensureDirectory(path.dirname(fullPath)); // SPEC-096 FR-4: the one directory operation
       fs.writeFileSync(fullPath, `${JSON.stringify(fresh, null, 2)}\n`);
       return 'created';
     } catch {

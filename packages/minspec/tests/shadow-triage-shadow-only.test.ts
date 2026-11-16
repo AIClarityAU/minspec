@@ -26,6 +26,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { GH_BOT_STUB_ENV } from './helpers/gh-bot-env';
+import { provenanceAnswer } from './helpers/agent-launch-harness';
 
 // These specs drive real bash → claude/gh stub → triage-decide.sh → jq chains. Under
 // container scheduling contention a single invocation can queue past the 5s default
@@ -88,7 +89,17 @@ interface Harness {
  * fixture key and silently turn every assertion below into a vacuous pass against a
  * shadow step that never ran.
  */
-function makeHarness(opts: { key?: string; disabled?: boolean; private?: boolean } = {}): Harness {
+function makeHarness(
+  opts: {
+    key?: string;
+    legacyKey?: string;
+    disabled?: boolean;
+    private?: boolean;
+    title?: string;
+    liveVerdict?: string;
+    shadowVerdict?: string;
+  } = {},
+): Harness {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shadow-triage-'));
   const binDir = path.join(dir, 'bin');
   fs.mkdirSync(binDir);
@@ -98,8 +109,9 @@ function makeHarness(opts: { key?: string; disabled?: boolean; private?: boolean
   const curlCalls = path.join(dir, 'curl-calls.log');
   const shadowLog = path.join(dir, 'shadow-triage.jsonl');
 
-  fs.writeFileSync(path.join(dir, 'live-verdict.txt'), LIVE_VERDICT);
-  fs.writeFileSync(path.join(dir, 'shadow-verdict.txt'), SHADOW_VERDICT);
+  fs.writeFileSync(path.join(dir, 'live-verdict.txt'), opts.liveVerdict ?? LIVE_VERDICT);
+  fs.writeFileSync(path.join(dir, 'shadow-verdict.txt'), opts.shadowVerdict ?? SHADOW_VERDICT);
+  const title = opts.title ?? 'A fixture issue';
 
   // Only the LIVE agent is a `claude` process now. The stub still branches on
   // ANTHROPIC_BASE_URL so that a regression which reintroduced a shadow `claude` call
@@ -156,12 +168,21 @@ exit 0
 
   // Every argument is logged on its own line with newlines escaped, so a multi-line
   // `--body` cannot be mistaken for separate arguments when asserting.
+  //
+  // Triage asks GitHub, in a read of its own, who wrote the issue's text, and refuses
+  // unless every one of them is on the list in scripts/lib/dispatch-author-gate.sh. The
+  // issue served here was opened by the founder and never edited, so that read passes:
+  // these cases are about what happens when both agents run.
+  const provenance = path.join(dir, 'provenance.json');
+  fs.writeFileSync(provenance, provenanceAnswer({ title, body: 'Some issue body.' }));
   fs.writeFileSync(
     path.join(binDir, 'gh'),
     `#!/usr/bin/env bash
 { printf '=== %s %s\\n' "\${1:-}" "\${2:-}"; for a in "\$@"; do printf 'ARG %s\\n' "\${a//$'\\n'/\\\\n}"; done; } >> "${ghLog}"
 if [[ "\${1:-}" == "issue" && "\${2:-}" == "view" ]]; then
-  echo '{"body":"Some issue body.","title":"A fixture issue","labels":[{"name":"inbox"}]}'
+  echo '{"body":"Some issue body.","title":${JSON.stringify(title)},"labels":[{"name":"inbox"}]}'
+elif [[ "\${1:-}" == "api" && "\${2:-}" == "graphql" ]]; then
+  cat "${provenance}"
 elif [[ "\${1:-}" == "repo" && "\${2:-}" == "view" ]]; then
   echo '${visibility}'
 fi
@@ -174,6 +195,9 @@ exit 0
     PATH: `${binDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
     HOME: process.env.HOME ?? '/tmp',
     MINSPEC_SHADOW_TRIAGE_LOG: shadowLog,
+    // Hermetic: the "no key" cases must not pick up the operator's real key file under
+    // HOME, which would send a real credential to the stub curl's log (zaikey23).
+    MINSPEC_ZAI_API_KEY_FILE: path.join(dir, 'no-such-zai.key'),
     // Pin the model so these cases stay HERMETIC. The shipped default is the
     // `latest` sentinel, which resolves via GET /v1/models — a network call these
     // tests must never make, and which would (correctly) skip the run when it fails,
@@ -186,17 +210,18 @@ exit 0
     // supplies a stubbed `gh` on PATH. Without it the script aborts before writing.
     ...GH_BOT_STUB_ENV,
   };
-  if (opts.key) env.MINSPEC_SHADOW_TRIAGE_KEY = opts.key;
+  if (opts.key) env.MINSPEC_ZAI_API_KEY = opts.key;
+  if (opts.legacyKey) env.MINSPEC_SHADOW_TRIAGE_KEY = opts.legacyKey;
   if (opts.disabled) env.MINSPEC_SHADOW_TRIAGE = '0';
 
   return { dir, binDir, ghLog, claudeCalls, curlCalls, shadowLog, env };
 }
 
-function runTriage(h: Harness, issue = '4242'): { stdout: string; stderr: string; status: number } {
+function runTriage(h: Harness, issue = '4242', triageInbox = TRIAGE_INBOX): { stdout: string; stderr: string; status: number } {
   // spawnSync, not execFileSync: the success path must still yield stderr, because
   // the "an inert instrument is visible as inert" assertion reads a note printed on
   // a run that exits 0.
-  const r = spawnSync('bash', [TRIAGE_INBOX, issue], {
+  const r = spawnSync('bash', [triageInbox, issue], {
     encoding: 'utf-8',
     env: h.env,
     cwd: h.dir,
@@ -366,7 +391,7 @@ describe('shadow-triage — a contradicting shadow verdict changes NO outcome (#
 
 describe('shadow-triage — inert without a key, and real triage is untouched (#1338)', () => {
   it('no key → the shadow model is never called, no log is written, triage still succeeds', () => {
-    const h = makeHarness(); // no MINSPEC_SHADOW_TRIAGE_KEY
+    const h = makeHarness(); // no MINSPEC_ZAI_API_KEY
     const res = runTriage(h);
 
     expect(res.status).toBe(0);
@@ -386,6 +411,19 @@ describe('shadow-triage — inert without a key, and real triage is untouched (#
     // from "ran and agreed" — the same reason a report distinguishes n=0 from a pass.
     const h = makeHarness();
     expect(runTriage(h).stderr).toMatch(/shadow-triage: no z\.ai key configured/);
+  });
+
+  it('the pre-rename MINSPEC_SHADOW_TRIAGE_KEY still enables the step, with a visible deprecation notice (#2707)', () => {
+    const h = makeHarness({ legacyKey: 'zai-test-key' });
+    const res = runTriage(h);
+    expect(res.stderr).toMatch(/MINSPEC_SHADOW_TRIAGE_KEY is deprecated.*MINSPEC_ZAI_API_KEY/);
+    expect(res.stderr).not.toMatch(/no z\.ai key configured/);
+    expect(fs.existsSync(h.curlCalls)).toBe(true);
+  });
+
+  it('MINSPEC_ZAI_API_KEY set → no deprecation notice even if the old name is also present (#2707)', () => {
+    const h = makeHarness({ key: 'zai-test-key', legacyKey: 'zai-old-key' });
+    expect(runTriage(h).stderr).not.toMatch(/deprecated/);
   });
 
   it('MINSPEC_SHADOW_TRIAGE=0 hard-disables it even when a key is present', () => {
@@ -491,6 +529,17 @@ describe('shadow-triage — verdict-block schema conformance (#1338 metric 2)', 
     expect(conformant(`Here is my analysis.\n\n${SHADOW_VERDICT}\n\nHope that helps!`)).toBe(true);
   });
 
+  it('a large block stays conformant under pipefail (no SIGPIPE from early grep -q exit, #2874)', () => {
+    // Fields come first, then more than a pipe buffer of rationale: `grep -q` exits on the
+    // first match while a piped writer is still writing, which under `set -o pipefail`
+    // reported a conformant block as non-conformant.
+    const big = SHADOW_VERDICT.replace(
+      'TRIAGE_VERDICT_END',
+      `${'rationale padding line\n'.repeat(20000)}TRIAGE_VERDICT_END`,
+    );
+    for (let i = 0; i < 5; i++) expect(conformant(big)).toBe(true);
+  });
+
   it('no block at all is NOT conformant', () => {
     expect(conformant('the model rambled and emitted no verdict block')).toBe(false);
   });
@@ -513,5 +562,42 @@ describe('shadow-triage — verdict-block schema conformance (#1338 metric 2)', 
       .filter((l) => !l.startsWith('rationale:'))
       .join('\n');
     expect(conformant(noRationale)).toBe(true);
+  });
+});
+
+// ── #3282: the shadow side is judged with the SAME named-spec status as the live side ──
+// A `build: SPEC-NNN` issue whose spec is already approved is held `built-spec` by the
+// live gate. If the shadow call were made without that status, an agreeing agent-ready
+// shadow verdict would come out specify/agent-ready, and the log would record a
+// disagreement the PR caused rather than the model.
+describe('shadow-triage — an agreeing model scores as agreement on an already-built spec (#3282)', () => {
+  const NUM = '987';
+  const agentReady = verdict('agent-ready', 'architect', 'T3', 'no');
+
+  /** triage-inbox.sh finds specs at <its dir>/../specs, so a private copy sees only the fixture. */
+  function fixtureTriage(status: string): string {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'shadow-triage-repo-'));
+    fs.cpSync(scriptsDir, path.join(root, 'scripts'), { recursive: true });
+    const d = path.join(root, 'specs', 'fixture-epic', `SPEC-${NUM}-fixture`);
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, 'requirements.md'), `---\nid: SPEC-${NUM}\nstatus: ${status}\n---\n`);
+    return path.join(root, 'scripts', 'triage-inbox.sh');
+  }
+
+  it('live built-spec and shadow agent-ready are recorded as AGREEING on label, hold and all', () => {
+    const h = makeHarness({
+      key: 'zai-test-key',
+      title: `build: SPEC-${NUM} the fixture spec`,
+      liveVerdict: agentReady,
+      shadowVerdict: agentReady,
+    });
+    runTriage(h, '4242', fixtureTriage('implementing'));
+    const rows = readRows(h);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].live.hold).toBe('built-spec');
+    expect(rows[0].shadow.hold).toBe('built-spec');
+    expect(rows[0].agree.label).toBe(true);
+    expect(rows[0].agree.hold).toBe(true);
+    expect(rows[0].agree.all).toBe(true);
   });
 });

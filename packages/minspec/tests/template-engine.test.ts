@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { buildContext, renderTemplate, renderAll, type TemplateContext } from '../src/lib/template-engine';
-import { TEMPLATE_NAMES, type TemplateName } from '../src/lib/template-registry';
+import { TEMPLATE_NAMES } from '../src/lib/template-registry';
 import { DEFAULT_CONFIG } from '../src/lib/config';
 import * as fs from 'fs';
 import * as path from 'path';
