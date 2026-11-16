@@ -35,11 +35,20 @@ calls the contradiction false once scope is applied, and asks for a written rule
 separates the two blocking semantics, a cross-reference from both specs, and a negative test
 case for the cross-spec reviewer tracked as #147.
 
-**Id note.** Number 118 is the highest spec id on any local or remote-tracking ref and in
-any local worktree of this checkout (read offline on 2026-10-03 from every ref under
-`refs/heads` and `refs/remotes`, and from all 354 worktrees). Open pull requests whose
-branches are not fetched here are invisible to that read. If `SPEC-119` collides at review
-time, renumber.
+**Id note.** `SPEC-119` was minted by the first Specify dispatch for #164 (commit
+`9979eacc9`, 2026-10-03). The refresh dispatch of 2026-11-16 was handed spec number 361 as a
+reserved id, with the instruction to keep an existing spec's own id; this spec keeps
+`SPEC-119`. Checked offline on 2026-11-16: no file under `specs/` on `origin/main`
+(`7931142f`) carries `id: SPEC-119`, and across every fetched `refs/remotes/origin/*` ref the
+only `SPEC-119-*` directory is this one. Unfetched pull-request branches are invisible to that
+read. If `SPEC-119` collides at review time, renumber to the reserved number, 361.
+
+**Refresh note (2026-11-16).** Code citations below were re-read from `origin/main` at
+`7931142f`; the branch this spec was first written on was behind it, and
+`template-registry.ts` alone gained about 600 lines since. The two quoted sentences
+(Invariant 5, FR-12) are byte-identical between the two commits. One change on main bears on
+the design itself: the approval-race commit gate of #424 - see
+[What the edits cost](#what-the-edits-cost-measured) and DQ-6.
 
 **Tier note.** T3 (full spec cycle). The mechanical scope is small - two one-sentence edits,
 one data file, one test - but both edited specs are approved T4 documents whose approval the
@@ -53,7 +62,7 @@ system and the object it applies to, list the blocking semantics MinSpec and its
 extension actually have, point SPEC-001 Invariant 5 and SPEC-019 FR-12 at that list, and seed
 a reviewer test case that fails a reviewer which flags the pair as a contradiction.
 
-## Context - what the two specs say today (read from `350c6fa4`, not inferred)
+## Context - what the two specs say today (read from `7931142f`, not inferred)
 
 ### The two sentences
 
@@ -87,16 +96,22 @@ The issue's summary is "MinSpec-core is Tier-0 and never blocks authoring; agent
 Tier-1 and may block dispatch." The second half holds as written. The first half holds only
 for a precise meaning of "authoring", because the core ships gates that refuse:
 
-| Refusal the core ships today | Where |
+| Refusal the core ships today (scaffolded `pre-commit` / `commit-msg`) | Where, at `7931142f` |
 |---|---|
-| Protected-branch guard refuses an authored commit on the default branch | `packages/minspec/src/lib/template-registry.ts:1200` (stage header), refusal at `:1322` |
-| Secret scan refuses a commit when `gitleaks` reports a finding | `template-registry.ts:1431`, refusal at `:1445-1452` |
-| SDD validation refuses a commit on a frontmatter violation | `template-registry.ts:1459`, refusal at `:1522-1529` |
-| Commit-message gate refuses an uncited deferral | `template-registry.ts:1597` onward, refusals at `:1653` and `:1673` |
+| Stage 0 - protected-branch guard refuses an authored commit on the default branch | `packages/minspec/src/lib/template-registry.ts:1286` (stage header), refusal at `:1408` |
+| Stage 1 - author-identity gate (itself separately opt-in, #1114) | `template-registry.ts:1411`, refusals at `:1451`, `:1466` |
+| Stage 2 - secret scan refuses a commit when `gitleaks` reports a finding | `template-registry.ts:1547`, refusal at `:1568` |
+| Stage 2b - committed-symlink gate refuses a staged symlink of the `node_modules` kind (#922) | `template-registry.ts:1575`, refusal at `:1632` |
+| Stage 3 - SDD validation refuses on a frontmatter violation (exit code captured, not exited on) | `template-registry.ts:1635`; exit at `:1998` |
+| Stage 4 - code-quality correctness checks (SPEC-080, DR-099) | `template-registry.ts:1992`; exit at `:1999` |
+| `commit-msg` - RCDD root-cause line on `fix:` commits (DR-003) and cited prose deferrals (DR-059) | `template-registry.ts:2025` onward, refusals at `:2081`, `:2101` |
 
 These reach a project because Initialize points the repository's `core.hooksPath` at
-`.minspec/hooks` (`packages/minspec/src/lib/scaffold.ts:910-933`). Every one of them honours a
-single bypass, `MINSPEC_GATE_OFF=1` (`template-registry.ts:1195`, `:1597`).
+`.minspec/hooks` (`packages/minspec/src/lib/scaffold.ts:1108-1132` at `7931142f`). Both
+hooks honour a single bypass, `MINSPEC_GATE_OFF=1` (`template-registry.ts:1281`, `:2025`).
+The list is longer than when this spec was first written (2026-10-03: four rows) - which is
+itself the evidence for R2: rows name systems and objects precisely so that this table can
+grow without FR-2 changing.
 [DR-099](../../../docs/decisions/DR-099.md) ("How this sits with 'only DR-012 blocks'") records
 the history: earlier decisions stated an advisory default, later ones added refusing commit
 gates and argued each one.
@@ -139,8 +154,23 @@ The approval hash covers a spec's body and every frontmatter key except `status`
 `.minspec/approvals/specs/agent-execute/SPEC-019-execution-substrate/requirements.md.json`. So
 any cross-reference added to either file - a body sentence or a `relates_to` entry - voids
 that file's approval, and a human re-approves it. There is no way to add the pointer for free.
-Whether the edit also stales the sibling `design.md` and `tasks.md` approvals of those two
-specs I have not measured; the Plan phase must, before the edit is made.
+The sibling `design.md` and `tasks.md` approvals are not at stake: `npm run validate` at this
+refresh reports the sidecars for `specs/minspec/design.md`, `specs/minspec/tasks.md` and
+SPEC-019's `design.md` as "orphaned approval sidecar ... (no longer an approvable spec)", so
+only the two `requirements.md` approvals carry weight.
+
+**New since first draft - the edit cannot simply be committed stale any more.** `origin/main`
+at `7931142f` (#3726, closing #424) added an approval-race stage to this repository's own
+`.githooks/pre-commit`. It runs when a staged `.md` file has a committed sidecar under
+`.minspec/approvals/`, and refuses the commit when the staged file's hash differs from that
+sidecar - unless a matching re-approval sidecar is staged with it, or the sidecar's deletion
+(a revocation) is staged with it. Its bypass is `APPROVAL_RACE_GATE_OFF=1` (read from the
+#3726 diff and its test `packages/minspec/tests/githooks-approval-race-gate.test.ts`, cases
+"allows the edit when the matching re-approval sidecar is staged too" and "allows a revoked
+approval: sidecar deletion staged with an edit"). So the first draft's FR-6 - "leave both
+approvals stale, touch nothing under `.minspec/approvals/`" - would now be refused at commit
+time. How the implementing change gets past that gate is a human choice, DQ-6; FR-6 and AC-4
+below are written under its recommended option.
 
 ## Functional Requirements
 
@@ -207,16 +237,20 @@ specs I have not measured; the Plan phase must, before the edit is made.
   `SPEC-119` is added to that file's existing `relates_to` list. Dropped under DQ-3 Option C.
 
 - **FR-6 (the edits do not mint an approval).** The change that makes FR-4 and FR-5 lands both
-  edits in one pull request, leaves both approvals stale, and says so in its description. It
-  MUST NOT write or refresh an approval record. Re-approval is a human act
-  ([DR-012](../../../docs/decisions/DR-012.md)).
+  edits in one pull request and MUST NOT write or refresh an approval record: no agent-made
+  sidecar carries the new hash. Re-approval is a human act
+  ([DR-012](../../../docs/decisions/DR-012.md)). Under DQ-6 Option A, the agent's commit
+  stages the deletion of the two `requirements.md.json` sidecars alongside the edits (the
+  revocation the approval-race gate accepts), never bypasses that gate, and the pull-request
+  description states that SPEC-001 and SPEC-019 are unapproved until the human approves them
+  again.
 
 ### The reviewer test case
 
 - **FR-7 (one case, two halves).** A single data file,
   `packages/minspec/tests/fixtures/cross-spec/blocking-scope.case.json`, holds:
   1. **The negative half.** The Invariant 5 sentence and the FR-12 sentence, quoted verbatim
-     **as they read at `350c6fa4`, before FR-4 and FR-5** - with each excerpt's `product` and
+     **as they read at `7931142f`, before FR-4 and FR-5** - with each excerpt's `product` and
      tier. Expected result: no contradiction and no violated-invariant finding that cites both.
   2. **The positive control.** The same two sentences with the scope made equal - both
      attributed to the same System and Object. Expected result: a contradiction finding.
@@ -283,15 +317,19 @@ specs I have not measured; the Plan phase must, before the edit is made.
 
 - [ ] **AC-1 (FR-1, FR-2).** This spec is approved with the FR-2 table containing the rows the
   human chose under DQ-2, and the "contradict only when System and Object agree" rule stated.
-- [ ] **AC-2 (FR-4).** SPEC-001 Invariant 5 contains every word it has at `350c6fa4`, plus one
+- [ ] **AC-2 (FR-4).** SPEC-001 Invariant 5 contains every word it has at `7931142f`, plus one
   sentence that names SPEC-119 and rows B-1, B-2 and B-3. `git diff` on the file shows no
   deleted line content other than the one line re-emitted with the sentence appended.
-- [ ] **AC-3 (FR-5).** SPEC-019 FR-12 contains every word it has at `350c6fa4`, plus one
+- [ ] **AC-3 (FR-5).** SPEC-019 FR-12 contains every word it has at `7931142f`, plus one
   sentence that names SPEC-119 and rows B-3 and B-1; `relates_to` contains `SPEC-119`.
-- [ ] **AC-4 (FR-6).** The pull request that makes AC-2 and AC-3 changes no file under
-  `.minspec/approvals/`, and both specs show as needing re-approval afterwards.
+- [ ] **AC-4 (FR-6).** In the pull request that makes AC-2 and AC-3, the only change under
+  `.minspec/approvals/` is the deletion of
+  `.minspec/approvals/specs/minspec/requirements.md.json` and
+  `.minspec/approvals/specs/agent-execute/SPEC-019-execution-substrate/requirements.md.json`
+  (DQ-6 Option A); no sidecar is added or rewritten; no commit in it was made with
+  `APPROVAL_RACE_GATE_OFF=1`; and both specs show as unapproved afterwards.
 - [ ] **AC-5 (FR-7, FR-8).** The case file exists, parses against FR-8, and holds the two
-  cases with the excerpts byte-equal to the `350c6fa4` text.
+  cases with the excerpts byte-equal to the `7931142f` text.
 - [ ] **AC-6 (FR-9).** The pin test passes, and fails when any one of these is done in turn:
   the positive control is deleted; an excerpt differs between the two cases; `SPEC-119` is
   removed from either pointer; row B-3 is removed from FR-2. Each of the four is shown red
@@ -375,6 +413,38 @@ Not a choice between designs - a fact I could not read. Confirm that #147 tracks
 Slice 2 (independent adversarial second reviewer). If it tracks a different reviewer, FR-7 to
 FR-10 retarget to that reviewer and the rest of this spec stands.
 
+### DQ-6 - How does the edit get past the approval-race commit gate?
+
+New since the first draft (see [What the edits cost](#what-the-edits-cost-measured)). Every
+option below leaves SPEC-001 and SPEC-019 needing a human re-approval; they differ in what
+the repository records in the meantime and who stages what.
+
+Whichever option is chosen, while the two specs are unapproved and `implementing` the dev-time
+spec gate (`scripts/hooks/spec-gate.py`, scoped by #426 to the code a spec declares) denies
+agent edits to the existing files their `tasks.md` names in backticks. Read at `7931142f`:
+SPEC-001's `specs/minspec/tasks.md` names `.minspec/config.json` and `package.json` (both
+exist); SPEC-019's `tasks.md` names `package.json` and its own `design.md`. Neither
+`requirements.md` declares `implements:` or `affects:`. That the gate resolves those paths
+from the repository root is my reading of its docstring, unverified by running it.
+
+- **Option A (rec) - revoke: the agent's commit stages deletion of the two `requirements.md`
+  sidecars with the edits; the human approves both specs again afterwards.** This is the
+  path the gate's own test accepts ("allows a revoked approval"). *Cost:* from merge until the
+  human re-approves, the repository says SPEC-001 and SPEC-019 have no approval at all, and the
+  spec gate above freezes agent edits to root `package.json` and `.minspec/config.json` - a
+  file many unrelated changes touch - for that window.
+- **Option B - the human re-approves inside the same pull request** (runs MinSpec: Approve
+  Spec on both edited files on the branch, so the matching sidecars are staged with the
+  edits). *Cost:* no unapproved window and no freeze, but the pull request cannot be finished
+  by an agent alone: it waits on the human before it can even be committed green, and the
+  approval is then made against a branch rather than main.
+- **Option C - bypass the race gate with `APPROVAL_RACE_GATE_OFF=1` and leave the old sidecars
+  in place, stale.** This is what the first draft's FR-6 amounted to. *Cost:* it commits the
+  exact state #424 was built to refuse - an approved spec whose bytes no approval covers - and
+  normalises an agent using a gate's bypass. Not recommended.
+- **Option D - DQ-3 Option C (edit neither spec).** *Cost:* as stated under DQ-3; it makes
+  this question moot.
+
 ## Why no new DR
 
 The dispatch allows a decision record only for a choice that cannot be undone in under a day.
@@ -398,6 +468,7 @@ number comes from the collision gate, not from the files on disk.
 | R5 | **Re-approval is treated as a formality.** Two approved T4 specs are edited and the human signs both without reading. | Med, Med | The diff is one sentence per file (AC-2, AC-3), both in one pull request (FR-6), so the read is two sentences. DQ-3 Option C removes the sign-off entirely at a stated cost. |
 | R6 | **#147 is not what this spec assumes.** | Low, Low | DQ-5; only FR-7 to FR-10 depend on it. |
 | R7 | **Ratifying "Initialize is the opt-in" has consequences this spec did not trace.** A project that ran Initialize once may not think of itself as having opted into commit refusals. | Low, Med | DQ-2 states it as a cost so the human decides it knowingly; the follow-up below carries the question of whether Invariant 5's wording should change. |
+| R8 | **The re-approval window freezes unrelated agent work.** Under DQ-6 Option A, until the human re-approves SPEC-001 the spec gate denies agent edits to root `package.json` and `.minspec/config.json`. | Med, Med | Put the two re-approvals to the human the moment the pull request merges, in one ask; DQ-6 Option B removes the window at the cost of a human step before merge. |
 
 ## Out of Scope
 
