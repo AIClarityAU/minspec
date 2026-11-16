@@ -1,5 +1,5 @@
 ---
-id: SPEC-101
+id: SPEC-370
 type: requirements
 status: specifying
 tier: T3
@@ -13,9 +13,10 @@ implements_reason: >-
   below leaves the actual hook location (extension vs. dispatch script vs. git hook), the
   dedup mechanism, and the priority-scoring integration genuinely open — a Plan-phase decision,
   not a Specify-phase one. Grepped for prior art: no `known-failures`/`baseline` file exists
-  anywhere in the repo, and no issue-creation dedup gate exists outside the generic
-  worktree-path dedup in `drain-inbox.sh` (unrelated), so there is nothing to claim ownership
-  of yet.
+  anywhere in the repo, and the only issue-creation dedup gate found is the parking-lot
+  title-match gate (`packages/minspec/src/lib/parking-lot.ts` `findExistingIssue`, #24); it
+  keys on normalized title, not a failure-set fingerprint, so it does not cover this feature
+  and there is nothing to claim ownership of yet.
 phases:
   specify: done
   clarify: pending
@@ -24,7 +25,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-101: Auto-raise a high-priority issue for test failures unrelated to the current change
+# SPEC-370: Auto-raise a high-priority issue for test failures unrelated to the current change
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human reads
 > this, answers the questions under **Decisions needed (Clarify)**, and approves the spec
@@ -38,14 +39,11 @@ not by the bug fix in hand. The issue asks for the failures to be auto-filed as 
 issue rather than left for the developer (human or agent) to manually disentangle "did I break
 this, or was it already red?" by hand, every time.
 
-**Id note.** Picked `SPEC-101` from `max(SPEC-NNN) + 1` across every local branch, tag, and
-commit reachable in this worktree (`git log --all`, offline — this dispatch has no network
-access and cannot query open pull requests). That walk found `SPEC-097` and `SPEC-099`
-already claimed by other in-flight specs (issues #22, #15, #19) with `SPEC-098` an unclaimed
-gap and `SPEC-100` the highest claimed id; `101` is the next free one by the same
-max-plus-one convention `docs/decisions/INDEX.md` already uses for DRs. If this id collides
-with a concurrently-authored spec at review time, renumber per that convention — the id is a
-starting draft, not the answer (same caveat DR-NNN numbering carries).
+**Id note.** `SPEC-370` is the highest `SPEC-NNN` found across every local ref in this
+worktree (`SPEC-369`, on in-flight branches; `SPEC-342` on `origin/main`) plus one. This
+dispatch is offline and cannot query open pull requests, so it is a starting draft: the
+`scripts/check-dr-id-collision.ts` style gate (base branch plus open PRs, plus one) is the
+authority — if it reports a collision at review time, renumber to the id it reports.
 
 ## Context
 
@@ -93,10 +91,11 @@ gracefully (never hard-error) when the local tool (`gh` CLI) they delegate to is
 - **FR-5 (dedup — no repeat filing for the same standing/new failure set).** Before filing, the
   mechanism MUST check for an already-open issue covering the same failure set (same test
   names + same unrelated-cause fingerprint) and skip filing if one exists, surfacing a link to
-  the existing issue instead. (The issue body's "link to the existing dedup-gate work" claim is
-  **unverified** — a repo-wide grep for `dedup`/`duplicate` found no prior issue-creation dedup
-  mechanism to reuse; this FR specifies the requirement fresh rather than citing a nonexistent
-  precedent.)
+  the existing issue instead. (Prior art: `findExistingIssue` in `packages/minspec/src/lib/parking-lot.ts`
+  dedups OPEN issues by normalized title and fails open to create; Plan phase should reuse its
+  `gh` lookup shape, but a title match cannot express a failure-set fingerprint, so this FR
+  still requires the fingerprint check, and — per INV constitution #2 — a lookup failure here
+  must surface visibly rather than silently fall through.)
 - **FR-6 (priority signal, not a hardcoded label).** The filed issue's priority MUST be set
   by whatever backlog-priority mechanism already exists at implementation time rather than
   hardcoding a `P1` label; if no such mechanism exists, Plan phase specifies the minimal
