@@ -6,7 +6,7 @@ tier: T3
 product: minspec
 epic: EPIC-004  # Classifier Validation - DR-009/DR-021 (what a tier may and may not claim) live here
 aspects: [tier, classifier, validator, diagnostics, quick-fix, approval-hash, tier-0]
-relates_to: [DR-021, DR-026, DR-012, DR-024, DR-004, DR-014, SPEC-004, SPEC-005, SPEC-013, SPEC-022, "#138", "#103", "#90", "#91"]
+relates_to: [DR-021, DR-026, DR-012, DR-024, DR-004, DR-014, SPEC-004, SPEC-005, SPEC-013, SPEC-022, SPEC-109, "#138", "#103", "#90", "#91"]
 # Ownership declared in Specify, before approval mints a hash (SPEC-038 FR-1/FR-2). Both
 # files are NEW and are needed under every Clarify answer below: FR-1 (the floor function)
 # and its tests exist whichever options the human picks.
@@ -29,11 +29,19 @@ Materializes **[#138](https://github.com/AIClarityAU/minspec/issues/138)** - *"m
 should detect and autofix tier incorrectness as it goes. the reclassify command should be
 unnecessary."* (founder, verbatim).
 
-**Id note.** `SPEC-097` through `SPEC-114` are claimed on unmerged branches (read from all
-279 local remote-tracking refs, newest dated 2026-10-03; `SPEC-097` alone is claimed by
-fifteen branches). `SPEC-115` was the lowest id above every claim visible from this
-checkout. Open pull requests are not visible offline, and sibling dispatches running at the
-same moment may pick the same number, so if the id collides at review time, renumber.
+**Id note.** `SPEC-115` was minted by the first dispatch of #138 (branch `agent/issue-138`,
+2026-10-03) and is kept: this is a refresh of that draft, not a second spec. On 2026-11-16 no
+`id: SPEC-115` exists on `origin/main` 7931142f or on any other local remote-tracking ref
+(searched every ref's `specs/` tree). The fresh id the dispatcher reserved for this run is
+not used, because the issue already had a spec.
+
+**Refresh note (2026-11-16).** The first draft was measured at `origin/main` 350c6fa4,
+when the corpus held 79 primary specs. Main has since moved 601 commits and the corpus now
+holds 226. Every code citation below was re-read at 7931142f and every corpus figure was
+re-measured there. The re-measurement changed the answer: the requirement-count rule that
+flagged five specs then flags twenty-nine now, and twenty-two of those flags come from a
+threshold that the data shows does not separate T3 from T4 (Reality-check item 4). The
+recommended rule table (FR-2, DQ-3) changed as a result.
 
 ## One-Sentence Scope
 
@@ -42,62 +50,98 @@ carry; whenever the declared `tier:` sits below it (or is missing), say so on th
 line and in every validation run, and offer the correction as one click - never lowering a
 tier, never writing an approval record, never asking the user to run a command.
 
-## Reality-check - what the issue assumes, checked against `origin/main` 350c6fa4
+## Reality-check - what the issue assumes, checked against `origin/main` 7931142f
 
 The issue body was written on 2026-06-04. Four of its premises were checked against code
-and the corpus rather than taken on its word (CLAUDE.md, Evidence Discipline).
+and the corpus rather than taken on its word (CLAUDE.md, Evidence Discipline). Tier names
+used throughout: T1 (one-sentence spec), T2 (spec + plan), T3 (full spec cycle), T4
+(complete ceremony) - the CLAUDE.md SDD table.
 
 1. **"The reclassify command" does not exist.** Searching `packages/minspec/src` and
    `packages/minspec/package.json` for `reclassif` returns nothing. The only tier command
    is `minspec.classify`, "MinSpec: Classify Task Complexity"
-   (`packages/minspec/package.json:96-97`). It measures a *diff*, and its command file
+   (`packages/minspec/package.json:104-105`). It measures a *diff*, and its command file
    contains no spec-frontmatter write (`packages/minspec/src/commands/classify.ts`,
-   searched for `writeFile` and `frontmatter`: no hits); its one persistent effect is the
-   bump-up record in `.minspec/calibration.json` (`classify.ts:140-141`). So today
+   searched for `writeFile` and `frontmatter`: no hits); its persistent effects are the
+   bump-up record in `.minspec/calibration.json` and the "Auto-classify from now on"
+   preference, both offered only in an opted-in folder (`classify.ts:140-159`). So today
    **nothing re-evaluates a spec's `tier:` after it is first written** - there is no
    command to make unnecessary, only a gap to close. This spec reads the founder's
    sentence as: no command, existing or future, should be needed to keep a tier right.
 
 2. **"Tierless specs silently default to T2" is half fixed.** The parser still coerces a
-   missing or unrecognized tier to `T2` (`packages/minspec/src/lib/spec.ts:302`). The
+   missing or unrecognized tier to `T2` (`packages/minspec/src/lib/spec.ts:314`). The
    *detection* half of #103 has shipped: a primary spec with no `tier:` now draws a
-   `frontmatter.tier.missing` warning (`packages/minspec/src/lib/spec-validator.ts:541-545`,
-   rule emitted at `:595`). What has not shipped is any *offer to fix it*, and the warning
-   cannot say what the tier should be. In this repo's corpus today, 0 of 76 primary specs
-   are tierless.
+   `frontmatter.tier.missing` warning (field table at
+   `packages/minspec/src/lib/spec-validator.ts:545`, rule emitted at `:595`). What has not
+   shipped is any *offer to fix it*, and the warning cannot say what the tier should be.
+   In this repo's corpus today, 0 of 226 primary specs are tierless.
 
 3. **"Tier change voids approval" is true, and the reason matters.** The canonical
    approval hash removes exactly `status` and `phases` from the frontmatter and keeps
    everything else, `tier` included (`packages/shared/src/canonical.ts:14-16`). So editing
-   `tier:` on an approved spec makes that approval stale. The same file shows the body is
-   inside the hash too (`canonical.ts:130`), which gives a useful consequence: **a spec
-   that grows requirements after approval is already stale because of the growth itself**,
-   so raising its tier in the same edit costs no additional re-approval.
+   `tier:` on an approved spec makes that approval stale. The same file rejoins the body
+   into the hashed text (`canonical.ts:101-105`), which gives a useful consequence: **a
+   spec that grows requirements after approval is already stale because of the growth
+   itself**, so raising its tier in the same edit costs no additional re-approval.
 
-4. **The proposed rubric does not predict the declared tier, in one direction
-   especially.** The issue offers "FR count (T2 ~3-5, T3 ~6-12, T4 >12)". Measured over
-   the 76 primary specs on `origin/main` (counting distinct FR ids that open a list item,
-   heading, table row or bold lead; `FR-4a`/`FR-4b` counted once):
+4. **The proposed rubric does not predict the declared tier, and its T4 threshold does
+   not separate T3 from T4 at all.** The issue offers "FR count (T2 ~3-5, T3 ~6-12, T4
+   >12)". Measured over the 226 primary specs on `origin/main` 7931142f by a throwaway
+   script (counting distinct FR ids that open a list item, heading, table row or bold
+   lead; `FR-4a`/`FR-4b` counted once; the same script reproduces the first draft's
+   five-spec result at 350c6fa4):
 
    | Reading of the rubric | Specs |
    |---|---|
-   | Declared tier is **below** what the FR count implies | 5 |
-   | Declared tier is **above** what the FR count implies | 28 |
-   | Declared tiers in the corpus | T2: 3 · T3: 46 · T4: 27 · missing: 0 |
+   | Declared tier is **below** what the FR count implies | 29 (7 T2 to T3, 22 T3 to T4) |
+   | Declared tier is **above** what the FR count implies | 40 |
+   | Declared tiers in the corpus | T2: 11 · T3: 178 · T4: 37 · missing: 0 |
 
-   The five below-floor specs are SPEC-039 (T2, 6 FRs), SPEC-050 (T2, 8), SPEC-076
-   (T2, 8), SPEC-042 (T3, 17) and SPEC-077 (T3, 20). All five carry an approval record.
-   The 28 above-floor specs are not errors: a spec is legitimately T4 for reasons a count
+   How the FR count is distributed within each declared tier:
+
+   | Declared tier | Specs | Median FRs | Under 6 | 6 to 12 | 13 or more |
+   |---|---|---|---|---|---|
+   | T2 | 11 | 6 | 4 | 7 | 0 |
+   | T3 | 178 | 8 | 11 | 145 | 22 |
+   | T4 | 37 | 11 | 2 | 23 | 12 |
+
+   Two readings follow. **First, 13 is not a T3/T4 boundary in this corpus:** 22 T3 specs
+   reach it and only 12 T4 specs do, and 23 of the 37 T4 specs sit inside the "T3" band.
+   Raising the threshold does not rescue it - at 15 FRs it flags 11 T3 specs against 9 T4
+   specs reaching it, at 17 it is 7 against 6, at 20 it is 4 against 3. Under the
+   CLAUDE.md definition a tier is *mechanical scope* (blast radius), and how many
+   requirements a spec states measures how carefully it was written at least as much as
+   how far the change reaches. **Second, the low threshold is weaker evidence but not
+   refuted:** 7 of the 11 T2 specs reach six FRs, which may mean those seven are
+   under-tiered or may mean six is too low; only the human verdicts of FR-13 can tell
+   which.
+
+   The 29 below-floor specs, all read from `origin/main` 7931142f:
+   - *T2 with six or more FRs (7):* SPEC-039 (6 FRs), SPEC-050 (8), SPEC-076 (8),
+     SPEC-231 (6), SPEC-232 (7), SPEC-233 (8), SPEC-240 (7).
+   - *T3 with thirteen or more FRs (22):* SPEC-042 (17), SPEC-077 (20), SPEC-087 (14),
+     SPEC-109 (21), SPEC-135 (26), SPEC-137 (13), SPEC-140 (21), SPEC-143 (17), SPEC-209
+     (13), SPEC-216 (16), SPEC-227 (13), SPEC-265 (13), SPEC-283 (13), SPEC-289 (13),
+     SPEC-293 (13), SPEC-296 (16), SPEC-302 (16), SPEC-310 (13), SPEC-313 (16), SPEC-314
+     (18), SPEC-321 (13), SPEC-334 (14).
+
+   All seven T2 specs and 17 of the 22 T3 specs have a file under `.minspec/approvals/`;
+   SPEC-289, SPEC-296, SPEC-313, SPEC-321 and SPEC-334 do not (`status: specifying`).
+   Whether each existing approval's hash still matches was **not** checked.
+
+   The 40 above-floor specs are not errors: a spec is legitimately T4 for reasons a count
    cannot see (a hard-to-reverse seam, a security boundary). **So the FR count is usable
-   as a lower bound and useless as an exact answer** - the same shape
+   at most as a lower bound and useless as an exact answer** - the same shape
    [DR-021](../../../docs/decisions/DR-021.md) found for the diff-based classifier, and it
-   leads to the same design: a floor that only ever moves up.
+   leads to the same design: a floor that only ever moves up, carrying only the thresholds
+   that have evidence behind them.
 
    A second candidate from the issue, "cross-package contract present", was measured the
    only way the corpus allows: `implements:`/`affects:` paths spanning two or more
-   `packages/<name>` roots. 37 of 76 specs declare ownership at all; four span packages
-   (SPEC-041, SPEC-046, SPEC-070, SPEC-086) and all four are already T3 or T4. The rule
-   would flag nothing today.
+   `packages/<name>` roots. Eight specs span packages (SPEC-041, SPEC-046, SPEC-070,
+   SPEC-086, SPEC-130, SPEC-134, SPEC-136, SPEC-227) and all eight are already T3 or T4.
+   The rule would flag nothing today.
 
    The remaining three candidates ("declared UX/data/API aspect", "number of hard
    invariants", "blast-radius / hard-to-reverse seams") have no deterministic detector
@@ -127,15 +171,17 @@ below the floor.
   nothing else: no diff, no git, no file system beyond the text handed to it, no network,
   no model call, no clock. The same text always yields the same result.
 - **FR-2 - First rule table (under DQ-3's recommended option).** Two rules:
-  1. *Requirement count.* Six or more distinct FR definitions contribute `T3`; thirteen
-     or more contribute `T4`. An FR definition is an FR id that opens a list item, a
-     heading, a table row or a bold lead in the body; a letter suffix does not make a new
-     id. A mention of an FR in running prose, or of another spec's FR, is not a definition.
+  1. *Requirement count.* Six or more distinct FR definitions contribute `T3`. No count
+     contributes `T4` (DQ-3: the measured data gives no T3/T4 boundary). An FR definition
+     is an FR id that opens a list item, a heading, a table row or a bold lead in the
+     body; a letter suffix does not make a new id. A mention of an FR in running prose, or
+     of another spec's FR, is not a definition.
   2. *Cross-package ownership.* `implements:` and `affects:` paths that fall under two or
      more distinct `packages/<name>` roots contribute `T3`.
 
   The table is data, carries a version identifier, and is the only place a threshold
-  lives.
+  lives. Under this table no spec can be floored above `T3`, so the check can only ever
+  ask a T1 or T2 spec to take on the full spec cycle.
 - **FR-3 - What counts as a finding.** A finding exists only for a primary spec, and only
   when the declared tier ranks below the floor. A declared tier at or above the floor
   produces nothing: no diagnostic, no message, no suggestion. The check never proposes a
@@ -150,7 +196,7 @@ below the floor.
 - **FR-5 - One rule, every surface.** The shortfall is a single validator rule emitted
   from the FR-1 function, and it appears identically in the editor's diagnostics, in
   "MinSpec: Validate", and in the commit/CI validation path (`npm run validate`, which
-  runs `scripts/validate-frontmatter.ts` and already imports `spec-validator.ts` at `:31`).
+  runs `scripts/validate-frontmatter.ts` and already imports `spec-validator.ts` at `:36`).
   There is one implementation; no surface re-derives the floor. The message states the
   declared tier, the floor, every signal that reached the floor with its observed value,
   the exact frontmatter line that resolves it, and which phases the higher tier newly
@@ -191,7 +237,10 @@ below the floor.
   finding drops to information level and **is still listed** on every surface in FR-5,
   worded as acknowledged. If the floor later rises above the acknowledged value the
   warning returns. An acknowledgment with no shortfall left to acknowledge is reported as
-  removable.
+  removable. The acknowledgment key is added to the known-key set the parser preserves
+  (`KNOWN_FRONTMATTER_KEYS`, `spec.ts:203`) and, if SPEC-109 (canonical frontmatter
+  schema, `status: planning`) has landed by then, to its schema table - otherwise its
+  FR-13 would report the key as unknown on every acknowledged spec.
 - **FR-11 - A current approval is not disturbed by the check alone.** For a spec whose
   approval hash currently matches, a shortfall is reported at information level with the
   text "applies at the next re-approval", and raises no toast (DQ-5). The moment the
@@ -199,8 +248,8 @@ below the floor.
 - **FR-12 - MinSpec never mints a tier.** No MinSpec write puts a `tier:` value into a
   spec that the author did not type or accept through FR-7. In particular, a spec with no
   `tier:` still has no `tier:` after any tool write to its frontmatter. *(The parser
-  coerces a missing tier to `T2` at `spec.ts:302` and the serializer emits
-  `tier: ${fm.tier}` unconditionally at `spec.ts:387`, so I believe a parse-then-write
+  coerces a missing tier to `T2` at `spec.ts:314` and the serializer emits
+  `tier: ${fm.tier}` unconditionally at `spec.ts:399`, so I believe a parse-then-write
   round trip turns a missing tier into a written `T2`. That was read from the two lines,
   not reproduced. The Plan phase must reproduce it or refute it; if real, it is the
   mechanism behind #103's "silently", and closing it is in scope.)*
@@ -210,8 +259,10 @@ below the floor.
 - **FR-13 - The rule table is judged against this corpus before it ships.** The
   implementing pull request includes the list of specs the shipped function flags across
   this repository, produced by running the function rather than by hand. With FR-2's table
-  at `origin/main` 350c6fa4 the expected list is the five specs named in the
-  Reality-check; a different list is explained in the pull request. The founder marks each
+  at `origin/main` 7931142f the expected list is the seven T2 specs named in the
+  Reality-check (SPEC-039, SPEC-050, SPEC-076, SPEC-231, SPEC-232, SPEC-233, SPEC-240);
+  the corpus will have grown by the time this is built, so a different list is expected
+  and is explained in the pull request. The founder marks each
   flag right or wrong, and the verdicts are recorded in this spec's `tasks.md` Findings.
   A rule with a wrong verdict has its threshold revisited in the same pull request, or the
   verdict is recorded as an accepted false positive. No rule is added to the table later
@@ -223,11 +274,12 @@ below the floor.
       equal results; a test asserts its module imports no `vscode`, `fs`, `child_process`
       or network module.
 - [ ] **AC-2 (FR-2).** A spec with five FR definitions yields `T1`, with six yields `T3`,
-      with twelve yields `T3`, with thirteen yields `T4`. `FR-4a` and `FR-4b` count once.
+      with forty yields `T3` (no count reaches `T4`). `FR-4a` and `FR-4b` count once.
       An FR id that appears only in running prose counts zero. Ownership paths under one
       package yield no contribution; under two yield `T3`.
-- [ ] **AC-3 (FR-3, DQ-6).** A `T4` spec with two FR definitions produces no finding on
-      any surface. No message anywhere in the feature contains a suggestion to lower a tier.
+- [ ] **AC-3 (FR-3, DQ-6).** A `T4` spec with two FR definitions, and a `T3` spec with
+      twenty-five, each produce no finding on any surface. No message anywhere in the
+      feature contains a suggestion to lower a tier.
 - [ ] **AC-4 (FR-4).** A tierless primary spec with eight FR definitions is offered `T3`;
       a tierless primary spec with two is offered `T2`, not `T1`.
 - [ ] **AC-5 (FR-5).** For one fixture spec, the editor diagnostic, "MinSpec: Validate"
@@ -313,25 +365,36 @@ Changes FR-7 and INV-3.
   approved at the lower tier, with only a warning in the way - the shape principle 8
   ("enforce it via code") warns about.
 - `b` An error at approval time for a spec with an unacknowledged shortfall. Cost: the
-  first rule table has been judged on five flags, none yet by a human, and a gate built on
-  it blocks approvals on its false positives.
+  first rule table produces seven flags on this corpus, none yet judged by a human, and 7
+  of the 11 T2 specs reach its threshold - a gate built on it could block most T2
+  approvals on false positives.
 
 Recommended sequencing: `a` now, and revisit `b` once FR-13's verdicts exist. Changes
 FR-5's severity.
 
 ### DQ-3 - Which signals are in the first rule table?
 
-- `a` **Requirement count and cross-package ownership (rec).** Both are computable from
-  the spec's text and both were measured (five flags and zero flags). Cost: under-tiering
-  that shows up as neither - a three-FR spec that moves a security boundary - is not
-  caught.
-- `b` Requirement count only. Cost: drops a rule that costs nothing today, and loses the
-  one signal that speaks to contract breadth.
-- `c` All five candidates in the issue. Cost: three of them ("UX/data/API aspect",
+Re-measured at 7931142f; see Reality-check item 4 for the tables these options rest on.
+
+- `a` **Six-FR count to T3, plus cross-package ownership to T3; no count rule for T4
+  (rec).** Both rules are computable from the spec's text and both were measured (seven
+  flags and zero flags). The issue's ">12 FRs means T4" is left out because the corpus
+  shows no count at which T4 specs outnumber T3 specs. Costs: the check can never ask for
+  T4, so a T3 spec that genuinely needs complete ceremony is not caught; and under-tiering
+  that shows up as neither signal - a three-FR spec that moves a security boundary - is
+  not caught either.
+- `b` The issue's rubric as written: six FRs to T3 and thirteen to T4, plus cross-package.
+  Cost: 29 flags on day one, 22 of them asking a T3 spec to become T4 on a threshold that
+  12 T4 specs and 22 T3 specs both reach; 17 of those 22 carry an approval record, so
+  clearing them costs up to 17 re-approvals or 17 acknowledgments.
+- `c` Option `a` plus a T4 count rule at a high threshold (twenty FRs). Cost: 4 T3 flags
+  (SPEC-077, SPEC-109, SPEC-135, SPEC-140) against 3 T4 specs that reach it - still no
+  evidence the number means T4, chosen only because it is quiet.
+- `d` All five candidates in the issue. Cost: three of them ("UX/data/API aspect",
   "hard invariants", "hard-to-reverse seams") have no deterministic definition and no
   measurement; shipping them is shipping guesses under a never-wrong banner.
 
-Changes FR-2.
+Changes FR-2, AC-2, AC-3 and FR-13's expected list.
 
 ### DQ-4 - Where does "keep this tier" live?
 
@@ -349,15 +412,18 @@ Changes FR-2.
 
 Changes FR-10.
 
-### DQ-5 - What happens to the five approved specs that are already below the floor?
+### DQ-5 - What happens to the approved specs that are already below the floor?
 
-SPEC-039, SPEC-042, SPEC-050, SPEC-076 and SPEC-077 each carry an approval record.
+Under DQ-3 `a` that is seven specs - SPEC-039, SPEC-050, SPEC-076, SPEC-231, SPEC-232,
+SPEC-233 and SPEC-240 - each with a file under `.minspec/approvals/` (whether each hash
+still matches was not checked). Under DQ-3 `b` it is twenty-four.
 
 - `a` **Information only until the next re-approval (rec).** No approval is disturbed by
-  shipping this. Cost: those five keep their lower ceremony until something else makes
-  them stale, which for a finished spec may be never.
+  shipping this. Cost: those specs keep their lower ceremony until something else makes
+  them stale, which for a finished spec (SPEC-076 is `done`) may be never.
 - `b` Warn immediately. Cost: clearing each warning, by raising or by acknowledging under
-  DQ-4 `a`, makes that approval stale - five re-approvals on day one.
+  DQ-4 `a`, makes that approval stale - seven re-approvals on day one (twenty-four under
+  DQ-3 `b`).
 
 Changes FR-11.
 
@@ -365,12 +431,14 @@ Changes FR-11.
 
 The founder said "tier incorrectness", which covers both directions.
 
-- `a` **Never (rec).** DR-021 Decision 1 is upward-only, and the measurement shows 28 of
-  76 specs sit above the count-implied floor for reasons a count cannot see. Cost: a
+- `a` **Never (rec).** DR-021 Decision 1 is upward-only, and the measurement shows 40 of
+  226 specs sit above the count-implied floor for reasons a count cannot see. Cost: a
   genuinely over-tiered spec keeps paying ceremony it does not need, and this feature will
   not say so.
-- `b` Mention it at information level, with no action. Cost: 28 notices on this corpus on
-  day one, most of them wrong, against principle 4 ("avoid nagging").
+- `b` Mention it at information level, with no action. Cost: dozens of notices on this
+  corpus on day one (40 under the issue's rubric; under DQ-3 `a` every T3 or T4 spec with
+  fewer than six FRs and no cross-package ownership), most of them wrong, against
+  principle 4 ("avoid nagging").
 
 Changes FR-3 and INV-2; `b` would also need DR-021 revisited.
 
@@ -381,8 +449,11 @@ making one: the upward-only direction is DR-021 Decision 1 extended from a diff 
 spec; the offer-never-silent fix is DR-026; the approval interaction is DR-012/SPEC-022
 unchanged. The thresholds in FR-2 are data in one table and can be changed in minutes.
 `docs/decisions/INDEX.md` was searched for an existing record on continuous tier checking
-(terms: tier, classif, ratchet, reclassif, tier-check, mismatch); DR-021, DR-022 (status
-superseded) and DR-024 are the nearest and none decides this.
+(terms: tier, classif, ratchet, reclassif, tier-check, mismatch), first at 350c6fa4 and
+again at 7931142f, together with a search of `specs/` and `docs/decisions/` for "tier
+floor", "intrinsic tier" and "tier-check"; DR-021, DR-022 (status superseded) and DR-024
+are the nearest and none decides this. The refresh's change of recommendation (no T4
+count rule) is a threshold choice inside one data table, not a decision record.
 
 Two answers above would require a decision record before any build: DQ-1 `b` or `c`
 (amends DR-026) and DQ-6 `b` (revisits DR-021).
@@ -406,8 +477,8 @@ Two answers above would require a decision record before any build: DQ-1 `b` or 
 - **Autofix toward the diff-based classifier.** Rejected by the issue itself and by
   measurement: that classifier predicts T1 for 89 of 120 cases (DR-021 Context), so
   correcting specs toward it would push tiers the wrong way.
-- **Treat the FR-count rubric as the tier.** Rejected by the Reality-check table: it
-  disagrees with the declared tier in 33 of 76 specs, 28 of them downward.
+- **Treat the FR-count rubric as the tier.** Rejected by the Reality-check tables: it
+  disagrees with the declared tier in 69 of 226 specs, 40 of them downward.
 - **A "Reclassify Spec" palette command.** Rejected: it is the thing the founder asked to
   be unnecessary, and a check that waits to be run is not continuous.
 - **Hold the acknowledgment in a git-ignored file.** Rejected: CI would disagree with the
@@ -432,7 +503,7 @@ other rule firing.
 
 - Triggered by: [#138](https://github.com/AIClarityAU/minspec/issues/138).
 - Extends: #103 (tierless spec defaults to T2) - detection shipped at
-  `spec-validator.ts:541-545`; the fix offer (FR-4) and the round-trip question (FR-12)
+  `spec-validator.ts:545`/`:595`; the fix offer (FR-4) and the round-trip question (FR-12)
   are what remain.
 - Rests on: [DR-021](../../../docs/decisions/DR-021.md) (upward-only floor),
   [DR-026](../../../docs/decisions/DR-026.md) (offer, never silent),
