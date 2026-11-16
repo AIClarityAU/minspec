@@ -496,28 +496,39 @@ FR text?) is a hash check and belongs to SPEC-013 FR-10. **Coverage** (is each F
 in the section at all?) is the same question FR-3 already asks of the plan, so it belongs
 here. This amendment specifies only the coverage half.
 
-**Measured state of the corpus (2026-10-03, base commit `350c6fa4`).** A throwaway read-only
-script (not committed) scanned every `specs/**/SPEC-*/requirements.md`, took as the FR set
-each `FR-N` that opens a list item, heading or table row, and looked for whole-token
-references inside the section whose heading starts with "Risks" or "Consequences":
+**Measured state of the corpus.** A throwaway read-only script (not committed) scanned every
+`specs/**/SPEC-*/requirements.md`, took as the FR set each `FR-N` that opens a list item,
+heading or table row, and looked for whole-token references inside the section whose
+heading starts with "Risks" or "Consequences". It was first run on 2026-10-03 at base
+commit `350c6fa4`, and re-run on 2026-11-16 at `origin/main` commit `7931142f` (601 commits
+later; none of them touched this spec, SPEC-013, DR-028 or DR-029):
 
-| Measure | Count |
-|---|---|
-| Spec requirements files scanned | 76 |
-| ...with at least one FR id | 73 |
-| ...with a Risks section | 41 |
-| ...whose Risks section references every FR | 2 |
-| ...with a Consequences section | 13 |
-| ...whose Consequences section references every FR | 0 |
-| ...using a suffixed FR id such as `FR-4a` | 9 |
-| Sections using a range such as `FR-1..3` | 3 |
+| Measure | `350c6fa4` | `7931142f` |
+|---|---|---|
+| Spec requirements files scanned | 76 | 223 |
+| ...with at least one FR id | 73 | 193 |
+| ...with a Risks section | 41 | 56 |
+| ...whose Risks section references every FR | 2 | 2 |
+| ...with a Consequences section | 13 | 13 |
+| ...whose Consequences section references every FR | 0 | 0 |
+| ...using a suffixed FR id such as `FR-4a` | 9 | 11 |
+| Sections using a range such as `FR-1..3` | 3 | 1 |
 
-This spec is itself in the 39: its Risks & Mitigations table references 13 of 17 FRs and
+The range row differs between runs because the two throwaway scripts were not the
+same script: the 2026-11-16 run counts only the `FR-N..M` form, and reproduces every other
+`350c6fa4` figure exactly. The trend that matters for DQ-3 is that the failing set grew
+from 39 to 54 while the passing set stayed at 2: specs written since the first count did
+not converge on referencing every FR without a check.
+
+This spec is itself in the failing set: its Risks & Mitigations table references 13 of 17 FRs and
 omits FR-4, FR-5, FR-9 and FR-12. The parser used for these counts is ad hoc, so the
 numbers are an order-of-magnitude guide for the decisions below, not a baseline to assert
 against. No FR-id parser exists in the product today: a search of `packages/minspec/src`,
 `packages/shared/src` and `scripts` for an `FR-` digit pattern in code returns nothing,
-which agrees with SPEC-013 FR-12 ("parses none of these").
+which agrees with SPEC-013 FR-12 ("parses none of these"). Re-checked at `7931142f`: the
+only `FR-` hits in those trees are in comments citing other specs, and no symbol named
+`sectionCoverage` or `SectionCoverage` exists, so nothing has been built against this
+contract ahead of approval.
 
 ### State model (amended)
 
@@ -660,18 +671,20 @@ approved specs disagree about "due".
   question, adds a second trigger and couples the signpost's timing to an unbuilt
   mechanism (SPEC-013 FR-13 has no implementation, per its own `implements_reason`).*
 
-**DQ-3 — What happens to the specs that already fail?** By the measurement above, about 39
-of the 41 specs with a Risks section would report `partial`.
+**DQ-3 — What happens to the specs that already fail?** By the measurement above (`7931142f`), 54
+of the 56 specs with a Risks section would report `partial`, up from 39 of 41 at `350c6fa4`;
+the set grows with every new spec until the edge ships, so the cost of `h` rises the longer
+the edge waits.
 
 - `f` **(rec)** No grandfathering. Findings are advisory and never change an exit code
   (FR-25), so existing specs simply show their holes and are fixed when next edited.
   *Cost: every already-approved spec that is fixed needs re-approval, because adding the
-  missing FR ids edits hash-locked text; and until fixed, about 39 specs carry a standing
+  missing FR ids edits hash-locked text; and until fixed, about 54 specs carry a standing
   diagnostic, which risks teaching the reader to ignore the edge.*
 - `g` Apply the edge only to specs approved after this amendment ships. *Cost: needs a
   persisted per-spec marker or an approval-date comparison, which is new state the pure
-  derivation (FR-2) must read, and leaves the 39 permanently unchecked.*
-- `h` One backfill pass before the edge is switched on. *Cost: about 39 spec edits and 39
+  derivation (FR-2) must read, and leaves the 54 permanently unchecked.*
+- `h` One backfill pass before the edge is switched on. *Cost: about 54 spec edits and 54
   re-approvals in one batch, for a human who reads every document.*
 
 ### Invariants (Amendment A)
@@ -739,7 +752,7 @@ in FR-21 is one ordering key.
 | RA1 | **Id-listing passes the edge.** A line reading "FR-1 to FR-17: none" written out in full covers everything and says nothing. | High · Med | Stated, not solved: FR-23 makes the edge structural by design; SPEC-013 R4 (vacuity passes Tier 0) is the standing residual and its specificity layer is the next net. No skim claim rests on this edge. |
 | RA2 | **False covered through a loosely phrased foreign reference** ("its FR-3" about another spec). | Med · Med | FR-19 excludes the three id-qualified forms; the unqualified form is an accepted residual, visible in FR-22 evidence. |
 | RA3 | **False covered through an unparsed FR set.** | Low · High | FR-20 and INV-A2: empty is `not-applicable`, never `covered`; FR-19 ties the FR set to FR-3's so a parse gap shows on the plan edge too. |
-| RA4 | **Standing noise.** About 39 existing specs report `partial`; readers learn to ignore it. | High · Med | DQ-3 puts the choice to the human; FR-25 keeps findings off every exit code; FR-21 with FR-11 keeps pre-ready holes as a checklist, not errors. |
+| RA4 | **Standing noise.** About 54 existing specs report `partial` (measured at `7931142f`); readers learn to ignore it. | High · Med | DQ-3 puts the choice to the human; FR-25 keeps findings off every exit code; FR-21 with FR-11 keeps pre-ready holes as a checklist, not errors. |
 | RA5 | **Section list drifts from SPEC-013's registry.** | Med · Med | FR-18: the list is caller-supplied from the registry, with no second copy in this spec. |
 | RA6 | **Coverage and freshness get merged into one signal** and one masks the other. | Low · High | FR-24 forbids either reading or satisfying the other; acceptance criterion "Independent of freshness". |
 | RA7 | **Two unbuilt specs each wait on the other.** This edge needs SPEC-013 FR-2 (heading match) and FR-12 (FR-id grammar); SPEC-013 FR-11 needs this edge. | Med · Med | The dependency is on two small pure parsers, not on SPEC-013's lifecycle. Plan sequences those parsers first in `packages/shared`; FR-22's evidence and FR-25's tests do not depend on the rest of SPEC-013. |
