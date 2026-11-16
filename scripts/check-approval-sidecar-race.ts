@@ -40,6 +40,8 @@ function main(): number {
   const hasHead = tryGit(['rev-parse', '--verify', '-q', 'HEAD']) !== null;
   const stagedAcmr = lines(git(['diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z']).replace(/\0/g, '\n'));
   const staged = new Set(stagedAcmr);
+  // Staged deletions: a deleted sidecar is a deliberate "Revoke Approval", not a race.
+  const stagedDeleted = new Set(lines(git(['diff', '--cached', '--name-only', '--diff-filter=D', '-z']).replace(/\0/g, '\n')));
 
   const gitDir = git(['rev-parse', '--git-dir']).trim();
   let mergeHead: string | null = null;
@@ -64,6 +66,25 @@ function main(): number {
       headSidecarText,
       sidecarStaged,
       stagedSidecarText: sidecarStaged ? git(['show', `:${sidecar}`]) : null,
+      sidecarDeleted: stagedDeleted.has(sidecar),
+    });
+  }
+
+  // A sidecar staged on its own (approvable not part of this commit) must still describe the
+  // approvable as it will exist after the commit: the INDEX copy (== HEAD when unstaged),
+  // never the working tree.
+  for (const sc of stagedAcmr) {
+    if (!sc.startsWith(APPROVALS_PREFIX) || !sc.endsWith('.json')) continue;
+    const target = sc.slice(APPROVALS_PREFIX.length, -'.json'.length);
+    if (staged.has(target)) continue; // handled above
+    const indexContent = tryGit(['show', `:${target}`]);
+    if (indexContent === null) continue; // no such approvable (e.g. non-spec sidecar)
+    items.push({
+      path: target,
+      stagedContent: indexContent,
+      headSidecarText: null,
+      sidecarStaged: true,
+      stagedSidecarText: git(['show', `:${sc}`]),
     });
   }
 

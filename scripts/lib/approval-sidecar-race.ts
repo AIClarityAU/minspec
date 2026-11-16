@@ -34,6 +34,11 @@ export interface StagedApprovable {
   readonly sidecarStaged: boolean;
   /** Staged (index) sidecar text; null when the sidecar is not staged. */
   readonly stagedSidecarText: string | null;
+  /**
+   * True when this commit DELETES the sidecar ("Revoke Approval"). A deliberate revocation
+   * leaves nothing to go stale, so it is allowed through. Optional: absent means false.
+   */
+  readonly sidecarDeleted?: boolean;
 }
 
 export interface RaceFailure {
@@ -63,6 +68,8 @@ export function checkApprovable(
   item: StagedApprovable,
   hash: (raw: string) => string,
 ): RaceFailure | null {
+  if (item.sidecarDeleted && !item.sidecarStaged) return null; // revoked on purpose
+
   const live = hash(item.stagedContent);
 
   if (item.sidecarStaged) {

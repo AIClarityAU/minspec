@@ -89,10 +89,64 @@ describe('approval race gate (#424)', () => {
   });
 
   it('reads the staged index, not the working tree', () => {
-    write(SPEC, V2); // unstaged edit only
-    write('notes.md', 'hello\n');
-    git(['add', 'notes.md']);
+    // Index: V2 + a sidecar matching V2 (a valid re-approval). Working tree then drifts to a
+    // third body that would hash differently; a gate reading the working tree would refuse.
+    write(SPEC, V2);
+    write(SIDECAR, sidecarFor(V2));
+    git(['add', SPEC, SIDECAR]);
+    write(SPEC, V2.replace('rewritten', 'drifted after staging'));
     expect(commit({ DR_INDEX_GATE_OFF: '1' }).status).toBe(0);
+  });
+
+  it('allows a revoked approval: sidecar deletion staged with an edit', () => {
+    write(SPEC, V2);
+    git(['add', SPEC]);
+    git(['rm', '-q', '--cached', SIDECAR]);
+    fs.rmSync(path.join(tmp, SIDECAR));
+    expect(commit({ DR_INDEX_GATE_OFF: '1' }).status).toBe(0);
+  });
+
+  it('control: an edit with the sidecar neither re-staged nor deleted still fails', () => {
+    write(SPEC, V2);
+    git(['add', SPEC]);
+    fs.rmSync(path.join(tmp, SIDECAR)); // deleted in working tree only, not staged
+    const r = commit({ DR_INDEX_GATE_OFF: '1' });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('sidecar-not-restaged');
+  });
+
+  it('rejects a sidecar staged alone that does not match the committed spec', () => {
+    write(SIDECAR, sidecarFor(V2)); // approval of bytes that are only in the working tree
+    write(SPEC, V2);
+    git(['add', SIDECAR]);
+    const r = commit({ DR_INDEX_GATE_OFF: '1' });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('sidecar-mismatch');
+  });
+
+  it('allows a sidecar staged alone that matches the committed spec', () => {
+    write(SIDECAR, JSON.stringify({ specPath: SPEC, specHash: specHash(V1), approvedAt: 't' }) + '\n');
+    git(['add', SIDECAR]);
+    expect(commit({ DR_INDEX_GATE_OFF: '1' }).status).toBe(0);
+  });
+
+  it('fails closed when the checker script is missing', () => {
+    const hooks = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-race-hooks-'));
+    try {
+      // Mirror the hook at a root that has no scripts/ dir.
+      const root = path.join(hooks, 'r');
+      fs.mkdirSync(path.join(root, '.githooks'), { recursive: true });
+      fs.copyFileSync(path.join(REAL_HOOKS_DIR, 'pre-commit'), path.join(root, '.githooks', 'pre-commit'));
+      fs.chmodSync(path.join(root, '.githooks', 'pre-commit'), 0o755);
+      git(['config', 'core.hooksPath', path.join(root, '.githooks')]);
+      write(SPEC, V2);
+      git(['add', SPEC]);
+      const r = commit({ DR_INDEX_GATE_OFF: '1' });
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain('checker script missing');
+    } finally {
+      fs.rmSync(hooks, { recursive: true, force: true });
+    }
   });
 
   it('APPROVAL_RACE_GATE_OFF=1 bypasses only this gate', () => {
