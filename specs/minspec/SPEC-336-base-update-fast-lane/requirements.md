@@ -287,6 +287,8 @@ pr-drive's in-flight pull request `BEHIND` again.
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 4 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-16. These are not human choices and no delegation made them; the approver confirms or changes each. The founder's 2026-11-12 decision (queue item mt1394, summarised in "In plain terms" above) fixes what is built, but does not pick among the options of any question below.
+
 1. **Where does the landing trigger live?**
    - (a) **In the CoS runner (rec):** a light watcher compares `main`'s head (one
      `git ls-remote` per poll, no API quota and no model) and runs pr-drive when it moves.
@@ -302,6 +304,8 @@ pr-drive's in-flight pull request `BEHIND` again.
      file is a founder push.
    - (c) A workflow on `push` that only wakes the host runner. **Cost:** no inbound channel to
      the host exists. Building one is a new network surface for the runner.
+
+   **Recorded selection: Option (a),** the landing trigger lives in the CoS runner as a `git ls-remote` watcher that runs pr-drive when `main`'s head moves. Recorded by the runner's agent on 2026-11-16 as the document's (rec) option; the approver may change it.
 2. **Should the carry also ignore context lines that `main` moved (G1)?**
    - (a) **No, keep DR-110's identity (rec).** Decide on FR-1's count instead. **Cost:** those
      updates keep paying a full panel. Its size is unknown until FR-1. DR-104 estimated
@@ -311,6 +315,8 @@ pr-drive's in-flight pull request `BEHIND` again.
      lines say. **Cost:** a context line is part of what a reviewer reads. A change on `main`
      next to the pull request's change is exactly where an interaction defect can hide, and the
      panel would no longer look. Needs a decision record amending DR-110.
+
+   **Recorded selection: Option (a),** keep DR-110's identity and decide on FR-1's count. The founder's decision keeps the verdict across a base-only update; it does not say whether an update that moves context lines counts, so this selection does not read it as settling the question. Recorded by the runner's agent on 2026-11-16 as the document's (rec) option; the approver may change it.
 3. **What is the landing-to-update bound (FR-7)?**
    - (a) **2 minutes (rec).** A 60-second poll plus slack. Small against a 9-minute CI slot.
      **Cost:** about 1,440 `git ls-remote` calls a day per watched repository. That is cheap,
@@ -318,11 +324,15 @@ pr-drive's in-flight pull request `BEHIND` again.
    - (b) 30 seconds. **Cost:** about 4 times the polls, to save under a minute per landing.
    - (c) 5 minutes. **Cost:** gives back about half of what an immediate start wins, against
      a 9-minute slot.
+
+   **Recorded selection: Option (a),** a 2-minute landing-to-update bound (60-second poll plus slack). Recorded by the runner's agent on 2026-11-16 as the document's (rec) option; the approver may change it.
 4. **Build G2's lookback (FR-5) now, or only if FR-1 shows it matters?**
    - (a) **Only if FR-1 shows at least 5% of base updates refused for it (rec).** **Cost:**
      the build waits a week on measurement.
    - (b) Build it now. **Cost:** it adds a new paged read on a merge gate's input, built before
      anyone knows it pays.
+
+   **Recorded selection: Option (a),** build G2's lookback only if FR-1 shows at least 5% of base updates refused for it. Recorded by the runner's agent on 2026-11-16 as the document's (rec) option; the approver may change it.
 
 ## Decision record
 
