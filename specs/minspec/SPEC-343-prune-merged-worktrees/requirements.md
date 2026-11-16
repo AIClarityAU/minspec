@@ -27,7 +27,7 @@ Materializes **[#177](https://github.com/AIClarityAU/minspec/issues/177)** —
 *"after merging spec/DR work, stale `agent-*` worktrees + merged branches accumulate ...
 make MinSpec auto-prune merged trees."* Relates to **[#168](https://github.com/AIClarityAU/minspec/issues/168)**
 (worktree-per-session — the rule that creates the worktrees this spec cleans up) and to
-goal **G-8 — git transparency** (`.minspec/constitution.md:57`): *"MinSpec handles git for
+goal **G-8 — git transparency** (`.minspec/constitution.md:81`): *"MinSpec handles git for
 the human."* Today that handling stops at creation — `scripts/new-worktree.sh`'s own header
 comment names the cleanup step as a manual command the human runs by hand (`Cleanup: git
 worktree remove ../.worktrees/<repo>/<name>   (after the branch is merged)`). This spec is
