@@ -7,7 +7,7 @@ product: minspec
 epic: EPIC-003  # SDD Core Methodology - "the methodology rules enforced by the extension rather than by convention" is this epic's Done line
 aspects: [refactorability, contracts, invariants, dependency-budget, single-source, validator, advisory, tier-0, anti-debt]
 goal: G-2  # Prevent tech debt
-relates_to: [DR-029, DR-004, DR-064, DR-066, DR-074, SPEC-013, SPEC-010, SPEC-016, SPEC-038, SPEC-040, SPEC-006, "#133", "#125", "#132", "#23", "#52", "#121"]
+relates_to: [DR-029, DR-004, DR-064, DR-066, DR-074, DR-099, SPEC-013, SPEC-010, SPEC-016, SPEC-038, SPEC-040, SPEC-006, SPEC-109, SPEC-080, "#133", "#125", "#132", "#23", "#52", "#121", "#2463"]
 # Ownership declared in Specify, before approval mints a hash (SPEC-038 FR-1 to FR-3). All
 # four files are NEW and exist under every Clarify answer below: the one checker (FR-1), and
 # the test files that pin it. Files this spec would MODIFY (spec-validator.ts, git-analyzer.ts,
@@ -36,7 +36,11 @@ phases:
 Materializes **[#133](https://github.com/AIClarityAU/minspec/issues/133)** (refactorability
 enablers at the spec-to-code seam).
 
-**Date:** 2026-10-03 - read from `main` at `350c6fa4`.
+**Date:** 2026-10-03, first read from `main` at `350c6fa4`. **Refreshed 2026-11-16** against
+`origin/main` at `7931142f` (local remote-tracking ref; this dispatch makes no network call):
+line citations, corpus counts and the neighbour table below are re-measured there, and two
+findings changed the design - the canonical frontmatter schema (SPEC-109) is now on `main`,
+and the test-completeness spec for #52 does not cover a spec's own `INV-N` list (FR-9).
 
 ## One-Sentence Scope
 
@@ -59,7 +63,7 @@ boundary: check the things that *make* refactoring safe (a contract at each seam
 per invariant, few new dependencies, one implementation per contract) and leave code style
 to the linters that already exist.
 
-### Four neighbours already cover parts of this, and three of them are not merged
+### Six neighbours already cover parts of this, and three of them are not merged
 
 This is the fact that shapes the whole design. Each bullet in the issue lands next to a
 spec that already claims the adjacent ground.
@@ -68,15 +72,19 @@ spec that already claims the adjacent ground.
 |---|---|---|---|
 | Contracts at seams | Contract-frontmatter spec for #23, on branch `agent/issue-23` | Unmerged, `status: specifying` | It adds optional `contracts:` / `invariant_tests:` / `file_allowlist:` fields and warns on a malformed or dangling entry. It has "No missing-direction check": a spec with no `contracts:` produces nothing (its FR-5). |
 | Contracts-first, dependency budget, as *method rules* | Methodology guardrail spec for #125, on branch `agent/issue-125` | Unmerged, `status: specifying` | It checks *documents*. Its Out of Scope says: "Checking code or diffs against the method (for example counting new packages in a pull request). This spec checks documents." It treats contracts-first and dependency budget as judgement rules because "a spec has no field today that declares new dependencies or contracts". |
-| Invariant tests | Test-completeness spec for #52, on branch `agent/issue-52` | Unmerged, `status: specifying` | It maps `FR-N` and `INV-N` to tests by literal citation and refuses the tasks-to-implement transition. Its FR-1 to FR-8 as read do not mention the `invariant_tests:` field or stub/hollow tests. |
+| Invariant tests | Test-completeness spec for #52, on branch `agent/issue-52` (re-specified 2026-11-16) | Unmerged, `status: specifying` | It matches `FR-N` and `INV-N` citations in tests literally (its FR-4) and refuses the tasks-to-implement transition (its FR-6). But its *required* set is the spec's `FR-N` headings (its FR-1) and the **constitution** invariants the spec touches (its FR-2) - a spec's own `## Invariants` list (`INV-1`, `INV-2`, ... as in this spec) is in no required set. Its FR-1 to FR-8 do not mention the `invariant_tests:` field or stub/hollow tests. |
+| Every new frontmatter key | Canonical frontmatter schema SPEC-109 (#23 is in its `relates_to`) | **On `main`**, `status: planning` | It declares one ordered table of every recognised key (its FR-1, FR-2) and warns on any key not in it (its FR-13). Its Coordination table already expects the #23 spec to add `contracts:`, `invariant_tests:`, `file_allowlist:` as three rows. It does not know `contracts_reason:` (FR-4 here). |
+| Duplication and circular dependencies *as code metrics* | Pre-commit code-quality stage SPEC-080 and its decision DR-099 (correctness checks block, metric checks warn) | **On `main`**, `status: planning`; DR-099 `proposed` | v1 runs `shellcheck`, `actionlint`, `tsc` in the adopter's scaffolded pre-commit hook. Duplication % (`jscpd`), complexity and circular-dependency count (`madge`) are deferred to its v2, #2463, and run only if the tool is resolvable. It measures code; it never reads a spec, so it cannot say *which* type is the contract a second definition duplicates, nor whether a seam has a contract at all. |
 | Arch tools | Import-boundaries spec SPEC-040 and its decision DR-064 (machine-enforce the layer-import contract) | `status: done`, `accepted` | They enforce *this repository's* layering with `eslint.config.mjs` and an in-repo cycle gate (`npm run check:cycles`). Nothing looks at whether an *adopter's* project has any such tool. |
 
-The three unmerged specs are read from the remote-tracking refs present in this worktree;
+The three unmerged specs are read from the remote-tracking refs present in this worktree
+(branch tips dated 2026-10-02 for #23, 2026-10-03 for #125, 2026-11-16 for #52);
 this dispatch has no network, so that is a snapshot, not a live reading. They are cited by
 issue and branch, not by spec number, on purpose: their numbers are not final until they
 merge (several open branches in that snapshot claim the same number), and this spec's own
-id, 114, is one above the highest number visible across those refs (113), for the same
-reason.
+id, 114, was one above the highest number visible across those refs (113) when first
+written; on refresh no spec on `main` or on any local remote-tracking branch other than
+this one declares `id: SPEC-114`, so the id is kept.
 
 So #133 is not a fresh mechanism. Its distinct contribution is the one thing none of the
 four does: **join a spec's declarations to the code** - the missing direction (a seam with
@@ -87,15 +95,16 @@ duplicate (a contract type defined twice), and the count (new packages against a
 
 - **Seams are prose only.** The ranked seam list is the `## Costly to Refactor` section
   (SPEC-013 risk-section policy, FR-1; resolves #132 seams-first). The only code that
-  mentions it writes the heading: `slash-commands.ts:136` (authoring guidance) and
-  `adr-manager.ts:566` (DR template). Nothing parses it. SPEC-013's own frontmatter
+  mentions it writes the heading: `slash-commands.ts:137` (authoring guidance) and
+  `adr-manager.ts:586` (DR template). Nothing parses it. SPEC-013's own frontmatter
   records its section registry as having "zero implementation".
-- **Corpus numbers** (76 `requirements.md` files on `main`): 20 have a
+- **Corpus numbers** (224 `requirements.md` files on `main` at `7931142f`): 23 have a
   `## Costly to Refactor` section; 17 of those cite at least one `FR-N` inside it; **0**
-  declare `contracts:` and **0** declare `invariant_tests:`. Of the 17, 4 are T3 or T4
-  (full or complete ceremony) with `plan` in progress or done.
+  declare `contracts:` and **0** declare `invariant_tests:`. Of the 17, 10 are T3 or T4
+  (full or complete ceremony) with `plan` in progress or done. (First reading, at
+  `350c6fa4`: 76 files, 20, 17 and 4.)
 - **Dependency change is a boolean, and an over-reporting one.**
-  `git-analyzer.ts:190-210` sets `hasNewDependencies` when the diff of any `package.json`
+  `git-analyzer.ts:188-210` sets `hasNewDependencies` when the diff of any `package.json`
   contains an added line shaped `"name": "value"`; a version bump adds exactly such a line,
   so a bump reads as a new dependency. A failed diff is caught and read as "no new
   dependencies" (`git-analyzer.ts:206-209`). The signal it feeds, `dependency_change`
@@ -110,8 +119,8 @@ duplicate (a contract type defined twice), and the count (new packages against a
 - **Tool detection today is about AI harness files only.** `tool-detector.ts:28`
   `detectTools` checks six filenames (`CLAUDE.md`, `.cursorrules`, ...). No code looks for
   an architecture tool.
-- **A warn-to-error ratchet precedent exists.** `config.ts:60` and `:140`
-  `ownershipDeclaration: 'warn' | 'error'`, read at `spec-validator.ts:820`.
+- **A warn-to-error ratchet precedent exists.** `config.ts:60` and `:172`
+  `ownershipDeclaration: 'warn' | 'error'`, read at `spec-validator.ts:1031`.
 - **A "say it once" memory exists.** `preferences.ts:51-58` `answeredSignatures`, keyed by
   prompt and state signature.
 
@@ -135,15 +144,17 @@ duplicate (a contract type defined twice), and the count (new packages against a
   only content is a `Low - <reason>` line (SPEC-013 FR-1 allows it) has no seams.
 - **FR-3 - A seam with no contract is reported (the missing direction).** For a primary
   requirements spec that is T3 or T4 with `plan` in progress or done - the same trigger
-  `validateOwnership` uses (`spec-validator.ts:799-803`) - that has at least one seam FR
+  `validateOwnership` uses (`spec-validator.ts:1009-1013`) - that has at least one seam FR
   and declares no `contracts:` entry, the checker reports one `seam-without-contract`
   finding naming the seam FR ids. One finding per spec, not per seam (DQ-1).
 - **FR-4 - Declaring "no code contract" is a valid, visible answer.** `contracts: none`
   together with a non-empty `contracts_reason:` satisfies FR-3. It mirrors the existing
-  `implements: none` plus `implements_reason:` escape (`spec-validator.ts:808-814`). Many
+  `implements: none` plus `implements_reason:` escape (`spec-validator.ts:1017-1025`). Many
   seams are not code - a file grammar, a section order - and a warning with no honest way
   to answer it trains people to ignore it. This shape has to be admitted by the
-  contract-frontmatter spec for #23, which owns the field (DQ-2).
+  contract-frontmatter spec for #23, which owns the field (DQ-2), and `contracts_reason:`
+  needs its own row in SPEC-109's field table; until it has one, SPEC-109's FR-13 warns
+  that it is an unknown key on every spec that uses the escape.
 - **FR-5 - A contract file that defines nothing is reported once building starts.** For
   each declared `contracts[].path` that exists on disk, when the spec's `implement` phase
   is in progress or done, the file must export at least one type-level or schema
@@ -175,10 +186,17 @@ duplicate (a contract type defined twice), and the count (new packages against a
 
 ### Invariant tests
 
-- **FR-9 - This spec builds no invariant-to-test matcher.** Mapping each `INV-N` to a test
-  that cites it is the test-completeness spec for #52's requirement (its FR-2, FR-4, FR-6).
-  Building a second matcher here would be the duplicate implementation this spec exists to
-  flag. This spec contributes two inputs to that matcher and nothing else (DQ-3):
+- **FR-9 - This spec builds no invariant-to-test matcher.** Matching an `INV-N` to a test
+  that cites it is the test-completeness spec for #52's mechanism (its FR-4 matching, its
+  FR-6 gate). Building a second matcher here would be the duplicate implementation this
+  spec exists to flag. This spec contributes three inputs to that matcher and nothing else
+  (DQ-3):
+  - **(0) the required set** - the `INV-N` ids a spec declares under its own
+    `## Invariants` heading join the set of ids that must be mapped. Today that spec's
+    required set is `FR-N` headings (its FR-1) and *constitution* invariants the spec
+    touches (its FR-2); a spec's own invariants - the refactor safety net the issue names -
+    are in neither, so without this input "each invariant has a test" is not checked for
+    them at all;
   - **(a) scope** - files listed under `invariant_tests:` join the set of test files it
     scans;
   - **(b) a citing test must be real** - a test that cites an invariant id but is reported
@@ -188,7 +206,9 @@ duplicate (a contract type defined twice), and the count (new packages against a
   surface in this spec may show invariant tests as covered, green or passing while FR-9's
   owner is unbuilt. Where findings are summarised (FR-13), the summary line states which
   checks ran and names invariant coverage as "not checked" - a missing witness is said out
-  loud, not rendered as a pass.
+  loud, not rendered as a pass. The same holds after that matcher lands but before input
+  (0) does: coverage of a spec's own invariants is still "not checked", even if its
+  constitution-invariant rows are green.
 
 ### Dependency budget
 
@@ -266,8 +286,12 @@ duplicate (a contract type defined twice), and the count (new packages against a
   - a `.dependency-cruiser.*` config file at the repository root;
   - the literal `no-restricted-imports` or `boundaries/` in a root ESLint config file.
 
-  The result is `{ present: string[] }` naming each signal found. MinSpec never executes,
-  installs, configures or reads the output of any of these tools.
+  The result is `{ present: string[] }` naming each signal found. This spec's code never
+  executes, installs, configures or reads the output of any of these tools. (The
+  pre-commit code-quality stage, SPEC-080, *does* run an opportunistic tool when it is
+  resolvable; that is its hook's behaviour under DR-099, not this checker's, and the two
+  answer different questions - "can the hook run X now" there, "does this project
+  configure an import-boundary tool" here - so neither reuses the other's probe.)
 - **FR-17 - One quiet note, then silence.** When the list is empty **and** the repository
   has more than one workspace package, MinSpec shows one advisory line - on the classify
   output of FR-13(b), not a popup - saying no import-boundary tool was detected and naming
@@ -296,7 +320,7 @@ duplicate (a contract type defined twice), and the count (new packages against a
      `contracts:` field, so it must not enter Plan until the contract-frontmatter spec for
      #23 is approved.
   3. **The invariant-input slice** (FR-9). Needs the matcher from the test-completeness
-     spec for #52; until then FR-10 holds.
+     spec for #52, amended to take input (0); until then FR-10 holds.
 
 ## Costly to Refactor
 
@@ -305,10 +329,11 @@ Ranked most to least costly.
 1. **The `contracts: none` plus `contracts_reason:` escape (FR-4).** A frontmatter shape
    that specs adopt and another spec's validator must admit. Changing it later means
    editing every spec that used it, and each edit voids that spec's approval. *Check: you
-   accept this shape, and that it is settled with the #23 spec before either is built.*
+   accept this shape, and that it is settled with the #23 spec and registered in SPEC-109's
+   field table before either is built.*
 2. **Seam = an FR id cited in the Costly to Refactor section (FR-2).** Every spec's
    existing seam list becomes checker input. Redefining a seam later changes which specs
-   are warned. *Check: the 17-of-20 corpus count above is the population you expect.*
+   are warned. *Check: the 17-of-23 corpus count above is the population you expect.*
 3. **Finding contract (FR-12).** Read by the validator, the classify output and, later, the
    reality-check lens. *Check: the six kinds.*
 4. **What "new dependency" counts (FR-11).** The four manifest fields and the workspace
@@ -382,7 +407,8 @@ Ranked most to least costly.
 - **INV-7 - Absent declarations cost nothing outside the trigger.** A T1 or T2 spec, a spec
   not yet planned, and a spec with no Costly to Refactor section are unaffected.
 - **INV-8 - Detection is not integration.** Tool detection reads file names and literal
-  strings. MinSpec does not parse a third-party tool's rules, run it, or report its results.
+  strings. Nothing this spec adds parses a third-party tool's rules, runs it, or reports its
+  results.
 
 ## Files this would touch (for Plan to confirm; not yet `affects:`)
 
@@ -400,7 +426,7 @@ Each question names a recommended option and what that recommendation costs.
 ### DQ-1 - How is "a seam that needs a contract" identified?
 
 - **Option A - any FR cited in the Costly to Refactor section; one finding per spec;
-  answered by a contract or by `contracts: none` plus a reason (rec).** Uses a section 20
+  answered by a contract or by `contracts: none` plus a reason (rec).** Uses a section 23
   specs already have and needs no new markup. *Cost:* many seams are not code (a grammar, a
   section order), so a real share of specs will answer with `none` plus a reason - the
   check then proves that someone *considered* a contract, not that one exists.
@@ -416,13 +442,16 @@ Each question names a recommended option and what that recommendation costs.
 
 `contracts:` and `invariant_tests:` exist only in the contract-frontmatter spec for #23,
 which is unmerged, and FR-4's `contracts: none` shape is one that spec's validator would
-today warn about as malformed.
+today warn about as malformed. A second owner now exists on `main`: SPEC-109 (canonical
+frontmatter schema) declares the one table of recognised keys, so `contracts_reason:` also
+needs a row there or it is warned about as unknown on every spec that uses it.
 
-- **Option A - keep the two specs separate; amend the #23 spec to admit `contracts: none`
-  plus `contracts_reason:` before it is approved; the seam-contract slice waits for it
-  (rec).** One owner per field. *Cost:* the most valuable slice here is blocked on another
-  approval, and someone has to carry the amendment across - it is not made by this
-  dispatch, which may only write this spec.
+- **Option A - keep the specs separate; amend the #23 spec to admit `contracts: none`
+  plus `contracts_reason:` before it is approved, and register `contracts_reason:` in
+  SPEC-109's table alongside the three keys SPEC-109 already expects from #23; the
+  seam-contract slice waits for both (rec).** One owner per field. *Cost:* the most
+  valuable slice here is blocked on another approval, and someone has to carry two
+  amendments across - neither is made by this dispatch, which may only write this spec.
 - **Option B - fold the field definitions into this spec and retire the #23 spec.** One
   approval. *Cost:* discards a spec that also covers panel links and a CodeLens this spec
   does not want, and re-opens its Clarify answers.
@@ -432,19 +461,22 @@ today warn about as malformed.
 
 ### DQ-3 - Who owns invariant-to-test matching?
 
-- **Option A - the test-completeness spec for #52 owns it; this spec adds the two inputs in
-  FR-9 and reports "not checked" until it exists (rec).** One matcher. *Cost:* the issue's
-  second bullet ("each invariant has a test") is delivered by another spec's approval, not
-  this one's; if that spec stalls, so does the bullet.
+- **Option A - the test-completeness spec for #52 owns it; this spec adds the three inputs
+  in FR-9 and reports "not checked" until they exist (rec).** One matcher. *Cost:* the
+  issue's second bullet ("each invariant has a test") is delivered by another spec's
+  approval, not this one's, and needs that spec widened to a spec's own invariants (input
+  (0)) - a scope change its author has not agreed to; if that spec stalls or declines, so
+  does the bullet.
 - **Option B - build the matcher here.** Self-contained. *Cost:* two specs specifying the
   same literal-citation matcher, to be reconciled later.
 - **Option C - move the invariant row out of the #52 spec into this one, leaving that spec
   with `FR-N` rows only.** Groups "refactor safety net" in one place. *Cost:* splits one
   matcher's two row types across two specs and edits a spec this dispatch cannot touch.
 
-A related fact for whichever option: 61 of 76 requirement files use numbered `INV-N` ids
-and 9 use a worded form such as `INV-single-predicate`; a worded or unnumbered invariant
-can only be matched if the matcher accepts those ids.
+A related fact for whichever option: on `main` at `7931142f`, 124 of 224 requirement files
+cite at least one numbered `INV-N` id and 5 more cite only a worded form such as
+`INV-single-predicate`; a worded or unnumbered invariant can only be matched if the
+matcher accepts those ids.
 
 ### DQ-4 - How wide is the duplicate-contract scan?
 
@@ -483,11 +515,12 @@ follow rules - enforce it via code"; principle 4 says "Avoid nagging".
 
 - **Option A - everything a warning; one opt-in ratchet to `error` for
   `seam-without-contract` only (rec).** Lands without turning any spec red, and gives a
-  path to real enforcement once the corpus has contracts. *Cost:* on the day it ships it
+  path to real enforcement once the corpus has contracts. It is the same shape DR-099
+  chose for metric checks ("warn by default until a project opts one into blocking"). *Cost:* on the day it ships it
   enforces nothing - a warning can be ignored, which is the "trust the model" shape the
   constitution warns about, until someone flips the key.
 - **Option B - `seam-without-contract` is an error for T3/T4 from the start.** Real
-  enforcement. *Cost:* 4 in-build specs on `main` cite a seam FR and 0 declare a contract,
+  enforcement. *Cost:* 10 in-build specs on `main` cite a seam FR and 0 declare a contract,
   so each goes red on landing and needs an edit, and an edit to an approved spec voids its
   approval.
 - **Option C - all findings blocking.** *Cost:* blocks merges on lexical heuristics
@@ -513,7 +546,10 @@ Choosing B or C makes a merge-gating check and needs a decision record first (se
 dependency-budget or architecture-tool checking (terms: seam, contract, refactor,
 dependency, invariant, guardrail). DR-029 (self-audit family, advisory, deterministic floor
 in core and judgement in agent-execute) and DR-064 (this repository's own import boundaries)
-are the adjacent ones; neither decides this. Under the recommended options nothing here is
+are the adjacent ones, joined since first writing by DR-099 (code-quality checks in the
+pre-commit harness split by class - correctness blocks, metrics warn); none decides this:
+DR-099 rules on checks that read code alone, and every check here joins a spec's
+declarations to code. Under the recommended options nothing here is
 hard to undo: every finding is a warning, no file format is introduced beyond one optional
 frontmatter escape, and deleting the module and its call sites restores today's behaviour
 inside a day. A decision record becomes necessary, and this spec must not proceed to Plan
@@ -530,8 +566,12 @@ third-party tool (INV-8).
 - **Checking that an implementation *conforms* to its contract.** That is the type
   checker's and the contract tests' job.
 - **Coupling, god-object and circular-dependency judgement.** FR-19; reality-check lens.
+- **Duplication percentage, complexity and circular-dependency counts as metrics.** The
+  pre-commit code-quality stage's v2 (SPEC-080, #2463, DR-099). FR-7 is not a duplication
+  metric: it fires only on a second declaration of an identifier a *spec-declared contract*
+  exports, which a spec-blind metric tool cannot know.
 - **Fixing the existing `hasNewDependencies` heuristic or its swallowed failure**
-  (`git-analyzer.ts:190-210`). Observed and recorded here; changing it would change
+  (`git-analyzer.ts:188-210`). Observed and recorded here; changing it would change
   classification (INV-6). Follow-up below.
 - **Non-npm ecosystems in the dependency count.** Reported as not measured (FR-11a).
 - **The method-rule declarations in documents** (the `contracts-first` and
@@ -573,20 +613,26 @@ To be filed as issues by whoever publishes this spec; each is outside this spec'
 
 1. Amend the contract-frontmatter spec for #23 to admit `contracts: none` plus
    `contracts_reason:` (DQ-2 Option A).
-2. Add the two FR-9 inputs to the test-completeness spec for #52 (DQ-3 Option A).
-3. `git-analyzer.ts:190-210` reads a version bump as a new dependency and reads a failed
+2. Add the three FR-9 inputs to the test-completeness spec for #52 - most importantly
+   input (0), a spec's own `## Invariants` ids in its required set (DQ-3 Option A).
+3. Register `contracts_reason:` in SPEC-109's field table (canonical frontmatter schema)
+   alongside the #23 keys it already expects (DQ-2 Option A).
+4. `git-analyzer.ts:188-210` reads a version bump as a new dependency and reads a failed
    diff as "none"; decide whether classification should use FR-11's count instead.
-4. One home for the dependency-budget number, shared with the methodology guardrail spec
+5. One home for the dependency-budget number, shared with the methodology guardrail spec
    for #125 (DQ-5).
-5. After ten specs have passed through FR-3, measure how many answered `contracts: none`.
+6. After ten specs have passed through FR-3, measure how many answered `contracts: none`.
 
 ## Traceability
 
 - Issue: [#133](https://github.com/AIClarityAU/minspec/issues/133).
+- Related specs: SPEC-109 (canonical frontmatter schema - the table any new key joins).
 - Related issues: #125 (methodology guardrail), #132 (seams-first, resolved into SPEC-013),
   #23 (contract frontmatter), #52 (test completeness), #121 (signpost coverage).
 - Decisions rested on: DR-029 (advisory self-audit; judgement belongs to agent-execute),
   DR-004 (tier model - this is Tier 0), DR-064 (use existing boundary tooling), DR-066 (no
-  silent gate), DR-074 (blast radius).
+  silent gate), DR-074 (blast radius), DR-099 (warn-by-default for metric-class checks).
+- Related specs: SPEC-080 (pre-commit code-quality stage; its v2 #2463 owns duplication and
+  cycle metrics).
 - "DR-359 CDD" in the issue is a parent-register record (mmo-platform), not readable from
   this checkout; nothing here asserts its text beyond what the issue and `dev.md:24` quote.
