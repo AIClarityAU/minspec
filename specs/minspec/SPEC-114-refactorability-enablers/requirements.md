@@ -134,7 +134,9 @@ duplicate (a contract type defined twice), and the count (new packages against a
   git library and no network client; disk and git reads stay in the caller and are passed
   in, the pattern `consequence-analyzers.ts` documents in its header. No check in this spec
   may be implemented a second time elsewhere (the issue's own single-source rule, applied
-  to itself).
+  to itself). That includes the FR-16 tool detection: the function that decides which
+  signals are present lives here too; `tool-detector.ts` only gathers the files it inspects
+  and passes them in (FR-16).
 
 ### Contracts at seams
 
@@ -277,9 +279,11 @@ duplicate (a contract type defined twice), and the count (new packages against a
 
 ### Detect existing architecture tools - and stop there
 
-- **FR-16 - Detection is a closed list of file-level signals.** Extending
-  `tool-detector.ts`, a pure function reports which import-boundary tooling a project
-  shows, from files only:
+- **FR-16 - Detection is a closed list of file-level signals.** A pure function in
+  `seam-check.ts` (FR-1) reports which import-boundary tooling a project shows. It takes as
+  data the workspace manifests' dependency names, the repository root's file names and the
+  root ESLint config text; `tool-detector.ts` reads those from disk, beside its existing
+  `detectTools`, and passes them in. The signals, from files only:
   - a dependency named `dependency-cruiser`, `eslint-plugin-boundaries` or `tsarch` in any
     workspace manifest (the third is the package name I believe the issue's "ts-arch"
     refers to - unverified, this dispatch has no network; confirm at Plan);
@@ -294,10 +298,16 @@ duplicate (a contract type defined twice), and the count (new packages against a
   configure an import-boundary tool" here - so neither reuses the other's probe.)
 - **FR-17 - One quiet note, then silence.** When the list is empty **and** the repository
   has more than one workspace package, MinSpec shows one advisory line - on the classify
-  output of FR-13(b), not a popup - saying no import-boundary tool was detected and naming
-  the three as examples. Dismissal is remembered through `answeredSignatures`
-  (`preferences.ts:58`) keyed on the detection result, so it reappears only if the result
-  changes. When the list is non-empty nothing is shown. A single-package project is never
+  output of FR-13(b), not a new popup - saying no import-boundary tool was detected and
+  naming the three as examples. The classify output is already a non-modal toast with action
+  buttons (`classify.ts:163-170`), so the line goes in that toast's `detail`, and the toast
+  gains one extra action, `Don't mention again`, only while the line is showing. Clicking it
+  is what records the dismissal: it writes the `answeredSignatures` entry
+  (`preferences.ts:58`) under the key `archToolNote`. The value is the detection-result
+  signature, merged into the map the way `commit-on-approve.ts:461-478` merges, never
+  replacing it. The line is suppressed while the stored signature equals the current one, so
+  it reappears only when the result changes. Closing the toast without clicking records
+  nothing. When the list is non-empty nothing is shown. A single-package project is never
   nudged (DQ-7).
 - **FR-18 - This repository must detect as covered.** `eslint.config.mjs` carries
   `no-restricted-imports` (DR-064), so FR-16 returns a non-empty list here and FR-17 stays
@@ -374,8 +384,11 @@ Ranked most to least costly.
   the validator's warning count for specs whose `implement` phase is `done` is unchanged.
   (FR-15)
 - **AC-11.** Tool detection returns a non-empty list for this repository; an empty list
-  for a two-package fixture with none of the signals, which shows the note once and not
-  again after dismissal; and no note for a single-package fixture. (FR-16 to FR-18)
+  for a two-package fixture with none of the signals, which shows the note and the
+  `Don't mention again` action; after that action the note is not shown again while the
+  detection result is unchanged, and is shown again once it changes; closing the toast
+  without the action leaves the note showing next time; and no note for a single-package
+  fixture. (FR-16 to FR-18)
 - **AC-12 - not vacuous.** Each check in FR-3, FR-5, FR-7, FR-11 and FR-11a is removed one
   at a time and the suite goes red each time, and each removal is confirmed to have edited
   the line it meant to.
@@ -607,9 +620,12 @@ third-party tool (INV-8).
 - **A new command or view for these findings.** Rejected: two surfaces already show
   warnings and signals (FR-13).
 
-## Follow-ups (not yet filed - this dispatch has no network access)
+## Follow-ups (items 1, 2, 3 and 5 not yet filed - this dispatch has no network access)
 
-To be filed as issues by whoever publishes this spec; each is outside this spec's scope.
+Each is outside this spec's scope. Under DR-023's 30-day rule, items 1, 2, 3 and 5 bear on
+this spec's Clarify answers, so they must be filed as issues, and their numbers written in
+here, before this spec is approved. Items 4 and 6 would not change a decision within 30 days
+and are recorded in `docs/backlog.md` instead.
 
 1. Amend the contract-frontmatter spec for #23 to admit `contracts: none` plus
    `contracts_reason:` (DQ-2 Option A).
@@ -619,9 +635,11 @@ To be filed as issues by whoever publishes this spec; each is outside this spec'
    alongside the #23 keys it already expects (DQ-2 Option A).
 4. `git-analyzer.ts:188-210` reads a version bump as a new dependency and reads a failed
    diff as "none"; decide whether classification should use FR-11's count instead.
+   backlog: `git-analyzer.ts:188-210` reads a version bump as a new dependency...
 5. One home for the dependency-budget number, shared with the methodology guardrail spec
    for #125 (DQ-5).
 6. After ten specs have passed through FR-3, measure how many answered `contracts: none`.
+   backlog: once ten specs have passed through SPEC-114 FR-3 (seam-contract check)...
 
 ## Traceability
 

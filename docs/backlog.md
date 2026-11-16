@@ -10,6 +10,8 @@ bear on a near-term decision, file it as an issue and strike it here with the is
 
 Newest first.
 
+- 2026-11-16 - `git-analyzer.ts:188-210` reads a version bump as a new dependency and a failed diff as "none"; decide whether classification should use SPEC-114 FR-11's dependency count instead (source: SPEC-114, #133)
+- 2026-11-16 - once ten specs have passed through SPEC-114 FR-3 (seam-contract check), measure how many answered `contracts: none` (source: SPEC-114, #133)
 - 2026-10-31 - DR-092 follow-up (d) still applies to any adopter that keeps its hand-written `minspec-ci-parity.yml`, whose remedy text keeps the self-defeating advice; moot wherever the managed copy replaces it (source: SPEC-079 DQ-3, the parity-ownership record, number 120, in docs/decisions/)
 - 2026-10-31 - constitution invariants are numbered, so `CON/INV-<slug>` has no target until they are named, which is an edit to the constitution (source: DR-053 §9, #3439)
 - 2026-10-30 - a normal build dispatch whose only deliverable is a spec or decision record, with a legitimate `Closes #N`, is refused by the delegated spec merge with `spec-pr-closes-build-issue`; fails closed, code left as it is (source: #3351)
