@@ -1,5 +1,5 @@
 ---
-id: SPEC-097
+id: SPEC-354
 type: requirements
 status: specifying
 tier: T4
@@ -74,7 +74,7 @@ a *surface*, not a new source of truth.
 Read at `origin/main` (worktree HEAD) on 2026-10-03, not inferred:
 
 - **Git access.** `simple-git` is already a dependency, used today for per-diff line/file
-  counts in the tier classifier (`packages/minspec/src/lib/git-analyzer.ts:14-47`). Those
+  counts in the tier classifier (the `git.diffSummary` calls at `packages/minspec/src/lib/git-analyzer.ts:142` and `:334`). Those
   helpers measure one change (staged or working tree) — nothing in the repo walks commit
   history to build a time series. This spec would be the first consumer that does.
 - **"Approved" ground truth.** `packages/minspec/src/lib/approval-store.ts` already holds a
@@ -132,13 +132,12 @@ surface, not a new boundary.
   see the two edges converge as code catches up to doc, without the chart itself asserting a
   numeric "% complete" — the underlying signals (line counts, not semantic completeness)
   cannot support that claim, and asserting it would be exactly the false-precision defect
-  `.minspec/constitution.md` invariant 2's spirit and DR-087's forbidden-claim-word gate both
-  exist to catch in other surfaces.
+  DR-087's forbidden-claim-word gate exists to catch in other surfaces (see INV-5).
 
 - **FR-4 (approval/test-state overlay — the "bendy bar" variant).** When enabled (default
   decided by DQ-5), each edge MUST render as a variable-thickness band: thickness encodes
   cumulative line volume, color encodes state — green for lines covered by the "approved"
-  (doc) / "tested" (code) definition FR-1/FR-2 establish, orange for everything else. An
+  (doc, DQ-2) / "tested" (code, DQ-3) definition, orange for everything else. An
   ambiguous or unknown state MUST render orange, never green — the chart must never show more
   certainty than the underlying data supports.
 
@@ -154,8 +153,13 @@ surface, not a new boundary.
 
 - **FR-7 (Tier-0, offline, no new network surface).** The entire computation path (git walk,
   line counting, coverage-signal read, rendering) MUST execute with zero network calls and
-  introduce no new entry to `CHILD_PROCESS_ALLOWLIST` beyond `git` itself, which is already
-  allowlisted. Any charting library added MUST be bundled with the extension, never fetched
+  spawn no process other than `git`. `SPAWN_ALLOWLIST`
+  (`packages/minspec/tests/invariants.test.ts:121`, renamed from `CHILD_PROCESS_ALLOWLIST` in
+  #2456) is keyed by source FILE, not binary, and counts a `simple-git` import as a spawn. A
+  new module that walks git history is therefore a new spawn site and MUST be added as one
+  new, commented `SPAWN_ALLOWLIST` entry (Tier-1 local-tool delegation, `git` only, no network
+  method) — or reuse an already-allowlisted file such as `lib/git-analyzer.ts`; it MUST NOT
+  call `simple-git`'s network methods (`push`/`fetch`/`pull`/`clone`). Any charting library added MUST be bundled with the extension, never fetched
   from a CDN at render time (constitution invariant 1).
 
 - **FR-8 (performance bound, no unbounded background work).** The data computation MUST NOT
@@ -196,7 +200,8 @@ surface, not a new boundary.
 ## Invariants (must not break)
 
 - **INV-1 (offline core, constitution invariant 1).** No network call anywhere in this
-  feature's path; no new child process beyond `git`.
+  feature's path; no new child process beyond `git` (new spawn sites need a
+  `SPAWN_ALLOWLIST` entry, FR-7).
 - **INV-2 (honest degradation).** A sample point this feature cannot compute is shown as a
   gap. It is never guessed, interpolated, or silently dropped in a way that makes the series
   look more complete than it is.
@@ -243,8 +248,11 @@ recorded selection.
 
 ### DQ-3 — "Tested code" signal (the hardest question; no existing historical infra)
 
-- **Option A — `coverage/coverage-summary.json` (already produced by CI, FR-2's "now" point)
-  for the current sample, paired with a cheaper file-existence proxy for every historical
+- **Option A — `coverage/coverage-summary.json` (produced by CI, `ci.yml:184`, and locally only
+  after a coverage run with the json-summary reporter; it is not committed and an adopter
+  project may produce none) for the current sample. If the file is missing, or older than HEAD
+  (summary mtime vs HEAD commit time), the HEAD point follows FR-2's gap rule — a visible gap
+  labelled "no current coverage", never a stale value, paired with a cheaper file-existence proxy for every historical
   sample — "does a mapped test file exist for this source file at this commit," answerable
   via `git show <sha>:<path>` with no test execution (rec).** *Cost:* the two ends of the
   series are not apples-to-apples (today = a real percentage, history = a coarser presence
@@ -340,8 +348,8 @@ B without one.
 
 ## Id note
 
-`SPEC-097` was checked against `origin/main` (`350c6fa4`) and every packed remote-tracking
-ref available in this worktree on 2026-10-03 — no spec directory or branch claims `SPEC-097`
-or higher. This agent has no network access to re-fetch or query open pull requests directly;
-per `scripts/check-dr-id-collision.ts`'s sibling-gate convention, if this id collides with a
-pull request opened after this check, renumber at review time.
+Originally drafted as `SPEC-097`; that id collided with the approved
+`SPEC-097-watcher-config-source` (whose approval sidecar is path-keyed, so it keeps the id), and
+this spec was renumbered to `SPEC-354` (next free id per the collision gate) at review time.
+No network access in this worktree to re-query open pull requests; if `SPEC-354` collides with a
+pull request opened since, renumber again.
