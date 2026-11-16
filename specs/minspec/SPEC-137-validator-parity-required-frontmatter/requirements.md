@@ -52,7 +52,7 @@ breaks nothing today. The Plan phase must re-measure on the then-current corpus.
 - **FR-4 — Fail visibly when the rule cannot run.** If a spec file cannot be read or parsed,
   the new rule reports that it validated nothing (invariant 2), in the manner of Rules 17-19.
   It does not pass quietly and does not stop evaluating the remaining files.
-- **FR-5 — Parity test.** A test runs `validateSpec` and the CI path over the real
+- **FR-5 — Parity test.** A test runs `validateSpec` (with `knownRefs`, per FR-8) and the CI path over the real
   `specs/**` corpus and asserts that the set of closed-set-field findings (rule id + file)
   is identical. A rule present in one and absent in the other fails the build. The test
   must also include a self-check proving it can fail: a mutation of the CI path that drops
@@ -60,9 +60,16 @@ breaks nothing today. The Plan phase must re-measure on the then-current corpus.
 - **FR-6 — Fixture test for the reported hole.** A split-layout fixture whose `design.md`
   (and, separately, `tasks.md`) omits `status` must be flagged by the CI path. A fixture
   whose `design.md` omits `tier` must NOT be flagged (type-conditional rule preserved).
-- **FR-7 — Land together with #972.** If [#972](https://github.com/AIClarityAU/minspec/issues/972)
-  changes `status` to `requiredWhen: isPrimarySpec`, it lands in the same change as the parity
-  test so both paths move together. See DQ-2.
+- **FR-7 — Coordination with #972 follows DQ-2.** [#972](https://github.com/AIClarityAU/minspec/issues/972)
+  may change `status` to `requiredWhen: isPrimarySpec`. Under the recommended DQ-2 option A,
+  this change keeps `status` unconditionally required and #972 lands separately, gated on the
+  FR-5 parity test passing. Under option B, #972 lands in the same change as the parity test so
+  both paths move together.
+- **FR-8 — `knownRefs` for the `unresolved` arm.** The `unresolved` check for `superseded-by`
+  only fires when `knownRefs` is supplied (`spec-validator.ts:608-609`). The Plan must state
+  where the parity test and the CI path source `knownRefs` (the registry `validate-frontmatter.ts`
+  already builds, around lines 156-191) and pass the same set to both, so `unresolved` is
+  compared rather than never exercised.
 
 ## Acceptance criteria
 
