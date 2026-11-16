@@ -104,14 +104,14 @@ drain_holder() {
   printf '%s' "$pid"
 }
 
-# paused: the drain's own predicate, so the marker path is decided in one place.
 PRIMARY="${MINSPEC_DRAIN_PRIMARY_ROOT:-$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd))}"
 
 # run_dir_drain (#3747): refresh the run dir (the drain's own --refresh-run-dir seam) and
 # print its drain-inbox.sh when the run dir sits at the checkout's origin/main. Fails
 # (prints nothing) when MINSPEC_DRAIN_SERVICE_DRAIN is set explicitly (an override wins),
 # or when the run dir is missing or not verified; the caller then runs in place, and the
-# drain's own STALE line says so. Never fatal.
+# drain's own STALE line says so. Never fatal. cmd_run calls it only when no drain holds
+# the lock, so this refresh never resets the run dir under a drain executing from it.
 run_dir_drain() {
   [[ -n "${MINSPEC_DRAIN_SERVICE_DRAIN:-}" ]] && return 1
   local run="${MINSPEC_DRAIN_RUN_DIR-/tmp/minspec-drain-run}" head origin
@@ -122,6 +122,7 @@ run_dir_drain() {
   printf '%s\n' "$run/scripts/drain-inbox.sh"
 }
 
+# paused: the drain's own predicate, so the marker path is decided in one place.
 paused() { "$DRAIN" --paused >/dev/null 2>&1 9>&-; }
 
 log_size() { stat -c %s "$DRAIN_LOG" 2>/dev/null || echo 0; }
