@@ -1,5 +1,5 @@
 ---
-id: SPEC-097
+id: SPEC-343
 type: requirements
 status: specifying
 tier: T3
@@ -17,7 +17,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-097: MinSpec: Prune Merged Worktrees — squash-merge aware, never silent-delete
+# SPEC-343: MinSpec: Prune Merged Worktrees — squash-merge aware, never silent-delete
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human
 > reads it, resolves the open questions under **Decisions needed (Clarify)**, and approves
@@ -106,7 +106,11 @@ until the human invokes it.
 ## Functional Requirements
 
 - **FR-1 (enumeration).** List every worktree `git worktree list --porcelain` reports from
-  the primary root via `listWorktreeRoots`, excluding: the primary itself; the worktree
+  the primary root via `listWorktreeRoots`. The primary is identified as `primaryRoot`
+  itself (`listWorktreeRoots` always includes it) and is excluded by comparing each root
+  to `primaryRoot` — this holds even when the command runs from a non-primary worktree,
+  because `sameCheckout` only compares against the running workspace and cannot be relied
+  on to exclude the primary. Also excluded: the primary itself; the worktree
   `sameCheckout` resolves as the one the command is running from; and any worktree git
   reports `locked` (an explicit human "don't touch this" signal — never listed as a
   candidate, not even as a red row).
@@ -114,24 +118,40 @@ until the human invokes it.
 - **FR-2 (four safety gates, ALL required for a green verdict).** For each remaining
   candidate, compute and display:
   1. **Clean** — `git status --porcelain` is empty in that worktree.
-  2. **No unpushed commits** — the branch's upstream (if configured) has zero commits
-     ahead (`rev-list --count @{u}..`); if no upstream is configured, the branch tip must
-     be reachable from `origin/<default>` OR from the merge commit of a PR the forge
-     reports as MERGED for this branch (reuses the FR-3 result — a branch with no upstream
-     and no merged PR is never prune-safe).
+  2. **No unpushed commits** — every commit on the local branch is provably preserved
+     elsewhere. At least one of these must hold:
+     a. an upstream is configured and still exists, and it has zero commits ahead
+        (`rev-list --count @{u}..` is `0`);
+     b. the branch tip is an ancestor of `origin/<default>` (ordinary merge, offline);
+     c. the forge reports a MERGED PR for this branch whose `headRefOid` EQUALS the local
+        branch tip (FR-3). A squash merge's merge commit has the default branch, not the
+        feature tip, as its parent, so reachability from the merge commit can never prove
+        a squash-merged branch safe; tip-equals-`headRefOid` proves the exact commits the
+        PR merged are the commits held locally.
+     If the upstream is configured but gone (`[gone]` — the remote branch was
+     auto-deleted after merge, so `rev-list @{u}..` errors), that error is NOT treated as
+     "zero ahead" and is not a hard failure: it falls through to (b) and (c), so the
+     squash-merge-then-auto-delete path this spec exists for is decided by the forge
+     witness. A branch with no upstream, no ancestry, and no tip-matching merged PR is
+     never prune-safe.
   3. **Merged** — EITHER git ancestry (`merge-base --is-ancestor <tip> origin/<default>`,
-     catches an ordinary merge commit, offline) OR the forge's own PR state is MERGED for
-     this branch (FR-3, catches a squash merge). Neither alone is sufficient to call a
-     branch NOT merged — the ancestry check misses squash merges by construction (Context),
-     so "ancestry says no" must not short-circuit skipping the FR-3 lookup.
+     catches an ordinary merge commit, offline) OR the forge's PR state is MERGED for
+     this branch AND the PR's `headRefOid` equals the local branch tip (FR-3, catches a
+     squash merge). A PR that is MERGED but whose `headRefOid` differs from the local tip
+     (branch name reused, or commits added locally after the PR merged) is NOT merged for
+     this purpose and is shown as "PR #N merged, but local tip differs — unmerged commits".
+     "Ancestry says no" must not short-circuit skipping the FR-3 lookup, since ancestry
+     misses squash merges by construction (Context).
   4. **Not presence-occupied** — `isCheckoutOccupied(primaryRoot, worktreeRoot)` returns
      `false` (positive proof of dormancy). Any error, corrupt record, or ambiguous read
      returns `true` (occupied) per that function's own fail-safe contract, with the SAME
-     effect here as elsewhere: not prune-safe.
+     effect here as elsewhere: not prune-safe. That function also returns `true` when no
+     live presence record exists anywhere (presence heartbeat off or disabled), leaving
+     every candidate permanently red; FR-4 labels that case explicitly.
   A candidate is **prune-safe (green)** only when all four hold. Any other combination is
   shown but never offered a remove action.
 
-- **FR-3 (the network call, gesture-gated, not ambient).** Determining PR state for gate 2
+- **FR-3 (the network call, gesture-gated, not ambient).** Determining PR state for gates 2 and 3
   (merged-how) requires `gh pr view <branch> --json state,headRefOid,mergeCommit`, which
   reaches the network. This call runs **only** inside a run of this command that the user
   has explicitly invoked (command palette or a view's own button) — never on activation,
@@ -148,6 +168,11 @@ until the human invokes it.
   candidate: the worktree path, its branch, the merged-how result (`merge commit`,
   `squash via PR #N`, `not merged`, or `not provably merged — gh unavailable`), clean
   yes/no, unpushed commit count, and presence (live/dormant, and if live, which session).
+  When `isCheckoutOccupied` returns `true` only because no live presence record exists at
+  all (heartbeat not running or disabled), not because a session is attached to that
+  worktree, the row says "presence unavailable — heartbeat not running; cannot prove
+  dormancy" rather than "occupied", so the command never silently prunes nothing with a
+  misleading reason.
   Matches the issue's own ask ("lists candidates with per-item safety verdict") and this
   repo's never-wrong stance — a human can see WHY a given worktree was or wasn't offered.
 
@@ -161,7 +186,8 @@ until the human invokes it.
   row carries its own remove action. Removal runs `git worktree remove <path>` (never
   `--force` — FR-2 gate 1 already proved the tree clean, so an ordinary remove succeeds or
   the re-check in FR-5 already caught the reason it wouldn't) followed by deleting the
-  local branch. Because a squash-merged branch is never an ancestor of `origin/<default>`
+  local branch, only if the branch tip still equals the tip FR-5 classified (a tip that
+  moved in between is skipped, never deleted). Because a squash-merged branch is never an ancestor of `origin/<default>`
   (Context), `git branch -d` — which git would otherwise correctly refuse — is not the
   right primitive here; the branch delete uses the force form (`-D`) **but only reaches it
   after FR-2/FR-5 have independently proven the branch's content is safe to lose**, which
@@ -228,8 +254,9 @@ until the human invokes it.
 - **INV-3 (DR-065 fail-safe direction, reused not re-derived).** `isCheckoutOccupied`'s
   existing fail-to-occupied contract is consumed as-is; this spec does not reimplement or
   loosen it.
-- **INV-4 (never touches the primary or the caller's own worktree).** `sameCheckout`
-  excludes both from candidacy unconditionally, independent of every other gate.
+- **INV-4 (never touches the primary or the caller's own worktree).** The primary is
+  excluded by comparison to `primaryRoot` and the caller's own worktree by `sameCheckout`
+  (FR-1), both unconditionally, independent of every other gate.
 - **INV-5 (no new unattended trigger).** Nothing in this feature runs from activation, a
   timer, or the SPEC-026 presence heartbeat (FR-7) — distinct from, and narrower than,
   DR-065 §5's drain/loop sanction, which this feature does not use or extend.
