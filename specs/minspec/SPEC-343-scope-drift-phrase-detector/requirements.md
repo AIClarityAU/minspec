@@ -1,5 +1,5 @@
 ---
-id: SPEC-097
+id: SPEC-343
 type: requirements
 status: specifying
 tier: T3
@@ -15,7 +15,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-097: Phrase-based scope-drift detector (status bar + CodeLens)
+# SPEC-343: Phrase-based scope-drift detector (status bar + CodeLens)
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human
 > reads it, checks its Clarify questions, and approves it through the normal spec-approval
@@ -34,9 +34,9 @@ detection that today exists only as local, repo-specific plumbing
 using the extension — not just this monorepo's Claude Code sessions — gets the same
 guardrail.
 
-**Id note.** `SPEC-096` is the highest id on `origin/main`; checked for open pull
-requests and pushed branches claiming `SPEC-097` on 2026-10-02, found none at the time of
-writing. If the id collides at review time, renumber.
+**Id note.** Originally drafted as `SPEC-097`, which collided with the approved
+watcher-config-source spec; renumbered to `SPEC-343` (`SPEC-342` was the highest id on
+`origin/main` at renumbering, 2026-11-16). If the id collides at review time, renumber.
 
 ## One-Sentence Scope
 
@@ -121,18 +121,24 @@ can watch (DQ-1).
 - **FR-2 - `minspec.checkScopeDrift` command.** A command, contributed and registered
   the way other MinSpec commands are (`package.json` `contributes.commands`,
   registered in `extension.ts`), that runs the phrase scan (FR-3) against the current
-  active text editor's full document text on demand and reports the result the same way
+  active text editor's full document text on demand (a manual run rescans everything, but
+  still omits matches the user has already dismissed, per FR-5a) and reports the result the same way
   automatic detection does (FR-5). Running it with no active session (`loadSession`
   returns `null`) MUST say so and do nothing else — it MUST NOT prompt to declare one
   (constitution principle 4, no nagging).
 
-- **FR-3 - Trigger-phrase scan.** A pure function taking a session's declared scope
-  text is not enough signal; the scan runs over **document text**, lower-cased, against
-  a configurable list of trigger phrases (FR-4). It MUST reuse the matching shape
-  `scope-check.sh:52-57` already validates (substring / simple regex-fragment match,
-  case-insensitive, short-input skip) rather than inventing new matching semantics, and
-  MUST run automatically in at least one place beyond the manual command (DQ-2 decides
-  exactly where/when).
+- **FR-3 - Trigger-phrase scan.** The scan is a pure function
+  `scanForDrift(text: string, triggers: readonly string[]): DriftMatch[]`, where each
+  `DriftMatch` is `{ phrase, line, lineText }` (`phrase` = the trigger entry that
+  matched, `line` = 1-based line number, `lineText` = that line, trimmed). It lower-cases
+  `text`, matches each trigger case-insensitively, skips input shorter than the same
+  minimum length `scope-check.sh:52-57` skips, and returns matches in document order with
+  no duplicates per (phrase, line). It does no I/O, reads no setting, and never throws on
+  an invalid trigger (FR-4a): the caller supplies the already-validated list. Matching
+  shape (substring or simple regex fragment, case-insensitive, short-input skip) is the
+  one `scope-check.sh:52-57` already validates, not new semantics. The automatic path
+  runs it at least once beyond the manual command (DQ-2 decides where/when) and, per
+  FR-5a, only ever *reports* matches that are new or changed.
 
 - **FR-4 - Configurable triggers, seeded from the existing lists.** `minspec.scopeDrift.triggers`
   (array of string, default seeded from the union of `scope-check.sh:38-50` and
@@ -142,6 +148,20 @@ can watch (DQ-1).
   described as additive). A `minspec.scopeDrift.enabled` boolean (default `true`,
   following `minspec.autoBootstrap.enabled`'s shape, `package.json:466-470`) turns the
   automatic path off without removing the manual command.
+
+- **FR-4a - Trigger entry semantics and failure handling.** Each
+  `minspec.scopeDrift.triggers` entry is an **extended-regex fragment**, matched
+  case-insensitively, exactly as `scope-check.sh` treats its array entries (a plain
+  phrase such as `also support` is a valid fragment that matches itself; the seeded
+  defaults include fragments like `include .{1,40} too` and `\+ any other`). Entries are
+  compiled once per settings change, not per scan. An entry that fails to compile is
+  **skipped and named in an explicit error state**: the status-bar item shows an error
+  indicator whose tooltip lists the bad entry (INV-2), valid entries keep working, and no
+  exception escapes the save handler. Pathological patterns are bounded by a fixed
+  per-scan input cap (the scan examines at most the first 200,000 characters of a
+  document and says so in the tooltip when it truncates) and a maximum trigger length
+  (500 characters; longer entries are rejected like uncompilable ones). Acceptance
+  criteria below cover an invalid entry and an over-cap document.
 
 - **FR-5 - Status-bar indicator.** A new status-bar item (added to
   `packages/minspec/src/views/status-bar.ts`, alongside `MinSpecNextTaskStatusBar` /
@@ -154,8 +174,24 @@ can watch (DQ-1).
   (`extension.ts:1013-1047`) does, so the two detectors share one resolution path. The
   indicator MUST clear back to neutral on Dismiss, Add to Scope, or declaring a new
   session, and MUST persist its last-known state across a VS Code window reload for the
-  same session (read from `.minspec/session.json`'s existing persistence, no new store)
-  per constitution invariant 3 (no state outside the opted-in folder's `.minspec/`).
+  same session. `SessionState` (`packages/minspec/src/lib/session.ts:8` onward) has **no
+  field for this today**, so persisting it means **adding one optional field,
+  `scopeDrift`, to the `.minspec/session.json` schema** (shape in FR-5a), with
+  back-compat: `loadSession` of an older file lacking the field MUST behave as an empty
+  `scopeDrift`, and `saveSession` MUST NOT drop it. It is the same file, so no new store
+  appears outside the opted-in folder's `.minspec/` (constitution invariant 3).
+
+- **FR-5a - New text only; a dismissed match never returns.** The automatic scan MUST NOT
+  re-raise a match the user has already resolved. `scopeDrift` in session.json holds
+  `{ active: DriftMatch[], dismissed: string[] }`, where each `dismissed` entry is a
+  stable key of the match, `sha256(phrase + "\n" + normalized lineText)` (lower-cased,
+  whitespace-collapsed, **not** the line number, so unrelated edits above it do not
+  resurrect it). On each automatic scan the full document is scanned, then every match
+  whose key is in `dismissed` is dropped; the indicator turns to warning only if at least
+  one match remains. Dismiss and Add to Scope append the keys of all `active` matches to
+  `dismissed` and clear `active`; declaring a new session resets both lists. Edit that
+  changes a matched line's text yields a new key and may raise again; re-saving unchanged
+  text never does (INV-4). The manual command applies the same filter.
 
 - **FR-6 - CodeLens suggestion.** When a trigger has fired for the document currently
   shown in an editor, a CodeLens line above the match (via a provider registered the
@@ -194,6 +230,16 @@ can watch (DQ-1).
       manual command still works. (FR-4)
 - [ ] Adding a phrase to `minspec.scopeDrift.triggers` makes a previously-unmatched
       sentence containing it match; removing a default phrase stops it matching. (FR-4)
+- [ ] After Dismiss, saving the same unchanged file again leaves the indicator neutral;
+      after Dismiss and a reload of the window, the same save still leaves it neutral;
+      editing the matched line's text so it still matches raises it again. (FR-5a)
+- [ ] A session.json written before this feature (no `scopeDrift` field) loads without
+      error and behaves as an empty state; saving it back keeps any `scopeDrift` present.
+      (FR-5)
+- [ ] An uncompilable `minspec.scopeDrift.triggers` entry shows the error indicator
+      naming that entry, other entries still match, and the save is not interrupted; a
+      document over the scan cap is scanned up to the cap and the tooltip says so.
+      (FR-4a)
 - [ ] The existing file-path drift warning (saving a file outside the session's
       `fileAllowlist`) still fires exactly as before, independent of this feature's
       state. (FR-1)
@@ -213,11 +259,13 @@ can watch (DQ-1).
   "neutral" while a scan actually errored — an exception inside the scan MUST surface as
   an explicit error state, not a silently-cleared neutral one.
 - **INV-3 - Blast radius (constitution invariant 3, DR-074).** No new file outside
-  `.minspec/` of an opted-in folder; indicator state is derived from
-  `.minspec/session.json`, not stored separately. No machine-wide or org-wide write.
+  `.minspec/` of an opted-in folder; indicator state is persisted in a new
+  optional `scopeDrift` field of `.minspec/session.json` (FR-5, FR-5a), not stored
+  separately. No machine-wide or org-wide write.
 - **INV-4 - No nagging (constitution principle 4).** No modal, no toast that reappears
   on every keystroke. The status bar and CodeLens are both passive, dismissible
-  surfaces the user looks at when they choose to; neither interrupts typing.
+  surfaces the user looks at when they choose to; neither interrupts typing. A match the user already
+  dismissed is never re-raised by a later scan of unchanged text (FR-5a).
 - **INV-5 - FR-7 (file-path drift) is unaffected.** See FR-1 and its acceptance
   criterion.
 
@@ -290,6 +338,16 @@ default).
   exported array needs a build step or a generated JSON artifact, which is new
   machinery for a list of a dozen strings, and ties this monorepo's dev-time hook to
   the extension's release cadence.
+
+## Clarify selections (recorded by an agent 2026-10-02, ratified only by approval of this spec)
+
+Recorded without a live conversation. Each is the option marked **(rec)** above; the
+requirements are written under these selections, so approving this spec ratifies them and
+changing one means editing the named requirements first.
+
+- **DQ-1:** Option A, active text editor documents only. (FR-2, FR-3)
+- **DQ-2:** Option A, scan on save beside the existing file-path check. (FR-3, FR-5a)
+- **DQ-3:** Option A, seed once from the union and let the three lists drift. (FR-4)
 
 ## Why no new DR
 
