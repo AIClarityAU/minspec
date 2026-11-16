@@ -807,8 +807,8 @@ The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, an
 
 *Status: proposed · Date: 2026-10-01*
 
-<!-- dr-summary:DR-101 auto=6f98618207b2 -->
-Triggered by: #297 (vertical-slice completion as a priority signal). DR-019 (deterministic next-task ordering) ranks pending human tasks by severity class and then by a within-class order, which DR-039 (goals drive priority) widened to (epic.order, goal-rank, priority, artifact-id). The code is compareRanked at packages/shared/src/next-task.ts:996-1002. Every term before artifact-id is a human weight; artifact-id is an arbitrary deterministic pick.
+<!-- dr-summary:DR-101 auto=c33940de233c -->
+Triggered by: #297 (vertical-slice completion as a priority signal). DR-019 (deterministic next-task ordering) ranks pending human tasks by severity class and then by a within-class order, which DR-039 (goals drive priority) widened to (epic.order, goal-rank, priority, artifact-id). The code is compareRanked at packages/shared/src/next-task.ts:1045-1051. Every term before artifact-id is a human weight; artifact-id is an arbitrary deterministic pick.
 <!-- /dr-summary:DR-101 -->
 
 ## [DR-102 — Checkbox state leaves the canonical approval hash - a ticked task-list item records progress, and the hash covers the contract](DR-102.md)

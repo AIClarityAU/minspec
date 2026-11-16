@@ -1,5 +1,5 @@
 ---
-id: SPEC-091
+id: SPEC-345
 type: requirements
 status: specifying
 tier: T3
@@ -23,7 +23,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-091: Prefer the task that advances an unfinished walking skeleton
+# SPEC-345: Prefer the task that advances an unfinished walking skeleton
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human
 > reads it, checks **[Decisions needed (Clarify)](#decisions-needed-clarify)**, and approves
@@ -41,11 +41,14 @@ tie-break term, `proposed`), which amends the within-class order set by
 [SPEC-012](../SPEC-012-next-task-resolver/requirements.md) (next-task resolver) and does not
 replace any part of it.
 
-**Id note.** The four ids after `SPEC-086` are claimed on branches visible in this checkout
-(775 local and remote-tracking refs scanned on 2026-10-01), so this is `SPEC-091`. Open pull
-requests could not be listed (no network on this dispatch). If either id collides at review
-time, renumber, and update `depends_on:` above in the same change: a `depends_on` that does
-not resolve is resolver corruption and would put "state unclear" on the signpost.
+**Id note.** First drafted on 2026-10-01 under the id ninety-one. The unmerged #260 spec on
+branch `agent/issue-260` had claimed that same id three minutes earlier, so on the
+2026-11-16 refresh this spec moved to `SPEC-345`, the id the dispatcher reserved after
+scanning main, open pull requests and local claims. `DR-101` has no
+rival claim on main or on any remote branch in this checkout and keeps its number. If either
+id collides at review time, renumber, and update `depends_on:` above in the same change: a
+`depends_on` that does not resolve is resolver corruption and would put "state unclear" on
+the signpost.
 
 ## One-Sentence Scope
 
@@ -53,11 +56,16 @@ Let a human mark, on an epic, which specs form its thinnest end-to-end path, and
 next-task resolver prefer work that advances an unfinished stage of that path when, and only
 when, every existing ordering term is tied.
 
-## Context - what the code does today (read from `main` at `27661a68`, not inferred)
+## Context - what the code does today (read from `main` at `3bcb7a06`, not inferred)
+
+First written against `27661a68` (2026-10-01). Every line number, count and probe below was
+re-read or re-run on `3bcb7a06` (2026-11-16). Two resolver changes landed in between, and
+neither alters the ordering this spec extends: the `literalStatusTerminal` field (#2370,
+which FR-4 now accounts for) and the retired-source skip in dangling-edge detection (#2614).
 
 ### The within-class order ends in an arbitrary pick
 
-`compareRanked` (`packages/shared/src/next-task.ts:996-1002`) orders pending human tasks by
+`compareRanked` (`packages/shared/src/next-task.ts:1045-1051`) orders pending human tasks by
 severity class, then `epic.order`, then goal-rank, then `priority`, then artifact id. The
 first four are a gate ranking and three human weights. The id is a deterministic but
 meaningless pick (SPEC-012 FR-14).
@@ -74,26 +82,29 @@ Measured on this checkout:
 | Term | What separates two specs today | Evidence |
 |---|---|---|
 | `epic.order` | always across epics, never within one | all 10 epics carry a distinct `order` |
-| goal-rank | never | 0 of 72 specs declare `goal:` |
-| `priority` | never | the adapter passes `priority: undefined` for every artifact (`packages/minspec/src/lib/artifact-graph.ts:522`, `:546`, `:569`) |
+| goal-rank | never | 0 of 224 requirements specs declare `goal:` |
+| `priority` | never | the adapter passes `priority: undefined` for every artifact (`packages/minspec/src/lib/artifact-graph.ts:536`, `:560`, `:589`) |
 | artifact id | everything else | - |
 
-So any two same-class tasks in the same epic are ordered by id. EPIC-002 (Signpost
-Integrity) holds 24 specs, EPIC-009 (Team Readiness) 15, EPIC-006 (Trust, Consent and
-Supply Chain) 12. The new term replaces that pick with a meaningful one, and by the same
-measurement it will not fire across epics.
+So any two same-class tasks in the same epic are ordered by id. By `epic:` on
+requirements files, EPIC-002 (Signpost Integrity) holds 65 specs, EPIC-006 (Trust, Consent
+and Supply Chain) 46, EPIC-003 (SDD Core) 44, EPIC-009 (Team Readiness) 35. The new term
+replaces that pick with a meaningful one, and by the same measurement it will not fire
+across epics. If the unmerged #260 spec makes `priority:` live (see Dependencies), the term
+fires less often but keeps the same position.
 
 ### The resolver ranks artifacts, not task-list items
 
 A resolver node is one pending human decision about one artifact: approve a spec, accept a
 decision, promote an epic, answer an open question, or carry on implementing a spec
-(`NodeKind`, `next-task.ts:152`). The issue's "task that completes the skeleton" therefore
+(`NodeKind`, `next-task.ts:169`). The issue's "task that completes the skeleton" therefore
 means, at the grain the engine has, a pending node whose artifact is a stage of the
 skeleton. A stage is a spec. The signal does not look inside `tasks.md`.
 
 ### A blocked task does not lift its blocker
 
-Probed against the shipped pure function: four unapproved specs under one active epic,
+Probed against the shipped pure function (re-run on `3bcb7a06`, same result): four
+unapproved specs under one active epic,
 called W, X, Y and Z here in ascending id order, where W `depends_on` Z.
 
 | Graph | Pipeline |
@@ -101,7 +112,7 @@ called W, X, Y and Z here in ascending id order, where W `depends_on` Z.
 | no edges | W, X, Y, Z |
 | W `depends_on` Z | X, Y, Z, W |
 
-The flooring pass (`floorDependsOn`, `next-task.ts:1072`) correctly puts W behind its
+The flooring pass (`floorDependsOn`, `next-task.ts:1121`) correctly puts W behind its
 blocker, but the blocker keeps its own rank. If W were a skeleton stage, a term that looked
 only at W would change nothing: the signpost would still say X. This is why FR-5 exists.
 
@@ -115,7 +126,7 @@ Requirement ids are local to this spec. "The core" is `packages/shared/src/next-
 - **FR-1 (the skeleton is declared on the epic).** An epic file MAY carry, in its
   frontmatter, `skeleton: [SPEC-NNN, SPEC-NNN, ...]`: an inline array of spec ids. Each
   entry names a **stage**. The grammar is the inline-array grammar already used for
-  `depends_on` / `supersedes` / `relates_to` (`parseEdgeArray`, `artifact-graph.ts:114-124`),
+  `depends_on` / `supersedes` / `relates_to` (`parseEdgeArray`, `artifact-graph.ts:115-124`),
   including a trailing `# comment` after the closing bracket. A stage MAY belong to any
   epic. List order is not read by the engine. The key is optional; an epic without it
   declares no skeleton.
@@ -136,17 +147,29 @@ Requirement ids are local to this spec. "The core" is `packages/shared/src/next-
   | State | Spec `status` |
   |---|---|
   | walked | `done` |
-  | withdrawn | `archived`, `superseded` |
+  | withdrawn | `archived`, `superseded`; or any status when `SpecNode.literalStatusTerminal` is true |
   | unwalked | any other value |
+
+  `literalStatusTerminal` (#2370, `next-task.ts:108-124`) marks a spec whose raw `status:`
+  line is terminal while its derived `status` is not. The resolver never asks for such a
+  spec to be approved (`next-task.ts:797`) and every approve command refuses it, because
+  its own file says it is finished. It can still draw an `answer-OQ` or implement node when
+  its derived status is `implementing` (those loops, `:839-842` and `:883-890`, do not test
+  the field). Counting it as unwalked would lift its blockers toward a stage its author has
+  already declared finished, so it MUST NOT count as unwalked. Such a node it still draws
+  simply carries no skeleton preference. The field is a boolean and cannot say which
+  terminal value was written, so the stage is classed as withdrawn, not walked. Its effect
+  is that the progress count in FR-8 leaves it out of both `walked` and `total`, which errs
+  toward under-reporting progress and never toward a wrong preference.
 
   An entry that does not resolve to a spec in the graph has no state and is ignored by the
   core (FR-9). A skeleton declared by an epic whose status is `abandoned` is ignored
   entirely.
 - **FR-5 (a node advances a skeleton directly or as a blocker).** A node **advances a
   skeleton** when its ranking key (`RankedNode.artifactId`, the key `compareRanked` and the
-  flooring pass already use, `next-task.ts:724-731`) is either:
+  flooring pass already use, `next-task.ts:600-607`) is either:
   1. an unwalked stage of at least one live skeleton; or
-  2. an artifact whose own gate is not cleared (`gateCleared`, `next-task.ts:254`) and that
+  2. an artifact whose own gate is not cleared (`gateCleared`, `next-task.ts:292`) and that
      an unwalked stage reaches through one or more `depends_on` edges, every artifact along
      the way also being uncleared.
 
@@ -170,7 +193,7 @@ Requirement ids are local to this spec. "The core" is `packages/shared/src/next-
   4. add, remove or re-target any node. The set of tasks in the pipeline is the same with
      and without skeletons; only their order within a tie can differ.
 
-  The `relates_to` clustering pass (`clusterRelatesTo`, `next-task.ts:1014`) is not
+  The `relates_to` clustering pass (`clusterRelatesTo`, `next-task.ts:1063`) is not
   modified. It may still pull a kindred node next to an earlier one mid-pipeline, exactly
   as it does past the existing terms today, and it cannot change the first element.
 
@@ -183,7 +206,7 @@ Requirement ids are local to this spec. "The core" is `packages/shared/src/next-
   an inherited node `unblocks SPEC-014, a stage of EPIC-002's walking skeleton (2 of 5
   stages done)`. When several skeletons or stages qualify, the one reported is the lowest
   epic id, then the lowest stage id, by the existing numeric-aware comparison
-  (`compareIds`, `next-task.ts:224`). `Evidence.rule` and `Evidence.severityClass` are
+  (`compareIds`, `next-task.ts:241`). `Evidence.rule` and `Evidence.severityClass` are
   unchanged. A node that does not advance a skeleton carries neither the field nor the
   clause. The evidence states a property of the node, so it is present whether or not the
   term happened to decide the order.
@@ -195,7 +218,7 @@ Requirement ids are local to this spec. "The core" is `packages/shared/src/next-
   produces before this change. In the core, an entry that does not resolve, or resolves to
   something that is not a spec, is ignored: it MUST NOT produce a `Corruption`, a
   gate-violation node, or a "state unclear" task. This follows the rule the core already
-  applies to `relates_to` (`next-task.ts:332-341`): a broken tie-influence link is a lint,
+  applies to `relates_to` (`next-task.ts:370-379`): a broken tie-influence link is a lint,
   never a signpost-blocking violation.
 - **FR-10 (a bad marker fails validation, visibly).** A deterministic, offline rule MUST
   report each of the following, naming the epic file and the offending entry, and
@@ -208,8 +231,8 @@ Requirement ids are local to this spec. "The core" is `packages/shared/src/next-
 
   A list naming a withdrawn stage (FR-4) is reported as a warning, not a failure: the list
   is stale but not malformed. The rule lives beside the other validator rules that
-  `scripts/validate-frontmatter.ts` imports from `packages/minspec/src/lib/` (its imports
-  at lines 20-36), so the editor and CI can share it.
+  `scripts/validate-frontmatter.ts` imports from `packages/minspec/src/lib/` (its
+  `../packages/minspec/src/lib/` imports at lines 19-65), so the editor and CI can share it.
 
 ### Determinism and packaging
 
@@ -228,11 +251,16 @@ Requirement ids are local to this spec. "The core" is `packages/shared/src/next-
 
 - **FR-13 (amend what states the old order).** The implementing change MUST update, in the
   same pull request as the code:
-  1. SPEC-012 FR-2 and FR-3, its FR-2 acceptance criterion and its FR-2 test-strategy row,
-     so they state the five-term order and point here;
-  2. DR-019 section 2, with an "Amended by DR-101" note beside the existing DR-039 one.
-     `validateDrAmendments` (`packages/minspec/src/lib/adr-manager.ts:262`) reports an
-     accepted amending decision until its target mentions it;
+  1. SPEC-012 FR-2 and FR-3, its FR-2 acceptance criterion, its FR-2 test-strategy row,
+     and the "Costly to Refactor" item that quotes the within-class tie-break (item 3, at
+     `specs/minspec/SPEC-012-next-task-resolver/requirements.md:277` on `3bcb7a06`), so
+     they state the five-term order and point here;
+  2. DR-019 section 2. The proposing pull request already stages an "Amended by DR-101 (on
+     acceptance)" note there, because Accept refuses a proposed decision whose amendment
+     target does not mention it (`validatePendingDrAmendments`,
+     `packages/minspec/src/lib/adr-manager.ts:281`, #3106), and `validateDrAmendments`
+     (`:265`) fails an accepted one. The implementing change rewrites that note's "Not
+     built" sentence to cite the live code;
   3. the comments that state the order in the core: the file header, the Step 4 heading
      above `compareRanked`, and the `INV-TIE` suite title in
      `packages/shared/tests/next-task.test.ts:193`.
@@ -310,7 +338,10 @@ the feature proves nothing.
   inside a 1000 ms test timeout, as the existing cycle test does, without throwing.
 - [ ] **AC-6 (FR-4).** A walked stage and a withdrawn stage give no preference to any node.
   A skeleton whose every stage is walked produces a pipeline identical to the same graph
-  with no skeleton. A skeleton on an `abandoned` epic is ignored.
+  with no skeleton. A skeleton on an `abandoned` epic is ignored. A stage whose derived
+  `status` is non-terminal but whose `literalStatusTerminal` is true lifts none of its
+  uncleared blockers and is counted in neither `walked` nor `total`. Control: the same
+  graph with the flag false lifts the blocker.
 - [ ] **AC-7 (FR-9).** The existing `packages/shared/tests/next-task.test.ts` suite passes
   unmodified apart from the FR-13 title change. A graph with no `skeleton` deep-equals its
   pre-change pipeline.
@@ -375,7 +406,7 @@ This is the decision DR-101 records. Accepting DR-101 answers it.
   new one-member slice that nothing can detect. Adding the key to an approved spec stales
   its approval, because the hash covers every frontmatter key except `status` and `phases`
   (`packages/shared/src/canonical.ts:14-15`), and a stale spec gets an approve task and
-  loses its implement task (`next-task.ts:749`, `:841`): one re-approval per stage. FR-1,
+  loses its implement task (`next-task.ts:798`, `:890`): one re-approval per stage. FR-1,
   FR-3, FR-10 and the contract would be rewritten around a per-spec field.
 - **Option C - read an existing `relates_to` cluster as the path.** No new key. *Cost:*
   every cluster already written for loose kinship would become a skeleton the author never
@@ -423,12 +454,17 @@ This is the decision DR-101 records. Accepting DR-101 answers it.
 
 With an unapproved spec under an active epic, and its `depends_on` target an unapproved
 spec under a `proposed` epic, the shipped resolver returns the blocked spec as the next
-task, ahead of both the epic promotion and the blocker. The flooring pass only reorders within one severity class
-(`next-task.ts:1063-1071`), and here the blocked spec is in a higher class than its
+task, ahead of both the epic promotion and the blocker. The flooring pass only reorders
+within one severity class
+(`next-task.ts:1121-1137`), and here the blocked spec is in a higher class than its
 blocker. SPEC-012 FR-13 says a dependent "MUST rank below an un-cleared target". This
 exists today, is independent of skeletons, and the new term neither fixes nor worsens it.
-**It is not yet filed as an issue**: this dispatch had no network. It needs filing against
-SPEC-012 before this spec's sign-off is taken as covering blocked work across classes.
+Re-probed on `3bcb7a06`: the pipeline is still the dependent (`blocked-ready`), then the
+proposed epic's promotion (`promote-parent`), then the blocker (`pending`).
+**It is not yet filed as an issue.** Neither the first dispatch nor this refresh could make
+a network call, and a search of `specs/` and `docs/` on `3bcb7a06` found no record of it.
+It needs filing against SPEC-012 before this spec's sign-off is taken as covering blocked
+work across classes.
 
 ## Alternatives considered and rejected
 
@@ -450,9 +486,18 @@ and treating a bad entry as resolver corruption. Two more are specific to this s
   its header comments change (FR-13).
 - **SPEC-010** (signpost correctness) is unaffected: the implement hole it feeds arrives as
   a node like any other, and the term applies to it through `artifactId`.
-- **In-flight neighbours.** Branches in this checkout carry unmerged spec folders whose
-  names say they add resolver node kinds (`pr-review-signpost-node`, `issue-triage-node`).
-  Their contents were not read. Because the term keys on `artifactId` rather than node kind, I believe it
+- **The #260 sibling spec (unmerged, branch `agent/issue-260`, folder
+  `…-resolver-priority-dials`).** It pins the same four-term within-class order as a
+  tested contract, proposes making `priority:` live, and lists `packages/shared/src/next-task.ts`
+  and `scripts/validate-frontmatter.ts` under `affects:` as this spec does. The two compose:
+  this spec only appends a term after `priority`. Both amend SPEC-012 FR-2, so whichever
+  is implemented second rebases its FR-13 amendment onto the other's wording and adds the
+  other's fixtures to its control set. Its contents were read only to establish this; Plan
+  should re-check it against whatever has merged by then.
+- **In-flight neighbours that add node kinds.** SPEC-090 (`pr-review-signpost-node`) is on
+  `main` at `status: planning`; `NodeKind` (`next-task.ts:169`) still lists five kinds, so
+  it is not built. An `issue-triage-node` spec folder seen on a branch on 2026-10-01 is not
+  on `main`. Because the term keys on `artifactId` rather than node kind, I believe it
   composes with a new kind without change; that is unverified and Plan should re-check it
   against whichever has merged.
 - **Rollback.** Remove the compared field and the adapter read; the contract fields are
