@@ -398,3 +398,31 @@ describe('a delegated spec approval never changes the spec body (#3380)', () => 
     expect(fs.readFileSync(abs, 'utf-8')).toMatch(/status: accepted/);
   });
 });
+
+describe('a delegated DR acceptance scopes INDEX.md to its own row (#581)', () => {
+  it("does not carry another DR's uncommitted status flip into the INDEX", async () => {
+    const { execFileSync } = await import('child_process');
+    const { regenerateDrIndex } = await import('../src/lib/adr-manager');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dlgidx-'));
+    fs.mkdirSync(path.join(root, '.minspec'), { recursive: true });
+    const dir = path.join(root, 'docs', 'decisions');
+    fs.mkdirSync(dir, { recursive: true });
+    const dr = (n: number): string =>
+      `---\nid: DR-${n}\ntitle: T${n}\nstatus: proposed\ndate: 2026-10-31\n---\n\n## Status\n\nProposed\n\n## Context\n\nctx ${n}\n`;
+    fs.writeFileSync(path.join(dir, 'DR-900.md'), dr(900));
+    fs.writeFileSync(path.join(dir, 'DR-901.md'), dr(901));
+    regenerateDrIndex(root);
+    const git = (...a: string[]): void => {
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: root, stdio: 'pipe' });
+    };
+    git('init', '-q');
+    git('add', '.');
+    git('commit', '-q', '-m', 'base');
+    // unrelated, uncommitted drift on DR-901
+    fs.writeFileSync(path.join(dir, 'DR-901.md'), dr(901).replace('status: proposed', 'status: accepted'));
+    expect(writeLifecycleHashNeutral(root, path.join(dir, 'DR-900.md'), 'engineering-dr-acceptance')).toBeUndefined();
+    const index = fs.readFileSync(path.join(dir, 'INDEX.md'), 'utf-8');
+    expect(index).toMatch(/DR-900[^\n]*\n\n\*Status: accepted/);
+    expect(index).toMatch(/DR-901[^\n]*\n\n\*Status: proposed/);
+  });
+});
