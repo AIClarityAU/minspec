@@ -49,16 +49,18 @@ invariant — has one. Three gaps follow directly:
    `packages/minspec/src/views/codelens-provider.ts`. Nothing populates it
    automatically from `FR-N` ids, nothing populates it from constitution
    invariants at all, and nothing reads it to refuse a phase transition.
-   `grep -rl` for writers of `addFileMapping`/`addTestMapping` outside
-   `traceability.ts` itself returns only the codelens provider and a benchmark
-   fixture — confirmed by direct read, not inferred.
+   `grep -rl` for `addFileMapping`/`addTestMapping` outside `traceability.ts`
+   itself returns the codelens provider, a benchmark fixture, and three test
+   files (`traceability.test.ts`, `features.test.ts`, `codelens-provider.test.ts`);
+   the only production writer is the manual codelens click — confirmed by
+   direct read, not inferred.
 
 ### Prior art — reuse, don't re-derive (mirrors SPEC-006)
 
 [SPEC-006 (stub-completeness-gate)](../SPEC-006-stub-completeness-gate/requirements.md)
 closed the sibling gap on the *code* side: a spec could reach `status: done` while
 its traced files still held `TODO`/`STUB` markers. Its RD-3 decision — extend the
-existing pure `validateSpec()` (`packages/minspec/src/lib/spec-validator.ts:899`)
+existing pure `validateSpec()` (`packages/minspec/src/lib/spec-validator.ts:1241`)
 with another completeness rule, rather than build a second, parallel checking
 engine — is the precedent this spec follows for the *test* side. Reusing it keeps
 one completeness engine instead of two that can drift (the exact failure SPEC-006's
@@ -179,7 +181,7 @@ RD-3 was written to prevent).
       `.minspec/traceability.json` plus a fresh scan — no second persisted
       store is created — **FR-7, Zone A #1**.
 - [ ] The gate is implemented as an additional rule inside the existing
-      `validateSpec()` (`packages/minspec/src/lib/spec-validator.ts:899`),
+      `validateSpec()` (`packages/minspec/src/lib/spec-validator.ts:1241`),
       invoked from the Approve Spec / `advancePhaseOnApprove` path (`packages/minspec/src/commands/approve.ts:124`) — SPEC-006 hooks the `status: done` transition instead (its RD-2), so this is a different call path into the same engine; no second validation engine — **Zone A #1, prior-art precedent**.
 
 ## Out of scope
@@ -204,7 +206,7 @@ RD-3 was written to prevent).
   `.minspec/constitution.md`'s `## Invariants` section is a *positional*
   numbered list (`1.`, `2.`, `3.` — confirmed by direct read, not the `INV-N`
   scheme the issue body assumes). Goals already solved this exact problem with
-  a stable `G-N` id (`.minspec/constitution.md:35`, referenced via `goal: G-N`
+  a stable `G-N` id (`.minspec/constitution.md:52-53`, referenced via `goal: G-N`
   frontmatter). Two options:
   - **(rec) Option A — mint stable `INV-N` ids on the invariants list,
     mirroring `G-N`.** Cost: a one-time constitution edit (owned by the
