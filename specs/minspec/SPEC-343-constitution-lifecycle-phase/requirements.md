@@ -1,5 +1,5 @@
 ---
-id: SPEC-099
+id: SPEC-343
 type: requirements
 status: specifying
 tier: T4
@@ -14,7 +14,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-099: Promote constitution to a first-class lifecycle phase
+# SPEC-343: Promote constitution to a first-class lifecycle phase
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human
 > reads it, resolves the Clarify decisions below, and approves it through the normal
@@ -24,14 +24,14 @@ phases:
 `clarify` → `plan` → `tasks` → `implement`), not by the six-phase model it proposes — FR-1
 has not shipped, so this file's own `phases:` block correctly carries no `constitution` key.
 
-Materializes **[#19](https://github.com/AIClarityAU/minspec/issues/19)** — *"constitution
+Materializes **#19** — *"constitution
 is a file ... parsed by classifier but never appears in `PHASES` ... or lifecycle state
 machine. No `minspec constitution` command. No T4 update prompt."*
 
-**Id note.** `SPEC-098` is the highest id reachable from this worktree's `.git` (every
-local branch across the many concurrent `agent/issue-*` worktrees sharing it, checked
-2026-10-02 — see `scripts/lib/spec-id-collision.ts` for why ids collide under concurrent
-creation). This is therefore `SPEC-099`. If it collides at review time, renumber.
+**Id note.** `SPEC-342` is the highest id on `origin/main` at base `3bcb7a06` (219 specs on
+disk, `SPEC-341` highest in this tree), so this is `SPEC-343` — max-plus-one. Open pull requests
+are invisible from a base checkout; if `scripts/check-dr-id-collision.ts`-style gating reports a
+higher free id at review time, renumber.
 
 **Tier note.** The issue's own dispatch labelled this "T3/T4" and the issue body says
 T3. Tracing the change (below) finds it touches the completeness gate (DR-012), the
@@ -56,7 +56,7 @@ actually ships.
   lists "Constitution" as a row with Skip/Skip/Reference/Create-update across T1-T4. The
   `Phase` type and `PHASES` array (`packages/minspec/src/lib/config.ts:8`, `:11`) hold only
   `['specify', 'clarify', 'plan', 'tasks', 'implement']`. `DEFAULT_CONFIG.phaseMappings`
-  (`config.ts:127-142`) has no `constitution` entry in any tier's `requiredPhases` or
+  (`config.ts:165-170`) has no `constitution` entry in any tier's `requiredPhases` or
   `optionalPhases`. This is the literal doc/code drift the issue names.
 - **The constitution is real, parsed, and partly tooled already.** `parseConstitution`
   (`packages/minspec/src/lib/constitution.ts:128-140`) extracts `invariants` / `principles`
@@ -79,10 +79,10 @@ actually ships.
   (`spec-panel-html.ts:93`, `:166`, rendered inside `<section class="phase-stepper">`) — it
   needs no new UI code, only a new array element (FR-5).
 - **The completeness gate already enforces "required" phases, the same way the issue's
-  table implies.** `checkAcceptanceCriteria` reads `config.phaseMappings[tier].requiredPhases`
+  table implies.** `validateSpec` reads `config.phaseMappings[tier].requiredPhases`
   and requires a non-empty `## <Phase>` section for each one, at **error** severity for
   T3/T4 — this is what blocks `MinSpec: Approve Spec` today for a missing Plan or Tasks
-  section (`packages/minspec/src/lib/spec-validator.ts:1005-1014`, DR-012). Clarify is
+  section (`packages/minspec/src/lib/spec-validator.ts:1354-1368`, DR-012). Clarify is
   "Required" for T3/T4 in the very same FR-2 table the issue cites, and that word means
   exactly this blocking check — not a toast. So "Constitution: Reference (T3) / Create-update
   (T4)" in that table is either going to mean the same enforced thing, or the table is
@@ -91,14 +91,14 @@ actually ships.
   iterated by `createInitialPhases`, `getCurrentPhase`, and `allRequiredDone`
   (`packages/minspec/src/lib/lifecycle.ts:37-81`). All three test `phases[phase] ===
   'pending'` or `=== 'in-progress'`; a key that is simply **absent** (`undefined`) fails
-  both comparisons and is silently skipped. So the ~98 specs already on disk, none of which
+  both comparisons and is silently skipped. So the 219 specs already on disk, none of which
   will carry a `constitution` key, are **not** flagged as having a pending phase and are
   **not** blocked from `allRequiredDone` by this change, in these three functions. This is
   checked, not inferred (CLAUDE.md evidence discipline) — it does not cover the other nine
   `PHASES`-consuming files, which is why FR-6 requires an explicit pass over all twelve
   before this ships, not an assumption that the pattern holds everywhere.
 - **`phases:` is outside the approval hash, confirmed.** `canonicalSpecHash`
-  (`packages/minspec/src/lib/approval.ts:338`) excludes the lifecycle fields `status` /
+  (`packages/minspec/src/lib/approval.ts:344`) excludes the lifecycle fields `status` /
   `phases` from the canonical bytes it hashes (`approval.ts:6`). So neither adding
   `constitution` to new specs' `phases:` block nor (if DQ-2 chooses it) backfilling it into
   old ones can stale an existing approval. This removes what would otherwise be the
@@ -108,18 +108,16 @@ actually ships.
   explicitly not executed. The T1-T4 scalar model and `phaseMappings` this spec edits are
   "the live, operative model until then" (`specs/minspec/requirements.md:16-20`). This spec
   edits the live model, not the gated one.
-- **The classify-time toast already has the shape FR-4 needs.** The T4 path
-  (`predictedTier === applyFloor(result.tier)`, `packages/minspec/src/commands/classify.ts:87`)
-  already drives a non-modal toast with persisting buttons
-  (`classify.ts:130-139`); the raise-tier button is the closest existing analogue
-  (`classify.ts:171-180`). FR-4 adds a sibling action, not a new toast.
-
-## Functional Requirements
-
+- **The classify-time toast is the surface FR-4 extends.** `classify.ts` shows one
+  non-modal advisory toast (`showInformationMessage`, `classify.ts:163-171`) with an
+  `actions` array (`classify.ts:157-159`); the existing extra action, raise-tier, is added
+  only when `predictedTier === 'T1'` (`classify.ts:151-156`, handler `:191-206`). There is
+  no T4-specific branch today. FR-4 adds a sibling action gated on `predictedTier === 'T4'`
+  (`predictedTier` is set at `classify.ts:104`), not a new toast.
 - **FR-1 — `constitution` joins the `Phase` type and `PHASES`, first.** `packages/minspec/src/lib/config.ts:8`
   and `:11` gain `'constitution'` as the first element: `PHASES = ['constitution',
   'specify', 'clarify', 'plan', 'tasks', 'implement']`. `DEFAULT_CONFIG.phaseMappings`
-  (`config.ts:127-142`) gains, per the FR-2 table already in `requirements.md:59-67`:
+  (`config.ts:165-170`) gains, per the FR-2 table already in `requirements.md:59-67`:
   - **T1** — `constitution` appears in neither `requiredPhases` nor `optionalPhases` (fully
     skipped, no UI surface at all — matches the table's bare "Skip").
   - **T2** — `optionalPhases` only (mirrors how `clarify` is optional for T2 today), so a
@@ -132,7 +130,7 @@ actually ships.
   separate code path (`requirements.md:59-67`).
 
 - **FR-2 — The completeness gate treats `constitution` like any other required phase.**
-  No new logic: `checkAcceptanceCriteria` (`spec-validator.ts:1005-1014`) already loops
+  No new logic: `validateSpec` (`spec-validator.ts:1354-1368`) already loops
   `config.phaseMappings[tier].requiredPhases` and requires a non-empty `## <Phase>`
   section. Adding `constitution` to T3/T4's `requiredPhases` (FR-1) makes a T3/T4 spec with
   no `## Constitution` section fail completeness at **error** severity, blocking `MinSpec:
@@ -158,7 +156,7 @@ actually ships.
     path) as the fix action rather than duplicating generation logic.
 
 - **FR-4 — Dismissible T4 classify-time prompt.** When `classify.ts` resolves
-  `predictedTier === 'T4'` (`classify.ts:87`), the existing toast (`classify.ts:103-139`)
+  `predictedTier === 'T4'` (`classify.ts:104`), the existing toast (`classify.ts:163-171`)
   gains a sibling action — "Update constitution?" — alongside the raise-tier button,
   opening `minspec.constitutionPropose` (reuse, not a new generation path). Dismissing it:
   - never blocks the classify flow itself (constitution principle: no nagging);
@@ -167,7 +165,7 @@ actually ships.
     `## Constitution` section before `Approve Spec` will pass. The two are independent: one
     is a same-minute nudge, the other is an approval-time floor (also DQ-1);
   - persists a per-workspace "don't ask again" using the same mechanism the existing
-    persisting buttons use (`classify.ts:130-139`), so the prompt is a one-time tour, not a
+    persisting action uses (the `AUTO_CLASSIFY` handler, `classify.ts:157,208-222`), so the prompt is a one-time tour, not a
     standing nag (CLAUDE.md "one-time prompt" convention).
 
 - **FR-5 — Lifecycle UI needs no new code, only the new array element.** `spec-panel-html.ts:93`'s
@@ -198,7 +196,7 @@ actually ships.
       DEFAULT_CONFIG.phaseMappings[t])` matches FR-1's skip/optional/required assignment
       exactly for T1-T4. (FR-1)
 - [ ] A T3 or T4 spec with every other required section present but no `## Constitution`
-      heading fails `checkAcceptanceCriteria` at `error` severity — only if DQ-1 resolves to
+      heading fails `validateSpec` at `error` severity — only if DQ-1 resolves to
       the enforced option; otherwise this AC is replaced by "the gate is unaffected,
       recorded in a code comment pointing at this spec." (FR-2, DQ-1)
 - [ ] Running the new command in a project with a template-only (never-authored)
@@ -247,7 +245,7 @@ actually ships.
 ### DQ-1 — Does "Reference (T3) / Create-update (T4)" actually gate anything?
 
 - **Option A — enforce it, via the existing DR-012 mechanism (rec).** `constitution` joins
-  `requiredPhases` for T3/T4 for real; `checkAcceptanceCriteria` blocks Approve on a missing
+  `requiredPhases` for T3/T4 for real; `validateSpec` blocks Approve on a missing
   `## Constitution` section, exactly like Plan/Tasks do today. *Cost:* every future T3/T4
   spec — and, retroactively in spirit, this repo's own stated methodology — needs one more
   section; a human reviewing a T3/T4 spec now checks one more box. It also means DQ-2's
@@ -259,7 +257,7 @@ actually ships.
   same shape of drift #19 was filed to close, just moved one level down. If chosen, FR-2
   must be deleted and the mapping table's wording corrected in the same change (INV-1).
 
-### DQ-2 — Backfill the ~98 existing specs, or rely on absent-key tolerance?
+### DQ-2 — Backfill the 219 existing specs, or rely on absent-key tolerance?
 
 - **Option A — no migration; rely on the verified absent-key tolerance (rec).** Matches the
   DR-053 v2 precedent ("record now, reformat later... don't mass-rewrite"). *Cost:* FR-6's
@@ -268,7 +266,7 @@ actually ships.
   or progress bar renders wrong, silently, until someone notices.
 - **Option B — a one-time backfill script writes `constitution: done` into every spec whose
   tier required it and whose phase already reached `implement`, else `skipped`.** Safe
-  w.r.t. approval (FR-7), but *cost:* a ~98-file mechanical diff, reviewed by a human, that
+  w.r.t. approval (FR-7), but *cost:* a 219-file mechanical diff, reviewed by a human, that
   can collide with every in-flight PR touching those same files' frontmatter (the same
   sequencing cost SPEC-096's DQ-6 named for a smaller set).
 
@@ -299,7 +297,7 @@ actually ships.
 
 The change is additive to a type union and a config default, reversible by removing
 `'constitution'` from `PHASES` and the mapping table (under a day), and the scariest-looking
-part — frontmatter shape changing under ~98 already-approved specs — is confirmed safe
+part — frontmatter shape changing under 219 already-approved specs — is confirmed safe
 against the approval hash (FR-7). DQ-1's enforced option extends an *existing* DR-012
 mechanism rather than creating a new one. A DR becomes necessary only if DQ-1 is decided
 some third way not enumerated here (e.g., a wholly new enforcement path outside DR-012), or
@@ -308,7 +306,7 @@ is this spec's recommended path.
 
 ## Traceability
 
-- **Issue:** [#19](https://github.com/AIClarityAU/minspec/issues/19).
+- **Issue:** #19.
 - **Governing decisions:** [DR-024](../../../docs/decisions/DR-024.md) (confirms the live
   T1-T4 model this spec edits), [DR-012](../../../docs/decisions/DR-012.md) (the
   completeness-gate mechanism FR-2 reuses).
