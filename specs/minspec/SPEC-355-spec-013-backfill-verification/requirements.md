@@ -69,12 +69,12 @@ filed "if not already tracked alongside #121" — #142 is that issue, and this i
 ### The corpus has already outgrown the number the issue names
 
 The issue's "13 specs + 30 DRs" is the count **at the time of the manual backfill**, not a
-property of the corpus. Measured on this branch today (`2026-10-03`):
+property of the corpus. Measured on this branch today (`2026-11-16`):
 
 | Corpus | Count on `2026-06-04` (RD-1) | Count measured now |
 |---|---|---|
-| Specs (`specs/*/SPEC-*/requirements.md`) | 13 | **76** |
-| DRs (`docs/decisions/DR-*.md`) | 30 | **100** |
+| Specs (`specs/*/SPEC-*/requirements.md`) | 13 | **224** |
+| DRs (`docs/decisions/DR-*.md`) | 30 | **119** |
 
 Neither count is frozen in this spec's requirements below — per the evidence-discipline
 rule that a currency claim expires, this spec's own FR-1 requires the run to measure the
@@ -89,8 +89,8 @@ feature-existence). Measured on this branch:
 
 | Corpus | Has `## Risks...` heading | Has `## Consequences` heading |
 |---|---|---|
-| DRs (100) | 57 | 96 |
-| Specs (76) | 42 | 13 |
+| DRs (119) | 58 | 115 |
+| Specs (224) | 58 | 14 |
 
 These numbers say nothing about L0 (is every `FR-N` paired with a disposition?), L1 (is
 the line specific, not vacuous-but-citing-an-id?), L2 (is Out-of-Scope actually disjoint
@@ -136,7 +136,7 @@ see DQ-1's Option C.
 - **FR-1 (measure the corpus at run time, not at spec-writing time).** The pass MUST
   enumerate every file matching `specs/*/SPEC-*/requirements.md` and every file matching
   `docs/decisions/DR-*.md` present in the checkout **at the moment it runs**, and MUST NOT
-  hard-code the 13/30 or 76/100 counts above as a target or a completion check. Those
+  hard-code the 13/30 or 224/119 counts above as a target or a completion check. Those
   numbers are context for this document only.
 
 - **FR-2 (run only the layers SPEC-013 has actually shipped).** The pass MUST run every
@@ -284,7 +284,7 @@ scanner, feeds L4) and SPEC-010's #121 amendment (coverage DAG, feeds FR-11); bo
 
 ### DQ-3 — How are pre-SPEC-013-grammar artifacts (no `FR-N` ids at all) handled?
 
-Some of the 100 DRs and a few older specs predate `FR-N` numbering as a convention; FR-9's
+Some of the 119 DRs and a few older specs predate `FR-N` numbering as a convention; FR-9's
 L0/L2 key off that id, and FR-12's grammar is new parser work with nothing to parse in
 those files.
 
@@ -359,12 +359,12 @@ Recorded because this spec was written without a live conversation (DR-086 §4, 
   SPEC-013's own acceptance criteria and understate SPEC-013's true landing cost.
   SPEC-013's own Follow-ups section asks for exactly this separation ("→ file issue").
 - **Hard-code the issue's "13 specs + 30 DRs" as the scope.** Rejected: already measured
-  stale on this branch (76/100) before this spec is even approved; see Context.
+  stale on this branch (224/119) before this spec is even approved; see Context.
 
 ## Id note
 
 Originally drafted as `SPEC-097`, which collided with the approved
 `SPEC-097-watcher-config-source` (caught by `npm run validate`'s duplicate-id check).
-Renumbered to `SPEC-355`: the highest `SPEC-NNN` claimed on any local branch was `SPEC-354`.
+Renumbered to `SPEC-355`: the highest `SPEC-NNN` on disk at drafting was `SPEC-354`.
 Open pull requests are not visible from this no-network dispatch; if `SPEC-355` collides at
 review time, renumber per the same convention.
