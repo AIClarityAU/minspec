@@ -19,7 +19,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { ApprovalRecord } from './approval';
+import type { ApprovalRecord } from './approval-types';
 import type { Tier } from './config';
 import { classifyApprovablePath } from './approvable';
 

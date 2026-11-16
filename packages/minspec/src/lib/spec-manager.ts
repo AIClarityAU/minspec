@@ -64,24 +64,11 @@ export interface SpecDetail {
 }
 
 // --- Slug generation ---
-
-/**
- * Convert a title to a URL-friendly slug.
- * Lowercase, non-alphanumeric → hyphens, collapsed, trimmed, max 50 chars.
- */
-export function slugify(title: string): string {
-  let slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-
-  if (slug.length > 50) {
-    slug = slug.slice(0, 50).replace(/-$/, '');
-  }
-
-  return slug;
-}
+// `slugify` lives in ./slug (SPEC-040 FR-6 / #988: re-homed so epic-manager and
+// friends need not import this module for it). Re-exported so every existing
+// `from './spec-manager'` site is unchanged.
+export { slugify } from './slug';
+import { slugify } from './slug';
 
 // --- ID generation ---
 
