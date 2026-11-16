@@ -66,7 +66,9 @@ touch the same two files, so they run in sequence, never in parallel.
   AC-4 the dead entry's `<pid>.<hex>.key` is in `remove`, the live entry's key is not;
   AC-5 a dead entry 23 h old is kept, and one whose `.json` is old but whose `.key` is 1 h
   old is kept;
-  AC-6 an entry whose `cwd` is not inside a `.minspec/` repo is kept;
+  AC-6 a dead, over-24 h entry whose `cwd` is not the hook's folder is kept, whether or not
+  that other folder is opted in (invariant 5 across folders); with the hook's folder not
+  opted in, nothing is planned;
   an unparseable `.json` sets `partial` and empties `remove`;
   a corrupt #2633 state file sets `partial` and empties `remove`;
   a dead entry first seen 60 s ago in the state file is kept;
@@ -75,7 +77,7 @@ touch the same two files, so they run in sequence, never in parallel.
   `.git` alone is out, `.minspec/` with no `.git` above it is out, a nested folder inside an
   opted-in repo is in.
 - [ ] **3.2** `scripts/hooks/session-panel.py` - design [C]: add `GRACE_S`, the two name
-  patterns, `opted_in(folder)` and `plan_cleanup(...)`. No call site yet, so behaviour is
+  patterns, `opted_in(folder)` and `plan_cleanup(...)` (same-folder rule and announce window per design [C]). No call site yet, so behaviour is
   unchanged.
   *Done when:* 3.1 is green, and a planner run over a real temporary directory leaves every
   file on disk (asserted by listing it after the call, not by reading the source). Tier T2.
@@ -95,13 +97,24 @@ touch the same two files, so they run in sequence, never in parallel.
   invariant 5: a dead human-panel entry older than 24 h, never seen before, is announced
   as a SESSION LOSS on this run AND kept on disk; a second start 601 s later (state file
   back-dated) removes it and does not announce it;
+  invariant 5, cross-folder: a dead human-panel entry in folder B (its own transcript on
+  disk, over 24 h old, never announced, so absent from the state file) survives a start in
+  folder A, and a later first start in B still announces it as a SESSION LOSS, then keeps it
+  until the window has passed;
+  same folder, nothing to announce: a dead entry for the hook's folder with no transcript,
+  over 24 h old, is removed on the first start;
+  executor failure: with the executor forced to raise a non-`OSError` exception (for example
+  a monkeypatched `entry_state`), the output carries one `Registry cleanup failed` line, does
+  NOT carry `Lost-panel check failed` or "is NOT being reported", the SESSION LOSS report
+  printed before it is intact, and the exit status is 0;
   a print-mode run (the unattended early return) removes nothing;
   nothing to do prints nothing.
 - [ ] **4.2** `scripts/hooks/session-panel.py` - design [D]: add `cleanup_registry(folder,
   registry_works, now)` with the pre-unlink re-check, the `FileNotFoundError` handling and the
-  one-line report; call it at the end of `mode_start` after the SESSION LOSS output. Same
+  one-line report, and a catch around the whole body that prints the
+  `Registry cleanup failed (<ExceptionName>)` line (design [D], never mislabelled); call it at the end of `mode_start` after the SESSION LOSS output. Same
   commit: the docstring sweep from the design (the "never cleaned up" sentences in the module
-  docstring and in `decide_announcements`, and the `.key` file under "WHAT IT ASSUMES ABOUT
+  docstring (:62-63), in `decide_announcements` (:375-376) and the `mode_start` comment (:782), and the `.key` file under "WHAT IT ASSUMES ABOUT
   THE CLI").
   *Done when:* 4.1 is green, every existing case is unchanged and green, and
   `grep -n "never cleaned up" scripts/hooks/session-panel.py` returns nothing. Tier T2.

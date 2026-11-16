@@ -30,7 +30,7 @@ symbol, because its line numbers move.
 All code lives in `scripts/hooks/session-panel.py`, the one consumer of the CLI session
 registry in this repo (requirements.md, "Existing handling"). Four changes, in order. First, a
 defect the spec's AC-7 names and today's code has: `mode_start` adds a dead entry's
-`sessionId` to `dead_sids` (:720-723) without checking whether another entry for the same id
+`sessionId` to `dead_sids` (:719-723) without checking whether another entry for the same id
 is live, and the stale-entry loop (:786) never checks `live` either, so a session resumed in a
 new process, whose older process left a dead file, can be announced as a SESSION LOSS while it
 is running. I believe this from reading the code, unverified by a run; the first task's red
@@ -74,7 +74,7 @@ directory itself (see [C]) so it can count those as unknown rather than not see 
 ## [C] FR-3, FR-5, AC-1/2/4/5/6: the planner deletes nothing
 
 ```python
-def plan_cleanup(directory, names, read, stat_of, state_of, opted_in, now, recently_announced):
+def plan_cleanup(directory, folder, names, read, stat_of, state_of, opted_in, now, seen_at):
     """-> {"remove": [paths], "unknown": [names], "kept": int, "partial": bool}"""
 ```
 
@@ -95,20 +95,42 @@ The executor in [D] passes the real functions.
   (the fixture in `packages/minspec/tests/session-panel.test.ts` `register()` mirrors it), so
   I believe, unverified against the CLI source, that `mtime` tracks the last write by the
   process.
-- **Opt-in, per entry (FR-5, AC-6).** `opted_in(entry["cwd"])` must be true: the nearest
-  ancestor of the entry's `cwd` that holds `.git` (directory or file) also holds `.minspec/`
-  as a directory. The hook's own folder must pass the same test before the planner runs at
-  all. Both are filesystem checks with no subprocess and no network (FR-6). Rejected
+- **Same folder only, and only after the announce step (FR-5, AC-6, invariant 5).** The
+  planner considers an entry only when `entry["cwd"] == folder`, the hook's own folder, which
+  must itself pass `opted_in(folder)` (the nearest ancestor holding `.git`, directory or file,
+  also holds `.minspec/` as a directory) before the planner runs at all. An entry for any
+  other folder is kept, whether or not that folder is opted in. Both checks are filesystem
+  reads with no subprocess and no network (FR-6). The executor in [D] runs after the announce
+  step in `mode_start`, so it sees the state file as `decide_announcements` just left it.
+  Why this and not "remove only entries the state file lists as seen long ago": the state file
+  records a `sessionId` only when a start in that entry's own folder finds a human-panel
+  transcript for it (`decide_announcements` adds a candidate with `state[sid] = now`), so
+  "absent from the state file" means "not yet told", never "safe to delete". Today
+  `mode_start` keeps such an entry until the first session in its own folder announces it
+  (:719-723, :786-810). If any start in folder A could remove an over-24 h, never-announced
+  entry of folder B, B's first start would find nothing to announce, and invariant 5 (how a
+  lost session is announced stays unchanged) would break across folders. Restricting to the
+  current folder closes that: an entry of this folder has just been through the announce
+  step, so it is either announced (then in the state file with `first_seen = now`, and kept
+  by the window below) or has nothing to announce (no transcript, or not a human panel), and
+  deleting it changes no announcement. Rejected alternative: also removing other-folder
+  entries whose `sessionId` the state file lists as seen longer than `ANNOUNCE_WINDOW_S` ago.
+  It is safe for invariant 5 but it reaches into other folders' state, and it leaves every
+  never-announced entry (no transcript, non-panel) to accumulate forever. Rejected
   alternative: removing every dead entry machine-wide once the asking repo is opted in. D2
-  accepted deleting from the user-global directory, but an entry whose `cwd` is a repo that
-  never opted in is that repo's state, and invariant 3 says MinSpec does not change it. Cost
-  of the choice made: dead entries from non-MinSpec repos keep accumulating.
-- **Announce window (invariant 5).** An entry whose `sessionId` the #2633 state file shows as
-  first seen less than `ANNOUNCE_WINDOW_S` ago is kept, so every session that starts inside the
-  window is still told, exactly as today. `recently_announced` is read without the lock; if the
-  state file exists but cannot be read or parsed, the planner sets `partial` and removes
-  nothing. Rejected alternative: ignoring the window. A session-start in the window would then
-  find the entry already gone and not be told, which changes #2633's behaviour.
+  accepted deleting from the user-global directory, but an entry whose `cwd` is another repo
+  is that repo's state, and invariant 3 says MinSpec does not change it. Cost of the choice
+  made: a dead entry is cleaned only when a session next starts in its own opted-in folder,
+  so dead entries of folders never started again, and of non-MinSpec repos, keep
+  accumulating.
+- **Announce window (invariant 5).** Within the folder, an entry whose `sessionId` the #2633
+  state file (`seen_at`) shows as first seen less than `ANNOUNCE_WINDOW_S` ago is kept, so
+  every session that starts inside the window is still told, exactly as today. The state file
+  is read after the announce step and without the lock; if it exists but cannot be read or
+  parsed, the planner sets `partial` and removes nothing. Rejected alternative: ignoring the
+  window. A session-start in the window would then find the entry already gone and not be told,
+  which changes #2633's behaviour. A recent-transcript loss (within `RECENT_S`) is reported
+  from the transcript, not the registry, so removing its entry does not change that report.
 - **Keys (AC-4).** A `.key` is removed only when its pid prefix belongs to a `.json` this plan
   removes. A `.key` whose entry is live, unknown, young or absent is kept. Orphan `.key` files
   with no `.json` are out of this spec's scope and are not touched.
@@ -137,13 +159,21 @@ on the unattended early return (:713-716), so the drain's print-mode runs never 
   Rejected alternative: printing a line on every start. It would teach the reader to skip it,
   which is the silent-gate failure by another route. Cost of the choice made: an unknown entry
   is re-reported at every start until it is fixed by hand.
-- **Never fatal.** Any exception inside the executor is caught by `main()`'s existing handler
-  (:885-889), which already prints one visible line.
+- **Never fatal, never mislabelled.** `cleanup_registry` catches its own exceptions
+  (`except Exception`, the same `noqa: BLE001` reason as :885) and prints
+  `Registry cleanup failed (<ExceptionName>) - dead entries may remain (#2091).` It does not
+  leave them to `main()`'s handler (:885-889): that handler prints "a session that lost its
+  panel is NOT being reported", which is false here, because the executor runs after the
+  SESSION LOSS report has printed and the report was complete. The catch wraps the whole
+  executor body, so there is no silent failure and no wrong message, and the hook still
+  returns 0. A removal that already happened before the exception stays done; the failure line
+  says "may remain", not "none removed".
 
 ## Docstring sweep
 
-The module docstring says the registry entry is "never cleaned up" (:24-27, :62-63) and
-`decide_announcements` says the same (:375-379). Those sentences become false once [D] lands,
+The module docstring says the registry entry is "never cleaned up" (:62-63),
+`decide_announcements` says the same (:375-376), and a comment in `mode_start` says
+"never cleaned up" too (:782). Those sentences become false once [D] lands,
 so the task that lands [D] rewrites them, and adds the `.key` file to "WHAT IT ASSUMES ABOUT
 THE CLI".
 
@@ -169,6 +199,6 @@ end-to-end cases build a real temporary folder with `.git/` and `.minspec/`.
 | FR-2, AC-2 | [B], [C] | 2, 3 |
 | FR-3, AC-1, AC-4, AC-5 | [C], [D] | 3, 4 |
 | FR-4, AC-3 | [C], [D] | 3, 4 |
-| FR-5, AC-6 | [C] | 3 |
+| FR-5, AC-6 | [C] same-folder rule | 3 |
 | FR-6 | all (no network, no subprocess) | 2, 3, 4 |
-| Invariant 5 (#2633 announce-once) | [C] announce window, [D] ordering | 4 |
+| Invariant 5 (#2633 announce-once), including across folders | [C] same-folder rule and announce window, [D] ordering | 4 |
