@@ -44,4 +44,24 @@ describe('findDecisionContradictions (#1812)', () => {
     expect(findDecisionContradictions('```\nD1 is still open\nD1 RESOLVED 2026-09-05 — x\n```\n')).toEqual([]);
     expect(findDecisionContradictions('D1 is still open\r\nD1 RESOLVED 2026-09-05 — x\r\n')).toHaveLength(1);
   });
+  it('gives each id on a multi-id line its own nearest status (missed-contradiction shape)', () => {
+    const t = [
+      'implements: [] # D1 RESOLVED 2026-09-01; D2/D3 remain open',
+      '**D2. Routing.**',
+      'RESOLVED 2026-09-05 — split',
+    ].join('\n');
+    expect(findDecisionContradictions(t)).toEqual([{ id: 'D2', openLine: 1, resolvedLine: 3 }]);
+  });
+  it('does not report a false contradiction against a multi-id line where the id is open (false-warning shape)', () => {
+    const t = 'implements: [] # D1 RESOLVED 2026-09-01; D2/D3 remain open\nD2 is still open.\n';
+    expect(findDecisionContradictions(t)).toEqual([]);
+  });
+  it('matches **Resolved:** emphasis and capital "Resolved <date>"', () => {
+    expect(findDecisionContradictions('D1 is still open.\n**Resolved:** D1 chose (a)\n')).toHaveLength(1);
+    expect(findDecisionContradictions('D1 is still open.\nD1 Resolved 2026-09-05 — x\n')).toHaveLength(1);
+  });
+  it('does not credit a bare RESOLVED line to an id that merely starts a prose line', () => {
+    const t = 'D1 is still open.\nRESOLVED 2026-09-05 — x\n';
+    expect(findDecisionContradictions(t)).toEqual([]);
+  });
 });
