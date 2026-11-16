@@ -99,6 +99,12 @@ describe('fm_list tokenizes every authored ownership path', () => {
       expected: ['packages/a.ts', 'packages/b.ts', 'packages/c.ts'],
     },
     {
+      name: 'block form with a trailing space after the key (#3653)',
+      fm: 'id: S\nimplements: \n  - packages/a.ts\n  - packages/b.ts\nother: x',
+      key: 'implements',
+      expected: ['packages/a.ts', 'packages/b.ts'],
+    },
+    {
       name: 'block form, single item',
       fm: 'id: S\nimplements:\n  - packages/a.ts\nother: x',
       key: 'implements',

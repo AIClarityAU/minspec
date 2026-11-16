@@ -1,0 +1,9 @@
+{
+  "_comment": "Rule 9 (ref-check) exemptions, #3752. Ids that name an artifact in ANOTHER repo's register (the parent register, mmo-platform) written bare in prose. This repo's register stops at DR-121, so these can never resolve here. Editing the ~50 citing artifacts instead would stale approved-spec hashes. Every entry needs a reason; an entry that starts resolving locally warns.",
+  "exemptions": [
+    { "id": "DR-355", "reason": "mmo-platform parent register: escalation rule (cited by DR-033 as a parent-register ref)." },
+    { "id": "DR-359", "reason": "mmo-platform parent register: Contract-Driven Development / ADR filter (cited by DR-003, DR-060, specs)." },
+    { "id": "DR-360", "reason": "mmo-platform parent register: global parking-lot rule (cited by DR-033, SPEC-252)." },
+    { "id": "DR-362", "reason": "mmo-platform parent register: spec-gate freezing edits (cited by DR-012, SPEC-252, SPEC-310)." }
+  ]
+}
