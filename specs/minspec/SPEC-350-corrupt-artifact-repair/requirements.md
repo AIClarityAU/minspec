@@ -5,7 +5,7 @@ status: specifying
 tier: T3
 product: minspec
 epic: EPIC-005  # Auto Structure Repair — the corrupt-artifact half that SPEC-005 parked
-relates_to: [SPEC-005]  # parent: additive/missing-only repair; this spec is its "Out of scope" corrupt-artifact item
+relates_to: [SPEC-005, SPEC-218]  # SPEC-005: parent, additive/missing-only repair, this spec is its "Out of scope" corrupt-artifact item. SPEC-218: owns config-corruption detection/visibility; this spec consumes it
 ---
 
 # MinSpec — Corrupt-artifact repair (Requirements)
@@ -17,8 +17,12 @@ relates_to: [SPEC-005]  # parent: additive/missing-only repair; this spec is its
 > **Status: specified, not built.** No corrupt-artifact detection or repair code exists.
 > Verified: `isMinspecInitialized` is only the `.minspec/` opt-in-marker check
 > (`packages/minspec/src/lib/auto-bootstrap.ts:77`), and the existing config readers swallow
-> a parse failure and fall back to defaults (`packages/minspec/src/lib/diagnostics.ts:153-163`),
-> so a corrupt `config.json` is today **invisible**, not reported.
+> a parse failure and fall back to defaults: `loadConfig`
+> (`packages/minspec/src/lib/config.ts:204-217`, the authoritative swallow point, bare `catch {}`)
+> and a secondary reader, `resolveDecisionsDir` (`packages/minspec/src/lib/diagnostics.ts:153-163`),
+> so a corrupt `config.json` is today **invisible**, not reported. Making that visible is
+> [SPEC-218](../SPEC-218-config-parse-failure-visible/requirements.md)'s scope (status `planning`),
+> not this spec's.
 
 ## Context
 
@@ -37,13 +41,21 @@ user content**, so the one rule that dominates is *never silently discard it*.
 
 ## Requirements
 
-- **FR-1 (corruption detection, read-only).** A pure function classifies each required artifact
-  as `ok | missing | corrupt` with a reason code (`invalid-json`, `schema-violation`,
+- **FR-1 (corruption classification, read-only).** A pure function classifies each required
+  artifact as `ok | missing | corrupt` with a reason code (`invalid-json`, `schema-violation`,
   `constitution-malformed`, …). Detection performs no writes. `missing` stays SPEC-005's
-  responsibility; this spec owns only `corrupt`.
+  responsibility; this spec owns only `corrupt`. **For `config.json` the detection of a
+  present-but-unusable file is [SPEC-218](../SPEC-218-config-parse-failure-visible/requirements.md)'s
+  `loadConfigWithDiagnostics` / `ConfigLoadProblem`; this function MUST reuse it and only map its
+  problem kinds onto repair reason codes, never re-implement a second detector.** The
+  constitution check is new here and owned by this spec.
 - **FR-2 (visible, never best-effort).** A corrupt artifact surfaces visibly (offer toast plus a
-  diagnostic naming file and reason). Readers that today fall back silently MUST NOT stop
-  falling back, but the corruption MUST be reported alongside (invariant 2: no silent gate).
+  diagnostic naming file and reason). For `config.json`, the diagnostic and the reader-fallback
+  reporting are [SPEC-218](../SPEC-218-config-parse-failure-visible/requirements.md)'s contract;
+  this spec adds only the repair **offer** on top of it and MUST NOT add a second diagnostic
+  channel or change the loader's behaviour. For the constitution (not covered by SPEC-218) this
+  spec owns the diagnostic. Readers that today fall back silently MUST NOT stop falling back,
+  but the corruption MUST be reported alongside (invariant 2: no silent gate).
 - **FR-3 (offer, never silent).** Repair is offered through the existing DR-006 toast
   (`[Repair] / [Not now] / [Don't ask again]`). No write occurs without a user action. No new
   silent-apply setting.
@@ -116,7 +128,7 @@ user content**, so the one rule that dominates is *never silently discard it*.
 | FR | Tier | Assertion |
 |---|---|---|
 | FR-1 | T0 | Table of fixtures (truncated JSON, empty, wrong type, BOM, valid) → expected class + reason. |
-| FR-2 | T0 | Corrupt config yields a diagnostic while readers still return defaults. |
+| FR-2 | T0 | Corrupt config yields a diagnostic (via SPEC-218's loader report) while readers still return defaults; constitution diagnostic tested here. |
 | FR-3/FR-9 | T0 | Spy on `fs` writes during detection and dismissals → zero; no network imports. |
 | FR-4 | T0 | Inject backup-write failure → original byte-identical, error surfaced. |
 | FR-5 | T0 | Property: every parseable key of the input survives repair with equal value. |
@@ -137,8 +149,9 @@ Verified against real files in a temp dir, not mocks, per the SPEC-005 test-thou
 
 - Reuses the DR-006 toast and `preferences.json` consent store; shares the watcher and
   debounce decision with SPEC-005 (#140).
-- Touches the config reader fallbacks (FR-2) — changing them affects every project's gate
-  inputs; they must keep returning defaults.
+- Depends on SPEC-218 (config-parse-failure-visible, `planning`) for config corruption
+  detection; implementation of FR-1/FR-2 for `config.json` is sequenced after it. This spec does
+  not touch the config reader fallbacks (SPEC-218 does); they must keep returning defaults.
 
 ## Rollback / reversibility
 
@@ -148,6 +161,7 @@ than user-consented `.bak` files. ADR filter: undoable in under a day → no new
 ## Follow-ups (tracked)
 
 - Required-artifact set and watcher debounce are shared with SPEC-005: #139, #140.
+- SPEC-218 (config-parse-failure-visible) owns config corruption detection; sequence this spec's config path after it.
 - Implementation plan/tasks: not yet written; follow after approval of this spec.
 
 ## Out of scope
