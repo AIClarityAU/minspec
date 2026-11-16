@@ -46,36 +46,58 @@ function runCli(script: string): { status: number; out: string } {
   }
 }
 
+const ERR403 = 'gh: Resource not accessible by integration (HTTP 403)';
+const ERR502 = 'gh: Bad Gateway (HTTP 502)';
+const ERRNET = 'error connecting to api.github.com';
+
+type Others = Record<number, string>; // PR number -> added file, or a stderr message that makes it fail
+
 /**
- * World: base holds DR-001. Subject PR 100 adds `subjectFile`. Open PRs 200 (readable,
- * adds `readableFile`) and 300 (diff unrenderable: the batched query AND its REST
- * listing both 500). `subjectBroken` makes PR 100's own listing 500.
+ * World: base holds DR-001. Subject PR 100 adds `subjectFile`. `others` maps each other
+ * open PR to the DR file it adds, or to an error line (its REST listing exits 1 with
+ * that stderr). The batched GraphQL query always fails with the unrenderable-diff 500,
+ * forcing the per-PR path. `subjectBroken` makes PR 100's own listing 500.
  */
-function world(opts: { subjectFile: string; readableFile: string; subjectBroken?: boolean }): string {
+function worldOf(opts: { subjectFile: string; others: Others; subjectBroken?: boolean }): string {
   const added = (f: string) => `[[{"filename":"${f}","status":"added"}]]`;
   const subject = opts.subjectBroken
     ? `echo '${ERR500}' >&2 ; exit 1`
     : `echo '${added(opts.subjectFile)}'`;
+  const nums = [100, ...Object.keys(opts.others).map(Number)].map((n) => `{"number":${n}}`).join(',');
+  const cases = Object.entries(opts.others)
+    .map(([n, v]) =>
+      v.startsWith('docs/')
+        ? `  *"pulls/${n}/files"*) echo '${added(v)}' ;;`
+        : `  *"pulls/${n}/files"*) echo '${v}' >&2 ; exit 1 ;;`,
+    )
+    .join('\n');
   return `#!/bin/sh
 argv="$*"
 case "$argv" in
   *"contents/specs?ref=main"*) echo '[[{"type":"dir","path":"specs/minspec"}]]' ;;
   *"contents/specs/minspec?ref=main"*) echo '[[{"type":"dir","path":"specs/minspec/SPEC-231-a"}]]' ;;
   *"pulls/100/files"*) ${subject} ;;
-  *"pulls/200/files"*) echo '${added(opts.readableFile)}' ;;
-  *"pulls/300/files"*) echo '${ERR500}' >&2 ; exit 1 ;;
+${cases}
   *"contents/docs/decisions?ref="*) echo '[[{"path":"docs/decisions/DR-001-a.md","type":"file"}]]' ;;
   *"files(first"*) echo '${ERR500}' >&2 ; exit 1 ;;
-  *"graphql"*) echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[{"number":100},{"number":200},{"number":300}]}}}}' ;;
+  *"graphql"*) echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[${nums}]}}}}' ;;
   *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
 esac
 `;
 }
 
+/** Back-compat shape: readable PR 200 plus unreadable PR 300 (unrenderable diff). */
+function world(opts: { subjectFile: string; readableFile: string; subjectBroken?: boolean }): string {
+  return worldOf({
+    subjectFile: opts.subjectFile,
+    subjectBroken: opts.subjectBroken,
+    others: { 200: opts.readableFile, 300: ERR500 },
+  });
+}
+
 describe('#3791 — one unrenderable open PR does not fail every PR', () => {
   it('passes, and names the unreadable PR, when only ANOTHER PR cannot be read', () => {
     const r = runCli(world({ subjectFile: 'docs/decisions/DR-010-x.md', readableFile: 'docs/decisions/DR-020-y.md' }));
-    expect(r.out).toMatch(/open PR #300 is unreadable/);
     expect(r.status, r.out).toBe(0);
     expect(r.out).toMatch(/open PR #300 is unreadable/);
   });
@@ -98,5 +120,48 @@ describe('#3791 — one unrenderable open PR does not fail every PR', () => {
     );
     expect(r.status).not.toBe(0);
     expect(r.out).toMatch(/FAILED CLOSED/);
+  });
+});
+
+describe('#3791 — only the unrenderable-diff signature is tolerated (fail closed otherwise)', () => {
+  const sub = 'docs/decisions/DR-010-x.md';
+
+  it('FAILS CLOSED when another PR listing returns 403', () => {
+    const r = runCli(worldOf({ subjectFile: sub, others: { 200: 'docs/decisions/DR-020-y.md', 300: ERR403 } }));
+    expect(r.status, r.out).not.toBe(0);
+    expect(r.out).toMatch(/FAILED CLOSED/);
+  });
+
+  it('FAILS CLOSED when another PR listing returns 502', () => {
+    const r = runCli(worldOf({ subjectFile: sub, others: { 200: 'docs/decisions/DR-020-y.md', 300: ERR502 } }));
+    expect(r.status, r.out).not.toBe(0);
+  });
+
+  it('FAILS CLOSED on a network error reading another PR', () => {
+    const r = runCli(worldOf({ subjectFile: sub, others: { 200: 'docs/decisions/DR-020-y.md', 300: ERRNET } }));
+    expect(r.status, r.out).not.toBe(0);
+    expect(r.out).toMatch(/FAILED CLOSED/);
+  });
+
+  it('FAILS CLOSED when EVERY other open PR is unreadable (500)', () => {
+    const r = runCli(worldOf({ subjectFile: sub, others: { 300: ERR500, 301: ERR500 } }));
+    expect(r.status, r.out).not.toBe(0);
+    expect(r.out).toMatch(/FAILED CLOSED/);
+  });
+
+  it('FAILS CLOSED when more than 3 other PRs are unreadable', () => {
+    const others: Others = { 200: 'docs/decisions/DR-020-y.md', 201: 'docs/decisions/DR-021-y.md' };
+    for (const n of [300, 301, 302, 303]) others[n] = ERR500;
+    const r = runCli(worldOf({ subjectFile: sub, others }));
+    expect(r.status, r.out).not.toBe(0);
+    expect(r.out).toMatch(/FAILED CLOSED/);
+  });
+
+  it('PASSES with a warning when one of many other PRs is unreadable (500)', () => {
+    const others: Others = { 300: ERR500 };
+    for (let i = 0; i < 9; i++) others[200 + i] = `docs/decisions/DR-0${30 + i}-y.md`;
+    const r = runCli(worldOf({ subjectFile: sub, others }));
+    expect(r.status, r.out).toBe(0);
+    expect(r.out).toMatch(/open PR #300 is unreadable/);
   });
 });

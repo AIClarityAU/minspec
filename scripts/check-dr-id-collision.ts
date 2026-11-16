@@ -136,6 +136,22 @@ class RateLimitError extends GateError {}
 const RATE_LIMIT_RE = /rate limit|HTTP 429|RATE_LIMITED/i;
 
 /**
+ * The ONE failure #3791 observed and the gate tolerates for an OTHER PR: GitHub refusing
+ * to render a diff ("this diff is temporarily unavailable due to heavy server load",
+ * HTTP 500). Anything that does not positively match (401/403, 502/503, timeouts,
+ * network faults, malformed output) is not this case and fails closed (DR-066).
+ */
+const UNRENDERABLE_DIFF_RE = /diff is temporarily unavailable/i;
+const HTTP_500_RE = /HTTP 500/;
+
+/**
+ * Most other open PRs the gate will skip as unreadable before it fails closed. Skipping
+ * is a bounded concession for the odd huge PR; beyond this, or when no other PR could be
+ * read at all, the comparison is too hollow to call a pass.
+ */
+const MAX_UNREADABLE_OTHER_PRS = 3;
+
+/**
  * Longest the gate will sleep waiting for the limit window to reset. 5 minutes by
  * default; `DR_ID_RATE_LIMIT_MAX_WAIT_MS` is a TEST SEAM (like `DR_ID_GH_BIN`) so the
  * tests do not really sleep. CI never sets it.
@@ -300,16 +316,21 @@ interface OtherPrListing {
 }
 
 /**
- * Like `prFileEntries`, but a non-rate-limit failure for an OTHER PR is returned as
- * `unreadable` instead of thrown (#3791). GitHub renders a diff to list a PR's files, and
+ * Like `prFileEntries`, but ONLY the unrenderable-diff failure for an OTHER PR is returned
+ * as `unreadable` instead of thrown (#3791); every other failure still throws. GitHub renders a diff to list a PR's files, and
  * answers HTTP 500 "this diff is temporarily unavailable" for one it cannot render; that
- * PR is not the PR under test, so it must not fail every other PR's check. A rate limit
- * stays a red: it says nothing about one PR and the whole run is then unreliable.
+ * PR is not the PR under test, so it must not fail every other PR's check. Any other
+ * failure (rate limit, auth, 5xx, network) stays a red: it says nothing about one PR
+ * and the whole run is then unreliable.
  */
 function tolerantPrFileEntries(repo: string, pr: number): PrFileEntry[] | { unreadable: string } {
   const r = gh(['api', `repos/${repo}/pulls/${pr}/files`, '--paginate', '--slurp']);
   if (r.failed) {
     if (RATE_LIMIT_RE.test(`${r.stderr}\n${r.stdout}`)) {
+      throw ghFailure(`could not list the files changed by PR #${pr}`, r);
+    }
+    const text = `${r.stderr}\n${r.stdout}`;
+    if (!(UNRENDERABLE_DIFF_RE.test(text) && HTTP_500_RE.test(text))) {
       throw ghFailure(`could not list the files changed by PR #${pr}`, r);
     }
     return { unreadable: r.stderr.trim().split('\n')[0]?.slice(0, 200) ?? 'unknown error' };
@@ -357,7 +378,7 @@ function otherPrFiles(repo: string, subjectPr: number): OtherPrListing {
     if (cursor) args.push('-f', `cursor=${cursor}`);
     const r = gh(args);
     if (r.failed) {
-      if (RATE_LIMIT_RE.test(`${r.stderr}\n${r.stdout}`)) {
+      if (RATE_LIMIT_RE.test(`${r.stderr}\n${r.stdout}`) || !UNRENDERABLE_DIFF_RE.test(`${r.stderr}\n${r.stdout}`)) {
         throw ghFailure(`could not ${what} — \`${GH_BIN} api graphql\` failed`, r);
       }
       return { failure: r };
@@ -397,9 +418,16 @@ function otherPrFiles(repo: string, subjectPr: number): OtherPrListing {
       try {
         prs = parsePage(first.out);
       } catch (e) {
-        // Rate limits stay red; a GraphQL `errors` array is the same unrenderable-diff
-        // family as an HTTP 500 and is retried per PR below.
-        if (e instanceof RateLimitError || !(e instanceof GateError) || !/returned errors/.test(e.message)) throw e;
+        // Rate limits stay red; only a GraphQL `errors` entry naming the unrenderable diff is retried
+        // per PR below; any other GraphQL error fails closed.
+        if (
+          e instanceof RateLimitError ||
+          !(e instanceof GateError) ||
+          !/returned errors/.test(e.message) ||
+          !UNRENDERABLE_DIFF_RE.test(e.message)
+        ) {
+          throw e;
+        }
         batchFailed = true;
       }
     }
@@ -604,6 +632,14 @@ function main(): void {
   assertBaseListingPlausible(args.base, decisionsDir, base, subject);
 
   const { others: otherFiles, unreadable } = otherPrFiles(args.repo, args.pr);
+  const totalOthers = otherFiles.length + unreadable.length;
+  if (unreadable.length > 0 && (unreadable.length === totalOthers || unreadable.length > MAX_UNREADABLE_OTHER_PRS)) {
+    throw new GateError(
+      `${unreadable.length} of ${totalOthers} other open PRs are unreadable ` +
+        `(${unreadable.map((u) => `#${u.pr}`).join(', ')}); the gate skips at most ${MAX_UNREADABLE_OTHER_PRS} and never ` +
+        'all of them, so it cannot vouch that no other PR claims the same DR id.',
+    );
+  }
   for (const u of unreadable) {
     // Loud, never silent: the PR under test is still checked in full against main and
     // every readable PR; only a claim held by THIS unreadable PR cannot be compared (#3791).
