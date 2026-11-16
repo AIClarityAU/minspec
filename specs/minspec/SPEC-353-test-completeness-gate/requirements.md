@@ -1,6 +1,6 @@
 ---
 epic: EPIC-002  # Signpost Integrity — a tasks/implement transition that claims test coverage nothing checked is a lying signpost, the same class SPEC-006 (stub-completeness-gate) closed for code
-id: SPEC-097
+id: SPEC-353
 type: requirements
 # Editing voids approval (hash in .minspec/approvals.json → stale); re-run "MinSpec: Approve Spec". DR-012
 status: specifying
@@ -75,13 +75,11 @@ RD-3 was written to prevent).
   spec).** Every constitution invariant the spec's `relates_to`/body text cites,
   or — failing an explicit citation — every invariant whose subject matter
   overlaps the spec's `implements:` files (see Decisions needed — this overlap
-  test is not fully mechanical yet), requires at least one mapped T0 test.
-  **100% of invariants a T3/T4 spec touches must be mapped; this is the one
-  non-negotiable row (no equivalent of FR-5's inline override applies to
-  invariant rows — see FR-6).**
+  test is not fully mechanical yet), requires at least one mapped TT0 test (test tiers: see Test / Verification Strategy).
+  **100% of invariants a T3/T4 spec touches must be mapped.** Invariant rows get the same override treatment as every other row: no inline per-row suppression, only FR-8's master toggle.
 - **FR-3 (derive required-test set from public shared-package exports).** Every
   exported function/class/type from `packages/shared/src/**` that the spec's
-  `implements:` list adds or modifies requires at least one T1 contract test.
+  `implements:` list adds or modifies requires at least one TT1 contract test.
   Scope is deliberately `packages/shared` only (the Tier-0, no-vscode-import
   boundary already named in `.minspec/constitution.md` Constraints #1) — not
   `packages/minspec/src/**` generally, whose exported-function surface is far
@@ -118,11 +116,7 @@ RD-3 was written to prevent).
   explains why `.minspec/traceability.json` is reused rather than duplicated).
 - **FR-8 (override).** A setting (e.g. `minspec.testGate.enabled`, default
   `true`) disables FR-6's block entirely, mirroring SPEC-006 FR-5's master
-  toggle. **No per-row inline suppression exists for `FR-N` or public-API rows**
-  — unlike SPEC-006's `minspec-stub-ok`, a missing test is not something a
-  single line comment should wave through silently; the master toggle is the
-  only override (see FR-2 for why invariant rows are even stricter — no override
-  of any kind once the master toggle is on).
+  toggle. **No per-row inline suppression exists for any row kind** (`FR-N`, invariant, or public-API) — unlike SPEC-006's `minspec-stub-ok`, a missing test is not something a single line comment should wave through silently; the master toggle is the only override and it applies equally to every row kind (turning it off also stops blocking invariant rows).
 
 ## Costly to Refactor (Zone A)
 
@@ -159,7 +153,7 @@ RD-3 was written to prevent).
 - **INV (no silent gate, constitution invariant 2):** an unmapped `FR-N` or
   invariant fails the transition **visibly**, with the specific unmapped ids
   named — never a best-effort pass, never a swallowed error.
-- **INV #5 (user override wins):** the master toggle (FR-8) disables the block;
+- **INV (user override wins — SPEC-006 FR-5 master-toggle precedent, not a numbered constitution invariant):** the master toggle (FR-8) disables the block;
   there is no finer-grained suppression that could be set-and-forgotten per row.
 
 ## Acceptance Criteria (Zone A)
@@ -169,9 +163,9 @@ RD-3 was written to prevent).
       `implement` transition, naming `FR-N` in the refusal — **FR-1, FR-6**.
 - [ ] A constitution invariant the spec cites (or that its `implements:` files
       overlap — pending the Decisions-needed resolution below) with zero
-      mapped T0 tests blocks the transition the same way — **FR-2, FR-6**.
+      mapped TT0 tests blocks the transition the same way — **FR-2, FR-6**.
 - [ ] An exported `packages/shared/src/**` function added/modified by the
-      spec's `implements:` list, with zero T1 test citing it, blocks the
+      spec's `implements:` list, with zero TT1 test citing it, blocks the
       transition — **FR-3, FR-6**.
 - [ ] A test file outside both `.minspec/traceability.json`'s scope and the
       spec's `implements:` list is not scanned and cannot satisfy a mapping —
@@ -186,8 +180,7 @@ RD-3 was written to prevent).
       store is created — **FR-7, Zone A #1**.
 - [ ] The gate is implemented as an additional rule inside the existing
       `validateSpec()` (`packages/minspec/src/lib/spec-validator.ts:899`),
-      reached through the same phase-transition call path SPEC-006 extended —
-      no second validation engine — **Zone A #1, prior-art precedent**.
+      invoked from the Approve Spec / `advancePhaseOnApprove` path (`packages/minspec/src/commands/approve.ts:124`) — SPEC-006 hooks the `status: done` transition instead (its RD-2), so this is a different call path into the same engine; no second validation engine — **Zone A #1, prior-art precedent**.
 
 ## Out of scope
 
@@ -203,9 +196,7 @@ RD-3 was written to prevent).
 - Auto-generating or stubbing the missing tests. The gate names the gap; a
   human or a later agent dispatch writes the test.
 - Cross-boundary payload/schema contract tests called out in the issue body —
-  genuinely out of scope for v1 pending the "what counts as a cross-boundary
-  payload" definition (see Decisions needed); tracked as a follow-up, not
-  silently dropped.
+  genuinely out of scope for v1 pending a "what counts as a cross-boundary payload" definition; recorded under Follow-ups (tracked), not silently dropped.
 
 ## Decisions needed (Clarify)
 
@@ -222,8 +213,7 @@ RD-3 was written to prevent).
     (several hit in this project's own memory notes) to the new id. Without
     it, FR-2's "every invariant the spec touches" has nothing stable to cite,
     and inserting a new invariant mid-list silently renumbers every later
-    `INV-N` reference — the same collision class DR-012/DR's own id-collision
-    gate exists to prevent for DR numbers.
+    `INV-N` reference — the same collision class the DR id-collision gate (`scripts/check-dr-id-collision.ts`) exists to prevent for DR numbers.
   - **Option B — key invariant rows by a content slug/hash instead of a
     position number.** Avoids touching the constitution, but produces opaque
     ids (`inv-a3f9c1`) nobody can cite in prose, which cuts against this
@@ -257,7 +247,7 @@ RD-3 was written to prevent).
 
 | # | Risk | Likelihood · Impact | Mitigation |
 |---|------|---------------------|------------|
-| R1 | `.minspec/traceability.json` is stale/empty (today it is populated only via a manual codelens click), so FR-5's scope is empty and the gate passes vacuously | Med · High | Same honest-edge acceptance SPEC-006 recorded for its own R4: detection is correct, scope is empty; FR-6's refusal reason should name "zero traced tests found" distinctly from "tests found but unmapped" so the vacuous case is visible, not silent |
+| R1 | `.minspec/traceability.json` is stale/empty (today it is populated only via a manual codelens click), so FR-5's scope is empty and every row reads unmapped, so the gate blocks every T3/T4 transition (consistent with Failure-Modes #1) until traceability is populated | Med · High | The block is visible, not silent, but it is a false block on a healthy spec: FR-6's refusal reason must name "zero traced tests found" distinctly from "tests found but unmapped" so the cause is obvious, and FR-8's master toggle is the escape hatch while traceability is populated (same staleness caveat SPEC-006 recorded as its R4) |
 | R2 | DQ-1/DQ-2 (invariant ids + touch-detection) ship unresolved, so FR-2 is implemented against a moving target | Med · High | FR-2's acceptance criterion is explicitly gated on the Decisions-needed resolution above; Plan phase must not proceed on FR-2 until DQ-1 is answered |
 | R3 | FR-4's literal-reference matching misses a test that *does* cover an `FR-N` but doesn't cite it by id, producing a false "unmapped" block on an already-tested requirement | Med · Med | Same trade-off SPEC-006 accepted for its own marker convention: authors adopt the citation convention going forward; a migration pass over existing tests is a follow-up, not a blocker for new specs |
 | R4 | FR-3's shared-package scope misses a public-API change that lives in `packages/minspec/src` but is still externally consumed (e.g. by `packages/extension-pack`) | Low · Med | Named explicitly in Out of scope / DQ-3; not silently dropped |
@@ -322,8 +312,7 @@ set without needing a transition attempt.
    files → every row reads unmapped; gate blocks everything until the project
    populates traceability, which is a visible (not silent) consequence per the
    no-silent-gate invariant, distinct from "tests exist but uncited" (R1).
-2. **A spec with `implements:` but no `invariants:` field** (DQ-2, if Option A
-   ships) — ambiguous whether it touches zero invariants or the field was
+2. **A spec with `implements:` but no `invariants:` field** (DQ-2, if its recommended `invariants:` frontmatter field ships) — ambiguous whether it touches zero invariants or the field was
    simply omitted; pending DQ-2's resolution, v1 should treat an absent field
    as "zero declared, zero required" rather than inferring, to avoid a false
    block, with the omission itself surfaced as a separate (non-blocking)
@@ -337,16 +326,18 @@ set without needing a transition attempt.
 
 ## Test / Verification Strategy
 
-| FR | Tier | Assertion sketch |
+Test tiers (TT) are a vocabulary distinct from the T1-T4 spec ceremony tiers: **TT0** = pure unit test of one function, no I/O (the sense of the `**T0 tests:**` bullets in `specs/minspec/tasks.md`); **TT1** = contract test at a package boundary (`packages/shared` exports); **TT2** = integration test across modules (e.g. `validateSpec()` over a fixture spec + traceability pair).
+
+| FR | Test tier | Assertion sketch |
 |---|---|---|
-| FR-1 | T2 | `validateSpec()` on a fixture spec with `FR-1`..`FR-3` and test citations for only `FR-1`/`FR-2` reports `FR-3` unmapped |
-| FR-2 | T2 | Blocked on DQ-1/DQ-2 — write once invariant ids + `invariants:` frontmatter exist; assertion sketch: declared `INV-2` with no citing T0 test reports unmapped |
-| FR-3 | T1 | A `packages/shared/src` export added by the spec's `implements:` list with no citing test reports unmapped; an export outside `packages/shared` is not checked |
-| FR-4 | T1 | A test named `...FR-3...` or carrying an adjacent `// FR-3` comment counts as a citation; `FR-30` does not satisfy `FR-3` (word-boundary) |
-| FR-5 | T0 | A test file absent from both `.minspec/traceability.json` and `implements:` cannot satisfy any mapping, even if it textually cites the id |
-| FR-6 | T0 | Fixture with all ids mapped: `tasks`→`implement` transition succeeds; any one id unmapped: transition refused, naming it; T1/T2 fixture: never blocked |
-| FR-7 | T1 | Matrix command output matches `validateSpec()`'s own unmapped-id list for the same fixture (single source of truth) |
-| FR-8 | T0 | `minspec.testGate.enabled = false` → transition never blocked regardless of unmapped ids |
+| FR-1 | TT2 | `validateSpec()` on a fixture spec with `FR-1`..`FR-3` and test citations for only `FR-1`/`FR-2` reports `FR-3` unmapped |
+| FR-2 | TT2 | Blocked on DQ-1/DQ-2 — write once invariant ids + `invariants:` frontmatter exist; assertion sketch: declared `INV-2` with no citing TT0 test reports unmapped |
+| FR-3 | TT1 | A `packages/shared/src` export added by the spec's `implements:` list with no citing test reports unmapped; an export outside `packages/shared` is not checked |
+| FR-4 | TT1 | A test named `...FR-3...` or carrying an adjacent `// FR-3` comment counts as a citation; `FR-30` does not satisfy `FR-3` (word-boundary) |
+| FR-5 | TT0 | A test file absent from both `.minspec/traceability.json` and `implements:` cannot satisfy any mapping, even if it textually cites the id |
+| FR-6 | TT0 | Fixture with all ids mapped: `tasks`→`implement` transition succeeds; any one id unmapped: transition refused, naming it; T1/T2 fixture: never blocked |
+| FR-7 | TT1 | Matrix command output matches `validateSpec()`'s own unmapped-id list for the same fixture (single source of truth) |
+| FR-8 | TT0 | `minspec.testGate.enabled = false` → transition never blocked regardless of unmapped ids |
 
 ## Alternatives Considered
 
@@ -368,19 +359,15 @@ set without needing a transition attempt.
 
 ## Follow-ups (tracked)
 
-- Resolve DQ-1 (stable `INV-N` ids on `.minspec/constitution.md`'s invariants
-  list) — file a GitHub issue once a human picks Option A or B above; FR-2
-  cannot proceed to Plan phase until this lands.
-- Resolve DQ-2 (`invariants:` frontmatter field + its own missing-direction
-  validator rule, per DR-003's addendum) — same gate as DQ-1.
-- Migration pass: re-cite existing tests with `FR-N`/`INV-N` ids so FR-4 does
-  not read a healthy, already-tested spec as freshly unmapped on gate
-  activation — file as a sibling issue before FR-6 is enabled project-wide.
-- Cross-boundary payload/schema contract tests (named in the original issue
-  body, placed Out of scope above) — file as a separate issue once "payload"
-  is scoped; not silently dropped.
-- DQ-3's `packages/minspec/src` FR-3 widening — file as a follow-up issue if
-  the `packages/shared`-only scope proves to miss real gaps in practice.
+Per the DR-023 amendment, none of these would change a decision within 30 days
+(each waits on a human answering DQ-1/DQ-2/DQ-3 or on FR-6 shipping), so each is
+one dated line in `docs/backlog.md`, cited here by its leading text.
+
+- backlog: `2026-11-16: SPEC-353 DQ-1 - mint stable INV-N ids` (FR-2 cannot proceed to Plan until this lands)
+- backlog: `2026-11-16: SPEC-353 DQ-2 - add an invariants: frontmatter field` (with its missing-direction validator rule, per DR-003's addendum)
+- backlog: `2026-11-16: SPEC-353 migration - re-cite existing tests` (before FR-6 is enabled project-wide)
+- backlog: `2026-11-16: SPEC-353 cross-boundary payload/schema contract tests` (out of scope for v1 until "payload" is scoped)
+- backlog: `2026-11-16: SPEC-353 DQ-3 - widen FR-3 public-API scope` (only if shared-only scope misses real gaps)
 
 ## Open questions
 
