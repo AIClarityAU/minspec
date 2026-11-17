@@ -205,6 +205,8 @@ must fail on a tree without this change (red on base, green on head).
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 5 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 Each has a recommendation and the cost of taking it.
 
 - **D1 - Which pull requests count toward the pile.**
@@ -217,6 +219,8 @@ Each has a recommendation and the cost of taking it.
     and a founder's own long-lived pull requests hold a permanent share of the cap.
   - Either way, draft pull requests are not counted (they are not updated or merged under strict).
     Counting them is (c) if the human wants it.
+
+  **Recorded selection: the recommended option,** option (a), the drain's own build pull requests only, with draft pull requests not counted. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D2 - Do build pull requests held for a human count?** (`needs-human-review`, e.g. machinery
   builds waiting on an `--admin` merge.)
   - (a) **(rec)** Not counted, and reported as a separate number on the FR7 line. They do not
@@ -225,6 +229,8 @@ Each has a recommendation and the cost of taking it.
     unbounded by this gate; a founder backlog grows without the drain slowing.
   - (b) Counted. Bounds the total. Cost: a weekend away from the founder stops all builds, which
     is idle quota, the thing the issue forbids.
+
+  **Recorded selection: the recommended option,** option (a), held build pull requests are not counted and are reported as a separate number on the FR7 line. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D3 - How the cap is set.**
   - (a) **(rec)** A static default in the script, computed at Plan by Little's law:
     `cap = ceil(landing rate per hour x target hours a build pull request may wait)`, landing
@@ -238,6 +244,8 @@ Each has a recommendation and the cost of taking it.
     landing rate shrinks the cap and pauses builds exactly when the pile is stuck (possibly
     right), and the behaviour is harder to predict from the log.
   - (c) A plain guess (say 20). Rejected by the issue ("rather than a guess").
+
+  **Recorded selection: the recommended option,** option (a), a static default computed at Plan by Little's law, with a target wait of 8 hours. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D4 - Hysteresis.**
   - (a) **(rec)** None: pause at the cap, resume below it, with FR3 headroom. Headroom already
     stops overshoot, and stateless is simplest to test. Cost: near the cap, builds trickle in
@@ -245,6 +253,8 @@ Each has a recommendation and the cost of taking it.
   - (b) Resume only below a low mark (say 75% of the cap). Fewer, larger dispatch bursts. Cost:
     state across cycles (or a second knob), and idle build slots while the pile sits between
     the two marks.
+
+  **Recorded selection: the recommended option,** option (a), no hysteresis. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D5 - Exemption for `pipeline-blocker` issues.**
   - (a) **(rec)** Exempt: a `pipeline-blocker` build is dispatched even when paused, named on its
     own line (FR11). A fix to the thing that stops landing (a red required check, a broken
@@ -253,6 +263,8 @@ Each has a recommendation and the cost of taking it.
     applied loosely.
   - (b) No exemption. Cost: a blocker that keeps the pile above the cap is never built by the
     drain; a human must dispatch it by hand.
+
+  **Recorded selection: the recommended option,** option (a), `pipeline-blocker` builds are exempt and named on their own line (FR11). Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 ## Out of scope (tracked elsewhere)
 
