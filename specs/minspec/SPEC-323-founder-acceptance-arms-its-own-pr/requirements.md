@@ -66,7 +66,17 @@ Ranking founder-authored PRs first in `cos.py pr-drive` (host patch, tracked by 
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 4 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 1. **Where consent lives.** (a) Reuse `minspec.pushOnApprove` `always`/project-local preference as the consent **(rec)**: one surface, matches DR-078; cost: a user who allowed push now also allows arming, which is a wider grant than they gave. (b) New dedicated setting `minspec.armOnApprove`: exact consent; cost: a second surface that can disagree with the first.
+
+   **Recorded selection: the recommended option,** option (a), reuse `minspec.pushOnApprove` as the consent. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 2. **Push-after-arm risk.** An armed PR stays armed across later pushes (the reason DR-112 refuses a bot arm). Options: (a) pass `--match-head-commit <sha>` so a push after the arm blocks the merge **(rec)**, matching DR-112 section 1(c); cost: I believe, unverified, that `gh pr merge --auto` accepts this flag together (Clarify must confirm it), and a rebase on the base branch needs a re-arm; (b) accept and state it in the consent text, as the issue asks, cost: a later push by anyone with write access can land unreviewed within the required checks, which is the exact hazard DR-112 and DR-119 reject.
+
+   **Recorded selection: the recommended option,** option (a), pass `--match-head-commit <sha>` so a push after the arm blocks the merge. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 3. **Repo without auto-merge enabled.** The arm fails (FR-5). Options: (a) report and stop **(rec)**, cost: founder still arms by hand there; (b) fall back to a direct squash merge when checks are already green, cost: a new merge path that needs its own review under DR-112.
+
+   **Recorded selection: the recommended option,** option (a), report and stop. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 4. **Does DR-112 need an amendment?** DR-112 (section 1(c), lines 80-82, 202-204), DR-119 (lines 170, 269) and the approval-only self-merge record reject arming native auto-merge on actor-independent grounds (it stays armed across pushes), and DR-119 forbids auto-merge in the approval lane, where these status-transition PRs sit. The issue's claim that a founder-credential arm is outside that rejection is therefore not licensed. Options: (a) amend DR-112 section 2 and DR-119 to permit a founder-credential, head-pinned arm for status-transition PRs **(rec)**, cost: a human-approved edit to two accepted records; (b) drop the arm and instead keep the founder's second keystroke, cost: the multi-hour wait of the Problem section stays.
+
+   **Recorded selection: the recommended option,** option (a), amend DR-112 section 2 and DR-119 to permit a founder-credential, head-pinned arm for status-transition pull requests. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
