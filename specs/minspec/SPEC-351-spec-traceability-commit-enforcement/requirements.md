@@ -129,6 +129,13 @@ work not tied to a spec.
   frontmatter — precise, but most specs do not list it. (c) Everything except docs — broad, noisy.
 - **D5 — Task-number source.** `task-N` requires stable task numbering in `tasks.md`. Confirm that
   checkbox order is the numbering, or require explicit task ids (a format change to existing specs).
+  **Recommended (agent, 2026-11-17):** explicit task ids, accepting the bold-prefix form most files
+  already use (`**1.1**`, `**T1**`). The tasks parser keeps no id, only text and done
+  (`packages/minspec/src/lib/spec.ts:115`, `:252-254`), and checkbox order is unstable: inserting a
+  task renumbers every later one, so an old `task-N` commit silently points at a different task.
+  36 of the 45 `tasks.md` files on this base already start their tasks with an explicit id - cost:
+  the other 9 get no `task-N` traceability until migrated, and the id format must be fixed (the
+  36 mix `1.1`, `T1`, `T1.1` and `A-T0-1`).
 - **D6 — Scope split.** Ship FR-1/FR-3/FR-5..8 first and FR-2/FR-4 (editor UI) after? **(rec)** yes — the
   hook is the part that enforces; the cost is a release where the helper is missing and users must type
   the prefix by hand.
