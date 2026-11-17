@@ -61,6 +61,7 @@ vi.mock('../src/lib/adr-manager', () => ({
   setAdrStatus: vi.fn(),
   adrHasFrontmatter: vi.fn(() => true),
   regenerateDrIndex: vi.fn(),
+  validatePendingDrAmendments: vi.fn(() => []),
   ADR_STATUS_VALUES: ['proposed', 'accepted', 'deprecated', 'superseded'],
 }));
 

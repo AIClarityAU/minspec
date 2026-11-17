@@ -144,6 +144,38 @@ occupancy() {
   esac
 }
 
+# Compare working-tree path $p of $repo with its content at git ref $ref.
+# Returns 0 = byte-identical, 1 = compared and differs / absent at the ref,
+# 2 = could not compare (reason in $CMP_WHY). A directory (git status collapses
+# an untracked directory to one "dir/" entry) is identical only if EVERY file in
+# it is identical to the ref's copy; one differing/absent file => 1; a non-regular
+# entry or a failed hash => 2 (never silently collapsed into "differs", #1650).
+# Compares blob ids (hash-object --no-filters vs rev-parse), so no cmp stderr leaks.
+CMP_WHY=""
+compare_with_ref() {
+  local repo="$1" ref="$2" p="$3" f rel want got rc=0 saw_unknown=0
+  CMP_WHY=""
+  if [ -d "$repo/$p" ]; then
+    while IFS= read -r -d '' f; do
+      rel="${f#"$repo"/}"
+      if [ ! -f "$f" ] || [ -L "$f" ]; then
+        saw_unknown=1; CMP_WHY="non-regular entry $rel"; continue
+      fi
+      want="$(git -C "$repo" rev-parse -q --verify "$ref:$rel" 2>/dev/null)" || return 1
+      got="$(git -C "$repo" hash-object --no-filters -- "$f" 2>/dev/null)" \
+        || { saw_unknown=1; CMP_WHY="cannot read $rel"; continue; }
+      [ "$want" = "$got" ] || rc=1
+    done < <(find "$repo/$p" -mindepth 1 \( -type d -empty -o ! -type d \) -print0 2>/dev/null)
+    [ "$rc" = 1 ] && return 1
+    [ "$saw_unknown" = 1 ] && return 2
+    return 0
+  fi
+  want="$(git -C "$repo" rev-parse -q --verify "$ref:$p" 2>/dev/null)" || return 1
+  got="$(git -C "$repo" hash-object --no-filters -- "$repo/$p" 2>/dev/null)" \
+    || { CMP_WHY="cannot read $p"; return 2; }
+  [ "$want" = "$got" ]
+}
+
 # Scan every OTHER remote-tracking ref (excluding origin/<default>, already
 # checked by the caller, and the symbolic origin/HEAD, which just aliases
 # whichever branch it points at) for a byte-identical copy of $repo's
@@ -157,8 +189,7 @@ find_landed_ref() {
   while IFS= read -r ref; do
     [ "$ref" = "refs/remotes/$origin_ref" ] && continue
     [ "$ref" = "refs/remotes/origin/HEAD" ] && continue
-    if git -C "$repo" cat-file -e "$ref:$p" 2>/dev/null \
-       && git -C "$repo" show "$ref:$p" 2>/dev/null | cmp -s - "$repo/$p"; then
+    if compare_with_ref "$repo" "$ref" "$p"; then
       echo "${ref#refs/remotes/}"
       return 0
     fi
@@ -204,15 +235,17 @@ for repo in "${REPOS[@]}"; do
   behind="$(git -C "$repo" rev-list --count "HEAD..$origin_ref" 2>/dev/null || echo 0)"
   ahead="$(git -C "$repo" rev-list --count "$origin_ref..HEAD" 2>/dev/null || echo 0)"
 
-  redundant=(); orphans=(); landed_paths=(); landed_refs=()
+  redundant=(); orphans=(); unknowns=(); unknown_whys=(); landed_paths=(); landed_refs=()
   while IFS= read -r -d '' entry; do
     code="${entry:0:2}"; p="${entry:3}"
     case "$code" in R*|C*) IFS= read -r -d '' _src ;; esac
     [ -n "$p" ] || continue
     if [ -e "$repo/$p" ]; then
-      if git -C "$repo" cat-file -e "$origin_ref:$p" 2>/dev/null \
-         && git -C "$repo" show "$origin_ref:$p" 2>/dev/null | cmp -s - "$repo/$p"; then
+      cmp_rc=0; compare_with_ref "$repo" "$origin_ref" "$p" || cmp_rc=$?
+      if [ "$cmp_rc" = 0 ]; then
         redundant+=("$p")
+      elif [ "$cmp_rc" = 2 ]; then
+        unknowns+=("$p"); unknown_whys+=("$CMP_WHY")
       else
         match_ref="$(find_landed_ref "$repo" "$origin_ref" "$p")"
         if [ -n "$match_ref" ]; then
@@ -231,7 +264,7 @@ for repo in "${REPOS[@]}"; do
     fi
   done < <(git -C "$repo" status --porcelain -z 2>/dev/null)
 
-  if [ "${#orphans[@]}" -eq 0 ] && [ "${#redundant[@]}" -eq 0 ] && [ "${#landed_paths[@]}" -eq 0 ] \
+  if [ "${#orphans[@]}" -eq 0 ] && [ "${#unknowns[@]}" -eq 0 ] && [ "${#redundant[@]}" -eq 0 ] && [ "${#landed_paths[@]}" -eq 0 ] \
      && [ "$behind" = "0" ] && [ "$ahead" = "0" ]; then
     say "OK    $name — clean, current with $origin_ref"
     continue
@@ -250,7 +283,15 @@ for repo in "${REPOS[@]}"; do
     mt="$(date -r "$repo/$p" '+%Y-%m-%d %H:%M' 2>/dev/null || echo 'deleted')"
     say "      ORPHAN     $p  (last written $mt)"
   done
+  for i in "${!unknowns[@]}"; do
+    say "      UNKNOWN    ${unknowns[$i]}  (could not compare with $origin_ref: ${unknown_whys[$i]})"
+  done
   overall=1
+
+  if [ "${#unknowns[@]}" -gt 0 ]; then
+    say "      -> comparison could not run for the UNKNOWN path(s); verify by hand before"
+    say "         discarding. This is NOT a verdict that the content differs."
+  fi
 
   if [ "${#orphans[@]}" -gt 0 ]; then
     say "      -> unlanded work. Land it from the owning worktree, or via"
@@ -263,7 +304,7 @@ for repo in "${REPOS[@]}"; do
     say "         still open before discarding the local copy."
   fi
 
-  if [ "${#orphans[@]}" -eq 0 ] && [ "${#landed_paths[@]}" -eq 0 ] && [ "${#redundant[@]}" -gt 0 ] && [ "$behind" != "0" ]; then
+  if [ "${#orphans[@]}" -eq 0 ] && [ "${#unknowns[@]}" -eq 0 ] && [ "${#landed_paths[@]}" -eq 0 ] && [ "${#redundant[@]}" -gt 0 ] && [ "$behind" != "0" ]; then
     deadlocked=1
     say "      -> G2 DEADLOCK: every dirty path here is REDUNDANT, so this checkout"
     say "         carries no unlanded work — but DR-065 G2 (content-clean) still fails,"

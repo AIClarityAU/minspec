@@ -37,7 +37,7 @@
  *
  * Without `--write` it prints the decision and the record it would write. With `--write`
  * it also writes the sidecar and moves the artifact's lifecycle (a spec advances to
- * implementing; a DR flips to `accepted` and the register index is regenerated), the
+ * its derived status (usually `planning`, DR-069); a DR flips to `accepted` and the register index is regenerated), the
  * same writes the founder's *Approve Spec* / *Accept ADR* make. Committing and opening the
  * approval pull request stay with the caller. Exit 0 = approved (or would be), 1 = denied.
  */
@@ -56,7 +56,9 @@ import {
 import { readRepeatFixShare, utcToday } from './repeat-fix-share';
 import { openClarifyDetail, clarifyPhaseDetail } from './clarify-open';
 import { readContentPullRequest } from './content-pr';
-import { readSpecFile, advanceSpecToImplementing } from '../../packages/minspec/src/lib/spec';
+import { readSpecFile, parseSpec, advanceSpecToImplementing } from '../../packages/minspec/src/lib/spec';
+import { deriveStatus, phasesForApproval } from '../../packages/minspec/src/lib/lifecycle';
+import { bodyStatusToken } from '../../packages/minspec/src/lib/status-parity';
 import { isTerminalSpecStatus } from '../../packages/minspec/src/lib/spec-vocabulary';
 import { loadConfig } from '../../packages/minspec/src/lib/config';
 import { validateSpec } from '../../packages/minspec/src/lib/spec-validator';
@@ -64,6 +66,7 @@ import { epicRefSet } from '../../packages/minspec/src/lib/epic-manager';
 import { readShardIdFiles } from '../../packages/minspec/src/lib/spec-layout';
 import { assertOwnershipDeclaredForAdvance } from '../../packages/minspec/src/lib/ownership-advance-guard';
 import { setAdrStatus, regenerateDrIndex } from '../../packages/minspec/src/lib/adr-manager';
+import { scopeIndexToDr } from '../../packages/minspec/src/lib/dr-index-scope';
 
 /** Where the AI review panel's run lives. A comment outside one of its runs is not a verdict. */
 export const AI_REVIEW_WORKFLOW_PATH = '.github/workflows/ai-review.yml';
@@ -549,7 +552,8 @@ function main(): number {
   console.log(JSON.stringify(plan));
   if (!parsed.write) return 0;
 
-  writeLifecycle(repoRoot, abs, plan.record.act);
+  const changed = writeLifecycleHashNeutral(repoRoot, abs, plan.record.act);
+  if (changed !== undefined) return deny('lifecycle-changed-hash', changed);
   const sidecar = path.join(repoRoot, '.minspec', 'approvals', `${artifact}.json`);
   if (!fs.existsSync(path.join(repoRoot, '.minspec'))) {
     console.error('no .minspec/ at the repo root: this repo has not opted in');
@@ -565,13 +569,36 @@ function main(): number {
  * (`packages/minspec/src/commands/approve.ts`): a terminal spec, an incomplete spec
  * (`validateSpec` errors), or one the phase advance would put into violation. Returns
  * the reason, or undefined when the spec may be approved.
+ *
+ * `content`, when given, is judged instead of the bytes at `abs`: the caller pre-checks
+ * the base's bytes before any worktree exists (`abs` still locates the spec's directory,
+ * config and sibling shards under `repoRoot`). One predicate for both, so they cannot drift.
  */
-export function specNotApprovable(repoRoot: string, abs: string): string | undefined {
-  const parsed = readSpecFile(abs);
+export function specNotApprovable(repoRoot: string, abs: string, content?: string): string | undefined {
+  const parsed = content === undefined ? readSpecFile(abs) : parseSpec(content);
   const status = parsed.frontmatter.status;
   if (isTerminalSpecStatus(status)) return `the spec is ${String(status)}, past the approval gate`;
   const clarify = clarifyPhaseDetail(parsed.raw, parsed.frontmatter.tier);
   if (clarify !== undefined) return clarify;
+  // The approval hash covers the body, and the lifecycle write rewrites a body status word
+  // (setBodyStatusToken) to the derived status. A delegated approval must leave the body untouched (DR-081 s5:
+  // the exemption covers the record, never the approvable), so refuse up front.
+  const text = content ?? fs.readFileSync(abs, 'utf-8');
+  const body = bodyStatusToken(text, 'spec');
+  // The word the approval stamps is the approval-aware derived status (DR-069): usually
+  // `planning` for a pre-implement spec, `implementing` once implement has started - the
+  // same derivation advanceSpecToImplementing uses (spec.ts), so pre-check and write agree.
+  const target = deriveStatus(phasesForApproval(parsed.frontmatter.phases), 'approved', undefined);
+  // The writer stamps the CAPITALIZED word (setBodyStatusToken), so compare the raw word,
+  // case-sensitively: a lowercase `planning` line is still rewritten to `Planning`.
+  const written = target.charAt(0).toUpperCase() + target.slice(1);
+  const rawWord = body === null ? '' : (text.split('\n')[body.line - 1].match(/^\*\*Status:\*\*[ \t]*([A-Za-z]+)/)?.[1] ?? '');
+  if (body !== null && rawWord !== written) {
+    return (
+      `the body status line (line ${body.line}, "${body.token}") would be rewritten to "${target}" by the approval, ` +
+      `which changes the spec's hash; open a content pull request that removes that line, then retry`
+    );
+  }
   const result = validateSpec(parsed, loadConfig(repoRoot), {
     knownEpicRefs: epicRefSet(repoRoot),
     siblingShardFiles: readShardIdFiles(path.dirname(abs)),
@@ -589,11 +616,40 @@ export function specNotApprovable(repoRoot: string, abs: string): string | undef
   return undefined;
 }
 
+/**
+ * `writeLifecycle`, then re-hash: if the write changed the artifact's canonical hash the
+ * recorded approval would be stale on arrival, so restore the original bytes and return the
+ * reason (undefined when the hash held). Only ever adds a refusal.
+ *
+ * Spec approvals only: a DR acceptance inherently rewrites the body `## Status` token
+ * (proposed -> accepted), which the hash retains, so it cannot be hash-neutral.
+ */
+export function writeLifecycleHashNeutral(repoRoot: string, abs: string, act: DelegatedAct): string | undefined {
+  if (act !== 'spec-approval') {
+    writeLifecycle(repoRoot, abs, act);
+    return undefined;
+  }
+  const before = fs.readFileSync(abs);
+  const hashBefore = specHash(before.toString('utf-8'));
+  try {
+    writeLifecycle(repoRoot, abs, act);
+  } catch (err) {
+    fs.writeFileSync(abs, before);
+    throw err;
+  }
+  if (specHash(fs.readFileSync(abs, 'utf-8')) === hashBefore) return undefined;
+  fs.writeFileSync(abs, before);
+  return `the lifecycle write changed the hash of ${path.relative(repoRoot, abs)}; restored, nothing recorded`;
+}
+
 /** The lifecycle half of the act, using the same writers the founder's commands use. */
 function writeLifecycle(repoRoot: string, abs: string, act: DelegatedAct): void {
   if (act === 'engineering-dr-acceptance') {
     setAdrStatus(abs, 'accepted');
     regenerateDrIndex(repoRoot);
+    // #581: the regen rebuilds every row from the working tree; keep only this DR's so an
+    // unrelated DR's uncommitted status change cannot ride into the approval commit.
+    scopeIndexToDr(repoRoot, path.join(path.dirname(abs), 'INDEX.md'), path.basename(abs, '.md'));
   } else {
     advanceSpecToImplementing(abs);
   }

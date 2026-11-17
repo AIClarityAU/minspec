@@ -58,11 +58,17 @@ interface Opts {
   viewExit?: number;
 }
 
+// A specify-only drain PR as dispatch publishes it since #3348: it references its issue
+// and closes nothing, because the issue carries the build that follows sign-off.
 const VIEW_OK = {
   headRefName: 'agent/issue-3000',
-  closingIssuesReferences: [{ number: 3000 }],
+  closingIssuesReferences: [] as { number: number }[],
   comments: [{ body: 'looks good' }],
+  author: { login: 'human' },
+  body: 'Spec drafted.\n\nRefs #3000',
 };
+/** A code (non-spec) path: a drain PR touching it is a build, which must close its issue. */
+const CODE = 'packages/minspec/src/lib/x.ts';
 
 function run(args: string[], o: Opts = {}) {
   const ghLog = path.join(tmp, 'gh.log');
@@ -207,9 +213,22 @@ describe('fail closed: nothing is armed', () => {
 describe('human claims: a covered PR the bot must still not merge (#3050)', () => {
   const view = (v: object) => JSON.stringify({ ...VIEW_OK, ...v });
   it.each([
-    ['no closing link at all', { view: view({ closingIssuesReferences: [] }) }, 'closes-link-unconfirmed'],
-    ['a closing link to a different issue', { view: view({ closingIssuesReferences: [{ number: 1 }] }) }, 'closes-link-unconfirmed'],
+    ['a build drain PR with no closing link at all', { diff: CODE, view: view({ closingIssuesReferences: [] }) }, 'closes-link-unconfirmed'],
+    ['a build drain PR closing a different issue', { diff: CODE, view: view({ closingIssuesReferences: [{ number: 1 }] }) }, 'closes-link-unconfirmed'],
+    // #3348: a spec-only drain PR that would close anything closes the build issue on merge.
+    ['a spec drain PR that closes its own issue', { view: view({ closingIssuesReferences: [{ number: 3000 }], body: 'Closes #3000' }) }, 'spec-pr-closes-build-issue'],
+    ['a spec drain PR that closes a different issue', { view: view({ closingIssuesReferences: [{ number: 1 }] }) }, 'spec-pr-closes-build-issue'],
+    ['a spec drain PR with an unlinked Closes trailer (#2228 can link later)', { view: view({ body: 'x\n\nCloses #3000' }) }, 'spec-pr-closes-build-issue'],
+    ['a spec drain PR with an unlinked Fixes: owner/repo trailer', { view: view({ body: 'Fixes: AIClarityAU/minspec#3000' }) }, 'spec-pr-closes-build-issue'],
+    ['a spec drain PR with no readable body', { view: JSON.stringify({ ...VIEW_OK, body: undefined }) }, 'spec-pr-closes-build-issue'],
     ['a non-drain branch with no link', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [] }) }, 'closes-link-unconfirmed'],
+    ['a human-authored non-drain PR with no link', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [], author: { login: 'human' }, body: 'no keyword' }) }, 'closes-link-unconfirmed'],
+    ['another bot with no link', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [], author: { login: 'dependabot[bot]' }, body: '' }) }, 'closes-link-unconfirmed'],
+    ['minspec-sdd[bot] with an unlinked Closes trailer', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [], author: { login: 'minspec-sdd[bot]' }, body: 'x\n\nCloses #12' }) }, 'closes-link-unconfirmed'],
+    ['minspec-sdd[bot] with an unlinked fixes: trailer', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [], author: { login: 'minspec-sdd[bot]' }, body: 'Fixes: org/repo#12' }) }, 'closes-link-unconfirmed'],
+    ['a bare minspec-sdd user login (spoofable, no [bot]/app/ form)', { view: view({ headRefName: 'cos/x', closingIssuesReferences: [], author: { login: 'minspec-sdd' }, body: '' }) }, 'closes-link-unconfirmed'],
+    ['minspec-sdd[bot] with no readable body', { view: JSON.stringify({ headRefName: 'cos/x', closingIssuesReferences: [], comments: [], author: { login: 'minspec-sdd[bot]' } }) }, 'closes-link-unconfirmed'],
+    ['minspec-sdd[bot] with no readable author', { view: JSON.stringify({ headRefName: 'cos/x', closingIssuesReferences: [], comments: [], body: '' }) }, 'closes-link-unconfirmed'],
     ['a creator-shepherd handoff comment', { view: view({ comments: [{ body: 'x <!-- minspec-shepherd-handoff -->' }] }) }, 'handed-to-human'],
     ['an unreadable PR view', { viewExit: 1 }, 'pr-claims-unreadable'],
     ['a PR view that is not JSON', { view: 'nope' }, 'pr-claims-unreadable'],
@@ -220,6 +239,24 @@ describe('human claims: a covered PR the bot must still not merge (#3050)', () =
     expect(r.verdict).toMatchObject({ proceed: false, reason });
     expect(r.judgeArgs).toBeUndefined();
     expect(writes(r.gh)).toEqual([]);
+  }, TIMEOUT);
+
+  it.each(['minspec-sdd[bot]', 'app/minspec-sdd'])('a %s PR with no link and no closing keyword proceeds (#3115)', (login) => {
+    const r = run(['2966'], { view: view({ headRefName: 'cos/clarify-selections', closingIssuesReferences: [], author: { login }, body: 'Records Clarify selections. Discloses #5 only.' }) });
+    expect(r.status).toBe(0);
+    expect(r.verdict).toMatchObject({ proceed: true });
+  }, TIMEOUT);
+
+  it('a build drain PR whose closing link to its issue is confirmed still proceeds', () => {
+    const r = run(['2966'], { diff: CODE, view: view({ closingIssuesReferences: [{ number: 3000 }], body: 'Closes #3000' }) });
+    expect(r.status).toBe(0);
+    expect(r.verdict).toMatchObject({ proceed: true });
+  }, TIMEOUT);
+
+  it('a spec drain PR that references its issue and closes nothing proceeds (#3348)', () => {
+    const r = run(['2966'], { view: view({ closingIssuesReferences: [], body: 'Spec drafted.\n\nRefs #3000. Discloses #5.' }) });
+    expect(r.status).toBe(0);
+    expect(r.verdict).toMatchObject({ proceed: true });
   }, TIMEOUT);
 
   it('a non-drain branch with a confirmed link still proceeds', () => {
@@ -258,5 +295,63 @@ describe('--arm: bound to the judged head, under the bot, never --admin', () => 
     expect(r.status).toBe(2);
     expect(r.verdict).toMatchObject({ armed: false, error: 'arm-failed' });
     expect(r.gh.filter((l) => /ARGS=pr (edit|comment)/.test(l))).toEqual([]);
+  }, TIMEOUT);
+});
+
+// #3120: a creator-shepherd handoff is a claim about the head it was posted against. It
+// is written when automation gives up (a ceiling timeout, the attempt cap, a fix that
+// produced nothing), never because a decision was put to the founder, and nothing ever
+// withdrew it. #2799, #2830 and #2945 were handed off on 2026-10-15..18, then remediated
+// and updated many times, and stayed refused as `handed-to-human` on every drain cycle
+// although the judge covered each at its current head. A commit pushed after the handoff
+// means automation took the PR back, so that handoff no longer speaks for the founder.
+describe('a shepherd handoff is scoped to the head it was posted against (#3120)', () => {
+  const MARK = 'handed off <!-- minspec-shepherd-handoff -->';
+  const view = (v: object) => JSON.stringify({ ...VIEW_OK, ...v });
+  const commits = (...dates: string[]) => dates.map((d) => ({ oid: 'a'.repeat(40), committedDate: d }));
+
+  it('a handoff posted before the newest commit is spent: the covered PR proceeds', () => {
+    const r = run(['2966'], {
+      view: view({
+        commits: commits('2026-10-14T00:00:00Z', '2026-10-25T10:13:30Z'),
+        comments: [{ body: MARK, createdAt: '2026-10-15T17:02:20Z' }],
+      }),
+    });
+    expect(r.status).toBe(0);
+    expect(r.verdict).toMatchObject({ proceed: true });
+  }, TIMEOUT);
+
+  it.each([
+    ['posted after the newest commit', { commits: commits('2026-10-14T00:00:00Z'), comments: [{ body: MARK, createdAt: '2026-10-15T17:02:20Z' }] }],
+    ['posted at the same second as the newest commit', { commits: commits('2026-10-15T17:02:20Z'), comments: [{ body: MARK, createdAt: '2026-10-15T17:02:20Z' }] }],
+    ['one spent and one live handoff', {
+      commits: commits('2026-10-20T00:00:00Z'),
+      comments: [{ body: MARK, createdAt: '2026-10-15T00:00:00Z' }, { body: MARK, createdAt: '2026-10-21T00:00:00Z' }],
+    }],
+    ['a handoff with no timestamp', { commits: commits('2026-10-20T00:00:00Z'), comments: [{ body: MARK }] }],
+    ['a handoff with an unparseable timestamp', { commits: commits('2026-10-20T00:00:00Z'), comments: [{ body: MARK, createdAt: 'yesterday' }] }],
+    ['no commit list', { comments: [{ body: MARK, createdAt: '2026-10-15T00:00:00Z' }] }],
+    ['an empty commit list', { commits: [], comments: [{ body: MARK, createdAt: '2026-10-15T00:00:00Z' }] }],
+    ['a commit with no date', { commits: [{ oid: 'a'.repeat(40) }], comments: [{ body: MARK, createdAt: '2026-10-15T00:00:00Z' }] }],
+  ] as const)('%s: still handed-to-human, nothing written', (_n, v) => {
+    const r = run(['2966', '--arm'], { view: view(v) });
+    expect(r.status).toBe(1);
+    expect(r.verdict).toMatchObject({ proceed: false, reason: 'handed-to-human' });
+    expect(r.judgeArgs).toBeUndefined();
+    expect(writes(r.gh)).toEqual([]);
+  }, TIMEOUT);
+
+  it('a spent handoff still leaves the closing-link claim in force', () => {
+    const r = run(['2966', '--arm'], {
+      diff: CODE,
+      view: view({
+        closingIssuesReferences: [],
+        commits: commits('2026-10-25T10:13:30Z'),
+        comments: [{ body: MARK, createdAt: '2026-10-15T17:02:20Z' }],
+      }),
+    });
+    expect(r.status).toBe(1);
+    expect(r.verdict).toMatchObject({ proceed: false, reason: 'closes-link-unconfirmed' });
+    expect(writes(r.gh)).toEqual([]);
   }, TIMEOUT);
 });

@@ -272,7 +272,19 @@ decision-shaped-gate convention. The FRs above are written assuming every recomm
 is taken; approving this spec unchanged ratifies all four. A different choice on any one
 changes only the FRs that name it.
 
+All 4 decisions are resolved on the option this document already marks recommended. An agent
+session recorded them on 2026-10-27, acting on a standing instruction the founder gave on
+2026-10-26 to settle Clarify on recommended options (inbox item in66, relayed by the
+chief-of-staff proxy). That instruction lives outside this repo and is not a consent record
+(DR-108 delegated approval: a queue item cannot carry consent), so it is cited here as
+context, not verified. No human chose any single item. The selections are ratified only by
+approval of this spec, which DLG-001 (DR-108) covers.
+
 ### DQ-1 — Does v1 include issue and/or pull-request nodes, as the issue's title literally asks?
+
+**Recorded selection: Option A,** Epic, Spec and DR nodes only, fully offline, leaving issue
+and pull-request nodes until SPEC-085 lands. An agent session copied this document's (rec)
+option; no human chose this item.
 
 - **Option A — no; Epic/Spec/DR only, fully offline (rec).** FR-1, FR-9. Ships the part
   of the ask that needs no new consent surface, and keeps the node/edge shape open for
@@ -291,6 +303,10 @@ changes only the FRs that name it.
 
 ### DQ-2 — What renders the minimap, and what renders the expanded view?
 
+**Recorded selection: Option A,** a native TreeView minimap, with a webview only for the
+expanded view. An agent session copied this document's (rec) option; no human chose this
+item.
+
 - **Option A — native TreeView minimap; webview only for the expanded view (rec).** FR-2,
   FR-6, FR-7. Reuses the existing pane pattern for the always-visible surface (cheapest,
   most consistent, no CSP/bundle concern in the sidebar) and reserves the richer,
@@ -304,6 +320,9 @@ changes only the FRs that name it.
 
 ### DQ-3 — What computes the animated layout?
 
+**Recorded selection: Option A,** a hand-rolled layout with zero new dependencies. An agent
+session copied this document's (rec) option; no human chose this item.
+
 - **Option A — hand-rolled layout, zero new dependencies (rec).** FR-7. At this
   repository's scale (FR-8: ~100-200 nodes) a simple layered or force-directed layout is
   a bounded, testable amount of code, and keeps the T3 dependency budget (0-1 simple
@@ -316,6 +335,11 @@ changes only the FRs that name it.
   explicitly out of Phase 1.
 
 ### DQ-4 — When does Plan start, given the constitution names this item Phase 2?
+
+**Recorded selection: Option A,** approve the spec now and hold Plan, Tasks and Implement
+until the constitution's current-phase exit checklist is met or the founder sequences this
+item ahead of it. An agent session copied this document's (rec) option; no human chose this
+item.
 
 - **Option A — approve the spec now; hold Plan/Tasks/Implement until Phase 1's exit
   checklist is met, or the founder explicitly sequences this item ahead of it the way

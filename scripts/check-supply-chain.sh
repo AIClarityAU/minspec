@@ -181,12 +181,47 @@ if [ ! -x "$BUMBLEBEE_BIN" ]; then
     exit 2
   fi
   check_go_version "$GO_RESOLVED"
+  # bumblebee's module graph needs cgo, so a C compiler is as hard a prerequisite as Go
+  # itself (#1913). Probe it up front so its absence is named, not misreported later as
+  # an unreachable install target. Skipped when the caller disabled cgo explicitly.
+  if [ "${CGO_ENABLED:-}" != "0" ]; then
+    _cc_want="${CC:-}"
+    _cc_found=""
+    for _cc in ${_cc_want:+"$_cc_want"} cc gcc; do
+      if command -v "$_cc" >/dev/null 2>&1; then
+        _cc_found="$_cc"
+        break
+      fi
+    done
+    if [ -z "$_cc_found" ]; then
+      echo "check-supply-chain: no C compiler found. Tried, in order:" >&2
+      echo "    1. \$CC                          ${CC:-(unset)}" >&2
+      echo "    2. cc on \$PATH                  $(command -v cc 2>/dev/null || echo '(not found)')" >&2
+      echo "    3. gcc on \$PATH                 $(command -v gcc 2>/dev/null || echo '(not found)')" >&2
+      echo "  required for bumblebee install (cgo). Install a C compiler (gcc or clang)." >&2
+      echo "  (exit 2: could not run — not a threat finding)" >&2
+      exit 2
+    fi
+  fi
   echo "check-supply-chain: installing bumblebee $BUMBLEBEE_VERSION using $GO_RESOLVED..." >&2
-  if ! GOBIN="$HOME/go/bin" "$GO_RESOLVED" install "github.com/perplexityai/bumblebee/cmd/bumblebee@$BUMBLEBEE_VERSION"; then
+  # Capture go's stderr (still shown live via the file replay below) so the failure
+  # summary can quote the real cause instead of guessing "target unreachable" (#1913).
+  _install_err="$(mktemp)"
+  if ! GOBIN="$HOME/go/bin" "$GO_RESOLVED" install "github.com/perplexityai/bumblebee/cmd/bumblebee@$BUMBLEBEE_VERSION" 2>"$_install_err"; then
+    cat "$_install_err" >&2
+    # Last non-blank line that is not a progress ("go: downloading ...") line; fall back to
+    # the last non-blank line, then to a generic note if go printed nothing at all.
+    _cause="$(grep -v '^[[:space:]]*$' "$_install_err" | grep -v '^go: downloading ' | tail -n 1 || true)"  # swallow-ok: diagnostics only; empty falls through to the fallbacks below
+    [ -n "$_cause" ] || _cause="$(grep -v '^[[:space:]]*$' "$_install_err" | tail -n 1 || true)"  # swallow-ok: diagnostics only
+    [ -n "$_cause" ] || _cause="go install printed no error output"
+    rm -f "$_install_err"
     echo "check-supply-chain: bumblebee@$BUMBLEBEE_VERSION install failed" >&2
-    echo "  (exit 2: could not run — not a threat finding; the pinned install target may be unreachable)" >&2
+    echo "  cause: $_cause" >&2
+    echo "  (exit 2: could not run — not a threat finding)" >&2
     exit 2
   fi
+  cat "$_install_err" >&2
+  rm -f "$_install_err"
 fi
 
 mkdir -p "$OUT_DIR" "$CATALOG_DIR"

@@ -15,6 +15,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 let CONFIG: Record<string, unknown> = {};
 let WARN_CHOICE: string | undefined;
 const warnings: string[] = [];
+const warnActions: string[][] = [];
 const infos: string[] = [];
 
 vi.mock('vscode', () => ({
@@ -24,8 +25,9 @@ vi.mock('vscode', () => ({
     }),
   },
   window: {
-    showWarningMessage: vi.fn(async (msg: string) => {
+    showWarningMessage: vi.fn(async (msg: string, ...actions: string[]) => {
       warnings.push(msg);
+      warnActions.push(actions);
       return WARN_CHOICE;
     }),
     showInformationMessage: vi.fn(async (msg: string) => {
@@ -111,6 +113,7 @@ beforeEach(() => {
   CONFIG = { commitOnApprove: true };
   WARN_CHOICE = undefined;
   warnings.length = 0;
+  warnActions.length = 0;
   infos.length = 0;
   bodyArgs.length = 0;
   commitApprovalMock.mockReset().mockResolvedValue(REFUSED);
@@ -156,11 +159,18 @@ describe('protected-branch recovery wiring — #1115', () => {
   it('#1255 nit: declining shows ONE warning, not the offer plus a near-identical repeat', async () => {
     CONFIG.pushOnApprove = 'prompt';
     WARN_CHOICE = 'Not now';
+    // Preferences stubbed: the offer now records itself, and a real write under the
+    // fake '/root' would (correctly, #2506) raise its own "could not remember" toast.
+    vi.doMock('../src/lib/auto-bootstrap.js', () => ({
+      loadPreferences: () => ({}),
+      savePreferences: vi.fn(),
+    }));
     await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
     // Exactly the offer. Re-showing "NOT committed / default branch" after the user
     // has just read and answered it makes a deliberate choice look like an error.
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('Save it on a branch');
+    vi.doUnmock('../src/lib/auto-bootstrap.js');
   });
 
   it('pushOnApprove=never still shows the fallback warning — the user was never asked', async () => {
@@ -267,6 +277,55 @@ describe('protected-branch recovery wiring — #1115', () => {
     expect(warnings).toHaveLength(0);
     expect(recoverMock).toHaveBeenCalledTimes(1);
     vi.doUnmock('../src/lib/auto-bootstrap.js');
+  });
+
+  describe('#2258 — standing push consent offered from the recovery prompt (SPEC-050 FR-8)', () => {
+    const PATHS = ['/root/specs/x/requirements.md'];
+    function mockPrefs(initial: Record<string, unknown>) {
+      const saved: Array<Record<string, unknown>> = [];
+      vi.doMock('../src/lib/auto-bootstrap.js', () => ({
+        loadPreferences: () => ({ ...initial, ...Object.assign({}, ...saved) }),
+        savePreferences: (_root: string, patch: Record<string, unknown>) => {
+          saved.push(patch);
+        },
+      }));
+      return saved;
+    }
+
+    it('first prompt carries "Always push from now on"; choosing it records pushOnApprove=always AND recovers', async () => {
+      CONFIG.pushOnApprove = 'prompt';
+      WARN_CHOICE = 'Always push from now on';
+      const saved = mockPrefs({});
+      const r = await commitApprovalIfEnabled('/root', PATHS, 'msg');
+      expect(warnActions[0]).toEqual(['Save it on a branch', 'Always push from now on', 'Not now']);
+      expect(saved.some((p) => p.pushOnApprove === 'always')).toBe(true);
+      // the show-once memory is written too
+      expect(saved.some((p) => (p.answeredSignatures as Record<string, string> | undefined)?.pushAlwaysOffer === 'offered')).toBe(true);
+      // the approval the user just said yes to is not dropped
+      expect(recoverMock).toHaveBeenCalledTimes(1);
+      expect(r.suffix).not.toContain('NOT committed');
+      vi.doUnmock('../src/lib/auto-bootstrap.js');
+    });
+
+    it('show-once: after the offer was made the extra action is gone', async () => {
+      CONFIG.pushOnApprove = 'prompt';
+      WARN_CHOICE = 'Not now';
+      mockPrefs({ answeredSignatures: { pushAlwaysOffer: 'offered' } });
+      await commitApprovalIfEnabled('/root', PATHS, 'msg');
+      expect(warnActions[0]).toEqual(['Save it on a branch', 'Not now']);
+      vi.doUnmock('../src/lib/auto-bootstrap.js');
+    });
+
+    it('declining the first prompt still spends the offer and writes no consent', async () => {
+      CONFIG.pushOnApprove = 'prompt';
+      WARN_CHOICE = 'Not now';
+      const saved = mockPrefs({});
+      await commitApprovalIfEnabled('/root', PATHS, 'msg');
+      expect(saved.some((p) => 'pushOnApprove' in p)).toBe(false);
+      expect(saved.some((p) => (p.answeredSignatures as Record<string, string> | undefined)?.pushAlwaysOffer === 'offered')).toBe(true);
+      expect(recoverMock).not.toHaveBeenCalled();
+      vi.doUnmock('../src/lib/auto-bootstrap.js');
+    });
   });
 
   it('T3 #1653 review: the PR body names the RECOVERY commit, not the primary checkout HEAD', async () => {

@@ -1,7 +1,7 @@
 ---
 id: SPEC-223
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - DR-066's domain (no silent gate); the carve-out filter sits in front of the invariant-2 second witness
@@ -15,9 +15,9 @@ implements_reason: >-
   machinery set for every other change to it.
 affects: [packages/minspec/src/lib/machinery-paths.ts, packages/minspec/tests/machinery-carve-outs.test.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -187,10 +187,14 @@ recommended option costs.
 
 ## Decisions needed (Clarify)
 
+All 2 decisions are answered, not ratified: an agent session selected on 2026-10-25, for each, the option this document already recommended. No human chose them, and no delegation covers authoring Clarify answers. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted it. It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and that approval may overturn it.
+
 **DQ-1 - which form closes the asymmetry.** Every option edits `machinery-paths.ts`, which is
 listed in `MACHINERY_SINGLE_FILES`. So every option, including the doc-only one, is a
 machinery PR that a human must merge (ai-review gives it no SHA-bound pass). That cost is the
 same across the options and does not decide between them.
+
+**Recorded selection: Option (a),** the spec's reason is that it makes the check proven and drift-pinned with negative tests without touching live gate files.
 
 - **(a) A pure validator function, patterns stay where they are (rec).** FR-1 to FR-7 as
   written. The disjointness check becomes a parameterised refusal with negative tests, like
@@ -223,6 +227,7 @@ tests today. One option: a build-time step, or a tiny `scripts/` check run in CI
   is the repo's normal level for a cross-language invariant (the hand-copy pins work the same
   way). A new CI step would be a second machinery change, widening this past #2026's scope
   (triage rule 2). If wanted, it goes in a separate issue.
+  **Recorded selection: Option Leave it out of this spec,** the spec's reason is that test enforcement is the repo's normal level for a cross-language invariant and a new CI step would widen scope.
 
 ## Limitations, stated plainly
 

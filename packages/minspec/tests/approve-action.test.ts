@@ -126,7 +126,10 @@ vi.mock('../src/lib/config', async (importOriginal) => ({
   loadConfig: vi.fn(() => ({})),
 }));
 
-vi.mock('../src/lib/spec-validator', () => ({
+vi.mock('../src/lib/spec-validator', async (importOriginal) => ({
+  // #1373: spread the real module so a newly added export flows through
+  // instead of leaving this hand-kept mirror stale. spec-validator is pure.
+  ...(await importOriginal<typeof import('../src/lib/spec-validator')>()),
   validateSpec: vi.fn(),
   // #1317: defaults to "the advance introduces nothing", so every pre-existing
   // case here keeps approving exactly as before. The refusal path is exercised

@@ -8,6 +8,10 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { prFromSubject, readContentPullRequest } from '../../../scripts/lib/content-pr';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// Module scope (#1399): shells out; vitest's 5s default flakes under load (#2598).
+useShellTimeout();
 
 describe('prFromSubject', () => {
   it('reads squash and merge-commit subjects, nothing else', () => {

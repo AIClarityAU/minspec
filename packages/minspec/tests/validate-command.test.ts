@@ -33,7 +33,10 @@ vi.mock('../src/lib/config', async (importOriginal) => ({
   loadConfig: vi.fn(),
 }));
 
-vi.mock('../src/lib/spec-validator', () => ({
+vi.mock('../src/lib/spec-validator', async (importOriginal) => ({
+  // #1373: spread the real module so a newly added export flows through
+  // instead of leaving this hand-kept mirror stale. spec-validator is pure.
+  ...(await importOriginal<typeof import('../src/lib/spec-validator')>()),
   validateSpec: vi.fn(),
   // #1317: approve.ts binds this import at module load, so any suite whose graph
   // reaches it needs the export present even when it never exercises the gate.
@@ -55,6 +58,10 @@ vi.mock('../src/lib/approval', () => ({
 // of depending on whether the fake `/tmp/ws/...` test paths happen to exist.
 vi.mock('../src/lib/spec-layout', () => ({
   readShardIdFiles: vi.fn(() => []),
+}));
+
+vi.mock('../src/lib/artifact-graph', () => ({
+  readSpecTaskTally: vi.fn(() => ({ total: 0, remaining: 0 })),
 }));
 
 // ─── Imports ──────────────────────────────────────────────────────────────────
@@ -435,6 +442,7 @@ describe('validateSpecCommand', () => {
       explicitTerminal: undefined,
       siblingShardFiles: [],
       pathExists: expect.any(Function),
+      taskTally: { total: 0, remaining: 0 },
     });
   });
 

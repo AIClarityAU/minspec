@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-258-shepherd-fix-quota-classification/requirements.md",
+  "specHash": "260b5b3e323a305c3b0d768aa9ec70a40820919ccc29c001ff59a20772032515",
+  "approvedAt": "2026-11-12T06:05:37.003Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-pile-1112a-implements",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3630#issuecomment-6815532762"
+}

@@ -27,7 +27,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 
 import { generateHarnessFiles, refreshHarnessFiles } from '../src/lib/scaffold';
 import {
@@ -39,6 +39,9 @@ import {
   renderManagedBlock,
 } from '../src/lib/template-registry';
 import { splitManagedRegion } from '../src/lib/merge-refresh';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+useShellTimeout();
 
 const PRE_COMMIT = `${MINSPEC_HOOKS_DIR}/pre-commit`;
 const COMMIT_MSG = `${MINSPEC_HOOKS_DIR}/commit-msg`;
@@ -112,8 +115,10 @@ describe('the scaffolded hook scripts actually enforce the SDD gates', () => {
     // Opt-in config key + the documented bypass.
     expect(c).toContain('minspec.allowedCommitEmails');
     expect(c).toContain('EMAIL_GATE_OFF');
-    // Reads the live identity, not a cached/assumed one.
-    expect(c).toContain('git config --get user.email');
+    // The VERDICT reads git's own resolved identity (git var GIT_AUTHOR_IDENT),
+    // not the user.email proxy. `git config --get user.email` still appears in
+    // the advisory message builder, so asserting on it would pass on the wrong line.
+    expect(c).toContain('git var GIT_AUTHOR_IDENT');
     // Names the actual symptom this gate exists to prevent, so the refusal is
     // self-explanatory rather than a bare "not allowed".
     expect(c).toMatch(/ghost/i);
@@ -127,7 +132,11 @@ describe('the scaffolded hook scripts actually enforce the SDD gates', () => {
     expect(c).toContain('not installed');
     // The gitleaks-absent branch (between `else` and its closing `fi`) warns and
     // does NOT exit non-zero — a missing optional tool degrades, never blocks.
-    const m = c.match(/\belse\b([\s\S]*?)\bfi\b/);
+    // Anchored to the block that starts at `command -v gitleaks`, and to a
+    // column-0 `else`/`fi` (the outer if), so an earlier stage's `else` or a
+    // comment containing the word cannot be inspected instead.
+    const fromGitleaks = c.slice(c.indexOf('command -v gitleaks'));
+    const m = fromGitleaks.match(/^else[ \t]*\n([\s\S]*?)^fi\b/m);
     expect(m, 'expected an else…fi block for the gitleaks-absent path').not.toBeNull();
     const elseBranch = m![1];
     expect(elseBranch).toContain('SKIPPED');
@@ -636,6 +645,13 @@ describe('python validate.py mirrors the Node validator core checks (#246)', () 
       expect(py.stderr).not.toContain('missing `id: SPEC-NNN`');
     });
 
+    it.skipIf(!hasPy)('#3595 — unterminated frontmatter keeps the "missing or invalid" wording adopters pin', () => {
+      writeSpec('specs/a/requirements.md', '---\nid: SPEC-001\nstatus: specifying\n# never closed\n');
+      const py = runValidatePy();
+      expect(py.code).toBe(1);
+      expect(py.stderr).toContain('missing or invalid `id: SPEC-NNN`');
+    });
+
     it.skipIf(!hasPy)('reports "missing", not "invalid", when the id key is absent entirely', () => {
       writeSpec('specs/spec-y/spec.md', '---\nstatus: specifying\n---\n# no id\n');
       const py = runValidatePy();
@@ -680,5 +696,95 @@ describe('python validate.py mirrors the Node validator core checks (#246)', () 
       const py = runValidatePy();
       expect(py.code, py.stderr).toBe(0);
     });
+  });
+});
+
+describe('pre-commit committed-symlink gate (#922) — executed behavior', { timeout: 60_000 }, () => {
+  let repo: string;
+  const git = (...args: string[]) =>
+    execFileSync('git', args, { cwd: repo, stdio: 'pipe' });
+
+  beforeEach(() => {
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-922-symlink-'));
+    git('init', '-q');
+    git('config', 'user.email', 'dev@example.com');
+    git('config', 'user.name', 'dev');
+    generateHarnessFiles(repo);
+  });
+
+  afterEach(() => {
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
+  function runHook(env: Record<string, string> = {}): { code: number; stderr: string } {
+    const hook = path.join(repo, PRE_COMMIT);
+    // `sh` (not bash) — the scaffolded hook is POSIX sh. Run on a branch so the
+    // protected-branch guard (no origin/HEAD → fails open) stays out of the way.
+    const res = spawnSync('sh', [hook], {
+      cwd: repo,
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: process.env.PATH ?? '', SYMLINK_GATE_OFF: '', ...env },
+    });
+    return { code: res.status ?? -1, stderr: res.stderr };
+  }
+
+  function stageLink(rel: string, target: string): void {
+    const full = path.join(repo, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.symlinkSync(target, full);
+    git('add', '-f', '--', rel);
+  }
+
+  it('template carries the gate and its bypass', () => {
+    const c = byPath(PRE_COMMIT).content;
+    expect(c).toContain('SYMLINK_GATE_OFF');
+    expect(c).toContain('120000');
+  });
+
+  it('refuses a node_modules symlink at the root, whatever the target', () => {
+    stageLink('node_modules', 'vendor');
+    const r = runHook();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("'node_modules' symlink");
+  });
+
+  it('refuses a node_modules symlink at depth', () => {
+    stageLink('packages/a/node_modules', 'sibling');
+    const r = runHook();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('packages/a/node_modules');
+  });
+
+  it('refuses a symlink with an absolute target', () => {
+    stageLink('link', '/home/dev/code/primary/thing');
+    const r = runHook();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('absolute path');
+  });
+
+  it('refuses a symlink whose target escapes the repo root', () => {
+    stageLink('a/link', '../../outside');
+    const r = runHook();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('escapes the repository root');
+  });
+
+  it('allows an in-repo relative symlink', () => {
+    fs.writeFileSync(path.join(repo, 'real.txt'), 'x\n');
+    stageLink('a/link', '../real.txt');
+    const r = runHook();
+    expect(r.stderr).not.toContain('refusing staged symlink');
+  });
+
+  it('SYMLINK_GATE_OFF=1 bypasses the gate', () => {
+    stageLink('node_modules', 'vendor');
+    const r = runHook({ SYMLINK_GATE_OFF: '1' });
+    expect(r.stderr).not.toContain('refusing staged symlink');
+  });
+
+  it('MINSPEC_GATE_OFF=1 bypasses the whole hook', () => {
+    stageLink('node_modules', 'vendor');
+    const r = runHook({ MINSPEC_GATE_OFF: '1' });
+    expect(r.code).toBe(0);
   });
 });
