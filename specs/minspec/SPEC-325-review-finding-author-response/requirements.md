@@ -179,6 +179,8 @@ becomes scored).
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 6 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 Each item gives a recommendation and the cost of taking it.
 
 - **D1 - How is `fixed` decided?**
@@ -190,6 +192,8 @@ Each item gives a recommendation and the cost of taking it.
     call per finding (tenet 2), non-determinism in a measurement that then vetoes a gate.
   - Option C: path-only (any edit to the file counts). *Cost:* far more false `fixed`,
     especially on large files.
+
+  **Recorded selection: the recommended option,** Option A, deterministic: a later commit on the PR edits the cited path within a line window. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D2 - What is a dispute? Today there is no channel for one.**
   - **Option A (rec): an explicit, machine-readable marker in a PR comment by the PR's
     author or the remediation agent, naming the finding id (the reader would print ids
@@ -200,6 +204,8 @@ Each item gives a recommendation and the cost of taking it.
     matching is unreliable; an LLM adds spend and a second untrusted-text surface.
   - Option C: drop `disputed`; track only fixed / ignored. *Cost:* loses the only route to
     reviewer false-positive cases, half of what the issue asks for.
+
+  **Recorded selection: the recommended option,** Option A, an explicit machine-readable marker in a PR comment naming the finding id. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D3 - Finding identity and cross-round matching.**
   - **Option A (rec): id = round head commit + voter + ordinal, computed by the reader from
     what is already posted; a later round's finding matches an earlier one when voter,
@@ -208,6 +214,8 @@ Each item gives a recommendation and the cost of taking it.
   - Option B: ai-review renders an id next to each finding. *Cost:* edits
     `ai-review.yml` and the guard, which is merge-gating machinery needing founder review
     (`machinery-review-required`); gives authors a stable handle for D2.
+
+  **Recorded selection: the recommended option,** Option A, id = round head commit + voter + ordinal, computed by the reader. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D4 - Where do outcomes live, and when does the reader run?**
   - **Option A (rec): on demand plus as a step of SPEC-291's draft job; output is printed
     and handed to the drafter, with no committed outcome store.** *Cost:* the
@@ -215,6 +223,8 @@ Each item gives a recommendation and the cost of taking it.
     history of outcome counts over time.
   - Option B: also append a JSONL history under `tests/review-eval/`. *Cost:* repo growth
     and a second history file to keep consistent with SPEC-291's.
+
+  **Recorded selection: the recommended option,** Option A, on demand plus as a step of SPEC-291's draft job, with no committed outcome store. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D5 - How much weight do author responses get in promotion?**
   - **Option A (rec): veto only (FR7).** *Cost:* a case the author evidence strongly
     supports still needs SPEC-291's consistency check to promote. Reason for the
@@ -223,10 +233,14 @@ Each item gives a recommendation and the cost of taking it.
   - Option B: `ignored-then-fixed` and `disputed-and-held` promote without the K-run
     check. *Cost:* skips the noise measurement, so a case that flips run to run enters
     the score.
+
+  **Recorded selection: the recommended option,** Option A, veto only (FR7). Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D6 - Decision record?** I recommend none: the outcome rules, storage and veto are each
   reversible in under a day (the decision-record filter: only a choice that cannot be undone in under a day needs one). *Cost:* if D2 or D3 picks a protocol change to
   ai-review comments, that change is harder to undo once adopters of the marker exist, and
   should then get a DR at Plan.
+
+  **Recorded selection: the recommended option,** no decision record. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 ## Follow-ups (tracked)
 
