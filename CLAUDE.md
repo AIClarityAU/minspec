@@ -230,11 +230,9 @@ human chose it. When every question carries one, `phases.clarify: done` is a tru
 approving the spec ratifies the picks. Reviewers do not block `clarify: done` because the picks
 are agent-recorded or because the text says the approver may change them. They still block it
 when a question has no recorded selection, names no recommended option, or the spec's own text
-keeps it open on purpose (SPEC-225 for the founder, SPEC-255 until a new DR). On main today,
-`specify: in-progress` next to `clarify: done` is the state between Clarify and sign-off (the
-approval commit sets `specify: done`, as in #3564, SPEC-294 approval); SPEC-320 (#3414, clarify
-done arms the freeze) may move where Clarify is recorded, and the rule above holds wherever it
-is. This decision covers T3 only; it is not a delegation (#3411).
+keeps it open on purpose (SPEC-225 for the founder, SPEC-255 until a new DR). Which phase field
+records a closed Clarify, and in which phase pair, is SPEC-320's open question (#3414); this
+rule settles only who closes it. This decision covers T3 only; it is not a delegation (#3411).
 
 Roles: `scripts/roles/` — triage, dev, architect, security, reviewer.
 Dispatch: `scripts/dispatch-issue.sh <N>` — reads `role:X` label, loads role prompt.
