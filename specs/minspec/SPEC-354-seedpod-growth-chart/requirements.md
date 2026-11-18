@@ -6,13 +6,15 @@ tier: T4
 product: minspec
 epic: EPIC-002  # Signpost Integrity — visualizes the same spec-before-code thesis the signpost enforces; a chart that misstates "approved"/"tested" is a false signpost in a different shape
 aspects: [ux, data]
-relates_to: [DR-038, DR-039, SPEC-012, SPEC-014, SPEC-010, SPEC-096, "#99"]
+relates_to: [DR-038, DR-039, DR-087, SPEC-012, SPEC-014, SPEC-010, SPEC-096, "#99"]
 implements: none
 implements_reason: >-
   Specified, not built. No webview, command, or data module for this feature exists today:
-  zero hits for "seedpod" or "pod chart" anywhere in packages/minspec/src, the only
-  createWebviewPanel caller is the pre-existing spec-panel.ts (which SPEC-014's own Context
-  section already distinguishes from a new surface), and git-analyzer.ts's line-count helpers
+  zero hits for "seedpod" or "pod chart" anywhere in packages/minspec/src, the two
+  existing createWebviewPanel callers are spec-panel.ts (SPEC-014's review webview, which
+  SPEC-014's own Context section already distinguishes from a new surface) and
+  getting-started-webview.ts (the Getting Started walkthrough), neither of which charts
+  anything, and git-analyzer.ts's line-count helpers
   measure one diff (current staged/working change), not a historical time series. This is the
   Specify-phase artifact for #99; Plan will declare the owned files once DQ-1/DQ-3 below are
   answered, since the answer changes which files this spec would own.
@@ -66,7 +68,7 @@ explicitly a visualization of the methodology's own thesis: spec precedes code, 
 project's code grows to close the gap. A chart that overstates "approved" or "tested" would
 be a false signpost in a different shape, so it inherits EPIC-002's never-wrong discipline
 even though it is not itself a gate. [SPEC-014](../SPEC-014-review-webview/requirements.md)
-(the only other webview this product ships) lives in the same epic for the same reason: it is
+(another webview this product ships, alongside the Getting Started walkthrough) lives in the same epic for the same reason: it is
 a *surface*, not a new source of truth.
 
 ### What already exists that this spec can reuse — and what it cannot
@@ -333,8 +335,9 @@ B without one.
 - **Epic:** [EPIC-002 Signpost Integrity](../../../docs/epics/EPIC-002-signpost-integrity.md).
 - **Related specs:** [SPEC-012 Next-Task Resolver](../SPEC-012-next-task-resolver/requirements.md)
   (the signpost priority DAG this chart visualizes a project-wide view alongside, DQ-6),
-  [SPEC-014 Prettified Spec-Review Webview](../SPEC-014-review-webview/requirements.md) (the
-  only other webview panel in the product — its Tier-0/no-auto-open precedent is reused here),
+  [SPEC-014 Prettified Spec-Review Webview](../SPEC-014-review-webview/requirements.md) (a
+  shipped webview panel whose Tier-0/no-auto-open precedent is reused here; the Getting
+  Started walkthrough in getting-started-webview.ts is the other),
   [SPEC-010 Signpost Correctness](../SPEC-010-signpost-correctness/requirements.md) (the
   never-wrong framing this chart inherits even though it is not itself a gate),
   [SPEC-096](../SPEC-096-opt-in-marker-single-creator/requirements.md) (the opt-in-marker rule
