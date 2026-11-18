@@ -1,7 +1,7 @@
 ---
 id: SPEC-323
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the approval/acceptance flow this arms
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Expected surface: `packages/minspec/src/commands/commit-on-approve.ts`
   (`openApprovalPr`, line 804 at the time of writing) plus one small arm seam and tests. None of it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
