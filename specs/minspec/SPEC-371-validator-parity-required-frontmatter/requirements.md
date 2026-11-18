@@ -1,5 +1,5 @@
 ---
-id: SPEC-137
+id: SPEC-371
 type: requirements
 status: specifying
 tier: T3
@@ -9,7 +9,7 @@ aspects: [validator, frontmatter, parity, ci-gate, silent-gate, tier-0]
 relates_to: ["#1033", "#972", "#137", "#1027", DR-003, SPEC-075]
 ---
 
-# SPEC-137: The CI frontmatter gate and the in-extension validator enforce one required-field schema (Requirements)
+# SPEC-371: The CI frontmatter gate and the in-extension validator enforce one required-field schema (Requirements)
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human reads
 > it, answers the questions under *Decisions needed (Clarify)*, and approves it before code
@@ -22,11 +22,11 @@ while the editor flags the same files.
 ## Root cause (measured, not inferred)
 
 - The schema is stated once, in `CLOSED_SET_FIELDS`
-  (`packages/minspec/src/lib/spec-validator.ts:534`); `status` is `required: true` (line 536).
+  (`packages/minspec/src/lib/spec-validator.ts:534`); `status` is `required: true` (line 540).
 - It is enforced only inside `validateSpec` (line 1157), via `checkClosedSetField` (line 575),
   which is **not exported**.
 - `scripts/validate-frontmatter.ts` never calls `validateSpec` and cannot reach
-  `checkClosedSetField`. Its spec loop (Rule 2 + 5, around line 194) checks `id` and `epic`
+  `checkClosedSetField`. Its spec loop (the `Rule 2 + 5` block, around line 277) checks `id` and `epic`
   only, with its own hand-written logic. So `status`, `tier` (primary specs) and
   `superseded-by` presence are never evaluated in CI.
 - This is a field-agnostic hole, not a `status` hole: any field added to `CLOSED_SET_FIELDS`
