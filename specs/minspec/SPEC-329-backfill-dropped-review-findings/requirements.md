@@ -1,7 +1,7 @@
 ---
 id: SPEC-329
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - stops the ai-review gate silently discarding findings
@@ -15,8 +15,8 @@ implements_reason: >-
   after the Clarify decisions below.
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
