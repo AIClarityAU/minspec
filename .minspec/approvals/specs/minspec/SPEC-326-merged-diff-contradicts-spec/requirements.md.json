@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-326-merged-diff-contradicts-spec/requirements.md",
+  "specHash": "e5608c06f7b4c3c3d3c7664d996ba169edbfac2b83941127e4e7043cc9b38db5",
+  "approvedAt": "2026-11-13T06:49:04.143Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:docs/clarify-recs-1113",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3697#issuecomment-6840772356"
+}

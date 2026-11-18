@@ -1,7 +1,7 @@
 ---
 id: SPEC-314
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the doc-before-code gate, moved to the commit boundary
@@ -17,9 +17,9 @@ relates_to: [DR-047, DR-031, DR-029, SPEC-143, SPEC-022, SPEC-038, SPEC-070, SPE
 implements: [scripts/hooks/spec-commit-gate.py, packages/minspec/tests/pre-commit-spec-gate.test.ts]
 affects: [.githooks/pre-commit, scripts/hooks/spec-gate.py]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
