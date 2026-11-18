@@ -1,7 +1,7 @@
 ---
 id: SPEC-326
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - "approved" certifies the spec text only; this reports when the merged code no longer matches it
@@ -16,9 +16,9 @@ implements_reason: >-
   and trusted-block change in scripts/review-branch.sh. Ownership is declared in Plan,
   before approval mints a hash (SPEC-051).
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

@@ -146,7 +146,9 @@ def fm_list(fm, key):
     """
     toks = []
     inline = fm_value(fm, key)
-    if inline is not None:
+    # `''` (trailing space after a block-form key) is NOT an inline form - fall
+    # through to the block branch, as the TS twin does (#3653).
+    if inline:
         for t in re.split(r'[,\s\[\]]+', inline):
             if t:
                 toks.append(t.strip().strip('"').strip("'"))
