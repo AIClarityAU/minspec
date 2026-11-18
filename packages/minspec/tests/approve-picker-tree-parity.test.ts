@@ -10,8 +10,8 @@
  *
  * T0 (invariant): the two predicates agree for EVERY status x approval pair, and
  *                 every SPEC_STATUSES member is explicitly classified terminal
- *                 or active (the asymmetry gate — a new status must be decided,
- *                 not silently default to "active").
+ *                 or active in a hand-written table (the asymmetry gate — a new
+ *                 status must be decided, not silently default to "active").
  * T3 (regression): SPEC-007's pre-approval shape (`done`, unapproved) and
  *                 SPEC-056's shape (`superseded`, unapproved).
  */
@@ -56,8 +56,25 @@ import { SpecNode } from '../src/views/spec-tree-provider';
 import type { SpecSummary } from '../src/lib/spec-manager';
 import type { ApprovalStatus } from '../src/lib/approval';
 
-/** Non-terminal statuses, derived so a new status is classified by the terminal set. */
-const ACTIVE_SPEC_STATUSES = SPEC_STATUSES.filter((st) => !isTerminalSpecStatus(st));
+/**
+ * The decided lifecycle class of every spec status, written out by hand. It is NOT
+ * derived from SPEC_STATUSES or TERMINAL_SPEC_STATUSES: deriving it (e.g. as the
+ * complement of the terminal set) would make the classification test below a
+ * tautology that passes for any vocabulary. A status added to SPEC_STATUSES without a
+ * row here fails that test, so the new status must be decided, not defaulted.
+ */
+const DECIDED_STATUS_CLASS: Readonly<Record<string, 'terminal' | 'active'>> = {
+  new: 'active',
+  specifying: 'active',
+  planning: 'active',
+  implementing: 'active',
+  done: 'terminal',
+  archived: 'terminal',
+  superseded: 'terminal',
+};
+
+/** Non-terminal statuses, per the hand-decided table above. */
+const ACTIVE_SPEC_STATUSES = SPEC_STATUSES.filter((st) => DECIDED_STATUS_CLASS[st] === 'active');
 
 const APPROVAL_STATES: ApprovalStatus[] = ['unapproved', 'approved', 'stale'];
 
@@ -104,12 +121,18 @@ function pickerOffers(status: SpecStatus, approval: ApprovalStatus): boolean {
 
 describe('approve picker <-> Specs tree parity (#440)', () => {
   it('T0: every spec status is explicitly classified terminal or active', () => {
-    const union = [...TERMINAL_SPEC_STATUSES, ...ACTIVE_SPEC_STATUSES];
     // No status may be left unclassified (the asymmetry that let `superseded`
-    // default to "active" when SPEC-017 added it).
-    expect([...union].sort()).toEqual([...SPEC_STATUSES].sort());
-    // And none may be claimed by both sets.
-    expect(new Set(union).size).toBe(union.length);
+    // default to "active" when SPEC-017 added it): the hand-decided table must
+    // cover exactly the vocabulary, so a new status fails here until decided.
+    expect(Object.keys(DECIDED_STATUS_CLASS).sort()).toEqual([...SPEC_STATUSES].sort());
+    // And the product's terminal set must match the decision for every status.
+    for (const status of SPEC_STATUSES) {
+      expect({ status, terminal: isTerminalSpecStatus(status) })
+        .toEqual({ status, terminal: DECIDED_STATUS_CLASS[status] === 'terminal' });
+    }
+    expect([...TERMINAL_SPEC_STATUSES].sort()).toEqual(
+      SPEC_STATUSES.filter((st) => DECIDED_STATUS_CLASS[st] === 'terminal').sort(),
+    );
   });
 
   it('T0: `superseded` is terminal, like `done` and `archived`', () => {
