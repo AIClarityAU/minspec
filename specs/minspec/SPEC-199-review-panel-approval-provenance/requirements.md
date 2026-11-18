@@ -1,7 +1,7 @@
 ---
 id: SPEC-199
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - the AI review panel must judge a human sign-off on evidence, not on a guess
@@ -17,9 +17,9 @@ implements: [scripts/approval-provenance.py, packages/minspec/tests/approval-pro
 # `approval-provenance-script` entry) and is review machinery.
 affects: [scripts/review-branch.sh, packages/minspec/src/lib/template-registry.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
