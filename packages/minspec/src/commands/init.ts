@@ -1270,6 +1270,53 @@ export async function offerCoverageThresholdPrompt(folder: string): Promise<void
   }
 }
 
+/** Quick-pick label for the multi-root "initialize every folder" choice (#294). */
+export const INIT_ALL_LABEL = 'All uninitialized folders';
+
+/**
+ * Multi-root target selection for Initialize SDD Structure (#294). Only engages when
+ * the workspace has 2+ folders AND 2+ of them lack `.minspec/config.json` — otherwise
+ * returns `undefined` and the caller falls through to the usual single-folder
+ * resolution. When engaged it ALWAYS asks (the active editor's folder is listed
+ * first, not silently chosen), so a focused file can no longer steer init at a
+ * folder the user did not mean. Returns the folders to initialize, or 'cancelled'.
+ */
+async function pickInitTargets(): Promise<string[] | 'cancelled' | undefined> {
+  const folders = vscode.workspace?.workspaceFolders;
+  if (!folders || folders.length < 2) return undefined;
+  const paths = folders.map((f) => f.uri.fsPath);
+  const uninitialized = paths.filter(
+    (p) => !fs.existsSync(path.join(p, '.minspec', 'config.json')),
+  );
+  if (uninitialized.length < 2) return undefined;
+
+  const active = vscode.window.activeTextEditor?.document.uri.fsPath;
+  const activeFolder = active
+    ? paths
+        .filter((p) => active === p || active.startsWith(p.endsWith('/') ? p : p + '/'))
+        .sort((a, b) => b.length - a.length)[0]
+    : undefined;
+  const ordered = [...paths].sort(
+    (a, b) => Number(b === activeFolder) - Number(a === activeFolder),
+  );
+  const items = [
+    ...ordered.map((p) => ({
+      label: workspaceFolderLabel(p),
+      description: uninitialized.includes(p) ? p : `${p} (already initialized)`,
+      folders: [p],
+    })),
+    {
+      label: INIT_ALL_LABEL,
+      description: `${uninitialized.length} folders`,
+      folders: uninitialized,
+    },
+  ];
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: 'MinSpec: select the project to initialize',
+  });
+  return picked ? picked.folders : 'cancelled';
+}
+
 export async function initCommand(
   folderArg?: string,
   deps?: OfferScaffoldCommitDeps & {
@@ -1278,6 +1325,17 @@ export async function initCommand(
     githubPrExt?: GitHubPrExtAdvisoryDeps;
   },
 ): Promise<void> {
+  if (folderArg === undefined) {
+    const choice = await pickInitTargets();
+    if (choice === 'cancelled') return;
+    if (choice) {
+      // "All uninitialized folders": run the full per-folder init for each, in
+      // workspace order. A failure in one folder is surfaced by that folder's own
+      // run and never stops the rest.
+      for (const target of choice) await initCommand(target, deps);
+      return;
+    }
+  }
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
   // Onboarding only makes sense the FIRST time a project gets a config.json —

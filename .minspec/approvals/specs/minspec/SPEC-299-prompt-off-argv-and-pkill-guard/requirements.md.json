@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-299-prompt-off-argv-and-pkill-guard/requirements.md",
+  "specHash": "7554ddfd961ffc9dc5c99a59c0727a4caacb71442a88c17c0b4994f92f5f4808",
+  "approvedAt": "2026-11-13T05:41:36.503Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:docs/clarify-recs-1113",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3697#issuecomment-6840772356"
+}
