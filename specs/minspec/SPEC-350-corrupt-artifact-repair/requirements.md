@@ -173,22 +173,34 @@ than user-consented `.bak` files. ADR filter: undoable in under a day → no new
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 5 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 - **D1 — What is "malformed constitution"?** `parseConstitution` never fails. Options:
   **(a, rec)** structural check only: no `## Invariants` heading, or heading present with zero
   list items, or non-UTF-8/binary content; cost: misses semantic damage and may flag a
   deliberately minimal constitution. **(b)** also flag unbalanced fences/markers; cost: more
   false positives. **(c)** config.json only in v1, constitution deferred; cost: half of #39
   unmet.
+
+  **Recorded selection: the recommended option,** option (a), a structural check only. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D2 — Preview strictness.** **(a, rec)** always diff-preview then confirm; cost: an extra
   click for trivial repairs. **(b)** preview only when content would be dropped; cost: a
   classifier decides when the user sees the diff, a new bug surface.
+
+  **Recorded selection: the recommended option,** option (a), always diff-preview then confirm. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D3 — Backup naming.** **(a, rec)** `config.json.bak`, and `.bak.1`, `.bak.2`… if present;
   cost: stray files accumulate. **(b)** overwrite single `.bak`; cost: second repair destroys
   the first backup — the exact data loss this spec forbids.
+
+  **Recorded selection: the recommended option,** option (a), `config.json.bak`, then `.bak.1`, `.bak.2` when present. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D4 — JSONC tolerance.** Does `config.json` with comments/trailing commas count as corrupt?
   **(a, rec)** yes — strict JSON, matching how readers parse it today; cost: users who hand-
   commented get an offer that strips comments (shown in preview, kept in `.bak`). **(b)** accept
   JSONC; cost: readers would also have to accept it, widening scope.
+
+  **Recorded selection: the recommended option,** option (a), yes, strict JSON. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D5 — Unsaved editor buffer.** **(a, rec)** skip the offer while the document is dirty;
   cost: delayed detection. **(b)** repair from the buffer; cost: complexity and risk of
   persisting unsaved edits unintentionally.
+
+  **Recorded selection: the recommended option,** option (a), skip the offer while the document is dirty. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.

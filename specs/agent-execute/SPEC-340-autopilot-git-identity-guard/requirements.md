@@ -1,7 +1,7 @@
 ---
 id: SPEC-340
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: agent-execute
 epic: EPIC-007  # Agent Execute Extension - Autopilot Mode (DR-036) runs inside the agent-dispatch surface
@@ -15,8 +15,8 @@ implements_reason: >-
   neither does a `gate-placement` config key. Which files this spec owns is declared at Plan.
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
