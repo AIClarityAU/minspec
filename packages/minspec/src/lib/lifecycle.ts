@@ -10,8 +10,8 @@
 
 import type { Phase } from './config';
 import { PHASES } from './config';
-import type { PhaseStatus, SpecStatus } from './spec';
-import type { ApprovalStatus } from './approval';
+import type { PhaseStatus, SpecStatus } from './spec-vocabulary';
+import type { ApprovalStatus } from './approval-types';
 
 // Re-export so consumers can import from either module
 export type { PhaseStatus, SpecStatus };
