@@ -93,3 +93,17 @@ The `awaiting-approval` applier (SPEC-031 FR-9a). Changing the remediation cap o
   - (b) Drop the label, rely on the red status and `ai-review-retry`: queue stays clean. Cost: an errored run sits silently red with no human signal if retry also fails, which edges toward a silent gate.
   - (c) Apply only after one automatic re-run also errors: best of both, but adds state and a new workflow path.
 - **D3 — Is item 1 closed by what already shipped?** If D1(a) and D2(a) are chosen, the remaining work is FR-6 plus tidying the issue's stale description; the issue could close after the wiring test lands. Alternatively keep it open for D1(b)/D2(b).
+
+  **Answer (fact, agent, 2026-11-17):** half of item 1 has shipped; whether the other half closes it
+  is D2's call, not a further fact. Shipped: a normal `ai-review:changes` no longer summons a
+  human at t=0 - `.github/workflows/ai-review.yml:1548` routes it through
+  `shouldSummonHumanReview` (`.github/scripts/ai-review-guard.js:2086`). Not shipped: the
+  fail-closed backstop still adds `needs-human-review` unconditionally, under a comment saying
+  it is kept eager on purpose (`.github/workflows/ai-review.yml:1607-1617`). Under D2 option (a),
+  the recommended option, that backstop stays by design, so item 1 is closed by what shipped and
+  #816 (still open) can close once the FR-6 wiring test lands. Under D2 (b) or (c) it is not.
+  **Recommended (agent, 2026-11-17):** item 1 is closed by what shipped, given D2 option (a); close
+  #816 when the FR-6 wiring test lands - cost: if sign-off picks D2 (b) or (c) instead, this
+  answer flips and item 1 stays open.
+  **Recorded selection: the recommended option,** item 1 is closed by what shipped, given D2
+  option (a); #816 closes when the FR-6 wiring test lands. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
