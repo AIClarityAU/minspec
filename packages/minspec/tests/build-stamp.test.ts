@@ -26,6 +26,7 @@ import * as path from 'path';
 const PKG_DIR = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(PKG_DIR, '../..');
 const WORKFLOW_DIR = path.join(REPO_ROOT, '.github', 'workflows');
+const SHARED_OUT = path.join(REPO_ROOT, 'packages', 'shared', 'out');
 
 /** Give the real bundler room on a cold CI runner — this shells out to esbuild + tsc. */
 const BUILD_TIMEOUT_MS = 300_000;
@@ -46,6 +47,23 @@ const STAMP_RE = new RegExp(`"${HEAD_SHA}(-dirty)?"`);
 let tmpDir: string;
 let build: { status: number | null; output: string };
 let bundleText = '';
+let sharedOutBefore: Map<string, string> | null = null;
+
+/**
+ * Identity of every emitted `.js` file in the LIVE `packages/shared/out`: inode, mtime and
+ * content. Any rewrite shows here, even one that writes back identical bytes, because tsc
+ * truncates and rewrites in place (#2244). `null` when shared has not been built.
+ */
+function snapshotSharedOut(): Map<string, string> | null {
+  if (!fs.existsSync(path.join(SHARED_OUT, 'index.js'))) return null;
+  const snap = new Map<string, string>();
+  for (const name of fs.readdirSync(SHARED_OUT).filter((f) => f.endsWith('.js')).sort()) {
+    const file = path.join(SHARED_OUT, name);
+    const st = fs.statSync(file);
+    snap.set(name, `${st.ino}:${st.mtimeMs}:${fs.readFileSync(file, 'utf-8')}`);
+  }
+  return snap;
+}
 
 /**
  * Run the extension build the way CI's `package` job does — `npm run build`, the DEFAULT
@@ -56,9 +74,17 @@ let bundleText = '';
  * Output goes to a temp file rather than `out/extension.js` so a parallel test file reading
  * the real bundle (no-app-private-key-shipped.test.ts) cannot observe a half-written one.
  * The stamp does not depend on the output path.
+ *
+ * `--ignore-scripts` skips the `prebuild` hook (`build:shared`) while still running the
+ * named `build` script with its arguments (#2244). That hook runs tsc over the LIVE
+ * `packages/shared/out`, truncating and rewriting each file in place, and a parallel test
+ * file whose tsx child loads `@aiclarity/shared` inside that window got
+ * `specHash is not a function`. Shared is already built before the suite starts (CI's
+ * `test` job and the root `pretest`), and nothing asserted here depends on the hook: the
+ * stamp lives in `scripts/build-extension.sh`, which `build` still runs.
  */
 function runBuild(extraArgs: string[]): { status: number | null; output: string } {
-  const res = spawnSync('npm', ['run', 'build', '--', ...extraArgs], {
+  const res = spawnSync('npm', ['run', 'build', '--ignore-scripts', '--', ...extraArgs], {
     cwd: PKG_DIR,
     encoding: 'utf-8',
     timeout: BUILD_TIMEOUT_MS,
@@ -69,6 +95,7 @@ function runBuild(extraArgs: string[]): { status: number | null; output: string 
 beforeAll(() => {
   // Deliberately no assertions here: a throwing hook reports every test in the file as
   // skipped, which hides WHICH property broke. Capture, then assert in the tests.
+  sharedOutBefore = snapshotSharedOut();
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-build-stamp-'));
   const outfile = path.join(tmpDir, 'extension.js');
   build = runBuild([`--outfile=${outfile}`]);
@@ -117,6 +144,18 @@ describe('the default build emits a stamped bundle (#1527)', () => {
     },
     BUILD_TIMEOUT_MS,
   );
+
+  // Must stay the LAST test in this block: it checks both builds above, which run in order.
+  it('never rewrites the live packages/shared/out that parallel test files load (#2244)', () => {
+    // Other test files spawn tsx children that load `@aiclarity/shared` through its `main`
+    // (`out/index.js`), outside vitest's src alias. A rewrite here leaves each output briefly
+    // empty, and a child that loads inside that window gets `specHash is not a function`.
+    expect(
+      sharedOutBefore,
+      'packages/shared/out is not built - run `npm run build --workspace=@aiclarity/shared` first',
+    ).not.toBeNull();
+    expect(snapshotSharedOut()).toEqual(sharedOutBefore);
+  });
 });
 
 describe('one bundling path — nothing can produce an unstamped bundle (#1527)', () => {
