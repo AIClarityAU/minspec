@@ -218,7 +218,7 @@ the deny passes even when everything is denied (memory `f-test-can-pass`).
 
 ## Decisions needed (Clarify)
 
-Recorded selections: each of the 5 selections below is an agent pick of the option marked **(rec)**, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+Recorded selections: each of the 5 selections below is an agent pick of the option marked **(rec)**, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them. Under that decision a recorded pick completes the Clarify phase (`clarify: done`), the same convention as SPEC-340, which was then approved under the delegated-approval record DLG-001 (#3807); approval, not Clarify, is the step that ratifies or changes a pick, which is why `status:` stays `specifying` until then.
 
 **Q1 — Name and shape of the provenance field.**
 - **a (rec)** Reuse DR-108's existing optional `basis` field and add a third form,

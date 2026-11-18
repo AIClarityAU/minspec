@@ -247,7 +247,7 @@ actually ships.
 
 ## Decisions needed (Clarify)
 
-Recorded selections: each of the 3 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+Recorded selections: each of the 3 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them. Under that decision a recorded pick completes the Clarify phase (`clarify: done`), the same convention as SPEC-340, which was then approved under the delegated-approval record DLG-001 (#3807); approval, not Clarify, is the step that ratifies or changes a pick, which is why `status:` stays `specifying` until then.
 
 ### DQ-1 — Does "Reference (T3) / Create-update (T4)" actually gate anything?
 
