@@ -96,6 +96,21 @@ Scanned frontmatter of every `.md` under `specs/`, `docs/decisions/`, `docs/epic
 
 **D4 — Which A1 files does Plan clean?** The issue says nine, this base measures three with a coarse scan. Plan must re-measure with the shipped predicate and clean whatever it reports; confirm no objection to deleting (not preserving) comments with no rationale.
 
+**Answer (fact, agent, 2026-11-17):** the project has already decided this. The convention is that the
+`status:` line carries a value and nothing else (#1900, merged: "Move SPEC-040's status rationale
+off the line the status writer owns"); #1879's corpus half deleted SPEC-062's orphaned comment
+outright; #1912's own fix, item 3, says to strip the comments and move any real rationale into
+body prose; and the writers already drop an inline status comment on every write today
+(`packages/minspec/src/lib/spec.ts:606`, `epic-manager.ts:318`, `adr-manager.ts:897`). The three
+comments measured on this base (SPEC-004, SPEC-011, SPEC-015) each carry build evidence, so
+under FR-7 they move into prose rather than being deleted.
+
+**Recommended (agent, 2026-11-17):** delete comments with no rationale; move any with rationale into
+body prose (FR-7) - cost: a deleted comment is recoverable only from git history.
+
+**Recorded selection: the recommended option,** delete comments with no rationale and move any
+with rationale into body prose. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+
 ## Rejected alternatives (DR-086 §4)
 
 - *Writer preserves the inline comment.* Written about the old value; preserving it is the #1879 falsification relocated.
