@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/agent-execute/SPEC-340-autopilot-git-identity-guard/requirements.md",
+  "specHash": "44932472f835f16150681f405ac4da4aff21beff876a855f5beedc8cedf6f32f",
+  "approvedAt": "2026-11-17T03:59:47.038Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1117",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3803#issuecomment-6937435860"
+}
