@@ -6,9 +6,14 @@ tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — the phase ladder is the methodology, so adding a phase belongs here
 relates_to: [DR-024, SPEC-025, SPEC-065, SPEC-006, SPEC-012, "#19"]
+implements: none
+implements_reason: >-
+  Specify phase only. Which files this spec owns is declared at Plan, after Clarify fixes
+  whether the completeness gate enforces the phase (DQ-1) and how the validator check is
+  graded (DQ-3).
 phases:
   specify: done
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -242,6 +247,8 @@ actually ships.
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 3 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 ### DQ-1 — Does "Reference (T3) / Create-update (T4)" actually gate anything?
 
 - **Option A — enforce it, via the existing DR-012 mechanism (rec).** `constitution` joins
@@ -257,6 +264,8 @@ actually ships.
   same shape of drift #19 was filed to close, just moved one level down. If chosen, FR-2
   must be deleted and the mapping table's wording corrected in the same change (INV-1).
 
+**Recorded selection: the recommended option,** option A, enforce via the existing DR-012 mechanism. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+
 ### DQ-2 — Backfill the 219 existing specs, or rely on absent-key tolerance?
 
 - **Option A — no migration; rely on the verified absent-key tolerance (rec).** Matches the
@@ -270,6 +279,8 @@ actually ships.
   can collide with every in-flight PR touching those same files' frontmatter (the same
   sequencing cost SPEC-096's DQ-6 named for a smaller set).
 
+**Recorded selection: the recommended option,** option A, no migration; rely on absent-key tolerance. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+
 ### DQ-3 — Validator severity for FR-3's new check
 
 - **Option A — `warn`, with the same future-ratchet shape as `ownershipDeclaration`
@@ -279,6 +290,8 @@ actually ships.
 - **Option B — `error` from day one.** *Cost:* this spec was written without reading every
   adopter's or this repo's own `.minspec/constitution.md` content, so an immediate hard
   failure risks blocking on content nobody has audited yet.
+
+**Recorded selection: the recommended option,** option A, `warn` with the future-ratchet shape. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 ## Out of Scope
 
