@@ -61,18 +61,24 @@ Shared rules for every task:
   (imported from `scripts/auto-merge-gate.ts`), `sites/**` and governance from
   `isGovernancePath`. No I/O.
 - [ ] **2.2** `packages/minspec/tests/pr-drain-decide.test.ts` - one case per check; a
-  property test over every combination of the enumerable fields asserting that any
-  `*-error` input never yields `merge`, that a machinery or governance path never yields
+  property test over every combination of the enumerable fields asserting that every
+  `*-error` input (`orphan`, `readyToMerge`, `approvalWitness`, a bad gate record) yields
+  `hold` (never `merge`, `defer` or `skip`), that `mergeable: 'unknown'` yields `defer`, that a machinery or governance path never yields
   `merge`, and that `merge` requires orphan `yes`, `ready-to-merge` `success` and the class
   conjunct. Control: removing the machinery check makes the property fail.
   *Done when:* green, and the control is red.
 
 ## 3 - The runner, read-only (FR-1 groundwork, INV-3, INV-6)
 
+- [ ] **3.0** `scripts/lib/issue-lease.sh` - in `lease_reclaim_q`, return a distinct exit
+  code `2` when `lease_read_claims` fails (today exit 1, identical to a live claim); update
+  the usage text. `packages/minspec/tests/issue-lease-reclaim.test.ts` - a stubbed failing
+  claims read exits 2, a live claim still exits 1, an expired claim still exits 0.
+  *Done when:* green; the existing reclaim tests stay green.
 - [ ] **3.1** `scripts/pr-drain.ts` - `main(argv, env, gh, git)`: list open PRs (fail closed
   at the list limit, as `sweep_open_prs` does), gather `PrDrainFacts` per PR (labels,
   `ready-to-merge` status on the head sha, changed paths, mergeable state, orphan via
-  `scripts/lib/issue-lease.sh 'reclaim?'`), call `decidePrDrainAction`, and print one JSON
+  `scripts/lib/issue-lease.sh 'reclaim?'`: exit 0 -> `yes`, 1 -> `no`, 2 or anything else -> `error`), call `decidePrDrainAction`, and print one JSON
   line per PR. With no `--merge` it performs nothing. An API failure exits non-zero.
 - [ ] **3.2** `packages/minspec/tests/pr-drain-runner.test.ts` - injected `gh` table for a
   machinery PR, a docs-lane PR, a live-claim PR and an API error; asserts the JSON lines,
@@ -114,9 +120,9 @@ Shared rules for every task:
   the existing bot `gh`. A failed post is logged and the decision is treated as a hold for
   the workflow's purposes (no record means no workflow merge).
 - [ ] **6.2** `scripts/lib/pr-drain-decide.ts` - `parseGateRecord(comments)`: accepts only
-  author `minspec-sdd[bot]` and a parsable payload; the latest record wins.
-- [ ] **6.3** `packages/minspec/tests/pr-drain-gate-record.test.ts` - a forged record by
-  another author is ignored; a record for a different sha gives `defer: stale-gate-record`;
+  author `minspec-sdd[bot]` and a parsable payload; the latest record wins. A marker comment
+  that is unparseable or not bot-authored yields an error result -> `hold: gate-error`.
+- [ ] **6.3** `packages/minspec/tests/pr-drain-gate-record.test.ts` - a forged or unparseable record yields `hold: gate-error`; a record for a different sha gives `defer: stale-gate-record`;
   a dispatch test (the existing stubbed-`gh` drain harness) shows the comment argv.
   *Done when:* green.
 

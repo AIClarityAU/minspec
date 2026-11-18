@@ -92,7 +92,7 @@ interface PrDrainFacts {
   changedPaths: readonly string[];
   labels: readonly string[];
   readyToMerge: 'success' | 'failure' | 'pending' | 'absent' | 'error';
-  orphan: 'yes' | 'no' | 'error';             // issue-lease reclaim?, fail closed
+  orphan: 'yes' | 'no' | 'error';             // issue-lease reclaim? exit 0 / 1 / 2 (see "The orphan witness"), fail closed
   mergeable: 'clean' | 'behind' | 'conflict' | 'unknown';
   gateRecord?: GateRecord;                     // CODE only; see "CODE eligibility"
   approvalWitness?: ApprovalWitness;           // approval only; see FR-3
@@ -112,13 +112,16 @@ Order of the checks, first match wins, so a hold can never be followed by a merg
 3. `mergeable === 'conflict'` -> `hold: conflict` (surfaced, never resolved).
 4. `ai-review:changes` label or a red required check -> `defer: llm-rework` (D1 Option A).
 5. `needs-human-review` or any `hold:*` label -> skip (already held; no second entry).
-6. `mergeable === 'behind'` -> `update-behind` (only acted on when the land job exists; else `defer`).
+6. `mergeable === 'unknown'` (GitHub is still recomputing) -> `defer: pending`, never a merge;
+   `mergeable === 'behind'` -> `update-behind` (only acted on when the land job exists; else `defer`).
 7. Class conjunct: approval -> FR-3 witness must be `match`; CODE -> the gate record must
    say eligible for exactly `headSha`; docs -> the `docs-lane` label must be present.
-8. `readyToMerge === 'success'` -> `merge` with `sha: headSha`. Anything else -> `defer: pending`.
+8. `readyToMerge === 'error'` -> `hold: status-error` (INV-1, an errored witness holds and says
+   why). `readyToMerge === 'success'` -> `merge` with `sha: headSha`. `failure`, `pending` and
+   `absent` -> `defer: pending`.
 
 `HoldReason` is a closed union (`machinery`, `governance`, `conflict`, `stale-approval`,
-`witness-error`, `lease-error`, `gate-error`). Each reason carries one sentence that the
+`witness-error`, `lease-error`, `status-error`, `gate-error`). Each reason carries one sentence that the
 hold comment prints, so the comment never disagrees with the decision.
 
 **Class.** A PR is `approval` when it touches `.minspec/approvals/**`; `docs` when it
@@ -146,12 +149,24 @@ the dispatch path, which already runs the gate on the host (`dispatch-issue.sh`,
 
 `parseGateRecord` accepts a record only when the comment author is `minspec-sdd[bot]` and
 the payload parses; `decidePrDrainAction` uses it only when `sha === headSha`. A record for
-an older sha is `defer: stale-gate-record`, never a merge. The agent that wrote the PR is
+an older sha is `defer: stale-gate-record`, never a merge. No record at all is
+`defer: pending`. A comment carrying the `minspec-gate-decision` marker that does not parse,
+or that is not authored by the bot (a forged record), makes `parseGateRecord` return an
+error and the decision is `hold: gate-error` (INV-1: an unreadable witness holds and says
+why; the hold is harmless, it only asks a session to look). The agent that wrote the PR is
 credential-free, so it cannot post as the bot.
 
 Most eligible CODE PRs already merge through the auto-merge armed at `dispatch-issue.sh:1732`.
 The workflow's CODE role is the fallback for one whose arm was dropped or never set; it
 adds no new way for a CODE PR to qualify.
+
+### The orphan witness
+
+`issue-lease.sh 'reclaim?'` (`lease_reclaim_q`) today returns exit 1 both for a live claim
+and when `lease_read_claims` fails, so an unreadable claims store would read as `no`.
+Task 3.0 gives the read failure its own exit code `2`; the runner maps 0 -> `yes`,
+1 -> `no`, 2 or any other status (including a spawn failure) -> `error` -> `hold: lease-error`.
+This spec edits no script itself; Task 3.0 is the change.
 
 ### FR-3 - the approval witness
 
@@ -249,7 +264,7 @@ not by `ai-review` alone.
 
 | Invariant | Test |
 |---|---|
-| INV-1 no silent gate | every `*-error` input yields `hold`, never `merge` or `skip` (property test over the decide function); the runner exits non-zero on an API failure; no `\|\| true` in the new files (grep test) |
+| INV-1 no silent gate | every `*-error` input (`orphan`, `readyToMerge`, `approvalWitness`, an unparseable or forged gate record) yields `hold`, never `merge`, `defer` or `skip` (property test over the decide function); the runner exits non-zero on an API failure; no `\|\| true` in the new files (grep test) |
 | INV-2 no bypass | merge argv recorded: never `--admin`, always `--match-head-commit`; `drain.yml` merge job has no `secrets.*`; M2 + Task 12 |
 | INV-3 no primary checkout | runner argv recorded: no `checkout`/`switch`/`merge`/`rebase`/`reset` |
 | INV-4 blast radius | workflow test: `--repo ${{ github.repository }}` only; nothing under `packages/minspec/src/` imports the new files |
