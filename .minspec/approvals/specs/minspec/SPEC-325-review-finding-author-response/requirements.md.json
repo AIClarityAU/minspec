@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-325-review-finding-author-response/requirements.md",
+  "specHash": "12ce72c448e06e4e9b4cd4701f822daa6d271e45569cce0da4b4fd687823ff8f",
+  "approvedAt": "2026-11-17T04:37:34.820Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1117",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3803#issuecomment-6937435860"
+}
