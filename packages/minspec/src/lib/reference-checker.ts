@@ -59,6 +59,13 @@ export interface ReferenceRegistry {
    * (`checkCitationFidelity`); without it that tier checks nothing.
    */
   readFile?: (relPath: string) => string | undefined;
+  /**
+   * Canonical ids (`DR-359`) that name an artifact in ANOTHER repo's register and are
+   * written bare in prose (#3752). Skipped like an `@namespace` ref, but declared in
+   * ONE written-down list by the caller rather than by editing every (approval-hashed)
+   * citing artifact. Absent ⇒ no exemptions.
+   */
+  externalIds?: ReadonlySet<string>;
 }
 
 /** A reference that failed to resolve. */
@@ -171,6 +178,8 @@ function resolve(
 ): ReferenceViolation | null {
   // External (@namespace) refs live in another repo's register — exempt.
   if (ref.external) return null;
+  // Declared parent-register ids (#3752) — only artifact kinds carry an id.
+  if (ref.id && registry.externalIds?.has(ref.id)) return null;
 
   switch (ref.kind) {
     case 'spec':
