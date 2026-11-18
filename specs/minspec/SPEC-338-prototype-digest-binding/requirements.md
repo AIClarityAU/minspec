@@ -75,18 +75,28 @@ Two stale paths must both fail closed:
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 4 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 - **D1 — Where the digest lives.**
   - **(rec) Frontmatter keys** `prototype:` + `prototype-digest:`. Parsed by the existing frontmatter reader, trivially greppable by the Python gate. Cost: frontmatter schema (`SPEC-109` canonical frontmatter) must admit two new keys, a small validator change.
   - Body line `prototype-digest: …`. Needs no schema change. Cost: needs a bespoke body regex in two languages, which is exactly the duplicate-predicate drift the repo has been bitten by.
+
+  **Recorded selection: the recommended option,** frontmatter keys `prototype:` and `prototype-digest:`. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D2 — Digest granularity for a multi-file prototype.**
   - **(rec) Sorted manifest digest** (per-file content hashes folded into one). One field, deterministic. Cost: any file change, including a whitespace-only asset, stales the approval.
   - Per-file digest lines in the overview. Pinpoints the changed file in the error. Cost: overview grows with the prototype and gets noisy diffs.
+
+  **Recorded selection: the recommended option,** a sorted manifest digest. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D3 — What to do with `unbound` when a Blueprint overview has no prototype.**
   - **(rec) Fail closed** (FR-4). Cost: the "operational / no UI only" blueprint in the design's trial step must carry a one-card prototype file rather than none.
   - Allow an explicit `prototype: none` sentinel. Cost: a new bypass value that agents could write to opt out of the binding.
+
+  **Recorded selection: the recommended option,** fail closed (FR-4). Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D4 — How "is a Blueprint overview" is detected** (FR-8 keys off the declared keys, which an agent could simply omit).
   - **(rec) Declared keys only for now**; the Blueprint approval flow (separate work) will mark overviews with a type and make `unbound` reachable. Cost: until that lands, omitting both keys skips the check.
   - Introduce `type: blueprint` in this spec. Cost: widens scope into the Blueprint feature itself.
+
+  **Recorded selection: the recommended option,** declared keys only for now. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 ## Follow-ups (tracked)
 
