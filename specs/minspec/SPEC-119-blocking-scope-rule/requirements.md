@@ -413,6 +413,17 @@ Not a choice between designs - a fact I could not read. Confirm that #147 tracks
 Slice 2 (independent adversarial second reviewer). If it tracks a different reviewer, FR-7 to
 FR-10 retarget to that reviewer and the rest of this spec stands.
 
+**Answer (fact, agent, 2026-11-17):** yes. #147 (open, "feat: inter-spec cross-check as a Slice 2 AI
+check") proposes the inter-spec cross-check as a lens inside SPEC-016's Slice 2 reality-check
+reviewer (EPIC-007); its Links section names "Slice 2 owner: SPEC-016 reality-check". So nothing
+retargets. Evidence: issue #147 body, sections "Proposal" and "Links", read 2026-11-17.
+
+**Recommended (agent, 2026-11-17):** keep FR-7 to FR-10 aimed at SPEC-016's Slice 2 reviewer, tracked
+by #147, as written - cost: #147 is a proposal with no built lens yet, so the case waits for it.
+
+**Recorded selection: the recommended option,** nothing retargets: FR-7 to FR-10 stay aimed at
+SPEC-016's Slice 2 reviewer, tracked by #147. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+
 ### DQ-6 - How does the edit get past the approval-race commit gate?
 
 New since the first draft (see [What the edits cost](#what-the-edits-cost-measured)). Every

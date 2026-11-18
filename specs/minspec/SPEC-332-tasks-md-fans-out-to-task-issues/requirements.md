@@ -64,8 +64,20 @@ Rewriting older `tasks.md` files into the canonical shape (refused and reported 
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 5 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 1. **Where the step runs.** (rec) A drain step, visible in the drain log and covered by tests. Cost: new drain code to maintain. Alternative: keep it a runner job after each plan merge; it stays invisible when the runner does not run it, which is the current failure.
+
+   **Recorded selection: the recommended option,** a drain step. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 2. **Task granularity.** (rec) One issue per `## N - title` section, matching "one task = one pull request" in SPEC-136. Cost: sections can be large for a Sonnet-class agent. Alternative: one per `- [ ] **N.M**` step; much finer, but the 53-task SPEC-018 becomes hundreds of issues and each is not independently mergeable.
+
+   **Recorded selection: the recommended option,** one issue per `## N - title` section. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 3. **Fate of the whole-spec issue.** (rec) Close as superseded (FR-6). Cost: loses its comment history from the open list. Alternative: leave it open as an epic tracker, but triage must then stop re-routing it, which is a second change.
+
+   **Recorded selection: the recommended option,** close the whole-spec issue as superseded (FR-6). Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 4. **Older `tasks.md` files that do not match.** (rec) Refuse and report (FR-2). Cost: some of the 8 specs wait for a manual reshape. Alternative: heuristic parsing, which risks filing wrong tasks that agents then build.
+
+   **Recorded selection: the recommended option,** refuse and report (FR-2). Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 5. **Trigger.** (rec) Scan every drain cycle for planned specs lacking task issues (self-healing, catches the 8 existing). Cost: one more scan per cycle. Alternative: fire only on a plan-PR merge event, which misses the existing backlog.
+
+   **Recorded selection: the recommended option,** scan every drain cycle for planned specs lacking task issues. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
