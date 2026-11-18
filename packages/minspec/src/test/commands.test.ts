@@ -28,13 +28,7 @@ suite('Command Execution', () => {
   test('minspec.init creates .minspec/ directory', async () => {
     // The fixture workspace already has .minspec/, so init should
     // succeed without error (it's idempotent)
-    //
-    // Not awaited: init awaits user-dismissed notices (e.g. the "hooks recorded
-    // as executable" toast, #2399) that nobody answers in an automated host, so
-    // awaiting the command hangs until the mocha timeout. Same approach as the
-    // classify test below; a short settle lets the synchronous scaffold finish.
-    void vscode.commands.executeCommand('minspec.init');
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    await vscode.commands.executeCommand('minspec.init');
 
     const minspecDir = path.join(workspaceRoot, '.minspec');
     assert.ok(
