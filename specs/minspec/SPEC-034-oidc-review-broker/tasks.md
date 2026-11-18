@@ -39,7 +39,8 @@ scan). **T0 invariant tests (AC-2/5/6/8/9/10) are written before the code they g
 
 ## Slice 2 — fail-closed + provenance
 
-- [ ] **2.1 App-not-installed ⇒ 403.** Reason tells the caller to install/grant the App (AC-4). *Verify:* integration test against a repo without the App → 403 + install reason.
+- [x] **2.1 App-not-installed ⇒ 403.** Reason tells the caller to install/grant the App (AC-4). *Verify:* integration test against a repo without the App → 403 + install reason.
+  <br>*(Done 2026-11-13, #1579. `app-auth.ts` turns a 404 from `GET /repos/{o}/{r}/installation` - and only a 404 - into `AppNotInstalledError`; `mint.ts` carries it out as `code: 'app_not_installed'`; `index.ts` answers 403 with a constant install reason naming only the public slug. Verified by `broker-handler.test.ts` running the REAL factory (throwaway key, real App-JWT signing) with GitHub's lookup stubbed to 404, plus controls: 401/403/422/5xx lookups stay 502 `mint_failed`, and a claim-mismatched or unauthenticated caller never reaches the lookup. A genuine GitHub 404 from a live repo without the App is observed with 1.4b, which needs a deployed broker.)*
 - [ ] **2.2 Broker down/deny ⇒ red gate (AC-9).** Workflow gets no token, posts no pass, `ready-to-merge` stays red; no path posts a pass without a broker/override token. *Verify:* workflow test with the broker stubbed to 5xx → no `ai-review:pass`, status red.
 - [ ] **2.3 Provenance closure (AC-8).** A broker-token-applied label satisfies `AI_REVIEW_BOT_LOGINS` → `ready-to-merge` green; the same label hand-applied by a human → reverted; `ai-review-guard.js` is unchanged and its tests still pass. *Verify:* guard test suite green + a bot-vs-human applier fixture.
 
