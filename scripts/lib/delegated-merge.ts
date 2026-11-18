@@ -22,10 +22,19 @@
  *   - the repo is not memory-fabric and has opted in (`.minspec/`); the clone is full;
  *   - the pull request is open, not a draft, and targets `main`;
  *   - every changed file is a spec's `requirements.md`
- *     (`specs/<project>/SPEC-NNN-<slug>/requirements.md`), added or modified. A plan
- *     artifact (`design.md`, `tasks.md`, #2980) or any other path denies, so governance
- *     files, the constitution, the delegations file, `.minspec/`, `.github/` and
- *     `scripts/` can never ride this path;
+ *     (`specs/<project>/SPEC-NNN-<slug>/requirements.md`), added or modified. Any other
+ *     path denies, so governance files, the constitution, the delegations file,
+ *     `.minspec/`, `.github/` and `scripts/` can never ride this path;
+ *   - OR (DR-121, build #3586) the diff is plan artifacts only (`design.md`/`tasks.md`)
+ *     for ONE spec whose `requirements.md` is approved on the base (a non-stale approval
+ *     record, status planning/implementing/done), authored and committed by the bot
+ *     only, every latest check run on the head finished SUCCESS, SKIPPED or NEUTRAL
+ *     (DR-121 s2.4, DR-119 item 10), GitHub reports the branch current and mergeable
+ *     (`mergeable_state` clean, unstable or has_hooks: never BEHIND or UNKNOWN, #3748),
+ *     and DR-121 is `accepted` on the base. Until it is, a
+ *     plan artifact is refused by name (#2980). A plan is merged DIRECTLY at the judged
+ *     head (`mergeMode: 'direct'`), never by native auto-merge (DR-121 s2.4, item 11),
+ *     because native auto-merge waits only for the REQUIRED checks. See `planArmFacts`;
  *   - each spec's `status:` is `new` or `specifying` at the head, and on the base when the
  *     file exists there: a pull request that moves a spec's lifecycle, or edits a spec
  *     past specifying, is an approval in disguise and stays the founder's;
@@ -75,11 +84,33 @@ import {
   type ReviewEvidence,
 } from './delegated-approval';
 import { readRepeatFixShare, utcToday } from './repeat-fix-share';
+import { specHash } from '../../packages/shared/src/canonical';
 
 /** The only path shape this arm admits: one spec's requirements. */
 export const SPEC_REQUIREMENTS_PATH = /^specs\/[^/]+\/SPEC-\d+-[^/]+\/requirements\.md$/;
 /** Plan artifacts (#2980). Named separately so the denial says why. */
 export const PLAN_ARTIFACT = /(^|\/)(design|tasks)\.md$/;
+/**
+ * DR-121 section 2.2: a plan artifact inside one spec's own directory. Group 1 is that
+ * directory; a plan pull request's every path must match, all with the same group 1.
+ */
+export const SPEC_PLAN_PATH = /^(specs\/[^/]+\/SPEC-\d+-[^/]+)\/(design|tasks)\.md$/;
+/** The decision record that admits plan pull requests; read from the base on every run. */
+export const PLAN_DECISION = 'DR-121';
+/** DR-121 section 2.3: the planned spec's status on the base. Anything else waits. */
+export const PLAN_SPEC_APPROVED_STATUSES: ReadonlySet<string> = new Set(['planning', 'implementing', 'done']);
+/** DR-119 section 1 item 10, as DR-121 section 2.4 applies it: the only green conclusions. */
+export const PLAN_GREEN_CONCLUSIONS: ReadonlySet<string> = new Set(['SUCCESS', 'SKIPPED', 'NEUTRAL']);
+/**
+ * #3748: the merge states in which a direct merge (no --auto, no --admin) can land. An
+ * allowlist, matched case-insensitively (REST `mergeable_state` is lower-case, GraphQL
+ * `mergeStateStatus` upper-case). The ruleset is strict, so GitHub refuses a BEHIND branch;
+ * UNKNOWN (not yet computed), BLOCKED, DIRTY, DRAFT and anything new deny too. The same
+ * three are what `gh pr merge` itself treats as immediately mergeable.
+ */
+export const PLAN_MERGEABLE_STATES: ReadonlySet<string> = new Set(['clean', 'unstable', 'has_hooks']);
+/** DR-119 section 1 item 2, as DR-121 section 2.4 applies it: the bot, keyed on type. */
+export const PLAN_BOT_LOGIN = 'minspec-sdd[bot]';
 /** A spec that has not been approved yet. Anything later is the founder's. */
 export const PRE_APPROVAL_STATUSES: ReadonlySet<string> = new Set(['new', 'specifying']);
 /** GitHub file statuses admitted. A removal or rename is not new spec content. */
@@ -98,7 +129,35 @@ export interface MergePull {
   readonly headSha: string;
   readonly headRef: string;
   readonly authorLogin: string;
+  /** GitHub's `user.type` (`Bot`, `User`); undefined = not read. Plan arm only. */
+  readonly authorType?: string;
   readonly labels: readonly string[];
+  /**
+   * #3748: GitHub's merge state for the pull request (REST `mergeable_state`, e.g. `clean`,
+   * `behind`, `unknown`); undefined = not read or not yet computed. Plan arm only.
+   */
+  readonly mergeState?: string;
+}
+
+/** DR-121: the planned spec as it stands on the base. null = absent, undefined = unreadable. */
+export interface PlanSpecFacts {
+  readonly requirements: string | null | undefined;
+  readonly sidecar: string | null | undefined;
+}
+
+/** One latest check run on a commit, as GitHub reports it. */
+export interface PlanCheckRun {
+  readonly name: string;
+  /** queued, in_progress, completed, ... */
+  readonly status: string;
+  /** success, failure, neutral, ...; null while not completed. */
+  readonly conclusion: string | null;
+}
+
+/** DR-121 s2.4 (DR-119 item 10): every latest check run on `sha`; runs undefined = unreadable. */
+export interface PlanChecks {
+  readonly sha: string;
+  readonly runs: readonly PlanCheckRun[] | undefined;
 }
 
 export interface MergeFile {
@@ -126,6 +185,12 @@ export interface MergeInput {
   readonly decisionStatus: (drId: string) => string | undefined;
   readonly repeatFixShare: number | undefined;
   readonly today: string;
+  /** DR-121: read only when the diff holds a plan artifact; undefined = not read. */
+  readonly planSpec?: PlanSpecFacts;
+  /** DR-121: the author login of EVERY commit, merge commits included; '' = no linked account. */
+  readonly commitAuthors?: readonly string[];
+  /** DR-121: every latest check run on the head; read only for a plan diff; undefined = not read. */
+  readonly planChecks?: PlanChecks;
 }
 
 export type MergePlan =
@@ -137,6 +202,11 @@ export type MergePlan =
       readonly verdictBy: string;
       readonly headSha: string;
       readonly classesAfter: readonly StopClass[];
+      /**
+       * How the caller merges. `auto`: arm GitHub native auto-merge (the spec arm, DR-108).
+       * `direct`: merge now, pinned to `headSha`, never native auto-merge (a plan, DR-121 s2.4).
+       */
+      readonly mergeMode: 'auto' | 'direct';
     }
   | { readonly arm: false; readonly reason: string; readonly detail: string };
 
@@ -182,10 +252,13 @@ export function planDelegatedMerge(input: MergeInput): MergePlan {
   if (files === undefined) return no('files-unreadable', `#${pull.number}'s changed files could not be read`);
   if (files.length === 0) return no('no-files', `#${pull.number} changes no files`);
   const tiers: Tier[] = [];
-  for (const f of files) {
-    if (PLAN_ARTIFACT.test(f.path)) {
-      return no('plan-artifact', `${f.path} is a plan artifact (#2980); plan pull requests are not merged on this delegation`);
-    }
+  const planFile = files.find((f) => PLAN_ARTIFACT.test(f.path));
+  if (planFile !== undefined) {
+    const planned = planArmFacts(input, pull, files, planFile.path);
+    if ('arm' in planned) return planned;
+    tiers.push(planned.tier);
+  }
+  for (const f of planFile === undefined ? files : []) {
     if (!SPEC_REQUIREMENTS_PATH.test(f.path)) {
       return no('path-out-of-scope', `${f.path} is not a spec's requirements.md; only spec content rides this arm`);
     }
@@ -267,7 +340,133 @@ export function planDelegatedMerge(input: MergeInput): MergePlan {
     verdictBy: pass.url,
     headSha: pull.headSha,
     classesAfter: after,
+    mergeMode: planFile === undefined ? 'auto' : 'direct',
   };
+}
+
+/**
+ * DR-121 section 2, conditions 1 to 4's plan-specific half. Returns the planned spec's
+ * tier, or a denial. The shared half (labels, the head-bound review, the delegation and
+ * its tripwire) is the spec arm's own code after this returns, so the two arms cannot
+ * drift on it. Every unreadable fact denies.
+ */
+function planArmFacts(
+  input: MergeInput,
+  pull: MergePull,
+  files: readonly MergeFile[],
+  firstPlanPath: string,
+): { readonly tier: Tier } | MergePlan {
+  const no = (reason: string, detail: string): MergePlan => ({ arm: false, reason, detail });
+  if (input.decisionStatus(PLAN_DECISION) !== 'accepted') {
+    return no(
+      'plan-artifact',
+      `${firstPlanPath} is a plan artifact (#2980) and ${PLAN_DECISION} is not accepted on the base; plan pull requests are not merged on this delegation`,
+    );
+  }
+  // 2.2: plan artifacts only, all in one spec's directory.
+  const dirs = new Set<string>();
+  for (const f of files) {
+    const m = SPEC_PLAN_PATH.exec(f.path);
+    if (m === null) {
+      return no('plan-mixed-diff', `${f.path} is not a spec's design.md or tasks.md; a plan pull request changes plan artifacts only (${PLAN_DECISION} s2.2)`);
+    }
+    dirs.add(m[1]);
+  }
+  if (dirs.size !== 1) {
+    return no('plan-mixed-diff', `the plan artifacts span ${dirs.size} specs; a plan pull request plans one spec (${PLAN_DECISION} s2.2)`);
+  }
+  for (const f of files) {
+    if (!ADMITTED_FILE_STATUSES.has(f.status)) {
+      return no('file-status-not-admitted', `${f.path} is ${f.status || 'of unknown status'}; only added or modified plan artifacts are admitted`);
+    }
+    if (f.headContent === null) return no('head-content-unreadable', `${f.path} could not be read at ${pull.headSha}`);
+  }
+  // 2.3: the spec it plans is approved on the base, and the approval is not stale.
+  const reqPath = `${[...dirs][0]}/requirements.md`;
+  const facts = input.planSpec;
+  if (facts === undefined || facts.requirements === undefined) {
+    return no('base-unreadable', `${reqPath} could not be read on the base`);
+  }
+  if (facts.requirements === null) {
+    return no('plan-spec-not-approved', `${reqPath} does not exist on the base; a plan waits for its approved spec`);
+  }
+  const status = frontmatterField(facts.requirements, 'status');
+  if (status === undefined || !PLAN_SPEC_APPROVED_STATUSES.has(status)) {
+    return no('plan-spec-not-approved', `${reqPath} is status "${String(status)}" on the base; a plan merges only once its spec is planning, implementing or done`);
+  }
+  if (facts.sidecar === undefined) return no('base-unreadable', `the approval record for ${reqPath} could not be read on the base`);
+  if (facts.sidecar === null) {
+    return no('plan-spec-not-approved', `${reqPath} has no approval record on the base; a plan waits for its approved spec`);
+  }
+  let record: { specPath?: unknown; specHash?: unknown };
+  try {
+    record = JSON.parse(facts.sidecar) as { specPath?: unknown; specHash?: unknown };
+  } catch {
+    return no('plan-spec-approval-unreadable', `the approval record for ${reqPath} does not parse`);
+  }
+  if (record === null || typeof record !== 'object') {
+    return no('plan-spec-approval-unreadable', `the approval record for ${reqPath} is not an object`);
+  }
+  if (record.specPath !== reqPath || record.specHash !== specHash(facts.requirements)) {
+    return no('plan-spec-approval-stale', `the approval record does not match ${reqPath} as it stands on the base (stale or for another spec)`);
+  }
+  const tier = frontmatterField(facts.requirements, 'tier');
+  if (tier === undefined || !TIERS.includes(tier as Tier)) {
+    return no('tier-unknown', `${reqPath} declares no tier T1..T4, and a tier is never invented`);
+  }
+  // 2.4: the bot's pull request, every commit the bot's (DR-119 s1 item 2). A merge commit
+  // by anyone else denies too: what it brought in is not checked path by path here.
+  if (pull.authorType !== 'Bot' || pull.authorLogin !== PLAN_BOT_LOGIN) {
+    return no('plan-author-not-bot', `#${pull.number} is authored by ${pull.authorLogin} (${String(pull.authorType)}), not ${PLAN_BOT_LOGIN} (Bot)`);
+  }
+  const commits = input.commitAuthors;
+  if (commits === undefined || commits.length === 0) {
+    return no('plan-commit-not-bot', `#${pull.number}'s commits could not be read`);
+  }
+  const strays = commits.filter((a) => a !== PLAN_BOT_LOGIN);
+  if (strays.length > 0) {
+    return no('plan-commit-not-bot', `#${pull.number} has ${strays.length} commit(s) not by ${PLAN_BOT_LOGIN}: ${[...new Set(strays.map((a) => a || '<no account>'))].join(', ')}`);
+  }
+  // 2.4 (DR-119 item 10): CI green on the head - EVERY latest check run, required or not,
+  // because a plan is merged directly and nothing else waits on an optional check. Zero,
+  // unreadable, pending or any other conclusion denies; the next drain cycle retries.
+  const checks = input.planChecks;
+  if (checks === undefined || checks.runs === undefined || checks.sha !== pull.headSha) {
+    return no('plan-ci-unreadable', `the check runs on ${pull.headSha} could not be read`);
+  }
+  if (checks.runs.length === 0) {
+    return no('plan-ci-none', `no check run has reported on ${pull.headSha}; zero checks is not green (${PLAN_DECISION} s2.4)`);
+  }
+  const pending = checks.runs.filter((c) => c.status !== 'completed');
+  if (pending.length > 0) {
+    return no('plan-ci-pending', `${pending.length} check run(s) on ${pull.headSha} have not finished: ${pending.map((c) => c.name || '<unnamed>').join(', ')}`);
+  }
+  const red = checks.runs.filter((c) => !PLAN_GREEN_CONCLUSIONS.has(String(c.conclusion ?? '').toUpperCase()));
+  if (red.length > 0) {
+    return no(
+      'plan-ci-not-green',
+      `check run(s) on ${pull.headSha} did not finish SUCCESS, SKIPPED or NEUTRAL: ${red.map((c) => `${c.name || '<unnamed>'}=${String(c.conclusion)}`).join(', ')} (${PLAN_DECISION} s2.4)`,
+    );
+  }
+  // #3748: a direct merge lands only on a branch current with main. The ruleset is strict,
+  // so GitHub refuses a BEHIND branch; admitting one failed the merge every cycle (19 PRs on
+  // 2026-11-14) and nothing updated it. A BEHIND plan is held for the one-at-a-time update
+  // turn (as remediate-pr.sh's skip-awaiting-merge-turn), never updated here and never in
+  // bulk. An unread or UNKNOWN state is not current: it denies, and the next cycle re-reads.
+  const mergeState = String(pull.mergeState ?? '').toLowerCase();
+  if (mergeState === 'behind') {
+    return no(
+      'plan-behind',
+      `#${pull.number} is BEHIND main and the ruleset is strict, so a direct merge would be refused; held for its one-at-a-time update turn, then judged again on the new head`,
+    );
+  }
+  if (!PLAN_MERGEABLE_STATES.has(mergeState)) {
+    return no(
+      'plan-merge-state-not-clean',
+      `#${pull.number}'s merge state is "${pull.mergeState ?? 'unread'}", not clean, unstable or has_hooks; a direct merge waits until GitHub reports it current and mergeable`,
+    );
+  }
+  return { tier: tier as Tier };
 }
 
 // ─── IO: gathering the facts ────────────────────────────────────────────────
@@ -335,7 +534,9 @@ export function gatherMergeInput(args: MergeArgs, deps: MergeDeps): MergeInput {
       headSha: s(head.sha),
       headRef: s(head.ref),
       authorLogin: s((p.user as Json | null)?.login),
+      authorType: s((p.user as Json | null)?.type) || undefined,
       labels: ((p.labels ?? []) as Json[]).map((l) => s(l.name)),
+      mergeState: s(p.mergeable_state) || undefined,
     };
   } catch {
     pull = undefined;
@@ -382,6 +583,62 @@ export function gatherMergeInput(args: MergeArgs, deps: MergeDeps): MergeInput {
     }
   }
 
+  // DR-121: the planned spec on the base, and every commit's author. Read only for a diff
+  // that holds a plan artifact, so the spec arm's reads are unchanged.
+  let planSpec: PlanSpecFacts | undefined;
+  let commitAuthors: string[] | undefined;
+  let planChecks: PlanChecks | undefined;
+  const planDir = files?.map((f) => SPEC_PLAN_PATH.exec(f.path)?.[1]).find((d) => d !== undefined);
+  if (planDir !== undefined) {
+    const reqPath = `${planDir}/requirements.md`;
+    planSpec = baseOk
+      ? { requirements: show(reqPath), sidecar: show(`.minspec/approvals/${reqPath}.json`) }
+      : { requirements: undefined, sidecar: undefined };
+    try {
+      const rows: Json[] = [];
+      for (let page = 1; ; page++) {
+        // GitHub lists at most 250 commits on a pull request; more is unreadable here.
+        if (page > 3) throw new Error('more than 250 commits');
+        const items = JSON.parse(deps.gh([`repos/${repo}/pulls/${pr}/commits?per_page=100&page=${page}`])) as Json[];
+        if (!Array.isArray(items)) throw new Error('not a list');
+        rows.push(...items);
+        if (items.length < 100) break;
+      }
+      commitAuthors = rows.map((c) => s((c.author as Json | null)?.login));
+    } catch {
+      commitAuthors = undefined;
+    }
+    // DR-121 s2.4: every LATEST check run on the head (filter=latest drops superseded
+    // re-runs). A short read (fewer rows than total_count) is unreadable, never a pass.
+    const headSha = pull?.headSha ?? '';
+    let runs: PlanCheckRun[] | undefined;
+    try {
+      if (!/^[0-9a-f]{40}$/.test(headSha)) throw new Error('no head sha');
+      const rows: Json[] = [];
+      let total = -1;
+      for (let page = 1; ; page++) {
+        if (page > 10) throw new Error('more than 10 pages of check runs');
+        const body = JSON.parse(
+          deps.gh([`repos/${repo}/commits/${headSha}/check-runs?filter=latest&per_page=100&page=${page}`]),
+        ) as Json;
+        const items = body?.check_runs;
+        if (!Array.isArray(items) || typeof body.total_count !== 'number') throw new Error('not a check-run list');
+        total = body.total_count;
+        rows.push(...(items as Json[]));
+        if (items.length < 100 || rows.length >= total) break;
+      }
+      if (rows.length !== total) throw new Error(`read ${rows.length} of ${total} check runs`);
+      runs = rows.map((c) => ({
+        name: s(c.name),
+        status: s(c.status),
+        conclusion: typeof c.conclusion === 'string' ? c.conclusion : null,
+      }));
+    } catch {
+      runs = undefined;
+    }
+    planChecks = { sha: headSha, runs };
+  }
+
   const delegationsText = baseOk ? show('.minspec/delegations.json') : undefined;
   const delegations = typeof delegationsText === 'string' ? parseDelegations(delegationsText) : undefined;
   const decisionStatus = (id: string): string | undefined => {
@@ -402,6 +659,9 @@ export function gatherMergeInput(args: MergeArgs, deps: MergeDeps): MergeInput {
     decisionStatus,
     repeatFixShare: baseOk ? deps.repeatFixShare(base) : undefined,
     today: deps.today(),
+    planSpec,
+    commitAuthors,
+    planChecks,
   };
 }
 
