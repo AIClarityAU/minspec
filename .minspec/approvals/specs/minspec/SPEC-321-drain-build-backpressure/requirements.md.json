@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-321-drain-build-backpressure/requirements.md",
+  "specHash": "c7d2169c2d129809c1e7e036c55b0df587cb2f0809877c08a334833760d36a28",
+  "approvedAt": "2026-11-17T04:00:50.278Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1117",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3803#issuecomment-6937435860"
+}
