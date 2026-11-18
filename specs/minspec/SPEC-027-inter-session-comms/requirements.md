@@ -7,8 +7,10 @@ product: minspec
 epic: EPIC-009  # Team Readiness
 depends_on: [SPEC-026]  # reuses SessionPresenceRecord, liveness/staleness, sessionId, atomic-write idiom, .minspec/sessions/
 relates_to: [DR-051, SPEC-077]  # DR-051: inherits the docs-on-main / worktree enforcement this spec itself is authored under. SPEC-077 (idle-wake economics): its Part A conforms to this mailbox's pull-only inbox check by construction; keeping it that way is this spec's own constraint to hold (SPEC-077 Follow-up 2, #2209), not something SPEC-077 can enforce from outside.
-# Ownership declared in the same amendment that stales the 2026-07-14 approval, so the
-# re-approval that amendment already needs covers it (SPEC-038 FR-3, spec-to-code ownership).
+# Ownership declared in the same amendment that stales the 2026-07-14 approval (recorded in the
+# sidecar .minspec/approvals/specs/minspec/SPEC-027-inter-session-comms/requirements.md.json;
+# `status: planning` is the lifecycle state, not evidence of no approval), so the re-approval
+# that amendment already needs covers it (SPEC-038 FR-3, spec-to-code ownership).
 # Without it that re-approval is refused: approving advances `plan` to in-progress, the state
 # `ownership.implements.missing` fires on, and this repository sets `ownershipDeclaration:
 # error`. Both paths are the files Traceability marks as new. The two it marks as modified
