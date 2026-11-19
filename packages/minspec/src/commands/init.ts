@@ -202,8 +202,13 @@ export interface ScaffoldCommitter {
    * project, and one ignored path must never fail the whole commit.
    */
   add(paths: readonly string[]): Promise<void>;
-  /** Create a single commit with `message` (staged content only). */
-  commit(message: string): Promise<void>;
+  /**
+   * Create a single commit with `message`. When `paths` is given the commit is
+   * SCOPED to them (`git commit -m msg -- paths`), so unrelated content the user
+   * had already staged is never folded into the dedicated scaffold commit (#347).
+   * Omitted = whole index (legacy; only stubs rely on it).
+   */
+  commit(message: string, paths?: readonly string[]): Promise<void>;
   /**
    * The branch this commit would land on, and the repo's default branch — or
    * `null` when either cannot be determined (detached HEAD, no origin/HEAD).
@@ -279,8 +284,24 @@ export async function defaultCommitter(folder: string): Promise<ScaffoldCommitte
       if (stageable.length === 0) return;
       await git.add(stageable);
     },
-    async commit(message) {
-      await git.commit(message);
+    async commit(message, paths) {
+      if (!paths) {
+        await git.commit(message);
+        return;
+      }
+      // Same ignore-filter as add(): a pathspec naming an ignored, unstaged file
+      // makes `git commit -- <paths>` fail. Scope to exactly what add() staged.
+      let scoped = [...paths];
+      try {
+        const ignored = new Set(await git.checkIgnore([...paths]));
+        if (ignored.size > 0) scoped = scoped.filter((p) => !ignored.has(p));
+      } catch {
+        // optimisation only — let git decide
+      }
+      // Never fall back to an unscoped commit: with nothing in scope, an
+      // unscoped `git commit` would sweep the whole index.
+      if (scoped.length === 0) throw new Error('nothing to commit in the scaffold paths');
+      await git.commit(message, scoped);
     },
     async branchInfo() {
       // Delegate to the SAME destination-resolution `approve-commit.ts` uses
@@ -540,7 +561,7 @@ async function commitOrWarn(
 ): Promise<void> {
   try {
     await committer.add(paths);
-    await committer.commit(message);
+    await committer.commit(message, paths);
     vscode.window.showInformationMessage(`MinSpec: committed ${committedNoun} ("${message}").`);
   } catch (err) {
     vscode.window.showWarningMessage(
