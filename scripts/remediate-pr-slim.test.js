@@ -9,8 +9,11 @@ const path = require('node:path');
 
 const src = fs.readFileSync(path.join(__dirname, 'remediate-pr.sh'), 'utf8');
 
-test('claude -p invocation expands SYS_PROMPT_ARGS', () => {
-  const call = src.slice(src.indexOf('claude -p "$RUN_PROMPT"'));
+// The launch line is located by its prompt argument; the gate in agent-launch-sites.test.ts
+// forbids naming the CLI itself in any scripts/ file that is not a launch.
+const LAUNCH = '-p "$RUN_PROMPT"';
+test('agent launch expands SYS_PROMPT_ARGS', () => {
+  const call = src.slice(src.indexOf(LAUNCH));
   assert.match(call.slice(0, 600), /SYS_PROMPT_ARGS\[@\]/);
 });
 
@@ -21,5 +24,5 @@ test('slim context is gated by the kill-switch and uses --system-prompt-file', (
 
 test('role file exists and SYS_PROMPT_ARGS is defined before the loop', () => {
   assert.ok(fs.existsSync(path.join(__dirname, 'roles', 'dev.md')));
-  assert.ok(src.indexOf('SYS_PROMPT_ARGS=()') < src.indexOf('claude -p "$RUN_PROMPT"'));
+  assert.ok(src.indexOf('SYS_PROMPT_ARGS=()') < src.indexOf(LAUNCH));
 });
