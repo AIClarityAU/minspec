@@ -97,7 +97,7 @@ Each **pending human decision** is a node:
 | `spec-approve` | spec unapproved/stale AND not `done`/`archived` (DR-012) **∧ greenlit** (`ai-review/spec:pass`, FR-16) | Approve Spec |
 | `adr-accept` | ADR `status: proposed` **∧ greenlit** (`ai-review/dr:pass`, FR-16) | accept/reject |
 | `constitution-accept` *(new, FR-17)* | constitution invariant `status: proposed` **∧ greenlit** (`ai-review/constitution:pass`) | accept/reject |
-| `pr-review` *(new, FR-17 — subsumes #182)* | PR-to-main open ∧ mergeable ∧ checks-green **∧ greenlit** (`ai-review:pass`) | merge |
+| `pr-review` *(node kind owned by SPEC-090, not this spec; FR-16 supplies its greenlit clause)* | PR-to-main open ∧ mergeable ∧ checks-green **∧ greenlit** (`ai-review:pass`) | merge |
 | `phase-action` | SPEC-010 within-feature hole (uncovered FR / unchecked task) — **not** gated by FR-16: a phase-action is SPEC-010-owned work, not a reviewed Approvable type | author the phase |
 
 The greenlit clause on every row above except `phase-action` is this spec's #528 addition
@@ -285,22 +285,23 @@ are live invariant breaches, not future work.
   and explicitly assigns the resolver half of it here): the full predicate is
   **greenlit-for-type ∧ prior-stage-gates-clear ∧ human-gate-open**. "Prior-stage-gates-clear"
   for a doc Approvable reuses the existing FR-9/FR-13 coherence and `depends_on` checks
-  unchanged; for `pr-review` it is DR-033 §6's original `mergeable ∧ checks-green`.
-- **FR-17 (two new human-gated node kinds — `constitution-accept`, `pr-review`; subsumes
-  #182).** The node-kind set gains:
+  unchanged; for `pr-review` (SPEC-090's node) it is DR-033 §6's original `mergeable ∧ checks-green`, as SPEC-090 specifies.
+- **FR-17 (one new human-gated node kind — `constitution-accept`; `pr-review` is SPEC-090's).**
+  The node-kind set gains:
   - **`constitution-accept`** — a constitution invariant `status: proposed`, mirroring
     `adr-accept`'s shape (DR-047 Decision 1 names the constitution invariant as
     high-criticality / always-human).
-  - **`pr-review`** — a PR-to-main that is open, mergeable, and checks-green, pending
-    human merge-confirmation. This is the node kind issue #182 proposed; #182's own
-    predicate was never built into the resolver (`grep -c ai-review
-    packages/shared/src/next-task.ts` → 0 today, and this file's own header already lists
-    "PR-review nodes (#182) … out of this slice"), so FR-17 builds it directly as the
-    `pr-review` case of FR-16's generalised predicate rather than as a separate
-    PR-only predecessor this spec would then have to extend again. DR-038 §6 confirms the
-    *rendering* of PR nodes is downstream of whatever this resolver emits, not a competing
-    source of truth — building the predicate here is consistent with that DR, not a
-    detour from it. See Decisions needed → DQ-1 for the scope call this makes.
+  - **`pr-review` is NOT introduced here.** SPEC-090 (PR-review signpost node, status
+    `planning`, `depends_on: [SPEC-012]`, triggered by #182) owns that node kind and its
+    source (`packages/shared/src/pr-review-node.ts`); it states "SPEC-012 owns the resolver;
+    this spec adds a node source, it does not take over the resolver." FR-17 respects that
+    boundary: SPEC-012 FR-16/FR-18 define the greenlit-for-type clause the resolver applies
+    to *every* human-gated kind, and a `pr-review` node, once SPEC-090 lands it, is subject
+    to that clause (for `pr-review` the verdict is `ai-review:pass`). Whether SPEC-090's
+    pending predicate (opened-by-agent, non-draft, DQ-2's eyeball test) and this spec's
+    DR-033 §6 `mergeable ∧ checks-green` prior-stage gate are reconciled is SPEC-090's
+    call; this spec only requires that the greenlit clause is not bypassed. See Decisions
+    needed → DQ-1.
   - `plan-approve` is **not** introduced by this FR — see Decisions needed → DQ-3.
 - **FR-18 (fail closed — absence or a non-pass verdict is never read as greenlit).** Per
   the project's no-silent-gate invariant (constitution #2): if an artifact's
@@ -381,7 +382,7 @@ requirement is met. The resolver ships only when every box is tickable.
 - [ ] **(FR-11)** A single pure function in `packages/shared` (no `vscode`, no network) is the *only* resolver, imported by status-bar, explorer rollup, and CI/`npm run validate`.
 - [ ] **(FR-12)** Each (state → next-task) mapping has a T0 invariant test; the two triggering-session inconsistencies (stale epic INDEX; SPEC-004 implementing-under-proposed) exist as T3 regression fixtures.
 - [ ] **(FR-16)** A fixture with a structurally-open `spec-approve`/`adr-accept`/`epic-promote` node but no `ai-review/<type>:pass` verdict is excluded from the ranked set; the identical fixture with a fresh `pass` verdict is included.
-- [ ] **(FR-17)** A `pr-review` fixture (PR open, mergeable, checks-green, `ai-review:pass`) is ranked; the same PR missing any one of the three conditions is excluded. A `constitution-accept` fixture mirrors `adr-accept`'s on/off behaviour.
+- [ ] **(FR-17)** A `constitution-accept` fixture mirrors `adr-accept`'s on/off behaviour. The `pr-review` fixtures (PR open, mergeable, checks-green, `ai-review:pass`) live in SPEC-090's tests, not here; this spec's FR-16 generalised-predicate test is parameterised so a `pr-review` node is excluded without a fresh `ai-review:pass`.
 - [ ] **(FR-18)** Absent, `pending`, `escalated`, and `changes` verdicts all exclude the node (fail-closed); a test asserts the resolver never defaults an unknown/missing verdict to pass.
 
 ## Coverage Map (all bases)
@@ -481,7 +482,7 @@ Per-FR tier + one-line assertion sketch:
 | FR-11 | T1 | Single `packages/shared` pure function (no `vscode`/network) imported by status-bar, explorer, CI. |
 | FR-12 | T0 | Coverage check: every severity class + gate edge + coherence rule has a mapped T0 test; 2 session bugs exist as T3 fixtures. |
 | FR-16 | T0 | Structurally-open node + no/stale `ai-review/<type>` verdict → excluded; same node + fresh `pass` → included. |
-| FR-17 | T0 | `pr-review`/`constitution-accept` fixtures each exercise their full on/off predicate independently. |
+| FR-17 | T0 | `constitution-accept` fixture exercises its full on/off predicate; `pr-review` fixtures are SPEC-090's. |
 | FR-18 | T0 | Every non-`pass` verdict value (absent, `pending`, `escalated`, `changes`) excludes the node; none default to included. |
 
 ## Alternatives Considered
@@ -526,7 +527,7 @@ Per-FR tier + one-line assertion sketch:
 - **UX/data-contract handoff** — the status-bar signpost + explorer rollup visual design is a separate downstream UX spec (see Out of scope); this spec hands it the ordering + task-object contract.
 - **Activation of FR-16 for the doc-type node kinds (#528 / DQ-1):** tracked as an explicit follow-up step, not a prose promise — **no issue number yet** (this dispatch is specify-only and forbids opening one; the approving human should file it, or route it through the usual triage, before Plan). It must name: "flip the greenlit gate on for `spec-approve`/`adr-accept`/`epic-promote`/`constitution-accept` once #527 is confirmed posting verdicts."
 - **DR-047 Plan/design.md identity contradiction (DQ-3):** also not yet issue-tracked for the same reason. Blocks introducing a `plan-approve` node kind until resolved.
-- **#182 closure note:** if DQ-1 resolves to "absorb" (this spec's working assumption, FR-17), #182 should be closed/relinked as *"subsumed by #528 / SPEC-012 FR-17"* explicitly in the implementing PR — never silently, per the project's prose-only-follow-up-leak rule.
+- **#182 / SPEC-090 relink note:** if DQ-1 resolves to (A) (this spec's working assumption, FR-17), #182 remains owned by SPEC-090 and needs no closure here; the implementing PR should cite SPEC-090 for the `pr-review` kind. If DQ-1 resolves to (B), #182 must instead be closed/relinked explicitly and SPEC-090 retired — never silently, per the project's prose-only-follow-up-leak rule.
 
 ## Out of scope
 
@@ -577,27 +578,20 @@ Per-FR tier + one-line assertion sketch:
 Added for #528 (DR-047 §2). These are the human's read. Each names a recommendation
 **and** what that recommendation costs, per the project's decision convention.
 
-- **DQ-1 — Scope: does #528 absorb #182's never-built PR-node-kind work, or does it
-  depend on #182 landing first?** The issue body reads "extends #182 (PR-only precursor)
-  to all human-gated types," phrasing that assumes #182 already shipped a PR-only
-  predicate to extend. It did not — `grep -c ai-review packages/shared/src/next-task.ts`
-  is `0` today, and this file's own header already lists "PR-review nodes (#182) …
-  out of this slice" as unbuilt. FR-17 (above) takes the working assumption that #528
-  builds `pr-review` directly, since no other spec owns this predicate and DR-038 §6
-  confirms the graph-render surface is downstream of whatever this resolver emits, not a
-  competing source of truth.
-  - **(A) Absorb — recommended.** Build `pr-review` here (FR-17), close #182 as
-    subsumed, relinked explicitly in the implementing PR (never silently — see Out of
-    scope). *Cost:* grows this spec's diff by a full new node kind rather than
-    "generalise 3 existing predicates" — worth re-confirming the T3/T4 tier call still
-    fits once Plan sizes it, and loses whatever discussion/history lives only on #182 if
-    it is closed rather than cross-linked.
-  - **(B) Depend on #182.** Scope #528 to the four doc-type node kinds only
-    (`spec-approve`/`adr-accept`/`epic-promote`/`constitution-accept`); file/land #182
-    as its own prerequisite PR first. *Cost:* two sequenced PRs instead of one, and a
-    `depends_on: [#182]` edge this spec's own FR-13 machinery would have to track on
-    itself — recursive, and slower for no correctness gain since the predicate shape
-    (FR-16) is identical either way.
+- **DQ-1 — Scope: who owns the `pr-review` node kind — SPEC-012 (#528) or SPEC-090 (#182)?**
+  The #528 issue body reads "extends #182 (PR-only precursor) to all human-gated types,"
+  assuming #182 already shipped a PR-only predicate. It did not (`grep -c ai-review
+  packages/shared/src/next-task.ts` is `0` today). But #182's work now has a dedicated
+  owner: SPEC-090 (`planning`, `depends_on: [SPEC-012]`), which declares the `pr-review`
+  node kind and source file and says it adds a node source without taking over the resolver.
+  FR-17 therefore takes the working assumption that this spec does **not** build `pr-review`.
+  - **(A) SPEC-090 owns the node; SPEC-012 owns only the greenlit clause — recommended.**
+    FR-16/FR-18 apply to `pr-review` once SPEC-090 lands it; #182 stays SPEC-090's issue.
+    *Cost:* #528's PR-side acceptance depends on SPEC-090's sequencing, so the `pr-review`
+    greenlit clause cannot be proven end-to-end until SPEC-090 implements.
+  - **(B) Absorb into SPEC-012.** Build `pr-review` here and retire SPEC-090. *Cost:* inverts
+    SPEC-090's declared ownership (one owner per file, SPEC-038), discards its clarified
+    DQs (agent-opened, non-draft, eyeball predicate), and grows this spec by a full node kind.
 
 - **DQ-2 — Rollout sequencing of the FR-16 greenlit gate.** Enabling FR-16/FR-18 for
   `spec-approve`/`adr-accept`/`epic-promote`/`constitution-accept` the moment this spec's
