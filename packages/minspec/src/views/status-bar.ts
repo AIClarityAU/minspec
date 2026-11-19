@@ -145,7 +145,7 @@ export class MinSpecNextTaskStatusBar {
   update(task: NextTask | null): void {
     const text = formatNextTaskText(task);
     this.statusBarItem.text = text;
-    const base = task ? task.evidence.explanation : 'No pending review tasks.';
+    const base = task ? task.evidence.explanation : 'No Pending Approvables.';
     this.statusBarItem.tooltip = this.keybindingLabel
       ? buildShortcutTooltip(base, this.keybindingLabel)
       : base;
@@ -155,7 +155,7 @@ export class MinSpecNextTaskStatusBar {
     this.statusBarItem.accessibilityInformation = {
       label: task
         ? `MinSpec next task: ${formatImperativeForSignpost(task.imperative)}`
-        : 'MinSpec: no pending review tasks',
+        : 'MinSpec: no pending Approvables',
     };
     this.statusBarItem.show();
   }
