@@ -69,7 +69,17 @@ A **signal**, not an auto-pull. The surfaces stay read-only. Never fetch, pull, 
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 4 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 1. **Approve on a behind checkout: confirm or refuse?** Options: (a) explicit modal-free confirmation, approver can proceed (rec) — costs: a habitual click-through can still approve stale bytes; (b) hard refuse until the checkout is advanced — costs: blocks the founder when the gap is irrelevant to the spec (an unrelated commit), adding a manual step against tenet 1; (c) refuse only when the behind commits touch the spec or its owned files — most precise, costs a path-diff computation and a new place for the gate to be wrong. The issue asks for "at minimum" (a).
+
+   **Recorded selection: the recommended option,** option (a), an explicit modal-free confirmation, and the approver can proceed. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 2. **Remote-tracking ref when no upstream is configured.** Options: `origin/<default>` fallback (rec) — costs: wrong in repos whose default is not what the branch tracks; or treat as `unknown` — costs: agent worktrees on fresh branches would always read `unknown`.
+
+   **Recorded selection: the recommended option,** the `origin/<default>` fallback. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 3. **Surface set for FR-3.** Approve command + spec tree/signpost (rec, matches the issue's "where the approve action lives") versus every surface listed in the issue (ownership gate, parity rules) — costs: more renderers to wire and test; deferral leaves the false-blocked message uncorrelated with the gap.
+
+   **Recorded selection: the recommended option,** the approve command plus the spec tree and signpost. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 4. **Should the ownership-gate failure message append the gap?** This directly shortens the observed diagnosis (rec: yes, only when `behind > 0`) — costs: touches a gate's message format that other tests may pin.
+
+   **Recorded selection: the recommended option,** yes, append the gap only when `behind > 0`. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.

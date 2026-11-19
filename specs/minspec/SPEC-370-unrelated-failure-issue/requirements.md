@@ -173,6 +173,19 @@ before Plan phase can commit to a mechanism:
    search during this Specify pass found no `wsjf`/backlog-priority scoring module; Plan phase
    should re-check (code can land between Specify and Plan) before deciding.
 
+   **Answer (fact, agent, 2026-11-17):** yes, one exists, and the Specify search missed it. The backlog
+   module scores and labels issues: `calculateWsjf` (`packages/minspec/src/lib/backlog.ts:80`),
+   `applyWsjfToIssue` (`:399`), `setPriority` (`:477`) and `PRIORITY_LABELS` = `P1`/`P2`/`P3`
+   (`:70`), exposed as the command `minspec.scoreWsjf` (`packages/minspec/src/extension.ts:472`).
+   Its WSJF dimensions come from a user QuickPick (`packages/minspec/src/commands/backlog.ts:83`),
+   so an automatic filer can call `setPriority` but has no WSJF inputs of its own.
+   **Recommended (agent, 2026-11-17):** FR-6 hooks into `backlog.ts` (`setPriority` with a
+   `PRIORITY_LABELS` value) and no placeholder is specified - cost: the level it sets is still a
+   fixed choice made by Plan, because nothing scores an auto-filed issue without a human's WSJF
+   inputs.
+   Not recorded as a selection: this section says its questions "need a human answer before Plan
+   phase", so the answer goes to sign-off.
+
 ## Out of scope
 
 - Building or changing any backlog/WSJF scoring mechanism — FR-6 only consumes one if it
