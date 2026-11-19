@@ -1,7 +1,7 @@
 ---
 id: SPEC-331
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - per-machine baseline drift must be visible, not silent
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Expected surface: one non-required CI step (machinery, founder gate) and a baseline-drift
   readout in the trust dashboard. Neither is built.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
