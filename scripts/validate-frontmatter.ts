@@ -56,6 +56,7 @@ import { findDecisionContradictions } from './lib/decision-status-contradiction'
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
 import { checkDrFrontmatterClosedSet } from './lib/dr-closed-set';
 import { checkDeclaredSpecIds } from './lib/spec-id-collision';
+import { checkDeclaredEpicIds } from './lib/epic-id-collision';
 import { findWrongDelegationCitations, isCorrectedSpec, type Delegation } from './lib/delegation-citation';
 import {
   SELF_HOSTED_TEMPLATE_NAMES,
@@ -496,6 +497,25 @@ try {
     `Spec-id uniqueness check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
       'Rule 18 validated NOTHING this run; do not read the green as a collision-free corpus.',
   );
+}
+
+// Rule 28 (FATAL, #396): epic-id uniqueness — the third register beside Rule 17 (DR) and
+// Rule 18 (spec). Concurrent `max+1` allocation hands two epics one id; the dangling-ref
+// check cannot see it because a duplicate still resolves. Fails CLOSED and visibly when the
+// corpus cannot be listed or read (invariant 2).
+{
+  const epicIdFiles: { file: string; content: string }[] = [];
+  eachFile(
+    'Rule 28',
+    listCorpus('Rule 28', epicsDir, '.md', true).filter((f) => /^EPIC-\d+/.test(basename(f))),
+    true,
+    (file) => {
+      epicIdFiles.push({ file: relative(ROOT, file), content: readFileSync(file, 'utf-8') });
+    },
+  );
+  for (const defect of checkDeclaredEpicIds(epicIdFiles)) {
+    fail(join(ROOT, defect.files[0]), `Epic id ${defect.kind} — ${defect.message}`);
+  }
 }
 
 // Rule 26 (FATAL, #1641): decision-record frontmatter closed set. The spec side has
