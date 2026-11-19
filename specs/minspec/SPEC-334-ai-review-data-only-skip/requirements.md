@@ -1,7 +1,7 @@
 ---
 id: SPEC-334
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-010  # Reviewer Across All Approvables - cost of the ai-review panel on pushes that change no code
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Expected surface: one pure seam in .github/scripts/ai-review-guard.js, a step in
   .github/workflows/ai-review.yml, and the matching scaffolded templates (ci-review-templates.ts). None is built.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

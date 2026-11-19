@@ -413,6 +413,21 @@ describe('gathering: every read failure becomes a denial, never a pass', () => {
     expect(plan(deps({ gh: () => { throw new Error('HTTP 401'); } }))).toMatchObject({ arm: false, reason: 'pr-unreadable' });
   });
 
+  it('an added file reads as no base content, not as unreadable files', () => {
+    const p = plan(deps());
+    expect(p).toMatchObject({ arm: true });
+  });
+
+  it('an unreadable file list denies fail-closed and names the cause in the hold reason', () => {
+    const gh = (a: readonly string[]) => {
+      if (a[a.length - 1].startsWith(`repos/${REPO}/pulls/${PR}/files`)) throw new Error('HTTP 502 bad gateway');
+      return okGh(a);
+    };
+    const p = plan(deps({ gh }));
+    expect(p).toMatchObject({ arm: false, reason: 'files-unreadable' });
+    expect((p as { detail: string }).detail).toContain('HTTP 502 bad gateway');
+  });
+
   it('a gh failure on the comments denies', () => {
     const gh = (a: readonly string[]) => {
       if (a[a.length - 1].includes('/comments')) throw new Error('HTTP 502');

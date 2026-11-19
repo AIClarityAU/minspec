@@ -1,7 +1,7 @@
 ---
 id: SPEC-352
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only (DR-076 / #1169 dispatch for a T3/T4 issue). File ownership is decided at
   Plan, after Clarify picks the legacy-corpus policy (Q1) and the witness shape (Q2).
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

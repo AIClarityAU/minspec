@@ -23,6 +23,7 @@ import * as os from 'os';
 
 import {
   scaffoldTasksMd,
+  buildTasksMdContent,
   findSpecDirsMissingTasksMd,
   type MissingTasksMdSpec,
 } from '../src/lib/scaffold';
@@ -249,5 +250,19 @@ describe('#225 findSpecDirsMissingTasksMd()', () => {
 
   it('returns [] when specs/ does not exist', () => {
     expect(findSpecDirsMissingTasksMd(tmpDir)).toEqual([]);
+  });
+});
+
+describe('#349 scaffolded tasks.md body egress (DR-032 / SPEC-021 INV-1)', () => {
+  it('body carries no (DR|SPEC|EPIC)-<digits> literal', () => {
+    const out = buildTasksMdContent(
+      '---\nid: SPEC-042\nstatus: specifying\nproduct: minspec\nepic: EPIC-7\n---\n# x\n',
+    );
+    // The frontmatter and the `# <id> — Task Breakdown` heading legitimately carry the
+    // USER's own spec id; everything else is MinSpec-authored prose and must be ref-free.
+    const body = out
+      .replace(/^---\n[\s\S]*?\n---/, '')
+      .replace(/^# .* — Task Breakdown$/m, '');
+    expect(body).not.toMatch(/\b(DR|SPEC|EPIC)-\d+\b/);
   });
 });
