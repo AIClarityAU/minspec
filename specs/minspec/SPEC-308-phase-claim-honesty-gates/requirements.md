@@ -1,7 +1,7 @@
 ---
 id: SPEC-308
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — a lifecycle claim must be backed by evidence
@@ -15,8 +15,8 @@ affects:
   - scripts/validate-frontmatter.ts
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

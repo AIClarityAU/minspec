@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-331-baseline-drift-visible/requirements.md",
+  "specHash": "9fee157310299e303096ea97bbb2b12da613c00295bf492078d2b3ac30ddb1ed",
+  "approvedAt": "2026-11-17T04:38:03.397Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1117",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3803#issuecomment-6937435860"
+}
