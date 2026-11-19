@@ -1110,13 +1110,16 @@ function clusterRelatesTo(sorted: RankedNode[], graph: ArtifactGraph): RankedNod
 // =====================================================================
 
 /**
- * Within a severity class only, stable-topologically order so an un-cleared
+ * Stable-topologically order the WHOLE sorted queue so an un-cleared
  * `depends_on` blocker ranks BEFORE its dependent. Without this a blocked node
  * can surface as the single next task — the never-wrong defect (FR-13: "it MUST
- * rank below an un-cleared target"). Cross-class deps are already separated by
- * classRank (or surfaced as an advance-past gate-violation), so flooring is
- * block-bounded. A dependency cycle (already corruption) makes no Kahn progress
- * and its members are appended in block order — never loops. Pure, deterministic.
+ * rank below an un-cleared target"). The pass is NOT bounded by severity class
+ * (#3836): a dependent in a higher class than its blocker (e.g. a `blocked-ready`
+ * spec-approve depending on a `pending` spec) used to keep its class-rank lead
+ * because flooring only reordered within a class. Step-4 order remains the
+ * tiebreak, so nothing moves unless an edge forces it. A dependency cycle
+ * (already corruption) makes no Kahn progress and its members are appended in
+ * order — never loops. Pure, deterministic.
  */
 function floorDependsOn(
   sorted: RankedNode[],
@@ -1125,21 +1128,12 @@ function floorDependsOn(
 ): RankedNode[] {
   const uncleared = unclearedDependsOn(graph, index);
   if (uncleared.size === 0) return sorted;
-
-  const out: RankedNode[] = [];
-  let i = 0;
-  while (i < sorted.length) {
-    let j = i;
-    while (j < sorted.length && sorted[j].classRank === sorted[i].classRank) j++;
-    out.push(...topoFloorBlock(sorted.slice(i, j), uncleared));
-    i = j;
-  }
-  return out;
+  return topoFloorBlock(sorted, uncleared);
 }
 
 /**
- * Stable topological sort of one same-class block: a node is emitted only after
- * all its in-block un-cleared blockers. Block order is the tiebreak, so it never
+ * Stable topological sort of the ranked queue: a node is emitted only after
+ * all its un-cleared blockers present in the queue. Queue order is the tiebreak, so it never
  * reorders beyond what flooring requires (preserving the Step-4 total order
  * otherwise). A leftover cycle (impossible here — cycles are corruption — but
  * guarded) is appended in block order, so the pass can never infinite-loop.
@@ -1160,12 +1154,14 @@ function topoFloorBlock(
 ): RankedNode[] {
   if (block.length < 2) return block;
   const inBlock = new Set(block.map((b) => b.artifactId));
-  const blockers = new Map<string, string[]>();
+  // A gate-violation (class 0) is never pushed below a LOWER class: it already
+  // targets the blocker (advance-past, #1237) and must stay on top. It is only
+  // floored against blockers that are themselves gate-violations.
+  const inGate = new Set(block.filter((b) => b.classRank === 0).map((b) => b.artifactId));
+  const blockers = new Map<RankedNode, string[]>(); // per-NODE: gate-violation differs
   for (const node of block) {
-    blockers.set(
-      node.artifactId,
-      (uncleared.get(node.artifactId) ?? []).filter((t) => inBlock.has(t)),
-    );
+    const eligible = node.classRank === 0 ? inGate : inBlock;
+    blockers.set(node, (uncleared.get(node.artifactId) ?? []).filter((t) => eligible.has(t)));
   }
 
   const placed = new Set<RankedNode>(); // per-NODE: already in `out`
@@ -1176,7 +1172,7 @@ function topoFloorBlock(
     progress = false;
     for (const node of block) {
       if (placed.has(node)) continue;
-      if (blockers.get(node.artifactId)!.every((b) => clearedArtifacts.has(b))) {
+      if (blockers.get(node)!.every((b) => clearedArtifacts.has(b))) {
         placed.add(node);
         clearedArtifacts.add(node.artifactId);
         out.push(node);
