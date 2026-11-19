@@ -39,6 +39,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { createRequire } from 'node:module';
+import { findShadowingEntries } from './lib/pythonpath-shadow.mjs';
 
 const require = createRequire(import.meta.url);
 // picomatch is the library `atkeson.nodejs-testing` bundles and calls. Using the same
@@ -261,6 +262,34 @@ function main() {
     }
     console.log();
   }
+
+  // RUNNABILITY (#1185): discovery says a suite appears, not that it can start. The
+  // Python controller's Coverage profile injects PYTHONPATH=<workspace root>; a root
+  // entry named like a module its adapter imports (Vitest's `coverage/` report dir)
+  // shadows it and errors EVERY python test at once. Assert the hostile thing is absent.
+  const roots = new Set([REPO_ROOT]);
+  for (const e of EXPECTED) {
+    const r = path.join(WORKSPACE_ROOT, e.folder);
+    if (fs.existsSync(r)) roots.add(r);
+  }
+  let shadowed = 0;
+  for (const root of roots) {
+    for (const h of findShadowingEntries(root)) {
+      shadowed++;
+      console.log(`  FAIL  ${root}/${h.entry} shadows python module "${h.module}" on the injected PYTHONPATH`);
+    }
+  }
+  if (shadowed > 0) {
+    console.error(
+      `FAIL  ${shadowed} repo-root entr${shadowed === 1 ? 'y' : 'ies'} would break the Python controller's ` +
+        `Coverage profile (every python test reports "error"; CLI and Run profile still pass).\n` +
+        `      Fix: delete/move the entry (for Vitest's coverage/ report dir: rm -rf coverage,\n` +
+        `      or set coverage.reportsDirectory outside the root). Running Python coverage\n` +
+        `      also needs coverage.py installed in the container image.`,
+    );
+    process.exit(1);
+  }
+  console.log(`runnability: no repo-root entry shadows a python adapter module.\n`);
 
   console.log(`known gaps (no Testing-panel controller):`);
   for (const g of KNOWN_GAPS) console.log(`  - ${g}`);
