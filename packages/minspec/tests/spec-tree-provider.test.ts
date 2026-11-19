@@ -648,8 +648,9 @@ describe('SpecTreeProvider — Needs Re-Approval group (SPEC-029)', () => {
     expect(approve.length).toBeGreaterThan(0);
     for (const m of approve) expect(m.when).toContain(approveFragment);
 
-    // revokeApproval must NOT be widened — it stays scoped to specNode.approved only
-    // (now via regex too, since it must still tolerate a trailing hasDesign/hasTasks flag).
+    // revokeApproval is scoped to approved rows only (never the classify/stale-widened
+    // pattern); #741 widens it to also match specNode.migrated, via regex so it still
+    // tolerates a trailing hasDesign/hasTasks flag.
     const revoke = contextMenus.find((m) => m.command === 'minspec.revokeApproval');
     expect(revoke?.when).toContain('specNode\\.(approved|migrated)');
     expect(revoke?.when).not.toContain(widenedFragment);
@@ -674,15 +675,38 @@ describe('SpecTreeProvider — Needs Re-Approval group (SPEC-029)', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
     const menus: Array<{ command: string; when: string }> = pkg.contributes.menus['view/item/context'];
     const rx = (cmd: string) => {
-      const m = menus.find((x) => x.command === cmd)!;
-      const src = /viewItem =~ \/(.*)\//.exec(m.when)![1];
-      return new RegExp(src);
+      const m = menus.find((x) => x.command === cmd);
+      expect(m, `menu entry for ${cmd}`).toBeDefined();
+      const match = /viewItem =~ \/(.*)\//.exec(m!.when);
+      expect(match, `viewItem regex in when-clause of ${cmd}`).not.toBeNull();
+      return new RegExp(match![1]);
     };
     expect(rx('minspec.revokeApproval').test('specNode.migrated hasDesign')).toBe(true);
     expect(rx('minspec.revokeApproval').test('specNode.approved')).toBe(true);
     expect(rx('minspec.approveSpec').test('specNode.migrated')).toBe(true);
     expect(rx('minspec.classify').test('specNode.migrated')).toBe(false);
     expect(rx('minspec.showChangesSinceApproval').test('specNode.migrated')).toBe(false);
+  });
+
+  it('#741: every view/item/context clause that matches specNode.approved also matches specNode.migrated', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
+    const menus: Array<{ command: string; when: string }> = pkg.contributes.menus['view/item/context'];
+    // Clauses deliberately excluded from the parity rule (none today: the only
+    // clause matching approved rows is revokeApproval, which is meaningful for
+    // unverified approvals too). List any future exclusion here with its reason.
+    const EXCLUDED = new Set<string>();
+    let checked = 0;
+    for (const m of menus) {
+      const match = /viewItem =~ \/(.*)\//.exec(m.when);
+      if (!match) continue;
+      const re = new RegExp(match[1]);
+      for (const flags of ['', ' hasDesign', ' hasTasks', ' hasDesign hasTasks']) {
+        if (!re.test('specNode.approved' + flags) || EXCLUDED.has(m.command)) continue;
+        checked++;
+        expect(re.test('specNode.migrated' + flags), `${m.command} (${m.when}) matches approved but not migrated`).toBe(true);
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
   });
 
   it('Slice 5: a non-terminal stale spec gets contextValue specNode.stale; approved/unapproved unchanged', () => {
