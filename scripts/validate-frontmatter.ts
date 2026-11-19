@@ -43,7 +43,10 @@ import {
   checkReferences,
   type ReferenceRegistry,
 } from '../packages/minspec/src/lib/reference-checker';
-import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
+import { listOrphanedRecords, listRecords } from '../packages/minspec/src/lib/approval-store';
+import { canonicalSpecHash } from '../packages/minspec/src/lib/approval';
+import { classifyApprovablePath } from '../packages/minspec/src/lib/approvable';
+import { findStaleSidecars } from './lib/stale-sidecar';
 import { checkStatusParity, inspectStatusLine, inspectAllStatusClaims } from '../packages/minspec/src/lib/status-parity';
 import { checkManagedRegionMarkers, MINSPEC_GITIGNORE_ENTRIES } from '../packages/minspec/src/lib/scaffold';
 import { missingGitignoreEntries } from './lib/gitignore-entries';
@@ -690,6 +693,28 @@ try {
 } catch (err) {
   // listOrphanedRecords tolerates an absent approvals dir itself (#2000).
   reportUnrunnable('Rule 10', 'the orphaned-approval check could not run', err, false);
+}
+
+// Rule 26 (FATAL for specs, #1227): a committed approval sidecar must match the file it
+// approves. #1205 landed an approval and #1181 then added `implements:` (a hashed field),
+// so `main` read `status: planning` while the record resolved `stale`; both PRs were green
+// because CI checked the field's presence, never the approval it invalidated. The pre-commit
+// race gate (#424) sees one commit; this sees the merged tree. Decision-record/epic sidecars
+// warn only (existing corpus drift); orphans are Rule 10's.
+try {
+  for (const s of findStaleSidecars(
+    listRecords(ROOT),
+    (p) => canonicalSpecHash(join(ROOT, p)),
+    (p) => classifyApprovablePath(p),
+  )) {
+    const msg =
+      `stale approval (#1227) - sidecar records specHash ${s.recorded.slice(0, 12)}... but the file now hashes to ${s.current.slice(0, 12)}.... ` +
+      'A hashed field changed after approval; re-run "MinSpec: Approve Spec" (or revert the edit) so the signpost and the record agree.';
+    if (s.fatal) fail(join(ROOT, s.specPath), msg);
+    else warn(`${s.specPath}: ${msg}`);
+  }
+} catch (err) {
+  reportUnrunnable('Rule 26', 'the stale-approval check could not run', err, true);
 }
 
 // Rule 11 (FATAL, #626): the body status line must match frontmatter `status:`.
