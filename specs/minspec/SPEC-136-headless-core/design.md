@@ -166,8 +166,8 @@ comments at `a3a4a3e8`; it was not run. Task 7 re-reads each row against the cod
 
 | Script rule | Function the core calls | Behind the core? |
 |---|---|---|
-| 1+3+4 domain docs (`type: domain`, no checklists, no acceptance criteria) | inline in the script today (`:113-134`) | Yes, after task 7 moves the inline body into an exported function the script then calls. The Python validator checks `type: domain`, so FR-3 needs it |
-| 2+5 spec `id:` | `validateSpec` (believed to check `id`; task 7 verifies, else the same extraction as rule 1) | Yes |
+| 1+3+4 domain docs (`type: domain`, no checklists, no acceptance criteria) | `domainDocFailures` (`scripts/lib/domain-doc-rules.ts`), moved out of the script's inline body in task 7; the script calls it with its messages unchanged | Yes, error. The Python validator checks `type: domain`, so FR-3 needs it |
+| 2+5 spec `id:` | `specIdFailure` (`scripts/lib/domain-doc-rules.ts`). Read in task 7: `validateSpec` checks only that `id` is present, as a warning (`spec-validator.ts` closed-set field `id`, `required: true`); it never checks the `SPEC-NNN` shape, and the script fails on both | Yes, error. Extracted the same way as rule 1 |
 | 2+5 epic gate as FATAL | - | **Left out.** The script's comment calls it "a project-policy gate for THIS repo"; the shipped extension keeps epics soft (DR-013 FR-9), and the core gives the extension's warning via `validateSpec` |
 | 6 DR sequence health | `validateDrSequence` (`adr-manager.ts`) | Yes (warn) |
 | 7 split-layout coverage | `validateSplitLayoutCoverage` | Yes (warn) |
@@ -176,7 +176,7 @@ comments at `a3a4a3e8`; it was not run. Task 7 re-reads each row against the cod
 | 10 orphaned approval sidecars | `listOrphanedRecords` (`approval-store.ts`) | Yes (warn) |
 | 11, 11b status line | `checkStatusParity`, `inspectStatusLine`, `inspectAllStatusClaims` (`status-parity.ts`) | Yes |
 | 12 generated CI templates fresh | `scripts/gen-ci-templates.mjs` | **Left out.** It checks MinSpec's own generator output, which exists only in this repository |
-| 13 acceptance criteria, 15 ownership, 22 implement evidence, 23 status annotation | `validateSpec` (`checkAcceptanceCriteria`, `validateOwnership`, `validateImplementEvidence`, `validateStatusAnnotation`) | Yes |
+| 13 acceptance criteria, 15 ownership, 22 implement evidence, 23 status annotation | `validateSpec` (`checkAcceptanceCriteria`, `validateOwnership`, `validateImplementEvidence`, `validateStatusAnnotation`; each is called from `validateSpec`, `spec-validator.ts:1259-1268,1375`) | Yes, in the per-spec pass; no second call |
 | 14 managed-region markers | `checkManagedRegionMarkers` (`scaffold.ts`) | Yes |
 | 16 and its advisory twin | `validateDrAmendments`, `validatePendingDrAmendments` | Yes |
 | 17 DR id collision (offline half) | `checkDeclaredDrIds` (`scripts/lib/dr-id-collision.ts`) | Yes. Also covers the Python validator's DR `id:` missing/invalid check |
@@ -184,7 +184,7 @@ comments at `a3a4a3e8`; it was not run. Task 7 re-reads each row against the cod
 | 19 forbidden integrity words (DR-087) | inline constant `FORBIDDEN_CLAIM_WORDS` (`:915`) | **Left out.** A wording policy of this repository's register; carrying it would make the core hold a rule it does not share with the extension (FR-2) |
 | 20 `## In plain terms` (#2921) | `drsMissingPlainTerms` (`scripts/lib/dr-required-sections.ts`) | Yes (warn). The Python validator warns on it too |
 | 20 doubled frontmatter (#2467) | `detectDoubledFrontmatter` (`adr-manager.ts`) | Yes (warn) |
-| 21 generated harness file | to be read in task 7 | Yes if it is a call to an exported function; otherwise left out, with the reason written into this table in the same pull request |
+| 21 generated harness file | `buildContext`, `renderTemplate`, `parseSections` and `detectDoubledTemplateHeadings` (`template-engine.ts`, `merge-refresh.ts`), composed in the script's own loop; the core repeats that loop over `TEMPLATE_NAMES` | Yes (warn). Every function is exported and editor-free; only the loop is the caller's, as for rule 20 doubled frontmatter |
 | 24 known limit in product source | inline | **Left out.** It reads MinSpec's own `packages/` source, not a project's specs |
 
 Severities are the script's: the core reports a finding at the severity the script's call
