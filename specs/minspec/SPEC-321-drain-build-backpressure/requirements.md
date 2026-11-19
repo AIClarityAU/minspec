@@ -1,7 +1,7 @@
 ---
 id: SPEC-321
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute - the dev-time autonomous build/merge pipeline; same epic as SPEC-062 (the PR drain)
@@ -14,9 +14,9 @@ implements_reason: >-
   `scripts/drain-inbox.sh` (owned by SPEC-044, modified here, not owned) and one new hermetic
   test beside `packages/minspec/tests/drain-specify-backpressure.test.ts`. None of it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

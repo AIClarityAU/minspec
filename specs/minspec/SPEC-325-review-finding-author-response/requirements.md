@@ -1,7 +1,7 @@
 ---
 id: SPEC-325
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - measures whether the ai-review gate's findings were right
@@ -15,8 +15,8 @@ implements_reason: >-
   tests. Which files it owns is decided at Plan, after the Clarify decisions below.
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
