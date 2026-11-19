@@ -776,6 +776,25 @@ describe('pre-commit committed-symlink gate (#922) — executed behavior', { tim
     expect(r.stderr).not.toContain('refusing staged symlink');
   });
 
+  it('refuses a symlink carried in by a rename (R status, destination path)', () => {
+    fs.writeFileSync(path.join(repo, 'real.txt'), 'x\n');
+    stageLink('link', 'real.txt');
+    git('-c', 'core.hooksPath=/dev/null', 'commit', '-q', '--no-verify', '-m', 'seed');
+    fs.mkdirSync(path.join(repo, 'packages/a'), { recursive: true });
+    git('mv', 'link', 'packages/a/node_modules');
+    const r = runHook();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('packages/a/node_modules');
+  });
+
+  it('refuses a symlink at a non-ASCII path (git diff read with -z)', () => {
+    stageLink('café/link', '/home/dev/code/primary/thing');
+    const r = runHook();
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('café/link');
+    expect(r.stderr).toContain('absolute path');
+  });
+
   it('SYMLINK_GATE_OFF=1 bypasses the gate', () => {
     stageLink('node_modules', 'vendor');
     const r = runHook({ SYMLINK_GATE_OFF: '1' });
