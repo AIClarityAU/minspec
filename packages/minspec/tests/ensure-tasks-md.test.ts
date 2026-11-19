@@ -62,7 +62,7 @@ function writeRequirements(root: string, relDir: string, o: ReqOpts): string {
     '---',
     `id: ${o.id}`,
     'type: requirements',
-    `status: ${o.status ?? 'implementing'}`,
+    `status: ${o.status ?? 'specifying'}`,
     ...(o.product ? [`product: ${o.product}`] : []),
     `tier: ${o.tier ?? 'T3'}`,
     ...(o.epic ? [`epic: ${o.epic}`] : []),
@@ -133,7 +133,7 @@ describe('#225 scaffoldTasksMd()', () => {
       id: 'SPEC-002',
       product: 'minspec',
       epic: 'EPIC-007  # Some Epic',
-      status: 'implementing',
+      status: 'planning',
       tier: 'T4',
     });
     scaffoldTasksMd(dir);
@@ -141,7 +141,7 @@ describe('#225 scaffoldTasksMd()', () => {
     const parsed = parseSpec(raw);
     expect(parsed.frontmatter.id).toBe('SPEC-002');
     expect(parsed.frontmatter.type).toBe('tasks');
-    expect(parsed.frontmatter.status).toBe('implementing');
+    expect(parsed.frontmatter.status).toBe('planning');
     expect(parsed.frontmatter.product).toBe('minspec');
     // epic carries its inline `# Title` comment verbatim (the corpus convention).
     expect(parsed.frontmatter.epic).toContain('EPIC-007');
@@ -190,6 +190,19 @@ describe('#225 scaffoldTasksMd()', () => {
     expect(created).toBe(false);
     expect(fs.readFileSync(path.join(dir, 'tasks.md'), 'utf-8')).toBe(existing);
   });
+
+  it.each(['implementing', 'done'])(
+    '#1118 writes no stub onto a spec whose status is %s (even with an inline comment)',
+    (status) => {
+      const dir = writeRequirements(tmpDir, 'minspec/SPEC-007-built', {
+        id: 'SPEC-007',
+        status: `${status}  # built: shipped + tests pass`,
+        tier: 'T3',
+      });
+      expect(scaffoldTasksMd(dir)).toBe(false);
+      expect(fs.existsSync(path.join(dir, 'tasks.md'))).toBe(false);
+    },
+  );
 
   it('returns false (no-op) for a dir with no requirements.md', () => {
     const dir = path.join(tmpDir, 'specs', 'minspec', 'SPEC-006-empty');
@@ -247,6 +260,18 @@ describe('#225 findSpecDirsMissingTasksMd()', () => {
     expect(a.tier).toBe('T3');
     expect(fs.existsSync(path.join(a.dirPath, 'requirements.md'))).toBe(true);
   });
+
+  it.each(['implementing', 'done'])(
+    '#1118 does NOT offer a spec whose status is %s',
+    (status) => {
+      writeRequirements(tmpDir, 'minspec/SPEC-008-built', {
+        id: 'SPEC-008',
+        status: `${status}  # built`,
+        tier: 'T3',
+      });
+      expect(findSpecDirsMissingTasksMd(tmpDir)).toEqual([]);
+    },
+  );
 
   it('returns [] when specs/ does not exist', () => {
     expect(findSpecDirsMissingTasksMd(tmpDir)).toEqual([]);
