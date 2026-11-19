@@ -117,11 +117,12 @@ cases land in two existing suites, both real fs with no `fs` mock:
 | migration | for both nested shapes, `migrateLayout(root, 'spec-kit')` counts the spec, the new representation is under `specs/p/`, and `specs/` still lists only `p`; then `'flat'` gives back the frontmatter and every section byte-for-byte | AC-3, INV-2 | yes |
 | duplicate id | `specs/a/SPEC-001-*/requirements.md` and `specs/b/SPEC-001-*/requirements.md`: two `rework` entries, `migrated: 2`, each landing under its own product (PQ1) | AC-6 | yes |
 | same id, one directory | top-level `SPEC-001-a.md` and `SPEC-001-b.md`: `success: false, migrated: 1` and warning `Target directory already exists: SPEC-001-<slug>`, exactly as on main (PQ6) | FR-5 | no: the case pins today's output |
+| same id, one directory (spec-kit) | top-level `SPEC-001-a/` and `SPEC-001-b/` directories to flat: `success: false, migrated: 1` and warning `Target file already exists: <fileName>`, exactly as on main (PQ6); the other directory byte-identical | FR-5 | no: the case pins today's output |
 | split spec | `specs/p/SPEC-010-split/{requirements,design,tasks}.md` to spec-kit: `migrated: 1`, the new directory exists inside the feature directory, `design.md` and `tasks.md` unchanged, and `listSpecs()` reports one entry with `hasDesignFile` and `hasTasksFile` true (PQ2) | FR-3 | yes |
 
 **Repoints.** In `spec-manager.test.ts`, the 12 calls (`:290`, `:298`, `:311`, `:315`, `:325`,
 `:334`, `:345`, `:356`, `:370`, `:610`, `:690`, `:720`) call `listSpecs(x)`. The four that pass a
-`filter` argument (`:311`, `:315`, `:325`, `:334`) become `listSpecs(x).filter(...)` with the same
+`filter` argument (`:311`, `:315`, `:325`, `:334`; `features.test.ts` has two more, `:165` and `:169`) become `listSpecs(x).filter(...)` with the same
 predicate and the same expected values, because D-1 deletes the `filter` parameter. Titles and the
 comment naming the dead function (`:278`, `:357`, `:687`, `:696`) name `listSpecs()` instead. The
 `migrateLayout()` suite is not edited (AC-4). `features.test.ts` (`:21`, `:117`, `:155`, `:165`,
@@ -329,6 +330,15 @@ just written, and the call returns `success: false` with `Target directory alrea
 survives, so the check is made explicit: right after a flat entry is written for spec-kit, a
 sibling `.md` file in the same directory whose frontmatter `id` equals the entry's, other than the
 entry's own file, returns that same result. The unlisted file stays byte-identical at its path.
+The mirror case is covered the same way: two top-level spec-kit directories `SPEC-001-a/` and
+`SPEC-001-b/` migrating to flat. On main (traced at `migrateLayout()`'s flat branch) both summaries
+resolve to the first directory through `findSpecEntry()`, the first pass writes
+`SPEC-001-<slug>.md`, and the second pass finds that file and returns `success: false` with
+`Target file already exists: <fileName>`. After the swap `listSpecs()` collapses both to one entry
+(`spec-catalog.ts:105-106`), so the check is explicit here too: right after a spec-kit entry is
+written flat, a sibling directory in the same parent whose spec file carries the entry's `id`, other
+than the entry's own directory, returns that same result and stays byte-identical. Both checks live
+in the same write-path scan; neither changes what a tree with no same-id sibling does.
 Rejected: (a), the first draft's choice (silent `success: true, migrated: 1`, a carve-out from
 FR-5, flagged by the architect review); (c), because it leaves `migrateLayout()`'s behaviour
 unchanged. Accepted cost: a small scan in the write path, and `SPEC_FILE_RE` kept

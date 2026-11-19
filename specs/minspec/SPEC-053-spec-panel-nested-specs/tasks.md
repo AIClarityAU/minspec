@@ -80,9 +80,13 @@ none touches `.github/`. They run in sequence: tasks 3.1 and 4.1 share a test fi
   directory, leaves `design.md` and `tasks.md` unchanged, and `listSpecs()` still reports one entry with both role flags; a nested target
   that already exists returns `success: false`; top-level `SPEC-001-a.md` and `SPEC-001-b.md` return
   `success: false, migrated: 1` and warning `Target directory already exists: <dirName>`, the same
-  result as on main, with the other file byte-identical at its path (PQ6(b); pins FR-5). After a flat
-  entry is written for spec-kit, `migrateLayout()` checks the entry's own directory for another
-  `SPEC-NNN-*.md` file with the same `id` and returns that result.
+  result as on main, with the other file byte-identical at its path (PQ6(b); pins FR-5); top-level
+  `SPEC-001-a/` and `SPEC-001-b/` directories to flat return `success: false, migrated: 1` and warning
+  `Target file already exists: <fileName>`, the same result as on main, the other directory
+  byte-identical. After a flat entry is written for spec-kit, `migrateLayout()` checks the entry's own
+  directory for another `SPEC-NNN-*.md` file with the same `id` and returns that result; after a
+  spec-kit entry is written flat, it checks the parent for another spec directory with the same `id`
+  and returns the flat-target result.
   *Prerequisites:* 1.1.
   *Done when:* green; the existing `migrateLayout()` suite passes with no edit to its lines;
   `scripts/check-import-cycles.ts` reports 0 runtime cycles; and the pull request body carries "re-run
@@ -94,7 +98,7 @@ none touches `.github/`. They run in sequence: tasks 3.1 and 4.1 share a test fi
   `packages/minspec/src/lib/artifact-graph.ts`, `packages/minspec/tests/spec-manager.test.ts`,
   `packages/minspec/tests/features.test.ts` - delete `listSpecsShallow()` (`SPEC_FILE_RE` stays, read by task 3.1's same-id check); sweep
   the `SpecSummary` doc comment and the near-namesake sentence in `artifact-graph.ts`. Repoint all 16
-  test calls at `listSpecs()`, the four with a `filter` argument becoming `.filter(...)` with the
+  test calls at `listSpecs()`, the six with a `filter` argument (four in `spec-manager.test.ts`, two in `features.test.ts`) becoming `.filter(...)` with the
   same predicate and expected values, and rename the titles and the comment naming the dead function.
   Add AC-1's case: FR-4's fixture is in `listSpecs()`. It is green before and after (PQ5); tasks 2.1
   and 3.1 carry the red-to-green pair.
