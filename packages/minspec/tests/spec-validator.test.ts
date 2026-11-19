@@ -754,39 +754,6 @@ describe('validateSplitLayoutCoverage — split-layout cross-file coverage (#111
   });
 });
 
-describe('validateSplitLayoutCoverage — shared id across phase files (#493)', () => {
-  const g = (type: string, id?: string): SplitLayoutFile => ({ type, ...(id ? { id } : {}) });
-
-  it('errors when design/tasks id differs from requirements id', () => {
-    const r = validateSplitLayoutCoverage(
-      [g('requirements', 'SPEC-001'), g('design', 'SPEC-002'), g('tasks', 'SPEC-003')],
-      DEFAULT_CONFIG,
-      'T3',
-    );
-    const v = r.violations.filter((x) => x.rule.startsWith('split-id.'));
-    expect(v.map((x) => x.rule).sort()).toEqual(['split-id.design.mismatch', 'split-id.tasks.mismatch']);
-    expect(v.every((x) => x.severity === 'error')).toBe(true);
-  });
-
-  it('passes when all ids match', () => {
-    const r = validateSplitLayoutCoverage(
-      [g('requirements', 'SPEC-001'), g('design', 'SPEC-001'), g('tasks', 'SPEC-001')],
-      DEFAULT_CONFIG,
-      'T3',
-    );
-    expect(r.violations).toHaveLength(0);
-  });
-
-  it('does not compare when an id is absent', () => {
-    const r = validateSplitLayoutCoverage(
-      [g('requirements', 'SPEC-001'), g('design'), g('tasks', 'SPEC-001')],
-      DEFAULT_CONFIG,
-      'T3',
-    );
-    expect(r.violations).toHaveLength(0);
-  });
-});
-
 // T3 regression (#115 follow-up): the parser coerces an unrecognized `status`/
 // `tier` to a hardcoded default ('new'/'T2'). Post-parse that is indistinguishable
 // from a genuine default, so the SPECS pane shows a FALSE status (signpost-lie) with
