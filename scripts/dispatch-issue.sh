@@ -2175,6 +2175,10 @@ SHEPHERD_MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"
 #   stuck — the shepherd's OWN automation gave up (ceiling, attempt cap, rebase or fix that
 #           produced nothing): `agent-stuck`, NOT `needs-human-review`, so no consumer reads
 #           it as a human decision. Anything but the literal "human" fails closed to stuck.
+#           No code reads `agent-stuck` (grep: zero consumers); it is a visibility marker.
+#           Any later retry comes from the label-agnostic drain sweep (drain-inbox.sh
+#           `gh pr list --state open`), NOT from this label; remediate-pr.sh may still
+#           relabel `needs-human-review` when ITS own cap is hit.
 shepherd_hand_off() {
   local pr_num="$1" reason="$2" kind="${3:-stuck}" already label desc tail
   if [[ "$kind" == "human" ]]; then
@@ -2183,8 +2187,8 @@ shepherd_hand_off() {
     tail='It is labelled `needs-human-review`; a human decision is needed and the creator will make no further automated attempts.'
   else
     label="agent-stuck"
-    desc="Automation gave up — no human decision is pending; an agent retry owns it"
-    tail='It is labelled `agent-stuck`: this is an automation failure, not a human decision, so it needs an agent retry rather than a human review. The creator will make no further automated attempts.'
+    desc="Automation gave up — a failure marker, not a human decision (no dedicated consumer)"
+    tail='It is labelled `agent-stuck`: this is an automation failure rather than a human decision. Nothing reads this label; a later drain sweep may retry it, and the remediation drain may escalate it to `needs-human-review` if it hits its own cap. The creator will make no further automated attempts.'
   fi
   gh label create "$label" --repo "$REPO" --color fbca04 \
     --description "$desc" 2>/dev/null || true
