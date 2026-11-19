@@ -174,6 +174,18 @@ export function buildTasksMdContent(requirementsRaw: string): string {
 }
 
 /**
+ * Statuses at which the work is already underway or finished (#1118). A stub task list
+ * reading "Add the first task" with an unticked box on such a spec asserts the work has
+ * not started — a false signpost — so no tasks.md is scaffolded or offered for it.
+ */
+const BUILT_SPEC_STATUSES: readonly string[] = ['implementing', 'done'];
+
+/** True when a requirements.md's raw source carries a built (`implementing`/`done`) status. */
+function isBuiltSpec(requirementsRaw: string): boolean {
+  return BUILT_SPEC_STATUSES.includes(scalarValue(rawFrontmatterLine(requirementsRaw, 'status')));
+}
+
+/**
  * Scaffold a `tasks.md` into a split-layout spec directory that lacks one.
  *
  * No-op (returns false) when the dir has no `requirements.md` (nothing to mirror
@@ -193,6 +205,8 @@ export function scaffoldTasksMd(dirPath: string): boolean {
   } catch {
     return false;
   }
+  // #1118: never stamp an empty stub onto a spec that is already being built / is built.
+  if (isBuiltSpec(prepareText(requirementsRaw))) return false;
 
   fs.writeFileSync(tasksPath, buildTasksMdContent(requirementsRaw), 'utf-8');
   return true;
@@ -265,6 +279,7 @@ export function findSpecDirsMissingTasksMd(rootDir: string): MissingTasksMdSpec[
           isSplit &&
           requiresTasks &&
           id &&
+          !isBuiltSpec(raw) &&
           !fs.existsSync(path.join(dir, 'tasks.md'))
         ) {
           found.push({ id, tier, dirPath: dir });
