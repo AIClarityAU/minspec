@@ -1,7 +1,7 @@
 ---
 id: SPEC-076
 type: requirements
-status: planning
+status: done
 tier: T2
 product: minspec
 epic: EPIC-002  # Signpost Integrity — the never-wrong next-action promise this reader must not weaken
@@ -11,6 +11,7 @@ affects: [package.json]  # one npm-script line; no dependency change
 phases:
   specify: done
   plan: done
+  implement: done   # delivered by #2183 (scripts/next-task.ts, headless-signpost.test.ts)
 ---
 
 # Headless signpost reader — one next action per project, with no editor

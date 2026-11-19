@@ -13,7 +13,8 @@ import { migrateLayoutCommand } from './commands/migrate';
 import { createAdrCommand, regenerateDrIndexCommand, acceptAdrCommand, setAdrStatusCommand } from './commands/adr';
 import { createEpicCommand, regenerateEpicIndexCommand, acceptEpicCommand } from './commands/epic';
 import { backfillEpicsCommand, type BackfillOptions } from './commands/backfill-epics';
-import { regenerateDrIndex } from './lib/adr-manager';
+import { regenerateDrIndex, regenerateDrIndexEntries, resolveDecisionsDir, listAdrs } from './lib/adr-manager';
+import { DrIndexDeltaTracker } from './lib/dr-index-delta';
 import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
 import { approveSpecCommand, revokeApprovalCommand } from './commands/approve';
 import { ApprovalDiffContentProvider, showChangesSinceApproval } from './lib/approval-diff';
@@ -31,10 +32,14 @@ import {
   MinSpecNextTaskStatusBar,
   MinSpecScaffoldCommitStatusBar,
   MinSpecTidyPrimaryStatusBar,
+  MinSpecQueueDepthStatusBar,
+  resolveKeybinding,
   resolveNextTaskKeybinding,
 } from './views/status-bar';
 import { classifyPrimary } from './lib/tidy-primary';
 import { tidyPrimaryCommand } from './commands/tidy-primary';
+import { viewQueueCommand } from './commands/view-queue';
+import { listQueuedRequests } from './lib/phase-advance-queue';
 import { fromFrontmatter } from './lib/spec-progress';
 import { nextTaskCommand, computeNextTask } from './commands/next-task';
 import { SpecPanel } from './views/spec-panel';
@@ -244,6 +249,7 @@ export function activate(context: vscode.ExtensionContext): void {
       // PR that merged while the window was unfocused clears its badge
       // promptly instead of waiting on the next unrelated file event.
       refreshTidyPrimaryStatusBar();
+      refreshQueueDepth();
     }),
     // Re-scan when the set of workspace folders changes (#549). The Specs/DRs
     // providers read the LIVE folder list on every getChildren, so a plain
@@ -333,6 +339,20 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   refreshTidyPrimaryStatusBar();
 
+  // Phase-advance queue-depth indicator (#737): enqueued requests must never
+  // silently rot with no consumer running. Read-only; hidden at zero.
+  const queueDepthStatusBar = new MinSpecQueueDepthStatusBar(
+    resolveKeybinding(context.extension?.packageJSON, 'minspec.viewQueue'),
+  );
+  const refreshQueueDepth = () => {
+    try {
+      queueDepthStatusBar.update(workspaceRoot ? listQueuedRequests(workspaceRoot) : []);
+    } catch {
+      queueDepthStatusBar.update([]);
+    }
+  };
+  refreshQueueDepth();
+
   // CodeLens providers (Phase 7)
   const codeLensProvider = new MinSpecCodeLensProvider(workspaceRoot);
   const specFileLensProvider = new MinSpecSpecFileLensProvider(workspaceRoot);
@@ -402,6 +422,7 @@ export function activate(context: vscode.ExtensionContext): void {
       await tidyPrimaryCommand(workspaceRoot, presence.sessionId);
       refreshTidyPrimaryStatusBar();
     }),
+    vscode.commands.registerCommand('minspec.viewQueue', () => viewQueueCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.constitutionShowPrompt', constitutionShowPromptCommand),
     vscode.commands.registerCommand('minspec.constitutionCompact', constitutionCompactCommand),
     vscode.commands.registerCommand('minspec.constitutionPropose', constitutionProposeCommand),
@@ -520,6 +541,7 @@ export function activate(context: vscode.ExtensionContext): void {
     nextTaskStatusBar,
     scaffoldCommitStatusBar,
     tidyPrimaryStatusBar,
+    queueDepthStatusBar,
   );
 
   // Watch spec files — refresh tree + status bar on changes
@@ -553,10 +575,17 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
-  // Regenerate INDEX.md when a DR file changes (frontmatter edit, add, delete).
-  // Guard against self-trigger: regenerateDrIndex writes INDEX.md, which is a
+  // Update INDEX.md when a DR file changes (frontmatter edit, add, delete).
+  // Guard against self-trigger: the update writes INDEX.md, which is a
   // *.md under decisionsDir and would re-fire the watcher → infinite loop.
-  // Debounce coalesces bursts (e.g. multi-file save) into one regenerate.
+  // Debounce coalesces bursts (e.g. multi-file save) into one write.
+  //
+  // Only the entries of the decisions whose files fired are touched (#896). A full
+  // rebuild here also rewrote every OTHER entry that had drifted, so creating a DR
+  // and discarding it in Source Control left INDEX.md modified: the delete rebuilt
+  // from disk instead of undoing the create. The full rebuild stays on the palette
+  // command (MinSpec: Regenerate DR INDEX) and is the fallback when an event cannot
+  // be mapped to a decision id.
   //
   // Opt-in gate (#2461): a folder with no `.minspec/` never asked MinSpec to
   // manage its decisions directory (constitution invariant 3 — blast radius).
@@ -564,27 +593,52 @@ export function activate(context: vscode.ExtensionContext): void {
   // re-checked every time the debounced timer fires, not once at activation,
   // so a folder that runs `MinSpec: Initialize` mid-session starts getting an
   // index without a window reload, and a folder that never does never gets one.
+  const adrIndexOverrides = decisionsDir ? { decisionsDir } : undefined;
+  const adrIndexDelta = new DrIndexDeltaTracker();
+  const resolvedDecisionsDir = (): string | null => {
+    try {
+      return resolveDecisionsDir(workspaceRoot, adrIndexOverrides);
+    } catch {
+      return null;
+    }
+  };
+  // Remember the id of every record already on disk, so discarding one whose
+  // frontmatter `id:` differs from its file name still removes the right entry.
+  try {
+    const existing = workspaceRoot ? listAdrs(workspaceRoot, adrIndexOverrides) : [];
+    for (const adr of existing) {
+      adrIndexDelta.remember(adr.filePath, adr.id);
+    }
+  } catch {
+    // An unresolvable register: its delete events fall back to the file-name id.
+  }
   let adrIndexTimer: ReturnType<typeof setTimeout> | undefined;
-  const onAdrsChanged = (uri?: vscode.Uri) => {
+  const onAdrEvent = (deleted: boolean) => (uri?: vscode.Uri) => {
     adrTreeProvider.refresh();
     // ADR status (proposed→accepted) is a resolver input — recompute the signpost.
     refreshNextTask();
     if (uri && path.basename(uri.fsPath).toLowerCase() === 'index.md') return;
     if (!workspaceRoot) return;
+    if (uri) adrIndexDelta.note(uri.fsPath, deleted, resolvedDecisionsDir());
+    else adrIndexDelta.markFull();
     if (adrIndexTimer) clearTimeout(adrIndexTimer);
     adrIndexTimer = setTimeout(() => {
+      // Not taken until the folder has opted in, so ids seen before
+      // `MinSpec: Initialize` still reach the first write after it.
       if (!isMinspecInitialized(workspaceRoot)) return;
+      const delta = adrIndexDelta.take();
       try {
-        regenerateDrIndex(workspaceRoot, decisionsDir ? { decisionsDir } : undefined);
+        if (delta.full) regenerateDrIndex(workspaceRoot, adrIndexOverrides);
+        else if (delta.ids.length > 0) regenerateDrIndexEntries(workspaceRoot, delta.ids, adrIndexOverrides);
       } catch {
         // Non-fatal: tree already refreshed; index regen is best-effort.
       }
     }, 300);
   };
 
-  adrWatcher.onDidChange(onAdrsChanged);
-  adrWatcher.onDidCreate(onAdrsChanged);
-  adrWatcher.onDidDelete(onAdrsChanged);
+  adrWatcher.onDidChange(onAdrEvent(false));
+  adrWatcher.onDidCreate(onAdrEvent(false));
+  adrWatcher.onDidDelete(onAdrEvent(true));
 
   context.subscriptions.push(adrWatcher);
 
@@ -644,6 +698,18 @@ export function activate(context: vscode.ExtensionContext): void {
   epicsWatcher.onDidCreate(onEpicsChanged);
   epicsWatcher.onDidDelete(onEpicsChanged);
   context.subscriptions.push(epicsWatcher);
+
+  // Queue watcher (#737): created after the spec/ADR/epic watchers so their
+  // creation order is unchanged.
+  if (workspaceRoot) {
+    const queueWatcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(workspaceRoot, '.minspec/queue/**'),
+    );
+    queueWatcher.onDidChange(refreshQueueDepth);
+    queueWatcher.onDidCreate(refreshQueueDepth);
+    queueWatcher.onDidDelete(refreshQueueDepth);
+    context.subscriptions.push(queueWatcher);
+  }
 
   // Drift detection: monitor file saves
   if (workspaceRoot) {

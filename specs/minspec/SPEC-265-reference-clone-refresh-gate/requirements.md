@@ -1,7 +1,7 @@
 ---
 id: SPEC-265
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a stale upstream copy is a supply-chain signpost that lies
@@ -14,9 +14,9 @@ implements_reason: >-
   own (a hook script under scripts/hooks/, a registry file, a settings.json entry, a scheduled lag
   check) are still fixed at Plan; no recorded option names them by path, so implements stays none.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
