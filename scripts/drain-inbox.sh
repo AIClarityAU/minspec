@@ -1703,7 +1703,7 @@ arm_delegated_spec_merges() {
     rc=1
     for attempt in 1 2; do
       if one_rows=$(gh pr list --repo "$REPO" --state open --label "$label" --limit "$limit" \
-           --json number,isDraft,autoMergeRequest,files 2>"$errfile"); then
+           --json number,isDraft,autoMergeRequest,headRefName,files 2>"$errfile"); then
         rc=0
         break
       fi
@@ -1785,6 +1785,16 @@ arm_delegated_spec_merges() {
   if [[ "$cursor" =~ ^[0-9]+$ ]]; then
     candidates=$(awk -v c="$cursor" '$1 > c' <<< "$candidates"; awk -v c="$cursor" '$1 <= c' <<< "$candidates")
   fi
+  # Delegated approval PRs (`dlg-approve/*`) are judged BEFORE the rest (#3825), each group
+  # still in cursor order. A BEHIND plan PR cannot be admitted until its update turn, yet it
+  # took judgement slots ahead of approval PRs that could be armed at once. Ordering only.
+  local dlg_prs
+  dlg_prs=$(printf '%s' "$rows" | jq -r '.[] | select((.headRefName // "") | startswith("dlg-approve/")) | .number' 2>/dev/null) || {
+    echo "[drain] WARNING: delegated spec merge NOT run: could not read the approval PR heads." >&2
+    return 0
+  }
+  candidates=$(awk 'NR == FNR { d[$1] = 1; next } ($1 in d)' <(printf '%s\n' "$dlg_prs") <(printf '%s\n' "$candidates")
+    awk 'NR == FNR { d[$1] = 1; next } !($1 in d)' <(printf '%s\n' "$dlg_prs") <(printf '%s\n' "$candidates"))
   while read -r pr; do
     [[ -n "$pr" ]] || continue
     if (( tried >= max )); then
@@ -2120,7 +2130,22 @@ _pending_specs() {
   _pend_prs=$(gh pr list --repo "$REPO" --state open --label hold:human --limit 1000 \
     --json title,body --jq "$_pend_jq") || _pend_rc=$?
   (( _pend_rc == 0 )) || return 1
-  _pend_held=$(printf '%s\n%s\n' "$_pend_issues" "$_pend_prs" | tr -d '\r' | awk '
+  # A spec whose delegated approval pull request (`dlg-approve/spec-NNN-*`) is auto-merge
+  # armed no longer waits for a human or for Clarify (#3825): it passed the delegation judge
+  # (or the founder armed it) and GitHub merges it once the branch is current. Counting it
+  # kept spec-writing paused for the ~65 minutes each serialized branch update takes. Only an
+  # ARMED one is left out: `ai-review:pass` alone is not a ruling by the judge. A disarmed PR
+  # or a moved head is counted again next cycle. A failed read pauses, like the holds above.
+  local _pend_armed
+  _pend_armed=$(gh pr list --repo "$REPO" --state open --limit 1000 \
+    --json headRefName,autoMergeRequest \
+    --jq '.[] | select(.autoMergeRequest != null) | .headRefName') || _pend_rc=$?
+  (( _pend_rc == 0 )) || return 1
+  _pend_armed=$(printf '%s\n' "$_pend_armed" | tr -d '\r' | awk '
+    match($0, /^dlg-approve\/spec-[0-9]+(-|$)/) {
+      t = substr($0, 18); sub(/[^0-9].*$/, "", t); print "SPEC-" t
+    }') || return 1
+  _pend_held=$(printf '%s\n%s\n%s\n' "$_pend_issues" "$_pend_prs" "$_pend_armed" | tr -d '\r' | awk '
     function emit(t,   r) {
       while (match(t, /SPEC-[0-9]+/)) { print substr(t, RSTART, RLENGTH); t = substr(t, RSTART + RLENGTH) }
     }
