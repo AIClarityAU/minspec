@@ -1,7 +1,7 @@
 ---
 id: SPEC-333
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute - the dev-time autonomous build/merge pipeline; the delegated merge lane is part of the drain (SPEC-062)
@@ -14,9 +14,9 @@ implements_reason: >-
   the delegated merge judge in scripts/lib/delegated-merge.ts, and the --delegated-spec-merge seam in
   scripts/dispatch-issue.sh. None of it is built.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
