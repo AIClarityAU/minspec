@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from './config';
-import { slugify } from './spec-manager';
+import { slugify } from './slug';
 import { epicRefValue } from './epic-manager';
 import { inspectAllStatusClaims, claimParagraphText } from './status-parity';
 import { ensureDirectory } from './opt-in';
