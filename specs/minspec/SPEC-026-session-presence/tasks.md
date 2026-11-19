@@ -52,24 +52,28 @@ Shared rules for every task:
 
 ## 1 - Presence groundwork in TypeScript (FR-10, FR-14, D-P5)
 
-- [ ] **1.1** `packages/minspec/src/lib/presence.ts` - change `contendingLiveSessions` to
+- [x] **1.1** `packages/minspec/src/lib/presence.ts` - change `contendingLiveSessions` to
   return `{ path: string; peer: SessionPresenceRecord }[]`, one entry per contended path and
   peer (FR-10 shape); export `APPROVABLE_CORPUS_PREFIXES` and `isApprovableCorpusPath`
   (D-P5); export `isPathClaimed` so the parity test can name the rule it mirrors. Update the
   existing callers in `packages/minspec/tests/presence.test.ts`.
-- [ ] **1.2** `packages/minspec/tests/helpers/presence-fixtures.ts` (new) - the golden
+- [x] **1.2** `packages/minspec/tests/helpers/presence-fixtures.ts` (new) - the golden
   fixture set FR-14 lists: live, stale heartbeat (121 s), stale by 1 s at the 120 s edge,
   dead pid, empty allowlist, same versus different `worktreeRoot`, covering versus
   non-covering path (exact, `dir/`, `dir/*`), a non-corpus path, and a corrupt record. Each
   fixture states its expected contender list. Exports a builder that writes the records into
   a temp `.minspec/sessions/` and spawns or reaps the pids.
-- [ ] **1.3** `packages/minspec/tests/presence.test.ts` - run every fixture through
+- [x] **1.3** `packages/minspec/tests/presence.test.ts` - run every fixture through
   `contendingLiveSessions`; tag the existing Layer 1 tests with their invariant ids (INV-2,
   INV-3, INV-4, INV-5, INV-6) and add any that are missing, so
   `grep -o 'INV-[0-9]*' packages/minspec/tests/presence*.test.ts` lists INV-1 to INV-6, INV-8
   and INV-10.
   *Done when:* the fixture cases pass, a mutant that drops the empty-allowlist skip fails
   INV-10, and the grep above lists the eight ids.
+  *Built note (2026-11-13):* the empty-allowlist mutant is equivalent and cannot fail:
+  `isPathClaimed([], p)` iterates nothing and returns false, so dropping the skip changes no
+  verdict. Two mutants that do change verdicts were run instead and both fail: the stale edge
+  `>=` to `>` fails `edge-120s-stale`, and dropping the `dir/*` strip fails `cover-dir-glob`.
 
 ## 2 - The bash predicate and its parity test (FR-14, INV-13; machinery)
 
