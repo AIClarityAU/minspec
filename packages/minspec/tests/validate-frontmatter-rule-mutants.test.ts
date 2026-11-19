@@ -317,6 +317,15 @@ const MUTANTS: Mutant[] = [
     expect: /DR frontmatter — field `approved-by` is a retired spelling/,
     mutate: (f) => replaceOnce(f, 'docs/decisions/DR-001.md', 'date: 2026-01-01\n---', 'date: 2026-01-01\napproved-by: x\n---'),
   },
+  {
+    rules: ['28'],
+    name: 'two epic files declaring one id',
+    severity: 'FAIL',
+    expect: /Epic id duplicate/,
+    mutate: (f) => {
+      f['docs/epics/EPIC-002-other.md'] = '---\nid: EPIC-001\nslug: other\ntitle: Other\n---\n\n# Other\n';
+    },
+  },
 ];
 
 // ---- Rules deliberately not mutated here ----------------------------------
