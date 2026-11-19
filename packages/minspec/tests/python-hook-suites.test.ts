@@ -7,7 +7,7 @@
 // is a red test — never a silent skip.
 import { spawnSync } from 'node:child_process';
 import { readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const hooksDir = resolve(__dirname, '../../../scripts/hooks');
