@@ -78,8 +78,8 @@ export function formatKeybindingForDisplay(binding: string): string {
  * and formats for display. Returns undefined if the command isn't bound.
  *
  * Caveat: VS Code exposes no public API for the *effective* (user-overridden)
- * binding, so this reflects what MinSpec ships. A 'Change…' affordance into the
- * Keyboard Shortcuts editor is the honest escape hatch (tracked follow-up).
+ * binding, so this reflects what MinSpec ships. The tooltip's 'Change…' link into the
+ * Keyboard Shortcuts editor is the honest escape hatch (#949).
  */
 export function resolveKeybinding(
   packageJSON:
@@ -97,6 +97,25 @@ export function resolveNextTaskKeybinding(
   packageJSON: Parameters<typeof resolveKeybinding>[0],
 ): string | undefined {
   return resolveKeybinding(packageJSON, 'minspec.nextTask');
+}
+
+/** Keyboard Shortcuts editor command, opened pre-filtered to `minspec.nextTask` (#949). */
+const OPEN_KEYBINDINGS_COMMAND = 'workbench.action.openGlobalKeybindings';
+
+/**
+ * Tooltip with the shipped-default shortcut plus a trusted 'Change…' link into
+ * the Keyboard Shortcuts editor (#949). VS Code has no public API for the
+ * *effective* binding, so the shown default may be stale after a rebind; the
+ * link gives a verify/change path. Trust is scoped to that single command, and
+ * the (untrusted) explanation text is escaped via `appendText`.
+ */
+export function buildShortcutTooltip(base: string, keybindingLabel: string): vscode.MarkdownString {
+  const md = new vscode.MarkdownString();
+  md.isTrusted = { enabledCommands: [OPEN_KEYBINDINGS_COMMAND] };
+  md.appendText(`${base}\nShortcut: ${keybindingLabel} (default) `);
+  const args = encodeURIComponent(JSON.stringify(['minspec.nextTask']));
+  md.appendMarkdown(`[Change…](command:${OPEN_KEYBINDINGS_COMMAND}?${args})`);
+  return md;
 }
 
 /**
@@ -128,7 +147,7 @@ export class MinSpecNextTaskStatusBar {
     this.statusBarItem.text = text;
     const base = task ? task.evidence.explanation : 'No pending review tasks.';
     this.statusBarItem.tooltip = this.keybindingLabel
-      ? `${base}\nShortcut: ${this.keybindingLabel}`
+      ? buildShortcutTooltip(base, this.keybindingLabel)
       : base;
     // Same one-line treatment as the label text (#1596) — screen readers get
     // the clause-stripped, word-boundary-truncated imperative too, not the

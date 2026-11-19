@@ -239,3 +239,31 @@ describe('defaultCommitter.dirty() — real git', () => {
     expect(await (await defaultCommitter(dir)).dirty(['seed.txt'])).toEqual([]);
   });
 });
+
+describe('defaultCommitter.commit() — real git (#347)', () => {
+  it('commits ONLY the given paths, leaving pre-staged unrelated files staged', async () => {
+    const dir = makeRepo();
+    fs.writeFileSync(path.join(dir, 'unrelated.txt'), 'user work\n');
+    git(dir, 'add', 'unrelated.txt'); // user staged this BEFORE running init
+    fs.writeFileSync(path.join(dir, 'scaffold.txt'), 's\n');
+    fs.writeFileSync(path.join(dir, 'clean-tracked.txt'), 'c\n');
+    git(dir, 'add', 'clean-tracked.txt');
+    git(dir, 'commit', '-m', 'track', '--', 'clean-tracked.txt');
+    const c = await defaultCommitter(dir);
+    await c.add(['scaffold.txt', 'clean-tracked.txt']);
+    await c.commit('chore: scaffold', ['scaffold.txt', 'clean-tracked.txt']);
+    const committed = git(dir, 'show', '--name-only', '--format=', 'HEAD').split('\n').filter(Boolean);
+    expect(committed).toEqual(['scaffold.txt']);
+    expect(git(dir, 'diff', '--cached', '--name-only')).toBe('unrelated.txt');
+  });
+
+  it('never falls back to an unscoped commit when every path is ignored', async () => {
+    const dir = makeRepo({ gitignore: ['ignored.json'] });
+    fs.writeFileSync(path.join(dir, 'ignored.json'), '{}\n');
+    fs.writeFileSync(path.join(dir, 'unrelated.txt'), 'u\n');
+    git(dir, 'add', 'unrelated.txt');
+    const before = git(dir, 'rev-parse', 'HEAD');
+    await expect((await defaultCommitter(dir)).commit('m', ['ignored.json'])).rejects.toThrow();
+    expect(git(dir, 'rev-parse', 'HEAD')).toBe(before);
+  });
+});
