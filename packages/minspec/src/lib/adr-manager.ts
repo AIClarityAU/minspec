@@ -834,6 +834,36 @@ export function reconcileBodyStatus(content: string, status: AdrStatus): string 
 }
 
 /**
+ * #1083 — the intro blockquote is a FOURTH status representation (after frontmatter, body,
+ * INDEX). A DR is born with "Born / stays `proposed` per DR-029 — acceptance is a separate
+ * human act"; once it is settled that sentence asserts a live status the frontmatter
+ * contradicts, and `dr-status-blockquote.test.ts` (#998/#1024) fails the corpus on it.
+ * #1024 reworded the three DRs already affected but not this writer, so every acceptance
+ * re-created the defect.
+ *
+ * Rewrites, in the intro region only (before the first `##` heading), to #1024's house
+ * form: past tense, deferring to the frontmatter `status:` field. Nothing is touched for a
+ * `proposed` target, where "stays proposed" is true. The pattern is the guard's own
+ * (`stays\s+`?proposed`), so the writer cannot be narrower than the detector.
+ */
+export function reconcileIntroBlockquote(content: string, status: AdrStatus): string {
+  if (status === 'proposed') return content;
+  const body = FRONTMATTER_RE.exec(content);
+  const start = body ? body[0].length : 0;
+  const rest = content.slice(start);
+  const h2 = rest.search(/^##\s/m);
+  const intro = h2 === -1 ? rest : rest.slice(0, h2);
+  if (!/stays\s+`?proposed/i.test(intro)) return content;
+  const fixed = intro
+    .replace(/\bBorn\s*\/\s*stays(\s+`?proposed)/gi, 'Born$1')
+    .replace(/\bstays(\s+`?proposed)/gi, 'was born$1')
+    .replace(/\bacceptance is a separate human act/gi, 'acceptance was a separate human act');
+  const note = '(live status: the frontmatter `status:` field, not this note)';
+  const withNote = fixed.includes('frontmatter `status:`') ? fixed : fixed.replace(/\bper DR-029\*{0,2}/, (m) => `${m} ${note}`);
+  return content.slice(0, start) + withNote + (h2 === -1 ? '' : rest.slice(h2));
+}
+
+/**
  * Rewrite the `status:` line in an ADR's frontmatter in place.
  * Adds the line if frontmatter exists but has no status field.
  *
@@ -910,7 +940,7 @@ export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   const updated = content.replace(FRONTMATTER_RE, () => block);
   // #1624 — the body's `## Status` section is the third place this status lives.
   // Writing only the frontmatter here is what broke parity on every acceptance.
-  fs.writeFileSync(filePath, restoreLineEndings(reconcileBodyStatus(updated, status), original), 'utf-8');
+  fs.writeFileSync(filePath, restoreLineEndings(reconcileIntroBlockquote(reconcileBodyStatus(updated, status), status), original), 'utf-8');
   return status;
 }
 
