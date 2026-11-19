@@ -19,7 +19,7 @@ describe('python hook unittest suites (#1092)', () => {
   });
 
   it.each(suites)('%s passes', (suite) => {
-    const r = spawnSync('python3', ['-m', 'unittest', 'discover', '-s', hooksDir, '-p', suite], {
+    const r = spawnSync('python3', ['-B', '-m', 'unittest', 'discover', '-s', hooksDir, '-p', suite], {
       cwd: hooksDir,
       encoding: 'utf8',
     });
