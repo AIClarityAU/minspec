@@ -408,17 +408,17 @@
         },
         {
           "command": "minspec.approveSpec",
-          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.stale)?( |$)/",
+          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.stale|\\.migrated)?( |$)/",
           "group": "inline"
         },
         {
           "command": "minspec.approveSpec",
-          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.stale)?( |$)/",
+          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.stale|\\.migrated)?( |$)/",
           "group": "2_approval@1"
         },
         {
           "command": "minspec.revokeApproval",
-          "when": "view == minspecStatus && viewItem =~ /^specNode\\.approved( |$)/",
+          "when": "view == minspecStatus && viewItem =~ /^specNode\\.(approved|migrated)( |$)/",
           "group": "2_approval@2"
         },
         {
