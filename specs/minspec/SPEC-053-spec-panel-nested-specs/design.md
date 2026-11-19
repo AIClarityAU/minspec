@@ -121,8 +121,8 @@ cases land in two existing suites, both real fs with no `fs` mock:
 | split spec | `specs/p/SPEC-010-split/{requirements,design,tasks}.md` to spec-kit: `migrated: 1`, the new directory exists inside the feature directory, `design.md` and `tasks.md` unchanged, and `listSpecs()` reports one entry with `hasDesignFile` and `hasTasksFile` true (PQ2) | FR-3 | yes |
 
 **Repoints.** In `spec-manager.test.ts`, the 12 calls (`:290`, `:298`, `:311`, `:315`, `:325`,
-`:334`, `:345`, `:356`, `:370`, `:610`, `:690`, `:720`) call `listSpecs(x)`. The four that pass a
-`filter` argument (`:311`, `:315`, `:325`, `:334`; `features.test.ts` has two more, `:165` and `:169`) become `listSpecs(x).filter(...)` with the same
+`:334`, `:345`, `:356`, `:370`, `:610`, `:690`, `:720`) call `listSpecs(x)`. The six that pass a
+`filter` argument (four in this file: `:311`, `:315`, `:325`, `:334`; two in `features.test.ts`: `:165` and `:169`) become `listSpecs(x).filter(...)` with the same
 predicate and the same expected values, because D-1 deletes the `filter` parameter. Titles and the
 comment naming the dead function (`:278`, `:357`, `:687`, `:696`) name `listSpecs()` instead. The
 `migrateLayout()` suite is not edited (AC-4). `features.test.ts` (`:21`, `:117`, `:155`, `:165`,
