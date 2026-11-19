@@ -6,7 +6,9 @@
  * founder's account that way. session-identity.sh says where the session runs, and
  * how old the last full identity check is, every time a session starts.
  *
- * Executed, not grepped. Each case runs the real unit with HOME pointed at a fixture
+ * Executed, not grepped — except the one wiring case at the bottom, which is the single
+ * source-text check (it greps session-start.sh, as autonomy-surface.test.ts does). Every
+ * other case runs the real unit with HOME pointed at a fixture
  * whose ~/.claude/scripts/identity-boundary-check.sh is a stub, so no case reads a
  * real credential, the real /proc environments, or the network.
  */
@@ -230,6 +232,15 @@ describe('session-identity — the last full check, with its age', () => {
     expect(run().out).toContain('has not completed for 1d');
   });
 
+  it('control characters in a stale verdict never reach the terminal', () => {
+    stub({ locRc: 0 });
+    seedLast('PASS — ok\x1b[31m(1 path(s))', 60);
+    const { out } = run();
+    expect(out).toContain('PASS');
+    expect(out).not.toContain('\x1b');
+    expect(out).toContain('ok[31m(1 path(s))');
+  });
+
   it('a record with no verdict is unknown — neither PASS nor FAILED — and is re-run', async () => {
     stub({ locRc: 0 });
     fs.mkdirSync(path.dirname(lastFile()), { recursive: true });
@@ -252,10 +263,31 @@ describe('session-identity — the last full check, with its age', () => {
   });
 });
 
+describe('session-identity — without flock', () => {
+  it('still runs one full check at a time (mkdir lock fallback)', async () => {
+    // A PATH of symlinks to every tool on the real PATH except flock.
+    const bin = path.join(home, 'bin-noflock');
+    fs.mkdirSync(bin, { recursive: true });
+    for (const d of (process.env.PATH ?? '/usr/bin:/bin').split(':')) {
+      if (!fs.existsSync(d)) continue;
+      for (const f of fs.readdirSync(d)) {
+        const dest = path.join(bin, f);
+        if (f !== 'flock' && !fs.existsSync(dest)) fs.symlinkSync(path.join(d, f), dest);
+      }
+    }
+    stub({ locRc: 0, fullSleep: 3 });
+    const env = { PATH: bin, HOME: home };
+    for (let i = 0; i < 3; i++) execFileSync('bash', [UNIT], { encoding: 'utf-8', env, timeout: 20_000 });
+    expect(await waitFor(() => fs.existsSync(lastFile()), 15_000)).toBe(true);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(fullRuns()).toBe(1);
+  });
+});
+
 describe('session-start hook wiring', () => {
   it('session-start delegates to the unit, so the executed path is the wired one', () => {
     const hook = fs.readFileSync(HOOK, 'utf-8');
     expect(hook).toContain('session-identity.sh');
-    expect(hook).toMatch(/session-identity\.sh[^\n]*\|\| true/);
+    expect(hook).toMatch(/\[ -x "\$_IDN" \] && "\$_IDN" \|\| true/);
   });
 });
