@@ -243,7 +243,12 @@ export function runCorpusRules(root: string): CorpusFinding[] {
 
   // Rule 14: managed-region markers (FATAL when the body diverged, warn when auto-healable).
   try {
-    for (const v of checkManagedRegionMarkers(root, detectTools(root), { exclude: SELF_HOSTED_TEMPLATE_NAMES })) {
+    // The self-hosted exclusion is minspec's own repo ONLY (template-registry.ts:
+    // "A project that scaffolds FROM these templates ... has no such exclusion").
+    // An adopter project is identified by the absence of the registry source file.
+    const isMinspecRepo = fs.existsSync(path.join(root, 'packages', 'minspec', 'src', 'lib', 'template-registry.ts'));
+    const exclude = isMinspecRepo ? SELF_HOSTED_TEMPLATE_NAMES : [];
+    for (const v of checkManagedRegionMarkers(root, detectTools(root), { exclude })) {
       s.add('corpus.managed-region', path.join(root, v.outputPath), v.severity === 'error' ? 'error' : 'warning', v.message);
     }
   } catch (err) {

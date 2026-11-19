@@ -293,6 +293,14 @@ describe('validate corpus rules (FR-3): one fixture per "Yes" row of design.md',
     expect(good.json.findings.filter((f: any) => f.rule === row.rule)).toEqual([]);
   }, 30_000);
 
+  it('adopter project: a self-hosted template file without markers is still flagged; minspec\'s own repo is exempt', () => {
+    const files = { '.github/workflows/ai-review.yml': 'name: my own review\non: push\n' };
+    const adopter = rulesOf(corpusProject(files));
+    expect(adopter.json.findings.some((f: any) => f.rule === 'corpus.managed-region' && f.file.endsWith('ai-review.yml'))).toBe(true);
+    const own = rulesOf(corpusProject({ ...files, 'packages/minspec/src/lib/template-registry.ts': '// marker\n' }));
+    expect(own.json.findings.some((f: any) => f.rule === 'corpus.managed-region' && f.file.endsWith('ai-review.yml'))).toBe(false);
+  }, 30_000);
+
   it('control: an opted-in project with only a clean spec reports no corpus finding', () => {
     const r = rulesOf(corpusProject({ 'specs/SPEC-917-x/requirements.md': SPEC_OK('SPEC-917') }));
     expect(r.json.findings.filter((f: any) => f.rule.startsWith('corpus.'))).toEqual([]);
