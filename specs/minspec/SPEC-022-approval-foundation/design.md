@@ -349,8 +349,8 @@ block (~line 39). The committed `.minspec/approvals/` tree is intentionally trac
    own** local approval — see dogfood below); both convert the same way.
 2. **Backfill the 7 unbacked implementing/done specs.** The specs that *derive* to
    implementing/done with no source record:
-   `specs/minspec/requirements.md` (SPEC-001), `specs/minspec/design.md` (SPEC-002),
-   `specs/minspec/tasks.md` (SPEC-003), `specs/minspec/SPEC-004-*` (requirements/design/
+   `specs/minspec/requirements.md` (SPEC-001), `specs/minspec/design.md` (SPEC-001),
+   `specs/minspec/tasks.md` (SPEC-001), `specs/minspec/SPEC-004-*` (requirements/design/
    tasks), `specs/agent-execute/SPEC-016-reality-check/requirements.md`. For each, write a
    sidecar with `specHash` = canonical hash of current content, `approvedBy` = owner,
    `approvedAt` = migration date, `tier`, and **`migrated:true`** — *honest provenance*: an
