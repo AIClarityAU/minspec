@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-310-ambiguous-resolver-state/requirements.md",
+  "specHash": "a2d41b6214162162478861f2a2d529c10de54cda8b73dcc2aa6748b75084e94a",
+  "approvedAt": "2026-11-13T06:11:16.983Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:docs/clarify-recs-1113",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3697#issuecomment-6840772356"
+}

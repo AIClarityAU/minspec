@@ -9,8 +9,9 @@ import { deriveStatus, phasesForApproval } from './lifecycle';
 import { bodyStatusToken, claimParagraphText } from './status-parity';
 import { prepareText, readDocument, readDocumentText, restoreLineEndings } from './text-io';
 
-/** Status of an individual phase */
-export type PhaseStatus = 'pending' | 'in-progress' | 'done' | 'skipped';
+/** Status of an individual phase (defined in ./spec-vocabulary; re-exported — SPEC-040 FR-6 / #988) */
+export type { PhaseStatus } from './spec-vocabulary';
+import type { PhaseStatus } from './spec-vocabulary';
 
 /**
  * Lifecycle statuses of a spec, in lifecycle order. Single source of truth:
