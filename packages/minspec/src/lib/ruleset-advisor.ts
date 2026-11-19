@@ -257,7 +257,9 @@ export async function hasRequiredChecksRuleset(
 
   for (const rs of rulesets) {
     if (rs.target !== 'branch') continue;
-    if (rs.enforcement === 'disabled') continue;
+    // Only an ENFORCED ruleset counts as already configured: `evaluate`
+    // (dry-run/audit) and `disabled` do not block a merge (#369).
+    if (rs.enforcement !== 'active') continue;
     if (typeof rs.id !== 'number') continue;
 
     const detail = await runSafe(run, 'gh', [
@@ -289,8 +291,9 @@ interface RulesetDetail {
 }
 
 /**
- * Does this ruleset detail BOTH target a branch (default-branch sentinel or any
- * `refs/heads/*` include) AND carry a `required_status_checks` rule? Pure;
+ * Does this ruleset detail BOTH target the default branch (the `~DEFAULT_BRANCH`
+ * or `~ALL` sentinel — an explicit `refs/heads/*` include may name a NON-default
+ * branch, so it does not count, #369) AND carry a `required_status_checks` rule? Pure;
  * tolerant of partial / unexpected JSON.
  */
 export function rulesetGuardsDefaultBranchChecks(detail: unknown): boolean {
@@ -300,10 +303,7 @@ export function rulesetGuardsDefaultBranchChecks(detail: unknown): boolean {
   const include = d.conditions?.ref_name?.include;
   if (!Array.isArray(include)) return false;
   const targetsBranch = include.some(
-    (ref) =>
-      ref === '~DEFAULT_BRANCH' ||
-      ref === '~ALL' ||
-      (typeof ref === 'string' && ref.startsWith('refs/heads/')),
+    (ref) => ref === '~DEFAULT_BRANCH' || ref === '~ALL',
   );
   if (!targetsBranch) return false;
 
