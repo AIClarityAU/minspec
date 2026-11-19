@@ -256,6 +256,17 @@ describe('resolveNextTaskKeybinding', () => {
       Object.defineProperty(process, 'platform', { value: original, configurable: true });
     }
   });
+
+  it('ships a mac override that avoids the Option+N dead key (#950)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const pkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf8'));
+    const kb = pkg.contributes.keybindings.find(
+      (k: { command: string }) => k.command === 'minspec.nextTask',
+    );
+    expect(kb.mac).toBe('cmd+alt+n');
+    expect(kb.mac).not.toBe(kb.key);
+  });
 });
 
 // =============================================================================
