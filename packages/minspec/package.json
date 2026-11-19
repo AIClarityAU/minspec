@@ -2,7 +2,7 @@
   "name": "minspec",
   "displayName": "MinSpec",
   "description": "Scope-adaptive spec-driven development. Classifies each change by how far it reaches and applies proportional ceremony: one sentence of spec for a small change, the full treatment for a far-reaching one.",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "private": true,
   "publisher": "aiclarity",
   "license": "MIT",
