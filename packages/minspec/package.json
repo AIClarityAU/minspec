@@ -2,7 +2,7 @@
   "name": "minspec",
   "displayName": "MinSpec",
   "description": "Scope-adaptive spec-driven development. Classifies each change by how far it reaches and applies proportional ceremony: one sentence of spec for a small change, the full treatment for a far-reaching one.",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "private": true,
   "publisher": "aiclarity",
   "license": "MIT",
@@ -60,7 +60,10 @@
       "description": "TypeScript 5.0+"
     }
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "workspaceContains:.minspec/config.json",
+    "workspaceContains:.minspec/constitution.md"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -185,17 +188,17 @@
       {
         "command": "minspec.specExplorer.toggleEpicGrouping",
         "title": "MinSpec: Toggle Group by Epic (Specs)",
-        "icon": "$(milestone)"
+        "icon": "$(list-tree)"
       },
       {
         "command": "minspec.adrExplorer.toggleEpicGrouping",
         "title": "MinSpec: Toggle Group by Epic (Decisions)",
-        "icon": "$(milestone)"
+        "icon": "$(list-tree)"
       },
       {
         "command": "minspec.backlog.toggleEpicGrouping",
         "title": "MinSpec: Toggle Group by Epic (Backlog)",
-        "icon": "$(milestone)"
+        "icon": "$(list-tree)"
       },
       {
         "command": "minspec.acceptAdr",
@@ -283,6 +286,7 @@
       {
         "command": "minspec.nextTask",
         "key": "alt+n",
+        "mac": "cmd+alt+n",
         "when": "workspaceFolderCount != 0"
       },
       {

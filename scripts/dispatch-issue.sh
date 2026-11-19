@@ -2169,15 +2169,34 @@ SHEPHERD_MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"
 
 # Stop automating and make the dead end VISIBLE. Idempotent: the comment is posted at
 # most once per PR, so a poll loop can never spam it.
+#
+# shepherd_hand_off <pr> <reason> [human|stuck]   (#3835)
+#   human — the reason NAMES a human decision (e.g. a merge conflict): `needs-human-review`.
+#   stuck — the shepherd's OWN automation gave up (ceiling, attempt cap, rebase or fix that
+#           produced nothing): `agent-stuck`, NOT `needs-human-review`, so no consumer reads
+#           it as a human decision. Anything but the literal "human" fails closed to stuck.
+#           No code reads `agent-stuck` (grep: zero consumers); it is a visibility marker.
+#           Any later retry comes from the label-agnostic drain sweep (drain-inbox.sh
+#           `gh pr list --state open`), NOT from this label; remediate-pr.sh may still
+#           relabel `needs-human-review` when ITS own cap is hit.
 shepherd_hand_off() {
-  local pr_num="$1" reason="$2" already
-  gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
-    --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
-  gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+  local pr_num="$1" reason="$2" kind="${3:-stuck}" already label desc tail
+  if [[ "$kind" == "human" ]]; then
+    label="needs-human-review"
+    desc="Automated gate failed closed — a human must resolve"
+    tail='It is labelled `needs-human-review`; a human decision is needed and the creator will make no further automated attempts.'
+  else
+    label="agent-stuck"
+    desc="Automation gave up — a failure marker, not a human decision (no dedicated consumer)"
+    tail='It is labelled `agent-stuck`: this is an automation failure rather than a human decision. Nothing reads this label; a later drain sweep may retry it, and the remediation drain may escalate it to `needs-human-review` if it hits its own cap. The creator will make no further automated attempts.'
+  fi
+  gh label create "$label" --repo "$REPO" --color fbca04 \
+    --description "$desc" 2>/dev/null || true
+  gh pr edit "$pr_num" --repo "$REPO" --add-label "$label" 2>/dev/null || true
   already=$(gh pr view "$pr_num" --repo "$REPO" --json comments \
               --jq "[.comments[]? | select(.body | contains(\"$SHEPHERD_HANDOFF_MARKER\"))] | length" 2>/dev/null || echo 0)
   if [[ "${already:-0}" -eq 0 ]]; then
-    gh pr comment "$pr_num" --repo "$REPO" --body "$(printf '## 🫱 Creator-shepherd handed off\n\nThe session that opened this PR drove it as far as it could, then stopped because %s.\n\nIt is labelled `needs-human-review`; the creator will make no further automated attempts. %s' "$reason" "$SHEPHERD_HANDOFF_MARKER")" 2>/dev/null || true
+    gh pr comment "$pr_num" --repo "$REPO" --body "$(printf '## 🫱 Creator-shepherd handed off\n\nThe session that opened this PR drove it as far as it could, then stopped because %s.\n\n%s %s' "$reason" "$tail" "$SHEPHERD_HANDOFF_MARKER")" 2>/dev/null || true
   fi
 }
 
@@ -2450,7 +2469,7 @@ shepherd_own_pr() {
       stop-capped)
         shepherd_hand_off "$pr_num" "the shared automated-attempt cap (${SHEPHERD_MAX_ATTEMPTS}) was reached without clearing the gate"; return 0 ;;
       stop-conflict)
-        shepherd_hand_off "$pr_num" "the branch conflicts with \`main\`, and resolving a conflict is a human's merge decision"; return 0 ;;
+        shepherd_hand_off "$pr_num" "the branch conflicts with \`main\`, and resolving a conflict is a human's merge decision" human; return 0 ;;
       stop-not-automation)
         echo "  PR #$pr_num is outside the automation scope — leaving it alone."; return 0 ;;
       stop-awaiting-human)
