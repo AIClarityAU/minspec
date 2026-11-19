@@ -1,7 +1,7 @@
 ---
 id: SPEC-332
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute - the dev-time autonomous build/merge pipeline; same epic as SPEC-062 (the PR drain)
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   Specify phase only. Expected surface: one drain step plus a pure tasks.md parser under scripts/. Neither is built.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

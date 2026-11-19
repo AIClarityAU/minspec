@@ -1,7 +1,7 @@
 ---
 id: SPEC-115
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-004  # Classifier Validation - DR-009/DR-021 (what a tier may and may not claim) live here
@@ -13,6 +13,12 @@ relates_to: [DR-021, DR-026, DR-012, DR-024, DR-004, DR-014, SPEC-004, SPEC-005,
 implements: [packages/minspec/src/lib/tier-floor.ts, packages/minspec/tests/tier-floor.test.ts]
 # Modified, not owned. Named from the code read for this spec; the Plan phase may narrow it.
 affects: [packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/diagnostics.ts, packages/minspec/src/lib/spec.ts, packages/minspec/src/extension.ts, scripts/validate-frontmatter.ts]
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-115: A spec's declared tier is checked against its own content on every save, and a shortfall is offered as a one-click raise
