@@ -1,7 +1,7 @@
 ---
 id: SPEC-324
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — the spec→code ownership contract (SPEC-038/SPEC-081 follow-through)
@@ -16,9 +16,9 @@ implements_reason: >-
   Creates no new production file; its deliverables are edits to existing specs' frontmatter and a severity change in files SPEC-081 owns/affects.
 affects: [packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/template-registry.ts, scripts/validate-frontmatter.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
