@@ -29,7 +29,8 @@
 // SCOPE
 //   node:test discovery only. Vitest and Python have their own controllers with
 //   different resolution rules; see EXPECTED below for what is deliberately not
-//   covered here.
+//   covered here. One exception (#1185): a RUNNABILITY check that no repo-root entry
+//   shadows a module the Python controller's adapter imports.
 //
 // USAGE
 //   node scripts/check-testing-panel-discovery.mjs          # assert, exit 1 on gap
@@ -39,7 +40,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { createRequire } from 'node:module';
-import { findShadowingEntries } from './lib/pythonpath-shadow.mjs';
+import { findShadowingEntries, pythonModuleInstalled } from './lib/pythonpath-shadow.mjs';
 
 const require = createRequire(import.meta.url);
 // picomatch is the library `atkeson.nodejs-testing` bundles and calls. Using the same
@@ -274,7 +275,7 @@ function main() {
   }
   let shadowed = 0;
   for (const root of roots) {
-    for (const h of findShadowingEntries(root)) {
+    for (const h of findShadowingEntries(root, undefined, pythonModuleInstalled)) {
       shadowed++;
       console.log(`  FAIL  ${root}/${h.entry} shadows python module "${h.module}" on the injected PYTHONPATH`);
     }
@@ -283,9 +284,9 @@ function main() {
     console.error(
       `FAIL  ${shadowed} repo-root entr${shadowed === 1 ? 'y' : 'ies'} would break the Python controller's ` +
         `Coverage profile (every python test reports "error"; CLI and Run profile still pass).\n` +
-        `      Fix: delete/move the entry (for Vitest's coverage/ report dir: rm -rf coverage,\n` +
-        `      or set coverage.reportsDirectory outside the root). Running Python coverage\n` +
-        `      also needs coverage.py installed in the container image.`,
+        `      Fix: delete/move the entry, or install the real module (Vitest's coverage/ report\n` +
+        `      dir is harmless once coverage.py is installed — a bare directory only wins\n` +
+        `      when no regular package of that name exists).`,
     );
     process.exit(1);
   }

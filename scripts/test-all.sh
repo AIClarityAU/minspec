@@ -185,6 +185,9 @@ run_suite "MinSpec · Testing-panel discovery" other "$MINSPEC_ROOT" \
 run_suite "MinSpec · node:test (ai-review guard)" node "$MINSPEC_ROOT" \
   bash -c 'node --test .github/scripts/*.test.js'
 
+run_suite "MinSpec · node:test (scripts/lib)" node "$MINSPEC_ROOT" \
+  bash -c 'node --test scripts/lib/*.test.mjs'
+
 if [ "$WITH_E2E" -eq 1 ]; then
   # Downloads and spawns a real VS Code, so it needs a display (or xvfb-run) and a
   # network fetch on first use. Opt-in for that reason, not because it is optional
