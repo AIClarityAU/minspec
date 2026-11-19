@@ -255,11 +255,26 @@ describe('hasRequiredChecksRuleset()', () => {
     expect(await hasRequiredChecksRuleset('o', 'r', run)).toBe(false);
   });
 
-  it('ignores evaluate-mode (dry-run) rulesets without fetching detail (#369)', async () => {
+  it('ignores evaluate-mode (dry-run) rulesets even when the detail is fully configured (#369)', async () => {
     const { run } = makeRunner((_c, args) => {
       const p = apiPath(args);
       if (p === 'repos/o/r/rulesets') {
         return ok(JSON.stringify([{ id: 9, target: 'branch', enforcement: 'evaluate' }]));
+      }
+      // Identical to the detail that yields `true` for an active ruleset, so
+      // only the enforcement check can make this false.
+      if (p === 'repos/o/r/rulesets/9') {
+        return ok(
+          JSON.stringify({
+            conditions: { ref_name: { include: ['~DEFAULT_BRANCH'] } },
+            rules: [
+              {
+                type: 'required_status_checks',
+                parameters: { required_status_checks: [{ context: 'lint' }, { context: 'test' }] },
+              },
+            ],
+          }),
+        );
       }
       return undefined;
     });
