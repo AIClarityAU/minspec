@@ -1,7 +1,7 @@
 ---
 id: SPEC-341
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute Extension (Autopilot Mode, DR-036)
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Nothing is built yet; the seam, the startup hook and the T0 tests are all
   planned (#237).
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
