@@ -111,6 +111,10 @@ function draftKey(text: string): string {
   return text
     .replace(/^(?:[-*]|\d+\.)\s+/, '')
     .replace(new RegExp(`^${DRAFT_MARKER}\\s*`), '')
+    // The principles template re-renders a DRAFT as `N. DRAFT: text > _proposed
+    // because …_` (provenance INLINE, via buildContext's joined continuation line).
+    // Drop that suffix so the rendered form keys the same as the form written (#940).
+    .replace(/\s+>\s*_proposed because[\s\S]*$/, '')
     .trim()
     .toLowerCase()
     .replace(/\s+/g, ' ');

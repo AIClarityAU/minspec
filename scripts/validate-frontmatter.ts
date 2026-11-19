@@ -45,7 +45,8 @@ import {
 } from '../packages/minspec/src/lib/reference-checker';
 import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
 import { checkStatusParity, inspectStatusLine, inspectAllStatusClaims } from '../packages/minspec/src/lib/status-parity';
-import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold';
+import { checkManagedRegionMarkers, MINSPEC_GITIGNORE_ENTRIES } from '../packages/minspec/src/lib/scaffold';
+import { missingGitignoreEntries } from './lib/gitignore-entries';
 // The corpus walkers, under their former local names. `safeGlob` now tolerates ONLY an
 // absent root; every other read failure reaches the rule's own catch instead of being
 // turned into an empty corpus (#1999).
@@ -1364,6 +1365,21 @@ try {
     join(ROOT, '.minspec', 'delegations.json'),
     `delegation-citation check could not run (${err instanceof Error ? err.message : String(err)}) — failing closed (#3463).`,
   );
+}
+
+// #383: committed .gitignore must cover every MINSPEC_GITIGNORE_ENTRIES line. The runtime
+// writer (ensureGitignoreEntries) is extension-version-dependent; a stale VSIX never
+// backfilled template-baseline.json, which then leaked untracked. Fails closed on an
+// unreadable .gitignore. Only applies where MinSpec is opted in (.minspec/ present).
+if (existsSync(join(ROOT, '.minspec'))) {
+  const giPath = join(ROOT, '.gitignore');
+  try {
+    for (const m of missingGitignoreEntries(readFileSync(giPath, 'utf-8'), MINSPEC_GITIGNORE_ENTRIES)) {
+      fail(giPath, `missing MinSpec ephemeral-data entry "${m}" (MINSPEC_GITIGNORE_ENTRIES, #383). Add it, or it leaks untracked.`);
+    }
+  } catch (err) {
+    fail(giPath, `gitignore-entries check could not run (${err instanceof Error ? err.message : String(err)}) - failing closed (#383).`);
+  }
 }
 
 checkCiReviewTemplatesFresh().then(() => {
