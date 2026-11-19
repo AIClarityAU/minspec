@@ -350,12 +350,17 @@ if (epicRegistry.fileCount > 0 && epicRefs.size === 0) {
     // too (e.g. `tier: T4  # rationale`) — take the first whitespace-delimited token.
     const tierToken = (fm['tier'] ?? '').split(/\s+/)[0];
     const tier = /^T[1-4]$/.test(tierToken) ? (tierToken as Tier) : undefined;
-    list.push({ type, ...(tier ? { tier } : {}) });
+    const id = (fm['id'] ?? '').split(/\s+/)[0];
+    list.push({ type, ...(tier ? { tier } : {}), ...(id ? { id } : {}) });
     byDir.set(dir, list);
   });
   eachFile('Rule 7', [...byDir.keys()], false, (dir) => {
     const result = validateSplitLayoutCoverage(byDir.get(dir) ?? [], DEFAULT_CONFIG);
     for (const v of result.violations) {
+      if (v.severity === 'error') {
+        fail(dir, `${v.rule}: ${v.message}`);
+        continue;
+      }
       warn(`split-coverage ${relative(ROOT, dir)}: ${v.message}`);
     }
   });

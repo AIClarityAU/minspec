@@ -1481,6 +1481,8 @@ export interface SplitLayoutFile {
   readonly type: string;
   /** The file's `tier:` frontmatter, used to pick the tier when present. */
   readonly tier?: Tier;
+  /** The file's `id:` frontmatter (#493). Omitted/empty ids are not compared. */
+  readonly id?: string;
 }
 
 export interface SplitLayoutCoverageResult {
@@ -1543,7 +1545,32 @@ export function validateSplitLayoutCoverage(
     });
   }
 
+  violations.push(...validateSplitLayoutIdAgreement(files));
+
   return { notSplitLayout: false, violations };
+}
+
+/**
+ * Phase files whose `id:` must equal the requirements file's `id:` (#493). Split
+ * specs share ONE id across their phase files; a mismatch makes `listSpecs()` render
+ * phantom separate specs and hides View Design/Tasks for the real parent.
+ */
+const SHARED_ID_TYPES: ReadonlySet<string> = new Set(['design', 'tasks', 'clarify']);
+
+function validateSplitLayoutIdAgreement(files: readonly SplitLayoutFile[]): ValidationViolation[] {
+  const reqId = files.find((f) => f.type === 'requirements' && f.id)?.id;
+  if (!reqId) return [];
+  const out: ValidationViolation[] = [];
+  for (const f of files) {
+    if (!SHARED_ID_TYPES.has(f.type) || !f.id || f.id === reqId) continue;
+    out.push({
+      rule: `split-id.${f.type}.mismatch`,
+      severity: 'error',
+      message: `Split-layout ${f.type}.md has id "${f.id}" but its sibling requirements.md has id "${reqId}" — phase files must share the requirements file's id.`,
+      fixHint: `Set \`id: ${reqId}\` in ${f.type}.md. A mismatched id silently detaches the phase file from its parent spec (phantom spec row; View Design/Tasks missing).`,
+    });
+  }
+  return out;
 }
 
 function cap(s: string): string {
