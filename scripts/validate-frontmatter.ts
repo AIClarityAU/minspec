@@ -513,7 +513,7 @@ try {
     },
   );
   for (const defect of checkDeclaredEpicIds(epicIdFiles)) {
-    fail(join(ROOT, defect.files[0]), `Epic id duplicate — ${defect.message}`);
+    fail(join(ROOT, defect.files[0]), `Epic id ${defect.kind} — ${defect.message}`);
   }
 }
 

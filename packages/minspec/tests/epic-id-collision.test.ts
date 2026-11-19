@@ -22,7 +22,14 @@ describe('checkDeclaredEpicIds', () => {
     expect(checkDeclaredEpicIds([e('EPIC-004-a.md', 'EPIC-4'), e('EPIC-004-b.md', 'EPIC-004')])).toHaveLength(1);
   });
   it('catches a file whose declared id collides with another filename id', () => {
-    expect(checkDeclaredEpicIds([e('EPIC-005-a.md', 'EPIC-004'), e('EPIC-004-b.md')])).toHaveLength(1);
+    const d = checkDeclaredEpicIds([e('EPIC-005-a.md', 'EPIC-004'), e('EPIC-004-b.md')]);
+    expect(d.filter((x) => x.kind === 'duplicate')).toHaveLength(1);
+  });
+  it('flags a filename/declared id mismatch even with no collision', () => {
+    const d = checkDeclaredEpicIds([e('EPIC-004-a.md', 'EPIC-040')]);
+    expect(d).toHaveLength(1);
+    expect(d[0].kind).toBe('mismatch');
+    expect(d[0].files).toEqual(['docs/epics/EPIC-004-a.md']);
   });
   it('uses the filename id when no frontmatter id is declared', () => {
     expect(checkDeclaredEpicIds([e('EPIC-004-a.md'), e('EPIC-004-b.md', 'EPIC-004')])).toHaveLength(1);

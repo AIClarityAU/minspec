@@ -5,6 +5,11 @@
  * dangling-ref check only proves an id RESOLVES; a duplicate still resolves, to whichever
  * file was read first. This is the symmetric primitive: ids must also be UNIQUE.
  *
+ * SCOPE: this is the single-tree witness only (the checkout being validated). Two concurrent
+ * PRs that each add the same `EPIC-NNN` pass their own local check; the duplicate is caught
+ * only once both are on the base. The cross-PR witness the DR (Rule 17) and spec (Rule 18)
+ * registers carry is NOT built yet — tracked in docs/backlog.md (2026-11-19, #396 follow-up).
+ *
  * Pure: no fs, no network, no vscode. Tier-0 (constitution invariant 1).
  */
 
@@ -14,6 +19,7 @@ export interface EpicFile {
 }
 
 export interface EpicIdDefect {
+  readonly kind: 'duplicate' | 'mismatch';
   readonly id: string;
   /** Sorted, repo-relative. */
   readonly files: string[];
@@ -42,14 +48,27 @@ export function declaredEpicId(content: string): string | undefined {
  */
 export function checkDeclaredEpicIds(files: readonly EpicFile[]): EpicIdDefect[] {
   const byId = new Map<string, string[]>();
+  const mismatches: EpicIdDefect[] = [];
   for (const { file, content } of files) {
     const base = file.replace(/\\/g, '/').split('/').pop() ?? '';
     const fromName = base.match(/^(EPIC-\d+)/);
     if (!fromName) continue;
     const declared = declaredEpicId(content);
-    const canonical =
-      (declared !== undefined ? canonicalEpicId(declared) : undefined) ??
-      canonicalEpicId(fromName[1]);
+    const fromFile = canonicalEpicId(fromName[1]);
+    const declaredCanon = declared !== undefined ? canonicalEpicId(declared) : undefined;
+    if (declaredCanon !== undefined && fromFile !== undefined && declaredCanon !== fromFile) {
+      // A filename-keyed (cross-PR) check cannot see frontmatter, so a disagreement hides
+      // the epic from it — flag it, as the spec register does.
+      mismatches.push({
+        kind: 'mismatch',
+        id: fromFile,
+        files: [file],
+        message:
+          `${file} is named ${fromFile} but declares id ${declaredCanon}. ` +
+          'Make the filename and the frontmatter id agree.',
+      });
+    }
+    const canonical = declaredCanon ?? fromFile;
     if (canonical === undefined) continue;
     byId.set(canonical, [...(byId.get(canonical) ?? []), file]);
   }
@@ -58,6 +77,7 @@ export function checkDeclaredEpicIds(files: readonly EpicFile[]): EpicIdDefect[]
     if (claimants.length < 2) continue;
     const sorted = [...claimants].sort();
     defects.push({
+      kind: 'duplicate',
       id,
       files: sorted,
       message:
@@ -66,5 +86,7 @@ export function checkDeclaredEpicIds(files: readonly EpicFile[]): EpicIdDefect[]
         'Renumber all but the earliest claim.',
     });
   }
-  return defects.sort((a, b) => a.id.localeCompare(b.id));
+  return [...defects, ...mismatches].sort(
+    (a, b) => a.id.localeCompare(b.id) || a.kind.localeCompare(b.kind),
+  );
 }

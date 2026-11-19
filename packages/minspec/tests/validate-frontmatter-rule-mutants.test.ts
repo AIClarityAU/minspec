@@ -322,6 +322,7 @@ const MUTANTS: Mutant[] = [
     name: 'two epic files declaring one id',
     severity: 'FAIL',
     expect: /Epic id duplicate/,
+    alsoTrips: [/Epic id mismatch/],
     mutate: (f) => {
       f['docs/epics/EPIC-002-other.md'] = '---\nid: EPIC-001\nslug: other\ntitle: Other\n---\n\n# Other\n';
     },
