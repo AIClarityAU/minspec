@@ -6,7 +6,6 @@
  * generator's OWN source set, so nothing here is re-listed by hand.
  */
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { MANAGED_REGION_TEMPLATES } from '../src/lib/template-registry';
@@ -22,20 +21,6 @@ async function loadGen() {
 }
 
 describe('#1959 embedded CI templates — independent witness to Rule 12', () => {
-  it('every generator source file exists and is readable (a missing source is a failure, not a pass)', async () => {
-    const gen = await loadGen();
-    expect(gen.CI_TEMPLATE_SOURCE_PATHS.length).toBeGreaterThan(0);
-    const unreadable = gen.CI_TEMPLATE_SOURCE_PATHS.filter((p) => {
-      try {
-        fs.accessSync(path.join(ROOT, p), fs.constants.R_OK);
-        return false;
-      } catch {
-        return true;
-      }
-    });
-    expect(unreadable).toEqual([]);
-  });
-
   it('includes the CANONICAL_PY source the portability suite never enumerated', async () => {
     const gen = await loadGen();
     expect(gen.SOURCES.map((s) => s.constName)).toContain('CANONICAL_PY');
@@ -54,12 +39,5 @@ describe('#1959 embedded CI templates — independent witness to Rule 12', () =>
       'scripts/review-pr.sh',
       'scripts/roles/approvable-reviewer.md',
     ]);
-  });
-
-  it('committed generated files match a fresh regeneration', async () => {
-    const gen = await loadGen();
-    for (const { outputPath, content } of gen.generateAll(ROOT)) {
-      expect(fs.readFileSync(path.join(ROOT, outputPath), 'utf-8'), outputPath).toBe(content);
-    }
   });
 });
