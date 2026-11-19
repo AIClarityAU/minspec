@@ -261,7 +261,10 @@ Requirement ids are local to this spec. "The core" is `packages/shared/src/next-
      `packages/minspec/src/lib/adr-manager.ts:281`, #3106), and `validateDrAmendments`
      (`:265`) fails an accepted one. The implementing change rewrites that note's "Not
      built" sentence to cite the live code;
-  3. the comments that state the order in the core: the file header, the Step 4 heading
+  3. DR-039 section 3, which states the four-term tuple verbatim. The proposing pull
+     request stages an "Amended by DR-101 (on acceptance)" note there too; the implementing
+     change rewrites its "Not built" sentence to cite the live code;
+  4. the comments that state the order in the core: the file header, the Step 4 heading
      above `compareRanked`, and the `INV-TIE` suite title in
      `packages/shared/tests/next-task.test.ts:193`.
 
