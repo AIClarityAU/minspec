@@ -12,6 +12,8 @@ relates_to: [SPEC-038, SPEC-051, SPEC-022, DR-088, DR-076, "#3650", "#1543", "#1
 # frontmatter (12 files, owned by no one) and a one-line severity change in files that
 # SPEC-081 owns/affects. It creates no new production file, so there is nothing to own.
 implements: none
+implements_reason: >-
+  Creates no new production file; its deliverables are edits to existing specs' frontmatter and a severity change in files SPEC-081 owns/affects.
 affects: [packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/template-registry.ts, scripts/validate-frontmatter.ts]
 phases:
   specify: in-progress
