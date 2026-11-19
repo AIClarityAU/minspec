@@ -23,6 +23,9 @@ import {
   MinSpecScaffoldCommitStatusBar,
   MinSpecNextTaskStatusBar,
   MinSpecTidyPrimaryStatusBar,
+  MinSpecQueueDepthStatusBar,
+  formatQueueDepthText,
+  resolveKeybinding,
   formatScaffoldCommitText,
   formatTidyPrimaryText,
   formatKeybindingForDisplay,
@@ -279,5 +282,48 @@ describe('MinSpecNextTaskStatusBar class', () => {
     bar.update(nextTask());
     expect(mockStatusBarItem.tooltip).toBe('SPEC-001 is unapproved');
     expect(mockStatusBarItem.tooltip).not.toContain('Shortcut');
+  });
+});
+
+// =============================================================================
+// Phase-advance queue-depth status bar (#737)
+// =============================================================================
+
+describe('MinSpecQueueDepthStatusBar (#737)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStatusBarItem.text = '';
+    mockStatusBarItem.tooltip = '';
+    mockStatusBarItem.command = '';
+  });
+
+  it('binds to minspec.viewQueue', () => {
+    new MinSpecQueueDepthStatusBar();
+    expect(mockStatusBarItem.command).toBe('minspec.viewQueue');
+  });
+
+  it('hides at zero depth', () => {
+    new MinSpecQueueDepthStatusBar().update([]);
+    expect(mockStatusBarItem.hide).toHaveBeenCalled();
+    expect(mockStatusBarItem.show).not.toHaveBeenCalled();
+  });
+
+  it('shows depth, oldest timestamp and the hotkey in the tooltip', () => {
+    const bar = new MinSpecQueueDepthStatusBar('Ctrl+K Ctrl+Y');
+    bar.update([
+      { specPath: 'specs/a/requirements.md', requestedAt: '2020-01-01T00:00:00.000Z' },
+      { specPath: 'specs/b/requirements.md' },
+    ]);
+    expect(mockStatusBarItem.text).toBe(formatQueueDepthText(2));
+    expect(mockStatusBarItem.tooltip).toContain('2020-01-01T00:00:00.000Z');
+    expect(mockStatusBarItem.tooltip).toContain('Shortcut: Ctrl+K Ctrl+Y');
+    expect(mockStatusBarItem.show).toHaveBeenCalled();
+  });
+
+  it('resolveKeybinding reads the shipped chord for minspec.viewQueue from the manifest', () => {
+    const pkg = { contributes: { keybindings: [{ command: 'minspec.viewQueue', key: 'ctrl+k ctrl+y' }] } };
+    const label = resolveKeybinding(pkg, 'minspec.viewQueue');
+    expect(label).toContain('K');
+    expect(resolveKeybinding(pkg, 'minspec.other')).toBeUndefined();
   });
 });

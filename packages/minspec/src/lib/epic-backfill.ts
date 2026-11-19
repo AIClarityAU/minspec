@@ -7,7 +7,7 @@ import { promisify } from 'util';
 import { loadConfig, resolveAndValidate } from './config';
 import { listAdrs } from './adr-manager';
 import { parseSpec } from './spec';
-import { slugify } from './spec-manager';
+import { slugify } from './slug';
 import { readDocumentText } from './text-io';
 import { ensureDirectory } from './opt-in';
 import {
