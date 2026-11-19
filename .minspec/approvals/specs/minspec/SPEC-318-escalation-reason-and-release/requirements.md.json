@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-318-escalation-reason-and-release/requirements.md",
+  "specHash": "69889401b9f23bbde828b32e8de27066a071d1ba35ac77ebb230bd21f8d82f2d",
+  "approvedAt": "2026-11-13T06:48:36.335Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:docs/clarify-recs-1113",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3697#issuecomment-6840772356"
+}
