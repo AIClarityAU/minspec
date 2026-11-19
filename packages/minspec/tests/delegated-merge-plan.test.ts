@@ -86,6 +86,7 @@ const pull = (over: Partial<MergePull> = {}): MergePull => ({
   authorLogin: BOT,
   authorType: 'Bot',
   labels: ['ai-review:pass', 'awaiting-approval'],
+  mergeState: 'clean',
   ...over,
 });
 
@@ -268,6 +269,29 @@ describe('DR-121 s2.4: CI green on the head - EVERY latest check, required or no
   });
 });
 
+describe('#3748: a plan merges directly only when its branch is current with main', () => {
+  // The ruleset is strict, so GitHub refuses a direct merge of a BEHIND branch. Before
+  // #3748 the judge never read the merge state: 19 BEHIND plan PRs were admitted, refused
+  // and re-admitted every cycle. A BEHIND plan waits for its one-at-a-time update turn.
+  it('a BEHIND plan PR is not admitted for a direct merge', () => {
+    const p = planDelegatedMerge(input({ pull: pull({ mergeState: 'behind' }) }));
+    expect(p).toMatchObject({ arm: false, reason: 'plan-behind' });
+    expect(p.arm ? '' : p.detail).toMatch(/update turn/);
+  });
+  it('the GraphQL upper-case BEHIND is read the same way', () => {
+    expect(reasonOf(input({ pull: pull({ mergeState: 'BEHIND' }) }))).toBe('plan-behind');
+  });
+  it.each([undefined, '', 'unknown', 'UNKNOWN'])('an unreadable or UNKNOWN merge state (%s) fails closed', (st) => {
+    expect(reasonOf(input({ pull: pull({ mergeState: st }) }))).toBe('plan-merge-state-not-clean');
+  });
+  it.each(['dirty', 'blocked', 'draft', 'something-new'])('merge state %s is not admitted (allowlist, not denylist)', (st) => {
+    expect(reasonOf(input({ pull: pull({ mergeState: st }) }))).toBe('plan-merge-state-not-clean');
+  });
+  it.each(['clean', 'unstable', 'has_hooks', 'CLEAN'])('merge state %s is admitted', (st) => {
+    expect(reasonOf(input({ pull: pull({ mergeState: st }) }))).toBe('ARMED');
+  });
+});
+
 describe('the spec arm is unchanged by the plan arm (DR-108)', () => {
   const SPEC_REQ = 'specs/minspec/SPEC-228-ci-parity/requirements.md';
   const specInput = (over: Partial<MergeInput> = {}) =>
@@ -281,6 +305,9 @@ describe('the spec arm is unchanged by the plan arm (DR-108)', () => {
     });
   it('a covered spec PR still arms native auto-merge, and needs no check-run read', () => {
     expect(planDelegatedMerge(specInput())).toMatchObject({ arm: true, mergeMode: 'auto' });
+  });
+  it('the spec arm does not read the merge state: native auto-merge waits on GitHub itself', () => {
+    expect(planDelegatedMerge(specInput({ pull: pull({ mergeState: 'behind' }) }))).toMatchObject({ arm: true, mergeMode: 'auto' });
   });
   it('a red optional check does not enter the spec arm: required checks stay GitHub\'s', () => {
     expect(planDelegatedMerge(specInput({ planChecks: { sha: HEAD, runs: [run('x', 'failure')] } }))).toMatchObject({ arm: true, mergeMode: 'auto' });
@@ -329,6 +356,7 @@ describe('DR-121 gathering: plan facts are read from the base, failures deny', (
         head: { sha: HEAD, ref: 'cos/plan-b-1028' },
         user: { login: BOT, type: 'Bot' },
         labels: [{ name: 'ai-review:pass' }, { name: 'awaiting-approval' }],
+        mergeable_state: 'clean',
       });
     }
     if (route.startsWith(`repos/${REPO}/pulls/${PR}/files`)) {
@@ -440,6 +468,20 @@ describe('DR-121 gathering: plan facts are read from the base, failures deny', (
         : okGh(a);
     expect(plan(deps({ gh }))).toMatchObject({ arm: false, reason: 'plan-ci-pending' });
   });
+  it('#3748: GitHub reporting the branch behind main denies with plan-behind', () => {
+    const gh = (a: readonly string[]) =>
+      a[a.length - 1] === `repos/${REPO}/pulls/${PR}` ? JSON.stringify({ ...JSON.parse(okGh(a)), mergeable_state: 'behind' }) : okGh(a);
+    expect(plan(deps({ gh }))).toMatchObject({ arm: false, reason: 'plan-behind' });
+  });
+  it('#3748: a pull read with no mergeable_state (not yet computed) fails closed', () => {
+    const gh = (a: readonly string[]) => {
+      if (a[a.length - 1] !== `repos/${REPO}/pulls/${PR}`) return okGh(a);
+      const p = JSON.parse(okGh(a));
+      delete p.mergeable_state;
+      return JSON.stringify(p);
+    };
+    expect(plan(deps({ gh }))).toMatchObject({ arm: false, reason: 'plan-merge-state-not-clean' });
+  });
   it('a missing approval record on the base denies', () => {
     const git = (a: readonly string[]) => {
       if (a[0] === 'cat-file' && String(a[2]).endsWith(SIDECAR)) throw new Error('absent');
@@ -479,16 +521,29 @@ describe('the dispatch seam merges a plan directly - never --auto, never --admin
   });
   afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
-  function seam(o: { judge: Record<string, unknown>; diff: string; mergeExit?: number }) {
+  function seam(o: {
+    judge: Record<string, unknown>;
+    diff: string;
+    mergeExit?: number;
+    mergeStderr?: string;
+    /** What the merge-instant read returns (#3748); null = the read fails. */
+    current?: { mergeStateStatus?: string; headRefOid?: string } | null;
+  }) {
     const ghLog = path.join(tmp, 'gh.log');
+    const current = o.current === undefined ? { mergeStateStatus: 'CLEAN', headRefOid: HEAD } : o.current;
     fs.writeFileSync(
       path.join(tmp, 'bin', 'gh'),
       `#!/usr/bin/env bash
 printf 'TOKEN=%s ARGS=%s\\n' "\${GH_TOKEN:-}" "$*" >> ${JSON.stringify(ghLog)}
 case "$1 $2" in
   "pr diff") printf '%s\\n' ${JSON.stringify(o.diff)} ;;
-  "pr view") printf '%s\\n' ${JSON.stringify(JSON.stringify(VIEW))} ;;
-  "pr merge") exit ${o.mergeExit ?? 0} ;;
+  "pr view")
+    if [[ "$*" == *mergeStateStatus* ]]; then
+      ${current === null ? 'exit 1' : `printf '%s\\n' ${JSON.stringify(JSON.stringify(current))}`}
+    else
+      printf '%s\\n' ${JSON.stringify(JSON.stringify(VIEW))}
+    fi ;;
+  "pr merge") printf '%s\\n' ${JSON.stringify(o.mergeStderr ?? '')} >&2; exit ${o.mergeExit ?? 0} ;;
 esac
 exit 0
 `,
@@ -550,8 +605,52 @@ exit 0
     expect(r.status).toBe(2);
     expect(r.merges).toHaveLength(1);
     expect(r.merges.join('\n')).not.toContain('--auto');
-    expect(r.verdict).toMatchObject({ merged: false, error: 'merge-failed' });
+    expect(r.verdict).toMatchObject({ merged: false });
+    expect(r.verdict.error).toMatch(/^merge-failed/);
     expect(r.stderr).toContain('next cycle');
+  }, TIMEOUT);
+
+  // #3748: the judge reads the merge state, but the base can move between the judge and the
+  // merge. The seam re-reads it at the merge instant, an independent second witness.
+  it('#3748: a plan PR BEHIND at the merge instant is not merged; held (exit 1) for its update turn', () => {
+    const r = seam({ judge: { ...ARMED, mergeMode: 'direct' }, diff: PLAN_DIFF, current: { mergeStateStatus: 'BEHIND', headRefOid: HEAD } });
+    expect(r.status).toBe(1);
+    expect(r.merges).toHaveLength(0);
+    expect(r.verdict).toMatchObject({ proceed: false, reason: 'plan-behind' });
+    expect(r.verdict.detail).toMatch(/update turn/);
+  }, TIMEOUT);
+
+  it.each([
+    ['UNKNOWN', { mergeStateStatus: 'UNKNOWN', headRefOid: HEAD }],
+    ['empty', { headRefOid: HEAD }],
+    ['BLOCKED', { mergeStateStatus: 'BLOCKED', headRefOid: HEAD }],
+    ['an unreadable read', null],
+  ] as const)('#3748: merge state %s at the merge instant fails closed and merges nothing', (_n, current) => {
+    const r = seam({ judge: { ...ARMED, mergeMode: 'direct' }, diff: PLAN_DIFF, current: current as { mergeStateStatus?: string; headRefOid?: string } | null });
+    expect(r.status).toBe(1);
+    expect(r.merges).toHaveLength(0);
+    expect(r.verdict).toMatchObject({ proceed: false, reason: 'plan-merge-state-not-clean' });
+  }, TIMEOUT);
+
+  it('#3748: a head that moved after the judge read is not merged', () => {
+    const r = seam({ judge: { ...ARMED, mergeMode: 'direct' }, diff: PLAN_DIFF, current: { mergeStateStatus: 'CLEAN', headRefOid: 'c'.repeat(40) } });
+    expect(r.status).toBe(1);
+    expect(r.merges).toHaveLength(0);
+    expect(r.verdict).toMatchObject({ proceed: false, reason: 'head-moved' });
+  }, TIMEOUT);
+
+  it('#3748: GitHub\'s refusal text is carried into error, one line, with no token in it', () => {
+    const r = seam({
+      judge: { ...ARMED, mergeMode: 'direct' },
+      diff: PLAN_DIFF,
+      mergeExit: 1,
+      mergeStderr: 'X Pull request #3280 is not mergeable: the head branch is not up to date with the base branch.\nauth ghs_abcdefghijklmnopqrstuvwxyz0123456789 failed',
+    });
+    expect(r.status).toBe(2);
+    expect(r.verdict.error).toMatch(/^merge-failed: .*not up to date with the base branch/);
+    expect(r.verdict.error).not.toContain('ghs_abcdefghijklmnopqrstuvwxyz0123456789');
+    expect(r.verdict.error).not.toMatch(/\n/);
+    expect(r.stderr).not.toContain('ghs_abcdefghijklmnopqrstuvwxyz0123456789');
   }, TIMEOUT);
 
   it('the spec arm is unchanged: a spec PR still arms --auto --squash at the judged head', () => {
