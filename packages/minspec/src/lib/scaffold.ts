@@ -6,6 +6,7 @@ import {
   TEMPLATE_NAMES,
   TEMPLATE_OUTPUT_PATHS,
   MANAGED_REGION_TEMPLATES,
+  SELF_HOSTED_TEMPLATE_NAMES,
   MINSPEC_HOOKS_DIR,
   managedRegionStartMarker,
   managedRegionEndMarker,
@@ -1217,6 +1218,15 @@ function tryAutoHealManagedRegion(
 }
 
 /**
+ * True only in minspec's own monorepo, where the template source lives (#1166): the
+ * registry file that defines `SELF_HOSTED_TEMPLATE_NAMES` is on disk under `rootDir`.
+ * No other project has this path, so the exemption cannot leak to an adopter.
+ */
+function isMinspecSelfHostRepo(rootDir: string): boolean {
+  return fs.existsSync(path.join(rootDir, 'packages', 'minspec', 'src', 'lib', 'template-registry.ts'));
+}
+
+/**
  * Reconcile managed-region templates on Refresh (#249, DR-037).
  *
  * For each managed-region template, by parsing its markers — never a whole-file
@@ -1254,6 +1264,9 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
       kind: 'exec-bit-recorded',
     });
   };
+
+  const selfHosted = isMinspecSelfHostRepo(rootDir);
+  const selfHostedNames = new Set(SELF_HOSTED_TEMPLATE_NAMES);
 
   for (const tpl of MANAGED_REGION_TEMPLATES) {
     // Skip a tool-gated template whose tool the project does not use (#241): never
@@ -1294,6 +1307,13 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
     // not start. Every other managed file keeps its own endings (SPEC-095 FR-5(c), FR-3).
     const writeBack = (lf: string): string =>
       isLfPinnedPath(tpl.outputPath) ? lf : restoreLineEndings(lf, original);
+
+    if (!split && selfHosted && selfHostedNames.has(tpl.name)) {
+      // Minspec's OWN repo (#1166, DR-073): these files ARE the template source and are
+      // deliberately markerless; their freshness is gated by checkCiReviewTemplatesFresh.
+      // Auto-healing would marker-wrap them (or swap in a different body) — skip silently.
+      continue;
+    }
 
     if (!split) {
       // Markers missing/corrupted — cannot identify MinSpec's region by markers
