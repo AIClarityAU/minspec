@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-333-delegated-merge-reads-dissenting-verdicts/requirements.md",
+  "specHash": "86f865cca4321f8d533ca6d29a9eb4165e2faa37e39dcc62118a6ed010c0c17c",
+  "approvedAt": "2026-11-17T05:06:07.992Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1117",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3803#issuecomment-6937435860"
+}
