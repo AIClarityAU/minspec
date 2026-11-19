@@ -179,6 +179,8 @@ export interface MergeInput {
   readonly stopClasses: string | undefined;
   readonly pull: MergePull | undefined;
   readonly files: readonly MergeFile[] | undefined;
+  /** Why `files` is undefined (the swallowed error's text), so the hold names its cause. */
+  readonly filesError?: string;
   readonly review: ReviewEvidence | undefined;
   /** undefined = the delegation file is absent or does not parse. */
   readonly delegations: readonly Delegation[] | undefined;
@@ -249,7 +251,10 @@ export function planDelegatedMerge(input: MergeInput): MergePlan {
   if (pull.baseRef !== 'main') return no('pr-base-not-main', `#${pull.number} targets ${pull.baseRef}, not main`);
   if (!/^[0-9a-f]{40}$/.test(pull.headSha)) return no('pr-unreadable', `#${pull.number} has no head SHA`);
 
-  if (files === undefined) return no('files-unreadable', `#${pull.number}'s changed files could not be read`);
+  if (files === undefined) {
+    const why = input.filesError ? `: ${input.filesError}` : '';
+    return no('files-unreadable', `#${pull.number}'s changed files could not be read${why}`);
+  }
   if (files.length === 0) return no('no-files', `#${pull.number} changes no files`);
   const tiers: Tier[] = [];
   const planFile = files.find((f) => PLAN_ARTIFACT.test(f.path));
@@ -543,6 +548,7 @@ export function gatherMergeInput(args: MergeArgs, deps: MergeDeps): MergeInput {
   }
 
   let files: MergeFile[] | undefined;
+  let filesError: string | undefined;
   if (pull !== undefined && /^[0-9a-f]{40}$/.test(pull.headSha)) {
     try {
       const rows: Json[] = [];
@@ -568,8 +574,10 @@ export function gatherMergeInput(args: MergeArgs, deps: MergeDeps): MergeInput {
         }
         return { path: rel, status: s(f.status), headContent, baseContent: baseOk ? show(rel) : undefined };
       });
-    } catch {
+    } catch (e) {
       files = undefined;
+      const msg = e instanceof Error ? e.message : String(e);
+      filesError = msg.replace(/\s+/g, ' ').trim().slice(0, 300) || 'unknown error';
     }
   }
 
@@ -654,6 +662,7 @@ export function gatherMergeInput(args: MergeArgs, deps: MergeDeps): MergeInput {
     stopClasses: args.stopClasses,
     pull,
     files,
+    filesError,
     review,
     delegations,
     decisionStatus,

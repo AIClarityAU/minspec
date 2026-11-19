@@ -151,6 +151,11 @@ export interface DrainFixture {
    */
   holdPrBodies?: string[] | 'fail';
   holdPrTitles?: string[];
+  /**
+   * Heads of open pull requests whose auto-merge is armed (#3825), e.g.
+   * `dlg-approve/spec-901-x`. `'fail'` makes that one query exit 1. Unset answers none.
+   */
+  armedHeads?: string[] | 'fail';
   /** The reading on disk when the drain starts. `null` = no file at all. */
   reading: Reading | null;
   /** What the meter reads once the dispatch of that issue has finished. */
@@ -360,6 +365,9 @@ fi
 if [[ "$1" == "issue" && "$2" == "view" ]]; then
   [[ -f "${dir}/issue.$3.json" ]] && cat "${dir}/issue.$3.json"
   exit 0
+fi
+if [[ "$1" == "pr" && "$2" == "list" && " $* " == *"--json headRefName,autoMergeRequest"* ]]; then
+  ${f.armedHeads === 'fail' ? 'echo "HTTP 502: Bad Gateway" >&2; exit 1' : `printf '%s\\n' ${(Array.isArray(f.armedHeads) ? f.armedHeads : []).map((h) => JSON.stringify(h)).join(' ')}; exit 0`}
 fi
 if [[ "$1" == "pr" && "$2" == "list" && "$label" == "hold:human" ]]; then
   ${f.holdPrBodies === 'fail' ? 'echo "HTTP 502: Bad Gateway" >&2; exit 1' : `cat "${dir}/hold-pr-bodies"; exit 0`}
