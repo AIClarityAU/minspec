@@ -120,3 +120,10 @@ Line numbers rot; Plan re-reads them. Figures below are the issue's, except wher
   second predicate that can drift from the lifecycle rules.
 - **D4 - Specs with a `phases:` block but no `tasks.md`** (e.g. SPEC-025). The warning should
   fire on status alone; confirm that is wanted rather than only on map-less specs.
+  **Recommended (agent, 2026-11-17):** fire on status alone, map or no map. On this base 19 specs sit
+  at `implementing` with no `tasks.md`; three have a `phases:` map, and those maps are themselves
+  wrong (SPEC-015 and SPEC-025 say `tasks: done`, SPEC-041 says `tasks: in-progress`), so
+  exempting map specs would exempt the specs whose signpost lies twice - cost: SPEC-039 (T2,
+  whose tier requires no `tasks` phase, `packages/minspec/src/lib/config.ts:174`) and any other
+  legitimate T1/T2 spec at `implementing` would warn too, unless FR5 is limited to tiers whose
+  required phases include `tasks`.
