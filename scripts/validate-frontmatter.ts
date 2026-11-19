@@ -51,6 +51,7 @@ import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold'
 // turned into an empty corpus (#1999).
 import { drsMissingPlainTerms } from './lib/dr-required-sections';
 import { walkFilesByExt as glob, walkOptionalRoot as safeGlob } from './lib/corpus-walk';
+import { findDecisionContradictions } from './lib/decision-status-contradiction';
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
 import { checkDrFrontmatterClosedSet } from './lib/dr-closed-set';
 import { checkDeclaredSpecIds } from './lib/spec-id-collision';
@@ -884,6 +885,30 @@ async function checkCiReviewTemplatesFresh(): Promise<void> {
       else warn(`implement-evidence ${relative(ROOT, file)}: ${v.message}`);
     }
   });
+}
+
+// Rule 27 (#1812, `decision.status-contradiction`): one document marking the SAME decision id
+// (`D<n>`/`OQ<n>`/`PQ<n>`) both open ("still open", "remain open", "Decision needed — D1") and
+// resolved ("RESOLVED <date> — ...") — the stale-sibling defect ai-review caught post-push in
+// #1658 and #1797. A marker match on this repo's own vocabulary, NOT a general consistency
+// checker: contradictions phrased outside the conventional forms are missed (ai-review stays
+// the backstop). `warn` by default, `error` via `decisionStatusContradiction` (FR-7 ratchet).
+{
+  const dcCfg = loadConfig(ROOT);
+  const dcFailsClosed = dcCfg.decisionStatusContradiction === 'error';
+  const dcRoots = [specsDir, resolveDecisionsDir()];
+  for (const root of dcRoots) {
+    eachFile('Rule 27', listCorpus('Rule 27', root, '.md', dcFailsClosed), dcFailsClosed, (file) => {
+      for (const f of findDecisionContradictions(readFileSync(file, 'utf-8'))) {
+        const msg =
+          `${f.id} is marked open at line ${f.openLine} and resolved at line ${f.resolvedLine} ` +
+          `(#1812). Update every register that states it (frontmatter comment, FR bodies, Clarify ` +
+          `block, DR note) so the document says one thing.`;
+        if (dcFailsClosed) fail(file, msg);
+        else warn(`decision-status-contradiction ${relative(ROOT, file)}: ${msg}`);
+      }
+    });
+  }
 }
 
 // Rule 14 (harden, #760): every MANAGED_REGION_TEMPLATES output path present on

@@ -112,7 +112,11 @@ Nothing rejects the second case, so the tree offers to accept an already-accepte
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 2 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 ### DQ-1 - How is the third state represented?
+
+**Recorded selection: the recommended option,** Option A, a new status value `unreadable` on `AdrStatus` and the epic status. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 - **Option A - new status value `unreadable` on `AdrStatus` / epic status (rec).** One field,
   exhaustive checks find every consumer. *Cost:* widens a type that file-facing code also uses
@@ -122,6 +126,8 @@ Nothing rejects the second case, so the tree offers to accept an already-accepte
   compiler does not force handling.
 
 ### DQ-2 - Tolerate leading blank lines as well?
+
+**Recorded selection: the recommended option,** Option A, a blank line before `---` is unreadable. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 - **Option A - no; a blank line before `---` is unreadable (rec).** Keeps "what parses" single
   and equal to every other consumer of the block (spec gate, validators). *Cost:* a harmless
