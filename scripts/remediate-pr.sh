@@ -1317,11 +1317,26 @@ RUN_MODEL="sonnet"
 RUN_PROMPT="$PROMPT"
 ESCALATED_ALREADY=0
 
+# Context-slim (#927, same root cause as #912): `claude -p` inside the worktree with
+# the default system prompt auto-loads the large CLAUDE.md + global CLAUDE.md +
+# auto-memory before the task starts -> autocompact thrash. Pass the dev role as the
+# SYSTEM PROMPT via --system-prompt-file (replaces that ambient load; auth-neutral,
+# subscription OAuth preserved). The task prompt already tells the agent to read
+# CLAUDE.md on demand. Kill-switch: MINSPEC_DISPATCH_SLIM_CONTEXT=0 restores the
+# default system prompt (same switch as dispatch-issue.sh).
+REMEDIATE_ROLE_FILE="${SCRIPT_DIR}/roles/dev.md"
+SYS_PROMPT_ARGS=()
+if [[ "${MINSPEC_DISPATCH_SLIM_CONTEXT:-1}" != "0" && -f "$REMEDIATE_ROLE_FILE" ]]; then
+  SYS_PROMPT_ARGS=(--system-prompt-file "$REMEDIATE_ROLE_FILE")
+  echo "  Context-slim: dev role via --system-prompt-file (#927)"
+fi
+
 echo "  Launching remediation agent (model: $RUN_MODEL, log: $LOG)..."
 while true; do
   if (cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$RUN_PROMPT" \
         "${AGENT_CONTEXT_ARGS[@]}" \
         ${AGENT_CAVEMAN_ARGS[@]+"${AGENT_CAVEMAN_ARGS[@]}"} \
+        ${SYS_PROMPT_ARGS[@]+"${SYS_PROMPT_ARGS[@]}"} \
         --model "$RUN_MODEL" \
         --allowedTools "$ALLOWED_TOOLS" \
         --output-format text 2>&1 | tee "$LOG"); then
