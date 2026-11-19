@@ -1,7 +1,7 @@
 ---
 id: SPEC-369
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Nothing is built yet; the behind-upstream probe, the approve-time
   confirmation and the facts command are all planned (#1639).
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
