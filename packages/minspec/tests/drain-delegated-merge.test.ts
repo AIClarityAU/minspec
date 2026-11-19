@@ -41,6 +41,7 @@ interface Row {
   number: number;
   isDraft?: boolean;
   autoMergeRequest?: unknown;
+  head?: string;
   files: string[];
 }
 
@@ -71,6 +72,7 @@ function run(
             number: r.number,
             isDraft: r.isDraft ?? false,
             autoMergeRequest: r.autoMergeRequest ?? null,
+            headRefName: r.head ?? `agent/issue-${r.number}`,
             files: r.files.map((p) => ({ path: p })),
           })),
         );
@@ -136,7 +138,7 @@ describe('Step 0c hands held spec-only PRs to the seam, and nothing else', () =>
   it('reads the held list with a limit and the fields the prefilter needs', () => {
     const r = run([]);
     expect(r.list[0]).toContain('pr list --repo AIClarityAU/minspec --state open --label needs-human-review --limit 500');
-    expect(r.list[0]).toContain('number,isDraft,autoMergeRequest,files');
+    expect(r.list[0]).toContain('number,isDraft,autoMergeRequest,headRefName,files');
     // #3123: a spec PR opened outside the drain is held as awaiting-approval, not
     // needs-human-review; `--label` ANDs, so each hold signal is its own read.
     expect(r.list[1]).toContain('pr list --repo AIClarityAU/minspec --state open --label awaiting-approval --limit 500');
@@ -290,6 +292,31 @@ describe('the cap rotates, so held PRs cannot starve the ones behind them', () =
     expect(judged(r)).toEqual([1, 2]);
     expect(r.stderr).toContain('could not record');
     expect(r.stdout).toContain('rc=0');
+  });
+});
+
+describe('#3825: delegated approval PRs are judged before the rest', () => {
+  const judged = (r: { seamCalls: string[] }) => r.seamCalls.map((c) => Number(c.split(' ')[1]));
+  const plan = (n: number) => `specs/minspec/SPEC-${n}-x/design.md`;
+
+  it('a dlg-approve PR is judged ahead of an older plan PR, under a cap that fits one', () => {
+    const rows = [
+      { number: 1, files: [plan(1)] },
+      { number: 2, files: [plan(2)] },
+      { number: 9, head: 'dlg-approve/spec-9-x', files: [spec(9)] },
+    ];
+    expect(judged(run(rows, { env: { MINSPEC_DRAIN_DELEGATED_MERGE_MAX: '1' } }))).toEqual([9]);
+  });
+
+  it('each group keeps its cursor rotation', () => {
+    const rows = [
+      { number: 1, files: [spec(1)] },
+      { number: 7, head: 'dlg-approve/spec-7-x', files: [spec(7)] },
+      { number: 8, head: 'dlg-approve/spec-8-x', files: [spec(8)] },
+      { number: 3, files: [spec(3)] },
+    ];
+    fs.writeFileSync(path.join(tmp, 'cursor'), '7\n');
+    expect(judged(run(rows, { env: { MINSPEC_DRAIN_DELEGATED_MERGE_MAX: '10' } }))).toEqual([8, 7, 1, 3]);
   });
 });
 
