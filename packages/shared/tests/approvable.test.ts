@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { Approvable, SpecNode, EpicNode, DrNode, PrNode, IssueNode } from '../src';
+import type { Approvable, SpecNode, EpicNode, DrNode, PrNode, IssueNode,
+  PlanNode, DesignDocNode, TasksDocNode, ConstitutionInvariantNode } from '../src';
 
 describe('Approvable (DR-041)', () => {
   it('accepts each member type', () => {
@@ -8,7 +9,11 @@ describe('Approvable (DR-041)', () => {
     const dr: DrNode = { id: 'DR-041', status: 'accepted' };
     const pr: PrNode = { number: 1, state: 'open' };
     const issue: IssueNode = { number: 325, state: 'open' };
-    const all: Approvable[] = [spec, epic, dr, pr, issue];
-    expect(all).toHaveLength(5);
+    const plan: PlanNode = { specId: 'SPEC-001', approvalState: 'unapproved' };
+    const design: DesignDocNode = { specId: 'SPEC-001' };
+    const tasks: TasksDocNode = { specId: 'SPEC-001' };
+    const inv: ConstitutionInvariantNode = { index: 1 };
+    const all: Approvable[] = [spec, plan, design, tasks, dr, inv, epic, issue, pr];
+    expect(all).toHaveLength(9);
   });
 });
