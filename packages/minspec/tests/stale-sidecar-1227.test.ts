@@ -1,5 +1,5 @@
 /**
- * #1227 - Rule 26: a committed approval sidecar must match the file it approves.
+ * #1227 - Rule 30: a committed approval sidecar must match the file it approves.
  * Unit cases for the pure decision, plus the CLI as a subprocess (the script calls
  * process.exit) with a clean control so a red case cannot be a vacuous scan.
  */
@@ -33,7 +33,7 @@ describe('findStaleSidecars (#1227)', () => {
   });
 });
 
-describe('validate-frontmatter Rule 26 CLI (#1227)', () => {
+describe('validate-frontmatter Rule 30 CLI (#1227)', () => {
   const TSX = path.join(process.cwd(), 'node_modules', '.bin', 'tsx');
   const SCRIPT = path.join(process.cwd(), 'scripts', 'validate-frontmatter.ts');
   const SPEC = 'specs/x/SPEC-900-probe/requirements.md';

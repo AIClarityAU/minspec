@@ -695,7 +695,7 @@ try {
   reportUnrunnable('Rule 10', 'the orphaned-approval check could not run', err, false);
 }
 
-// Rule 26 (FATAL for specs, #1227): a committed approval sidecar must match the file it
+// Rule 30 (FATAL for specs, #1227): a committed approval sidecar must match the file it
 // approves. #1205 landed an approval and #1181 then added `implements:` (a hashed field),
 // so `main` read `status: planning` while the record resolved `stale`; both PRs were green
 // because CI checked the field's presence, never the approval it invalidated. The pre-commit
@@ -714,7 +714,7 @@ try {
     else warn(`${s.specPath}: ${msg}`);
   }
 } catch (err) {
-  reportUnrunnable('Rule 26', 'the stale-approval check could not run', err, true);
+  reportUnrunnable('Rule 30', 'the stale-approval check could not run', err, true);
 }
 
 // Rule 11 (FATAL, #626): the body status line must match frontmatter `status:`.

@@ -1,5 +1,5 @@
 /**
- * Pure decision for Rule 26 (#1227): a committed approval sidecar must still describe
+ * Pure decision for Rule 30 (#1227): a committed approval sidecar must still describe
  * the file it approves.
  *
  * THE GAP. #1205 landed a sidecar + `status: planning`; #1181 then added `implements:`
