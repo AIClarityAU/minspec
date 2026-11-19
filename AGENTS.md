@@ -92,7 +92,7 @@ Report the state you already observed; re-reading it from the git host is ordina
 
 Before making ANY change, verify these will still hold:
 
-1. MinSpec makes zero network calls in its core path. A consent-gated shell-out to the user's own installed, authenticated CLI (`git`, `gh`) is not a MinSpec network call and is permitted (DR-050) when: the extension opens no socket itself, each action has per-action user consent, and a zero-network fallback exists.
+1. MinSpec makes zero network calls in its core path. A shell-out to the user's own installed, authenticated CLI (`git`, `gh`) is not a MinSpec network call and is permitted (DR-050, shell-out to the user's own CLI, as amended) when: the extension opens no socket itself, a zero-network fallback exists, and consent matches the action - read-only checks of the repo's own configuration (rulesets, secret names) may run without a prompt, while any write to the repo or any data sent out needs explicit consent for each action.
 2. MinSpec spec files remain Spec Kit-compatible markdown
 3. ScroogeLLM never stores API keys in plaintext
 4. ScroogeLLM proxy binds localhost by default
