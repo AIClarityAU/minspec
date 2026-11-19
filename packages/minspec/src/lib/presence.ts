@@ -414,9 +414,10 @@ export function isCheckoutOccupied(
  * `fileAllowlist.length === 0 || fileAllowlist.some((p) => !isApprovableCorpusPath(p))`.
  *
  * `classifyApprovablePath` (`./approvable`) classifies by FILE NAME, not by corpus
- * directory, so it cannot answer this question; hence a separate list. The pre-commit
- * hook duplicates it as a shell `case` pattern with a tie-back comment, and the
- * SPEC-026 FR-14 parity test asserts the two lists are equal - change BOTH or neither.
+ * directory, so it cannot answer this question; hence a separate list. SPEC-026 task 2
+ * (planned, not yet built) duplicates it in the pre-commit hook as a shell `case`
+ * pattern with a tie-back comment, with an FR-14 parity test asserting the two lists
+ * are equal - once that lands, change BOTH or neither.
  */
 export const APPROVABLE_CORPUS_PREFIXES: readonly string[] = Object.freeze([
   'specs/',
@@ -449,8 +450,9 @@ export interface ContendedPath {
  * FR-10 guard predicate - for each of `paths` (repo-relative), every OTHER live
  * same-tree session whose `fileAllowlist` covers it, as one `{ path, peer }` entry per
  * contended (path, peer) pair. Liveness and coverage only: no arbitration (FR-13) and
- * no corpus filter (the FR-12 backstop applies `isApprovableCorpusPath` itself), which
- * is exactly the scope the FR-14 bash twin is held to. Shares the FR-4 liveness core
+ * no corpus filter (the FR-12 backstop, SPEC-026 task 2 and not yet built, is to apply
+ * `isApprovableCorpusPath` itself), which is the scope the planned FR-14 bash twin is
+ * to be held to. Shares the FR-4 liveness core
  * with the sync gate, so both live here. A non-empty result is a contention advisory;
  * it never blocks.
  *
@@ -487,7 +489,7 @@ export function contendingLiveSessions(
 
 /**
  * The coverage rule `contendingLiveSessions` applies, exported so the FR-14 parity
- * test can name the rule the bash twin mirrors (design.md, *Coverage semantics*).
+ * test (task 2, not yet built) can name the rule the bash twin is to mirror (design.md, *Coverage semantics*).
  * True if repo-relative `p` is covered by any allowlist entry. Each entry is
  * normalised (`\` to `/`, a trailing `/*` dropped, trailing slashes dropped); an entry
  * that normalises to empty is skipped. Then `p` is covered if it equals the entry or
