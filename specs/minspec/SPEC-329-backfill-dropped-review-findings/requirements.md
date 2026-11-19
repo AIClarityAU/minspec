@@ -1,7 +1,7 @@
 ---
 id: SPEC-329
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - stops the ai-review gate silently discarding findings
@@ -15,8 +15,8 @@ implements_reason: >-
   after the Clarify decisions below.
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -122,6 +122,8 @@ re-reviewing PRs (#362); approvable defects (#627); the sealbox variant (#455).
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 6 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 **D1 - What counts as "resolved"?**
 (a) **(rec)** A later commit in the PR touches the file in `location`. Cheap, deterministic,
 offline-checkable. Cost: over-drops when the later commit touched the file for an unrelated
@@ -132,12 +134,16 @@ a parser that fails often.
 (c) Ask a model to judge each finding against later diffs. Best accuracy; cost: spends tokens
 on ~100 PRs, is non-deterministic, and re-opens the model-trust problem the gate avoids.
 
+**Recorded selection: the recommended option,** option (a), a later commit in the PR touches the file in `location`. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+
 **D2 - Which comment when a PR has several reviews?**
 (a) **(rec)** The last review comment posted before merge, since that verdict governed the
 merge. Cost: findings only in earlier rounds are dropped, though the later round probably
 re-raised any that mattered.
 (b) Union of all rounds, deduplicated by text. Loses nothing; cost: `RF` positions have no
 single list to index, so handles need a different scheme.
+
+**Recorded selection: the recommended option,** option (a), the last review comment posted before merge. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 **D3 - Which severities are in scope?**
 The issue names `LOW`/`minor`/`nit`. The reviewer prompt does not fix a vocabulary (see
@@ -147,11 +153,15 @@ allowlist from that. Cost: one extra step before filing.
 (b) File everything that is not literally blocking. Cost: unknown-severity rows may include
 real defects filed as low-priority noise.
 
+**Recorded selection: the recommended option,** option (a), run the dry run first, then fix a severity allowlist from the strings seen. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+
 **D4 - `bug` vs `idea` rule.**
 (a) **(rec)** Every backfilled issue is `idea,inbox`; the human or triage reclassifies. Cost:
 a real defect waits as an idea until triaged.
 (b) Keyword rule on the problem text. Cost: a heuristic that will misclassify and cannot be
 checked offline.
+
+**Recorded selection: the recommended option,** option (a), every backfilled issue is `idea,inbox`. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 **D5 - Who builds the extractor, #465 or this?**
 `specs/` holds no spec for #465 and no extractor exists on main, as far as I could check.
@@ -160,9 +170,13 @@ consume it (the issue's own second option). Cost: #465's design is constrained b
 interface chosen before its spec is written.
 (b) Wait for #465. Cost: this backfill is blocked on work with no spec yet.
 
+**Recorded selection: the recommended option,** option (a), build the extractor here as a standalone module that #465 consumes. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+
 **D6 - Backfill depth.** (a) **(rec)** All merged PRs once the dry-run total is known to be
 small enough to triage. Cost: if the unresolved count is in the hundreds, inbox flooding.
 (b) Only the last N days. Cost: older findings stay lost, which is the very leak being fixed.
+
+**Recorded selection: the recommended option,** option (a), all merged PRs once the dry-run total is known to be small enough to triage. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 ## Follow-ups (tracked)
 

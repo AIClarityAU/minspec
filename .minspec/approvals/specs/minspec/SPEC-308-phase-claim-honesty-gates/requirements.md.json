@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-308-phase-claim-honesty-gates/requirements.md",
+  "specHash": "22812055932f817e314e72f8e883897ec82321133e28c38c808fdf6998f7c3fd",
+  "approvedAt": "2026-11-17T04:00:35.338Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1117",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3803#issuecomment-6937435860"
+}

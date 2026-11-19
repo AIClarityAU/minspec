@@ -962,4 +962,12 @@ Adopters check MinSpec's review files with a workflow MinSpec does not ship, so 
 <!-- dr-summary:DR-121 auto=a299007d3188 -->
 _No summary available._
 <!-- /dr-summary:DR-121 -->
+
+## [DR-123 — On a T3 spec, an agent's recorded pick of each Clarify question's recommended option closes Clarify, and approving the spec ratifies the picks](DR-123.md)
+
+*Status: proposed · Date: 2026-11-17*
+
+<!-- dr-summary:DR-123 auto=76071625ecdd -->
+The founder answered this as runner queue item clarsel on 2026-11-17 (words in triggered_by). The delegated-approval record says in its section 4 that a queue item cannot carry consent, because any session can write the queue. So the answer is not binding until it sits in a committed record the founder accepts. This is that record. **It binds nothing until he accepts it.**
+<!-- /dr-summary:DR-123 -->
 <!-- minspec:dr-index:end -->
