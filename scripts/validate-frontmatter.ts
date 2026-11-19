@@ -330,13 +330,14 @@ if (epicRegistry.fileCount > 0 && epicRefs.size === 0) {
   });
 }
 
-// Rule 7 (non-fatal): split-layout cross-file coverage (#111). For each spec
+// Rule 7 (coverage non-fatal, id-agreement fatal): split-layout cross-file coverage (#111). For each spec
 // DIRECTORY whose sibling files carry split `type:` frontmatter, warn when the
 // SET does not cover the tier's required, file-backed phases (a T3 dir with only
 // requirements.md is missing design.md + tasks.md). The #93 fix correctly skips
 // the in-FILE phase-section check per split file; this is the dir-level backstop
-// it deferred. WARNS only — matches the extension's warning severity, so a
-// mid-authoring requirements-only dir surfaces but never fails the build.
+// it deferred. Coverage gaps WARN only (warning severity), so a mid-authoring
+// requirements-only dir surfaces without failing the build. Error-severity
+// violations (design/tasks `id:` differing from requirements', #493) FAIL.
 {
   const specFiles = listCorpus('Rule 7', specsDir, '.md', false);
   // Group by containing directory; each dir is one split-layout unit.

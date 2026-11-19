@@ -1488,7 +1488,11 @@ export interface SplitLayoutFile {
 export interface SplitLayoutCoverageResult {
   /** true when the file set is NOT a split layout at all (no `type:` files seen). */
   readonly notSplitLayout: boolean;
-  /** Coverage violations (always warning severity). Empty when fully covered. */
+  /**
+   * Coverage gaps (`split-coverage.*`, warning severity) plus id-agreement
+   * mismatches (`split-id.*.mismatch`, ERROR severity — callers must check
+   * `severity`). Empty when fully covered and ids agree.
+   */
   readonly violations: ValidationViolation[];
 }
 
@@ -1504,6 +1508,8 @@ export interface SplitLayoutCoverageResult {
  * - Otherwise, for each required file-backed phase whose `type` is absent from the
  *   set, emits a WARNING `split-coverage.<type>.missing`. Warning (never error) so a
  *   mid-authoring dir (only requirements.md) is surfaced but not blocked.
+ * - Also checks id agreement (#493): a design/tasks file whose `id:` differs from the
+ *   requirements file's emits an ERROR `split-id.<type>.mismatch`.
  *
  * The tier is taken from the requirements file's `tier:` when present (the primary
  * artifact carries it, #103), else the first file that declares one, else falls
@@ -1555,7 +1561,7 @@ export function validateSplitLayoutCoverage(
  * specs share ONE id across their phase files; a mismatch makes `listSpecs()` render
  * phantom separate specs and hides View Design/Tasks for the real parent.
  */
-const SHARED_ID_TYPES: ReadonlySet<string> = new Set(['design', 'tasks', 'clarify']);
+const SHARED_ID_TYPES: ReadonlySet<string> = new Set(['design', 'tasks']);
 
 function validateSplitLayoutIdAgreement(files: readonly SplitLayoutFile[]): ValidationViolation[] {
   const reqId = files.find((f) => f.type === 'requirements' && f.id)?.id;

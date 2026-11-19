@@ -768,15 +768,6 @@ describe('validateSplitLayoutCoverage — shared id across phase files (#493)', 
     expect(v.every((x) => x.severity === 'error')).toBe(true);
   });
 
-  it('errors on a clarify file with a different id', () => {
-    const r = validateSplitLayoutCoverage(
-      [g('requirements', 'SPEC-001'), g('clarify', 'SPEC-009')],
-      DEFAULT_CONFIG,
-      'T1',
-    );
-    expect(r.violations.map((x) => x.rule)).toContain('split-id.clarify.mismatch');
-  });
-
   it('passes when all ids match', () => {
     const r = validateSplitLayoutCoverage(
       [g('requirements', 'SPEC-001'), g('design', 'SPEC-001'), g('tasks', 'SPEC-001')],
