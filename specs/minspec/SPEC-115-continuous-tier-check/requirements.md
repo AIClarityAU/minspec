@@ -1,7 +1,7 @@
 ---
 id: SPEC-115
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-004  # Classifier Validation - DR-009/DR-021 (what a tier may and may not claim) live here
@@ -13,6 +13,12 @@ relates_to: [DR-021, DR-026, DR-012, DR-024, DR-004, DR-014, SPEC-004, SPEC-005,
 implements: [packages/minspec/src/lib/tier-floor.ts, packages/minspec/tests/tier-floor.test.ts]
 # Modified, not owned. Named from the code read for this spec; the Plan phase may narrow it.
 affects: [packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/diagnostics.ts, packages/minspec/src/lib/spec.ts, packages/minspec/src/extension.ts, scripts/validate-frontmatter.ts]
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-115: A spec's declared tier is checked against its own content on every save, and a shortfall is offered as a one-click raise
@@ -341,7 +347,11 @@ below the floor.
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 6 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 ### DQ-1 - Does "autofix" mean applied, or offered?
+
+**Recorded selection: the recommended option,** option `a`, always a one-click offer, never applied silently. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 The founder's sentence says "autofix". The issue's design notes, written by the session
 that parked it, say "detect-then-offer, never silent". Those differ.
@@ -361,6 +371,8 @@ Changes FR-7 and INV-3.
 
 ### DQ-2 - Advisory, or a gate?
 
+**Recorded selection: the recommended option,** option `a`, a warning only in the first release. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+
 - `a` **Warning only in the first release (rec).** Cost: an under-tiered spec can still be
   approved at the lower tier, with only a warning in the way - the shape principle 8
   ("enforce it via code") warns about.
@@ -373,6 +385,8 @@ Recommended sequencing: `a` now, and revisit `b` once FR-13's verdicts exist. Ch
 FR-5's severity.
 
 ### DQ-3 - Which signals are in the first rule table?
+
+**Recorded selection: the recommended option,** option `a`, the six-FR count to T3 plus cross-package ownership to T3, with no count rule for T4. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 Re-measured at 7931142f; see Reality-check item 4 for the tables these options rest on.
 
@@ -398,6 +412,8 @@ Changes FR-2, AC-2, AC-3 and FR-13's expected list.
 
 ### DQ-4 - Where does "keep this tier" live?
 
+**Recorded selection: the recommended option,** option `a`, a frontmatter key in the spec. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+
 - `a` **A frontmatter key in the spec (rec).** One source of truth, visible to whoever
   reads the spec, seen by CI with no new store. Unknown frontmatter keys already survive a
   tool round trip (`spec.ts:186-194`, #2324). Costs: the key is inside the approval hash,
@@ -414,6 +430,8 @@ Changes FR-10.
 
 ### DQ-5 - What happens to the approved specs that are already below the floor?
 
+**Recorded selection: the recommended option,** option `a`, information only until the next re-approval. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+
 Under DQ-3 `a` that is seven specs - SPEC-039, SPEC-050, SPEC-076, SPEC-231, SPEC-232,
 SPEC-233 and SPEC-240 - each with a file under `.minspec/approvals/` (whether each hash
 still matches was not checked). Under DQ-3 `b` it is twenty-four.
@@ -428,6 +446,8 @@ still matches was not checked). Under DQ-3 `b` it is twenty-four.
 Changes FR-11.
 
 ### DQ-6 - Should a tier that looks too high ever be mentioned?
+
+**Recorded selection: the recommended option,** option `a`, never mention a tier that looks too high. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 The founder said "tier incorrectness", which covers both directions.
 

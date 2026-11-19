@@ -1,7 +1,7 @@
 ---
 id: SPEC-331
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - per-machine baseline drift must be visible, not silent
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Expected surface: one non-required CI step (machinery, founder gate) and a baseline-drift
   readout in the trust dashboard. Neither is built.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -66,6 +66,14 @@ Blocked on PR #3724 landing (it introduces `npm run check:baseline-integrity`). 
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 3 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 1. **CI step: gate on the founder.** Workflow edits are machinery and need the founder's gate (a dev-role agent cannot edit CI config). Options: (a) **(rec)** a separate non-required job, which keeps a drift crash from ever touching required checks, at the cost of an extra runner spin-up per PR; (b) a step inside the existing `ci.yml` job, cheaper, but a misconfigured `continue-on-error` could mask a failure in, or redden, a required job.
+
+   **Recorded selection: the recommended option,** option (a), a separate non-required job. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 2. **Dashboard placement.** Options: (a) **(rec)** a small drift row in the existing SPEC-017 rework panel, least new surface, but it is invisible to someone who never opens a spec; (b) a status-bar item, more visible, but it adds standing UI for a per-machine, warn-only signal and invites noise.
+
+   **Recorded selection: the recommended option,** option (a), a small drift row in the existing SPEC-017 rework panel. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 3. **CI-runner meaning.** A fresh CI checkout will usually report many records unrecoverable because snapshot refs are not pushed (DR-043), so the PR annotation may be permanent noise. Options: (a) **(rec)** annotate only the count change versus main, needs a stored baseline count and extra machinery; (b) annotate always, simplest, but a constant warning teaches reviewers to ignore it; (c) skip CI and ship only the dashboard, no noise, but drops FR-1 which the issue asked for.
+
+   **Recorded selection: the recommended option,** option (a), annotate only the count change versus main. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
