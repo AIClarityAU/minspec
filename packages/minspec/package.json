@@ -60,7 +60,10 @@
       "description": "TypeScript 5.0+"
     }
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "workspaceContains:.minspec/config.json",
+    "workspaceContains:.minspec/constitution.md"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
