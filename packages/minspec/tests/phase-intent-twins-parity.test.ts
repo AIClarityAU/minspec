@@ -1,5 +1,5 @@
 /**
- * #899 / DR-067 §3 — the three phase-intent twins must agree per phase state.
+ * #899 / DR-069 §3 — the three phase-intent twins must agree per phase state.
  *
  * `getSpecStatus` (lifecycle.ts), `phaseIntentStatus` (scripts/lib/phase-intent-status.ts,
  * used by migrate-approvals) and `phase_intent_status` (scripts/hooks/spec-gate.py)
@@ -50,7 +50,7 @@ function pythonStatuses(maps: Record<string, string>[]): string[] {
   return JSON.parse(res.stdout.trim());
 }
 
-describe('phase-intent twins parity (#899, DR-067 §3)', () => {
+describe('phase-intent twins parity (#899, DR-069 §3)', () => {
   const maps = allPhaseMaps();
   const py = pythonStatuses(maps);
 
