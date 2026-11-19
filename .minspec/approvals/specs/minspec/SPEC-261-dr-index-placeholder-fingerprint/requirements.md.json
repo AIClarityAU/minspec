@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-261-dr-index-placeholder-fingerprint/requirements.md",
+  "specHash": "38337816b548cc9495e1a666ba39a37d502f25a249d1d5f02411a4acb8a0a3dd",
+  "approvedAt": "2026-11-17T05:35:37.304Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-ties-1117",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3806#issuecomment-6936187467"
+}

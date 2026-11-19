@@ -402,6 +402,25 @@ describe('FR-13 — cross-cutting edges', () => {
     expect(ids.indexOf('SPEC-009')).toBeLessThan(ids.indexOf('SPEC-001'));
   });
 
+  it('FR-13-blocks-cross-class (#3836): a blocked-ready dependent ranks below its pending blocker', () => {
+    // SPEC-001 (active epic, unapproved) is blocked-ready; its blocker SPEC-009 has
+    // no active epic so is merely pending. Class order alone puts SPEC-001 first;
+    // FR-13 "MUST rank below an un-cleared target" needs flooring across classes.
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'specifying', 'unapproved', { epic: 'EPIC-001' }),
+        mkSpec('SPEC-009', 'specifying', 'unapproved'),
+      ],
+      edges: [{ kind: 'depends_on', from: 'SPEC-001', to: 'SPEC-009' }],
+    });
+    const pipe = resolvePipeline(g);
+    const ids = pipe.map((t) => t.targetId);
+    expect(ids.indexOf('SPEC-009')).toBeGreaterThanOrEqual(0);
+    expect(ids.indexOf('SPEC-009')).toBeLessThan(ids.indexOf('SPEC-001'));
+    expect(resolveNextTask(g)!.targetId).toBe('SPEC-009');
+  });
+
   it('FR-13-blocks-transitive: a depends_on chain floors blocker-first, against id order', () => {
     // SPEC-001 depends_on SPEC-002 depends_on SPEC-003. Natural id order is
     // [001,002,003]; flooring must invert it to deepest-blocker-first.
