@@ -33,7 +33,7 @@ decision. Each can be undone in under a day, and none changes a sentence in requ
 | PQ3 - pin config-write sites? | **(a)**, per-file counts in `AC4_PINNED`, plus the pin on `.vscode` paths below. | AC-4's fail clause needs a test that can fire, and source text cannot show reachability. A correctly gated new site costs one reviewed line in the pin; a silent write that passes every test costs an invariant-3 breach. The pin only ever adds a failure, so it contradicts no sentence of AC-4. | (b) no pin: a silent Workspace write passes every test, so AC-4's fail clause is unenforced. |
 | PQ4 - static AC-3 scan of `status-bar.ts`? | **(a)**, scan `codeText` of `src/views/status-bar.ts` for both identifiers. | The behavioural test mocks all three classes, so it cannot see a focus-keyed `text` set inside one. The file holds neither identifier today, so a permitted non-text use, which has no current instance, costs one reviewed edit of the test. | (b) behavioural test alone: blind inside the classes, the place the defect would return. |
 
-**PQ1 stays open.** AC-2's approved text pins two items and main creates three, so every
+**PQ1 stays open.** AC-2's approved text pins two items and main creates four, so every
 option either edits that text or tests something other than it. No task here takes it; task
 4.1 in [tasks.md](tasks.md) is blocked on it, and nothing else is. Until it is answered the
 spec cannot reach `done`, because AC-2 stays false. One cost PQ1 did not name: while
@@ -46,10 +46,13 @@ together.
 
 Measured on `ef84097b`:
 
-- **PQ1's facts stand.** Three `createStatusBarItem` calls, now `status-bar.ts:111`, `:169`,
-  `:227`. The stale comments are now `:113`, `:171`, `:229`; the header is still `:1-11`.
+- **PQ1's facts stand, and there are four items now.** Four `createStatusBarItem` calls on the
+  plan's base `612386d0`: `status-bar.ts:118`, `:176`, `:234` and `:292`. The fourth is
+  `MinSpecQueueDepthStatusBar` (priority 96, `minspec.viewQueue`), added by `e0a3c432` (#737,
+  after `ef84097b`). The `ef84097b` figures below are three-item figures; line numbers on the
+  base are `:120`, `:178`, `:236`, `:294` for the priority comments. The header is still `:1-11`.
 - **Part of PQ2's list is already gone.** `packages/minspec/README.md:181-183` now describes
-  the three real items truthfully. The `package.json` sentence "The status bar tracks your
+  the three real items that existed on `ef84097b` truthfully (a fourth, the queue-depth item, has landed since; re-check that README paragraph at task 2.1). The `package.json` sentence "The status bar tracks your
   active spec at a glance." and the `status-bar.png` link no longer exist, and
   `media/screenshots/status-bar.png` is absent. `package.json:603` and README:171 describe the
   next-task signpost, which exists: not stale, no edit.
@@ -74,7 +77,8 @@ Measured on `ef84097b`:
 
 ## What this Plan designs against (measured on `d43f235a`)
 
-1. **Three status-bar items, not two.** `packages/minspec/src/views/status-bar.ts` calls
+1. **Four status-bar items, not two** (three when measured on `d43f235a`; the fourth, priority 96
+   `minspec.viewQueue`, class `MinSpecQueueDepthStatusBar`, landed in `e0a3c432`, #737). `packages/minspec/src/views/status-bar.ts` calls
    `createStatusBarItem` at :110 (priority 99, `minspec.nextTask`), :168 (98,
    `minspec.commitHarnessRefresh`) and :226 (97, `minspec.tidyPrimary`; class
    `MinSpecTidyPrimaryStatusBar` at :222, wired at `extension.ts:278-301`). The third landed in
@@ -144,7 +148,7 @@ tests on the text, not the number.
 
 | File | Change | Serves |
 |---|---|---|
-| `src/views/status-bar.ts` | Comments only. Header `:1-11` rewritten to say what the file holds (one left-aligned item per class; higher priority renders further left), with no tier/phase/progress format. `:113` becomes `99, // leftmost MinSpec item; a higher priority renders further left`; `:171` becomes `98, // just right of the next-task signpost (priority 99)`; `:229` becomes `97, // just right of the harness-commit recovery item (priority 98)`. | FR-1, AC-1 |
+| `src/views/status-bar.ts` | Comments only. Header `:1-11` rewritten to say what the file holds (one left-aligned item per class; higher priority renders further left), with no tier/phase/progress format. `:113` becomes `99, // leftmost MinSpec item; a higher priority renders further left`; `:171` becomes `98, // just right of the next-task signpost (priority 99)`; `:229` becomes `97, // just right of the harness-commit recovery item (priority 98)`; the queue-depth item's `96, // just left of the tidy-primary item (priority 97)` (base `:294`) becomes `96, // just right of the tidy-primary item (priority 97)`, the same reversed-direction error. | FR-1, AC-1 |
 | `src/commands/status.ts` | Comment `:6-9`: the `minspec.status` command handler, with no status-bar claim. | FR-1, AC-1 |
 | `src/lib/active-spec.ts` | Comments `:13-15`, `:79-80`: drop the claim that a status-bar watcher or status-bar click consumes it. | FR-1, AC-1 |
 | `src/lib/spec-progress.ts` | Comments `:8-10`, `:23`: drop the status-bar consumer claim. | FR-1, AC-1 |
@@ -193,9 +197,10 @@ function badPriorityComments(src: string): string[];  // each line matching
   and are left alone.
 - **AC-2**, over `tsFiles(src/)`: the `createStatusBarItem(` occurrences in `codeText` number
   exactly `AC2_PINNED.length`; the pairings are the existing
-  per-class tests (:81-85, :258-262, and :134-138 for the tidy-primary item). **`AC2_PINNED`
-  is PQ1's answer.** Under AC-2 as approved it has two entries and the test is red on
-  `ef84097b` (three sites).
+  per-class tests (:81-85, :258-262, :134-138 for the tidy-primary item, and the queue-depth
+  item's own priority test). **`AC2_PINNED`
+  is PQ1's answer.** Under AC-2 as approved it has two entries and the test is red on the
+  plan's base `612386d0` (four sites).
 - **AC-3, static** (`tests/status-bar.test.ts`): `codeText` of `src/views/status-bar.ts`
   contains neither `activeTextEditor` nor `onDidChangeActiveTextEditor`. **Meta:** the check
   fails on a sample holding either identifier in code, and passes when it appears only in a
@@ -244,7 +249,7 @@ Implement PR body.
 
 [tasks.md](tasks.md) holds the runs; the order is:
 
-1. T0 tests first. AC-1 is red on `ef84097b` (four sites). AC-3 and AC-4 assert absences that
+1. T0 tests first. AC-1 is red on the plan's base `612386d0` (five sites: the header and four priority comments). AC-3 and AC-4 assert absences that
    already hold, so their meta tests are what show each scan can fire. AC-2 waits on PQ1.
 2. Comment sweep; AC-1 goes green.
 3. PQ2 edits.
@@ -255,11 +260,13 @@ Implement PR body.
 The options as first posed, on `d43f235a`. PQ2, PQ3 and PQ4 are answered under
 [Decisions](#decisions); PQ1 is open.
 
-- **PQ1 - AC-2 pins two items; `d43f235a` creates three.** The tidy-primary item
-  (`status-bar.ts:222-261`, priority 97, `minspec.tidyPrimary`) landed after approval, so
+- **PQ1 - AC-2 pins two items; the plan's base `612386d0` creates four.** The tidy-primary item
+  (`status-bar.ts:222-261`, priority 97, `minspec.tidyPrimary`) and the queue-depth item
+  (priority 96, `minspec.viewQueue`, #737) landed after approval, so
   AC-2's own fail clause ("a third `createStatusBarItem` call appears … without this criterion
-  being updated") has fired. **(a) (rec)** Amend AC-2 in Clarify to pin three items (99
-  `minspec.nextTask`, 98 `minspec.commitHarnessRefresh`, 97 `minspec.tidyPrimary`) and
+  being updated") has fired. **(a) (rec)** Amend AC-2 in Clarify to pin four items (99
+  `minspec.nextTask`, 98 `minspec.commitHarnessRefresh`, 97 `minspec.tidyPrimary`, 96
+  `minspec.viewQueue`) and
   re-approve requirements.md. *Cost:* the edit voids the hash-locked sign-off, so the founder
   re-reads and re-approves, and AC-2 waits for it. **(b)** Test only the two named pairings and
   ignore the rest. *Cost:* the test passes on the state AC-2 says fails, a criterion that cannot

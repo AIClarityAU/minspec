@@ -38,6 +38,9 @@ Rules for every task:
   those of `ef84097b` and move.
 - Pull requests say `Refs #897`, never `Closes`: #897 carries the deferred title feature and
   must stay open (AC-5).
+- Re-measure before 1.1 and 4.1: if a new status-bar item or priority comment has landed on
+  main since `612386d0`, add it to the AC-1 sweep and the AC-2 count (the plan went stale once,
+  when #737 added the fourth item after the first measurement).
 - Add no import of a network or LLM module and no second progress or active-spec resolver
   (AC-6, FR-6, INV-3, INV-4).
 - Run `npx vitest run` (what CI runs), `npm run typecheck` and `npm run validate` before
@@ -47,7 +50,8 @@ Rules for every task:
 ## 1 - Comment sweep and the absence pins
 
 - [ ] **1.1** (FR-1, AC-1, INV-1) `packages/minspec/src/views/status-bar.ts` - comments only,
-  worded as in design.md's component table: the header, and the three priority comments.
+  worded as in design.md's component table: the header, and the four priority comments
+  (99, 98, 97 and the queue-depth item's 96).
   Test: `packages/minspec/tests/status-bar.test.ts`, new `describe('AC-1')` - the helpers
   `tsFiles`, `commentText`, `codeText`, `badPriorityComments` from the TypeScript compiler's
   comment ranges, with their meta tests, and the AC-1 scan with `$(shield) MinSpec` and
@@ -104,7 +108,7 @@ Rules for every task:
 
 - [ ] **4.1** (FR-1, AC-2) **Prerequisite: the founder's answer to PQ1** (design.md, *Plan
   Questions*); do not start without it. AC-2's approved text pins two items and `main` creates
-  three. Test: `packages/minspec/tests/status-bar.test.ts` - `createStatusBarItem(` occurrences
+  four. Test: `packages/minspec/tests/status-bar.test.ts` - `createStatusBarItem(` occurrences
   in `codeText` over the source tree equal `AC2_PINNED.length`, with `AC2_PINNED` as that answer
   sets it. Also needs 1.1, for the helpers.
   *Done when:* green on the state the answer describes, and its meta test goes red on a sample
