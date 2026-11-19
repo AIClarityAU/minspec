@@ -612,7 +612,7 @@ const RULESET_LEARN_MORE_ACTION = 'Learn more';
  * charset locally — right where the value reaches `gh` — keeps the safety
  * property co-located with its use rather than relying on a distant regex.
  */
-const REPO_SLUG_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+const REPO_SLUG_RE = /^(?![.-])(?!.*\.\.)[A-Za-z0-9._-]+\/(?![.-])[A-Za-z0-9._-]+$/;
 
 /**
  * VS Code setting id for the configurable required-status-check contexts the

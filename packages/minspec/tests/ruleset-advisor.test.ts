@@ -254,6 +254,36 @@ describe('hasRequiredChecksRuleset()', () => {
     });
     expect(await hasRequiredChecksRuleset('o', 'r', run)).toBe(false);
   });
+
+  it('ignores evaluate-mode (dry-run) rulesets without fetching detail (#369)', async () => {
+    const { run } = makeRunner((_c, args) => {
+      const p = apiPath(args);
+      if (p === 'repos/o/r/rulesets') {
+        return ok(JSON.stringify([{ id: 9, target: 'branch', enforcement: 'evaluate' }]));
+      }
+      return undefined;
+    });
+    expect(await hasRequiredChecksRuleset('o', 'r', run)).toBe(false);
+  });
+
+  it('ignores an active ruleset that targets only a non-default branch (#369)', async () => {
+    const { run } = makeRunner((_c, args) => {
+      const p = apiPath(args);
+      if (p === 'repos/o/r/rulesets') {
+        return ok(JSON.stringify([{ id: 5, target: 'branch', enforcement: 'active' }]));
+      }
+      if (p === 'repos/o/r/rulesets/5') {
+        return ok(
+          JSON.stringify({
+            conditions: { ref_name: { include: ['refs/heads/release'] } },
+            rules: [{ type: 'required_status_checks' }],
+          }),
+        );
+      }
+      return undefined;
+    });
+    expect(await hasRequiredChecksRuleset('o', 'r', run)).toBe(false);
+  });
 });
 
 // =============================================================================
