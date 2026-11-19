@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-302-ownership-hash-exit-residuals/requirements.md",
+  "specHash": "3fde936248da11c52f202dad17b3c98e3ae1d7335dde5c46eb70c050eb72e30d",
+  "approvedAt": "2026-11-13T05:41:49.829Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:docs/clarify-recs-1113",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3697#issuecomment-6840772356"
+}
