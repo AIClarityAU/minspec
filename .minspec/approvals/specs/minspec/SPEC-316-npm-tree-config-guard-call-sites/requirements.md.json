@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-316-npm-tree-config-guard-call-sites/requirements.md",
+  "specHash": "4b7c7250e8c785cc8b799a6d3097e9ab3790aad0cd7e3c199c009b09691043bd",
+  "approvedAt": "2026-11-13T06:12:01.863Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:docs/clarify-recs-1113",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3697#issuecomment-6840772356"
+}
