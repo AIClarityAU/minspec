@@ -39,6 +39,21 @@ _spec = importlib.util.spec_from_file_location("spec_gate_module", GATE_PY)
 spec_gate_module = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(spec_gate_module)
 
+
+
+def _gate_cmd():
+    """Command that runs spec-gate.py. Under scripts/python-coverage.sh
+    (COVERAGE_PROCESS_START set, #1256) the subprocess is wrapped in
+    `coverage run --parallel-mode` so its lines are measured; otherwise it is
+    the plain interpreter, exactly as Claude Code invokes it."""
+    rc = os.environ.get("COVERAGE_PROCESS_START")
+    if rc:
+        return [sys.executable, "-m", "coverage", "run",
+                "--parallel-mode", "--rcfile=" + rc,
+                "--source=" + _HERE, GATE_PY]
+    return [sys.executable, GATE_PY]
+
+
 IMPLEMENTING_PHASES = (
     "phases:\n"
     "  specify: done\n"
@@ -121,7 +136,7 @@ class GateFixture:
             "cwd": self.root,
         }
         proc = subprocess.run(
-            [sys.executable, GATE_PY],
+            _gate_cmd(),
             input=json.dumps(env).encode("utf-8"),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -477,6 +492,18 @@ class ScopedGateTests(unittest.TestCase):
         self.assertIsNone(
             self.fx.decision("specs/minspec/SPEC-907-x/requirements.md", tool="Read")
         )
+
+
+class FmListTrailingSpaceTests(unittest.TestCase):
+    """#3653: a trailing space/tab after a block-form key must not drop the list."""
+
+    def test_block_header_with_trailing_whitespace_keeps_all_paths(self):
+        for pad in (" ", "\t", "  \t"):
+            fm = "implements:" + pad + "\n  - packages/a/src/lost.ts\n  - packages/b.ts"
+            self.assertEqual(
+                spec_gate_module.fm_list(fm, "implements"),
+                ["packages/a/src/lost.ts", "packages/b.ts"],
+            )
 
 
 class Select958VerdictTests(unittest.TestCase):

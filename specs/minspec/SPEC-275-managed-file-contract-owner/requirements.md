@@ -1,7 +1,7 @@
 ---
 id: SPEC-275
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - the bytes MinSpec writes into every adopter's repository change with no spec saying what they may contain
@@ -20,8 +20,8 @@ implements_reason: >-
   change (see the note above), so implements stays none until Plan.
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

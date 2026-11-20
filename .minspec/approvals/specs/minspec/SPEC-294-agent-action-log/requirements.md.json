@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-294-agent-action-log/requirements.md",
+  "specHash": "d18f347a2192ae0c8687cfdf6c5afed8b4b94b863872ec7ff41a456fcab7cd8a",
+  "approvedAt": "2026-11-03T07:41:02.636Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-settle-1031",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3399#issuecomment-6537247262"
+}

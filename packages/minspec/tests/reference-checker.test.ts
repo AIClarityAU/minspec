@@ -153,3 +153,23 @@ describe('#1451 — relative file citations keep their ./ and ../ prefix', () =>
     ]);
   });
 });
+
+describe('#3752 — declared parent-register ids (externalIds)', () => {
+  const base = { specs: new Set<string>(), decisions: new Set(['DR-001']), epics: new Set<string>(), fileExists: () => true };
+
+  it('skips a bare id listed in externalIds', () => {
+    const reg = { ...base, externalIds: new Set(['DR-359']) };
+    expect(checkReferences('see DR-359 (parent register)', reg)).toEqual([]);
+  });
+
+  it('still flags an unlisted dangling id and every id when no list is given', () => {
+    const reg = { ...base, externalIds: new Set(['DR-359']) };
+    expect(checkReferences('DR-360', reg)).toHaveLength(1);
+    expect(checkReferences('DR-359', base)).toHaveLength(1);
+  });
+
+  it('does not exempt a different kind sharing the number', () => {
+    const reg = { ...base, externalIds: new Set(['DR-359']) };
+    expect(checkReferences('SPEC-359', reg)).toHaveLength(1);
+  });
+});
