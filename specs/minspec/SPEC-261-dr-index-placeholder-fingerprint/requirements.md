@@ -1,7 +1,7 @@
 ---
 id: SPEC-261
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a DR INDEX row must not claim a fingerprint it never had
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan, after Decisions D1-D3.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -114,8 +114,9 @@ be committed and then be self-perpetuating, because the generator treats it as c
 
 3 of 4 decisions are answered, not ratified: an agent session selected, for D1 to D3, the option this document
 already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). D4 is not answered: it states a
-belief ("Believed no") that the record says is unverified and defers to Plan, so it stays open. This spec is
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). D4 stated an unverified belief
+("Believed no"); on 2026-11-17 an agent answered it as a fact and recorded its recommended option
+under the founder decision in queue item clarsel (see D4). This spec is
 unapproved, so the recorded answers bind nothing until a human or a covered delegation approves it.
 
 - **D1 What counts as a placeholder?**
@@ -146,6 +147,17 @@ unapproved, so the recorded answers bind nothing until a human or a covered dele
   next to Rule 8, run by `npm run validate` and the existing CI path.
 - **D4 Is a DR needed?** Believed no: the rule and script are reversible in under a day, so
   the DR-359 ADR filter is not met. Unverified; confirm at Plan.
+  **Answer (fact, agent, 2026-11-17):** no DR is needed. Every piece is repo-local and undone by one
+  revert: the rule goes into the dev-time validator `scripts/validate-frontmatter.ts` (run by
+  root `package.json:18`; D3 option (a)), the FR-1 script is a repo-root npm script, FR-4 is
+  documentation, and the FR-5 backfill rewrites `auto=` values in `docs/decisions/INDEX.md`
+  only. Nothing ships to adopters and `summaryFingerprint`
+  (`packages/minspec/src/lib/adr-manager.ts:1026`) is unchanged, so the DR-359 ADR filter
+  ("cannot be undone in under a day") is not met. Contrast DR-028, which persisted hashes
+  across specs and so failed the filter (`docs/decisions/DR-028.md:146`).
+  **Recommended (agent, 2026-11-17):** no DR - cost: if Plan moves the rule into the shipped
+  extension, this answer no longer holds and must be revisited.
+  **Recorded selection: the recommended option,** no DR. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 ## Follow-ups (tracked)
 
