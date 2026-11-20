@@ -57,10 +57,14 @@ Rules for every task:
     Design: P-7, P-8.
   - Files: `packages/minspec/src/commands/init.ts`,
     `packages/minspec/tests/init-commit-destination.test.ts`.
-  - Work: export `isHarnessPublishablePath` over `SCAFFOLD_PATHSPECS` plus
-    `MINSPEC_GITIGNORE_ENTRIES`: exact match, or prefix match for an entry ending in `/`.
-  - Test: admits `.gitignore`, a managed workflow and `.minspec/generated-hashes.json`;
-    refuses `src/app.ts`, `.env` and `.minspec/specs/draft.md`.
+  - Work: export `isHarnessPublishablePath` as exact membership in `SCAFFOLD_PATHSPECS`, the
+    list the commit is already scoped to (P-8). No `MINSPEC_GITIGNORE_ENTRIES`, no prefix
+    matching: the list holds files only.
+  - Test: admits `.gitignore`, a managed workflow and `.claude/settings.json`; refuses
+    `src/app.ts`, `.env`, `.minspec/specs/draft.md` and `.minspec/generated-hashes.json` (a
+    `MINSPEC_GITIGNORE_ENTRIES` path the scoped commit never writes); and every path
+    `collectScaffoldPaths` returns for a freshly scaffolded folder is admitted, so the predicate
+    cannot refuse the commit the offer itself just made.
   - Prerequisites: none.
 
 - [ ] **3. Add `publishHarnessBranch` and its PR body.**
@@ -72,11 +76,20 @@ Rules for every task:
     `protectedBranches: []`, then `openPullRequest` with `labels: []` and
     `adoptExisting: true`. It never rejects, imports no `vscode` and reads no settings. The body
     lists the changed paths and says a human merges it.
-  - Test: a real temporary repository with a local bare `origin` and a stubbed `gh`, one case per
-    `HarnessPublishOutcome`: a stray staged file and an earlier local commit each give
-    `out-of-scope` with nothing on the bare remote; a missing `origin/<default>` gives
-    `scope-unproven`; the `gh` argument list never holds `--label`; and each failed
-    `OpenPrOutcome` gives `pr-failed` with the branch on the remote.
+  - Test: a real temporary repository with a local bare `origin` and a stubbed `gh`, the
+    branch made the way the offer makes it (`git checkout -b`, then a commit scoped to harness
+    paths), one case per `HarnessPublishOutcome`:
+    - an earlier unpushed local commit on the default branch touching `src/app.ts` gives
+      `out-of-scope` naming that path, with nothing on the bare remote (the case P-7 exists for);
+    - an earlier unpushed local commit that deletes `.minspec/generated-hashes.json` gives
+      `out-of-scope` (pins P-8's exclusion of `MINSPEC_GITIGNORE_ENTRIES`);
+    - an earlier unpushed harness-only commit plus the new one gives `pr-opened` (P-8's static
+      set carries a stranded harness commit);
+    - a file left staged in the index outside the scoped commit gives `pr-opened`, and the
+      remote branch does not contain it (publishing never commits or sweeps the index);
+    - a missing `origin/<default>` gives `scope-unproven` with nothing on the remote;
+    - the `gh` argument list never holds `--label`; and each failed `OpenPrOutcome` gives
+      `pr-failed` with the branch on the remote.
   - Prerequisites: none.
 
 ## The offer publishes
@@ -103,7 +116,8 @@ Rules for every task:
     `packages/minspec/tests/harness-refresh-pr-wiring.test.ts`.
   - Work: call `resolvePushConsent` with harness wording, and map each outcome to its message:
     decline names the branch and `git push -u origin <branch>`; `out-of-scope` names the stray
-    paths; `pr-failed` says the branch is pushed, why no PR opened, and gives the compare URL
+    paths and says they come from earlier unpushed commits on the default branch (P-7);
+    `pr-failed` says the branch is pushed, why no PR opened, and gives the compare URL
     when known.
   - Test: one prompt then a publish on accept; none on decline; a later run after "Always push
     from now on" asks nothing; a scope refusal shows no prompt; a throwing `publish` still leaves

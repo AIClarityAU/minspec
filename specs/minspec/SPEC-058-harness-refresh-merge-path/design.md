@@ -20,13 +20,15 @@ phases:
 # SPEC-058 - Design: a harness-refresh commit reaches `main` through an opened pull request
 
 Plan for [requirements.md](requirements.md). Citations of "today" are against `origin/main`
-`ef84097b`, the commit this plan was written on. The requirements cite older line numbers;
-the ones below were re-read. New code is named by symbol, because its line numbers will move.
+`6ebb4182`, the commit this plan was last re-checked against (it was first written on
+`ef84097b`, before #3841 (scope the scaffold commit to its pathspecs) landed and changed the
+commit behaviour P-7 and P-8 rest on). The requirements cite older line numbers; the ones below
+were re-read. New code is named by symbol, because its line numbers will move.
 
 ## Approach in one paragraph
 
 The branch arm of `offerScaffoldCommit` already moves the commit off the default branch and
-then stops (`packages/minspec/src/commands/init.ts:410-431`). This spec adds one step after
+then stops (`packages/minspec/src/commands/init.ts:431-451`). This spec adds one step after
 that commit: resolve the existing `minspec.pushOnApprove` consent, prove the branch carries
 only harness paths, push it with `pushApproval`, and open an unlabelled pull request with
 `openPullRequest`. The consent surface is lifted out of the approval recovery path so both
@@ -51,11 +53,11 @@ recommendation; not a founder decision. Each can be undone in under a day.
 | P-1 | FR-2 has two arms: which applies? | **The seam exists, so reuse it.** Since the requirements were written SPEC-050 (silent approval PR) shipped `openPullRequest` (`packages/minspec/src/lib/approval-pr.ts:830`). With `pushApproval` (`packages/minspec/src/lib/approve-push.ts:169`) that covers both steps, so the "build it directly and file a consolidation issue" arm does not apply | Calling `openApprovalPr` (`commit-on-approve.ts:804`): it reads an approval record, computes the `docs-lane` label and words its toast as "Approval pushed", and FR-3 rules out the label |
 | P-2 | Where does the new code live? | **A vscode-free `publishHarnessBranch` in `lib/approval-pr.ts`, toasts in `init.ts`.** The approved `implements_reason` says this spec "Creates no new source file", and `approval-pr.ts` is already in `affects:` and already has the runner, `branchChangedPaths` and `openPullRequest` | A new `lib/harness-publish.ts`: tidier, but it contradicts that approved sentence |
 | P-3 | How does `prompt` ask? | **A second toast after the commit**, as FR-1 orders it ("after the user accepts `BRANCH_COMMIT_ACTION`, it MUST offer"), with the same show-once "Always push from now on" action and the same project-local store as approvals (DR-078, the project-local push consent record). After that one answer the later refreshes ask nothing. Cost: under `prompt`, two clicks until "always" is chosen | A combined "Commit, push and open PR" action on the first toast: one click, but it reorders what FR-1 states and leaves a local-only choice beside it |
-| P-4 | Does `minspec.approvalPr` apply? | **Not read on this path.** FR-1 is unconditional ("`always` ⇒ silent push + PR-open") and that setting's text is scoped to an approval commit (`packages/minspec/package.json:505-517`). Cost: someone who set `manual` for approvals still gets `gh pr create` on a refresh they consented to push | Honouring `manual` here: it breaks FR-1's sentence. SPEC-260 (refresh decides branch or direct, unapproved) proposes this for its own FR-6 and can add it if approved |
+| P-4 | Does `minspec.approvalPr` apply? | **Not read on this path.** FR-1 is unconditional ("`always` ⇒ silent push + PR-open") and that setting's text is scoped to an approval commit (`packages/minspec/package.json:525-538`). Cost: someone who set `manual` for approvals still gets `gh pr create` on a refresh they consented to push | Honouring `manual` here: it breaks FR-1's sentence. SPEC-260 (refresh decides branch or direct, unapproved) proposes this for its own FR-6 and can add it if approved |
 | P-5 | Which arms of the offer publish? | **Only the `BRANCH_COMMIT_ACTION` arm**, in both variants, as FR-1's "i.e." states. "Commit here anyway" and the ordinary feature-branch arm stay local | Also publishing from a feature branch: new scope, and that is the user's own work |
-| P-6 | Does the checkout return to the default branch? | **No, unchanged.** `createBranch` still switches (`init.ts:302-304`) and the checkout stays on the side branch, with the local branch kept. FR-1 asks for a push and a PR, not a restore. Cost: the parked checkout SPEC-260 FR-4 describes stays until that spec lands | Restoring it here: this is SPEC-260's scope, and its recorded (unratified) D4 selection sequences it after this transport |
-| P-7 | Could the push carry something MinSpec did not write? | **Yes, so prove the branch's diff first.** `commit(message)` commits the whole index (`init.ts:282`), and the branch starts at local `HEAD`, so a pre-staged file or an earlier unpushed local commit would go along. Today that stays local; after FR-1 it leaves the machine. The step takes `branchChangedPaths(run, cwd, 'origin/<default>', 'HEAD')` and refuses to push when any path is outside the allowed set or the range cannot be read, naming the paths. Local only, so it runs before any prompt. Cost: a repo with unpushed local commits on its default branch gets an advisory instead of a push | A pathspec commit: I believe, unverified on this path, that it undoes the staged `git rm --cached` deletions the #1146 untrack step relies on. Also no check at all: a stray staged file reaches the remote with no warning |
-| P-8 | What is the allowed set? | **`SCAFFOLD_PATHSPECS` plus `MINSPEC_GITIGNORE_ENTRIES`** (`scaffold.ts:287`), the second because the untrack step's deletions ride this commit. An entry ending in `/` matches by prefix, every other entry exactly. Explicit lists only, in keeping with INV-2's spirit | The on-disk `paths` the offer staged: it omits the untrack deletions, so a repo's first refresh after #1146 would always be refused |
+| P-6 | Does the checkout return to the default branch? | **No, unchanged.** `createBranch` still switches (`init.ts:323-325`, `git checkout -b`) and the checkout stays on the side branch, with the local branch kept. FR-1 asks for a push and a PR, not a restore. Cost: the parked checkout SPEC-260 FR-4 describes stays until that spec lands | Restoring it here: this is SPEC-260's scope, and its recorded (unratified) D4 selection sequences it after this transport |
+| P-7 | Could the push carry something MinSpec did not write? | **Yes, through earlier commits, so prove the branch's diff first.** The commit itself is scoped: `commitOrWarn` calls `committer.commit(message, paths)` (`init.ts:564`), and the default committer runs `git commit -m <message> -- <paths>` over the existing `SCAFFOLD_PATHSPECS` minus ignored paths, refusing rather than falling back to the whole index (`init.ts:287-305`; contract at `init.ts:205-211`, #347 (scaffold commit swept the user's staged work)). So a file the user had staged stays in the index and never enters the commit. But `createBranch` branches from local `HEAD` (`init.ts:323-325`), and `branchChangedPaths` diffs `merge-base(base, HEAD)..HEAD` (`approval-pr.ts:705-741`), so an earlier unpushed local commit on the default branch rides the push. Today that stays local; after FR-1 it leaves the machine. The step takes `branchChangedPaths(run, cwd, 'origin/<default>', 'HEAD')` and refuses to push when any path is outside the allowed set or the range cannot be read, naming the paths. Local only, so it runs before any prompt. Cost: a repo with unpushed non-harness commits on its default branch gets an advisory instead of a push | Pushing only the new commit (for example cherry-picked onto `origin/<default>`): it needs the remote ref to be current and adds a rewrite step that can conflict, while the refusal is one advisory. Also no check at all: an unpushed local commit touching any file reaches the remote with no warning |
+| P-8 | What is the allowed set? | **`SCAFFOLD_PATHSPECS` exactly** (a private const at `init.ts:101-143`), the same list the commit is scoped to. Every entry is a file, never a directory (its own comment at `init.ts:113-115` forbids directory entries), so the predicate is exact membership. Using the full static list, not the on-disk subset, also admits an earlier unpushed harness-only commit, such as a stranded "Commit here anyway" refresh, which this push then carries off the machine. Explicit lists only, in keeping with INV-2's spirit. Cost: a user who committed the #1146 (stop tracking machine-local manifests) untrack deletions locally and never pushed them gets an advisory, because those paths are outside the set | Adding `MINSPEC_GITIGNORE_ENTRIES` (`scaffold.ts:303`): the earlier reason, that the untrack deletions ride this commit, held only for a whole-index commit. Under the scoped commit they stay staged and are never committed here, so the entries would only admit paths this flow never writes. Also the on-disk `paths` the offer staged (`collectScaffoldPaths`, `init.ts:150`): it refuses an earlier harness commit that touched a file absent today |
 | P-9 | What does `pushApproval` get as `protectedBranches`? | **`[]`.** The guard already chose this branch and MinSpec just created it, so `decidePushPlan` must take `push-current`. A remote that refuses is reported like any other push failure | The real setting: a wrong entry would route to `push-new-branch` and an `approvals/...` name for a harness commit |
 | P-10 | How is the consent shared? | **Extract `resolvePushConsent` in `commit-on-approve.ts` from `recoverOnProtectedBranch`** (`:103-137`), with the message and lead action as arguments, and export it. Keeps DR-078 section 4's single accessor | Exporting the four private helpers, or copying them: a second consent copy is the disagreement DR-078 records fixing |
 | P-11 | How many toasts? | **One result toast per event.** The branch arm commits quietly and then reports the result, instead of a "committed" toast followed by a second one. Under `prompt` the commit is reported in the prompt itself. #1700 records why two toasts for one event are a defect | Keeping `commitOrWarn`'s toast and adding another |
@@ -64,7 +66,7 @@ recommendation; not a founder decision. Each can be undone in under a day.
 ## Flow
 
 ```text
-branch arm: createBranch(name), then add + commit (failure: warn and stop, as today)
+branch arm: createBranch(name), then add + commit scoped to the paths (failure: warn and stop, as today)
   no .minspec/ at the root       -> stop after the commit, advisory (INV-3)
   effective mode
     never                        -> advisory, no action buttons, no network (AC-2)
@@ -141,8 +143,12 @@ requirements.md is hash-locked and no task edits it. A builder should read these
   the FRs name its functions.
 - Context says SPEC-050 is unbuilt. Its tasks.md is reconciled against shipped code and
   `openPullRequest` is on `main`.
-- `offerScaffoldCommit` is now `init.ts:366-444`, not `:360-431`.
-- Context and D-1 place `commit(message)` at `init.ts:308-310`; it is now `:282-284`.
+- `offerScaffoldCommit` is now `init.ts:387-465`, not `:360-431`.
+- Context and D-1 place `commit(message)` at `init.ts:308-310` and call it a whole-index commit.
+  Since #3841 the committer's `commit(message, paths)` is scoped (`init.ts:287-305`) and
+  `commitOrWarn` passes the paths (`init.ts:564`). D-1's verdict still stands, since a refresh
+  commit still carries machinery paths, but its rebuttal of Option C now holds for a different
+  reason: the untrack deletions do not ride this commit at all.
 
 ## Risks
 
