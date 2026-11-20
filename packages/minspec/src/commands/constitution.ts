@@ -11,7 +11,8 @@ import {
   type IntegrateResult,
 } from '../lib/constitution-proposer';
 import { compactConstitution } from '../lib/constitution-compaction';
-import { ensureDirectory, hasOptInMarker, notOptedInMessage, NotOptedInError } from '../lib/opt-in';
+import { ensureDirectory, hasOptInMarker, notOptedInMessage } from '../lib/opt-in';
+import { showedOptInRefusal } from './opt-in-refusal';
 
 /**
  * SPEC-025 FR-2/FR-3 (manual path): assemble the deterministic context manifest +
@@ -126,12 +127,9 @@ export async function constitutionProposeCommand(folderArg?: string): Promise<vo
       },
     });
   } catch (err) {
-    if (err instanceof NotOptedInError) {
-      // The refusal is the whole message: nothing was written, so "could not
-      // propose a draft" wrapped around it would add nothing true.
-      vscode.window.showErrorMessage(err.message);
-      return;
-    }
+    // The refusal is the whole message: nothing was written, so "could not
+    // propose a draft" wrapped around it would add nothing true.
+    if (showedOptInRefusal(err)) return;
     vscode.window.showErrorMessage(
       `MinSpec: Could not propose a constitution draft — ${
         err instanceof Error ? err.message : String(err)
