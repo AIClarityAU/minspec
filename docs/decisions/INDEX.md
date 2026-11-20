@@ -485,7 +485,7 @@ The continuous drain (#239) triages the inbox and dispatches agent-ready issues,
 
 ## [DR-061 — Native GitHub auto-merge on ai-review:pass — interim policy that supersedes DR-033 §6 deny-by-default until the consequence-hybrid blast gate's analyzers land](DR-061.md)
 
-*Status: accepted · Date: 2026-07-15 · Constrained in part by DR-086 (autonomy axis: native auto-merge is off unless `autonomy: act`)*
+*Status: accepted · Date: 2026-07-15*
 
 <!-- dr-summary:DR-061 auto=3588d3052bff -->
 Auto-merge has been **deny-by-default** since DR-033 §6: a PR holds for a human unless the SPEC-024 **consequence-hybrid** gate certifies it low-blast. But that gate measures blast via the #88 consequence analyzers on a real cross-file index (#195) — **all still open**. With no analyzers, the gate scores every change high (INV-2: unmeasured blast = high) → HOLD. So the *designed* auto-merge cannot function today, and won't for weeks. DR-058 hardened that gate further (affirmative evidence required), widening — not closing…
