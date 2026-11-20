@@ -12,8 +12,10 @@ vitest.config.*
 .vscode-test.mjs
 coverage/**
 *.log
-out/*.js.map
-out/test/**
+# Allowlist (#1493): `main` is the esbuild bundle; nothing loads out/lib or out/commands at
+# runtime. Stale tsc output left in out/ read as authoritative and doubled the package.
+out/**
+!out/extension.js
 tests/**
 test-fixtures/**
 .vsixignore
