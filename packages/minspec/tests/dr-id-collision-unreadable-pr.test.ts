@@ -165,3 +165,32 @@ describe('#3791 — only the unrenderable-diff signature is tolerated (fail clos
     expect(r.out).toMatch(/open PR #300 is unreadable/);
   });
 });
+
+describe('transient 5xx retry (#3906)', () => {
+  const flaky = (fails: number) => `#!/bin/sh
+argv="$*"
+n=$(cat "$0.count" 2>/dev/null || echo 0)
+case "$argv" in
+  *"pulls/100/files"*)
+    n=$((n+1)); echo $n > "$0.count"
+    if [ $n -le ${fails} ]; then echo '${ERR502}' >&2; exit 1; fi
+    echo '[[{"filename":"docs/decisions/DR-900-x.md","status":"added"}]]' ;;
+  *"contents/specs?ref=main"*) echo '[[{"type":"dir","path":"specs/minspec"}]]' ;;
+  *"contents/specs/minspec?ref=main"*) echo '[[{"type":"dir","path":"specs/minspec/SPEC-231-a"}]]' ;;
+  *) echo '[[]]' ;;
+esac
+`;
+
+  it('exhausted retries on the subject PR report an infrastructure error, not a collision', () => {
+    const r = runCli(flaky(99));
+    expect(r.status).toBe(1);
+    expect(r.out).toMatch(/INFRASTRUCTURE ERROR \(not a DR id collision\)/);
+    expect(r.out).toMatch(/retry 3\/3/);
+  });
+
+  it('a 5xx that clears within the retries does not report an infrastructure error', () => {
+    const r = runCli(flaky(2));
+    expect(r.out).not.toMatch(/INFRASTRUCTURE ERROR/);
+    expect(r.out).toMatch(/retry 2\/3/);
+  });
+});
