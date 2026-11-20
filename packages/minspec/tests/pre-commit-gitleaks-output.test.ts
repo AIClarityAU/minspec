@@ -50,20 +50,38 @@ function cleanEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   return { ...base, ...extra };
 }
 
-/** PATH with the directory holding a real `gitleaks` removed, so the hook sees none. */
+/**
+ * PATH in which `gitleaks` resolves nowhere. Every PATH directory holding a `gitleaks`
+ * (there may be several installs) is replaced by a temp dir symlinking all of its OTHER
+ * entries, so co-located tools such as `git` and `sh` stay reachable. Asserts as a
+ * control that the result really hides gitleaks, so a bad PATH fails loudly here
+ * instead of surfacing as a misleading hook failure.
+ */
 function pathWithoutGitleaks(): string {
-  let realDir: string | undefined;
-  try {
-    realDir = path.dirname(
-      execFileSync('sh', ['-c', 'command -v gitleaks'], { encoding: 'utf8' }).trim(),
-    );
-  } catch {
-    realDir = undefined;
-  }
-  return (process.env.PATH ?? '')
-    .split(path.delimiter)
-    .filter((p) => p && p !== realDir)
-    .join(path.delimiter);
+  const shimRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-nogitleaks-'));
+  const dirs = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
+  const out = dirs.map((d, i) => {
+    const hasGitleaks = fs.existsSync(path.join(d, 'gitleaks'));
+    if (!hasGitleaks) return d;
+    const shim = path.join(shimRoot, String(i));
+    fs.mkdirSync(shim);
+    for (const name of fs.readdirSync(d)) {
+      if (name === 'gitleaks') continue;
+      try {
+        fs.symlinkSync(path.join(d, name), path.join(shim, name));
+      } catch {
+        /* unreadable or racing entry — not needed by the hook */
+      }
+    }
+    return shim;
+  });
+  const result = out.join(path.delimiter);
+  const probe = spawnSync('sh', ['-c', 'command -v gitleaks'], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: result },
+  });
+  expect(probe.stdout.trim(), 'constructed PATH must hide gitleaks').toBe('');
+  return result;
 }
 
 interface Repo {

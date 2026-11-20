@@ -304,7 +304,7 @@ describe('MinSpecNextTaskStatusBar class', () => {
     const bar = new MinSpecNextTaskStatusBar('Alt+N');
     bar.update(null);
     const tip = mockStatusBarItem.tooltip as unknown as { value: string };
-    expect(tip.value).toContain('No pending review tasks.\nShortcut: Alt+N');
+    expect(tip.value).toContain('No Pending Approvables.\nShortcut: Alt+N');
     expect(tip.value).toContain('Change…');
   });
 
