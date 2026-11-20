@@ -45,11 +45,23 @@ export function findShadowingEntries(root, modules = ADAPTER_MODULES, isInstalle
 }
 
 /**
- * True when `module` imports from the real interpreter install. `-I` drops PYTHONPATH
- * and the cwd, so the probe cannot be fooled by the very directory under test. A
- * missing python3 or a failed import fails CLOSED (reported as not installed).
+ * True when `module` imports from the real interpreter install. The probe runs with
+ * PYTHONPATH removed from the env and cwd '/', so it cannot be fooled by the very
+ * directory under test. It deliberately does NOT use `-I`: `-I` also skips the user
+ * site-packages, so a `pip install --user coverage` (exactly what the checker tells
+ * you to do) would still read as missing.
+ *
+ * LIMIT: this asks the bare `python3` on PATH, while the extension runs the
+ * workspace-selected interpreter (often a venv). A module installed only in that venv
+ * reads as missing here, which fails closed (the checker keeps flagging the entry).
+ * A missing python3 or a failed import is likewise reported as not installed.
+ *
+ * @param {string} module
+ * @param {typeof spawnSync} [spawn] injectable for tests
  */
-export function pythonModuleInstalled(module) {
-  const r = spawnSync('python3', ['-I', '-c', `import ${module}`], { stdio: 'ignore', cwd: '/' });
+export function pythonModuleInstalled(module, spawn = spawnSync) {
+  const env = { ...process.env };
+  delete env.PYTHONPATH;
+  const r = spawn('python3', ['-c', `import ${module}`], { stdio: 'ignore', cwd: '/', env });
   return r.status === 0;
 }

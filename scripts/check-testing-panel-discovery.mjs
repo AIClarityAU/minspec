@@ -268,11 +268,9 @@ function main() {
   // Python controller's Coverage profile injects PYTHONPATH=<workspace root>; a root
   // entry named like a module its adapter imports (Vitest's `coverage/` report dir)
   // shadows it and errors EVERY python test at once. Assert the hostile thing is absent.
-  const roots = new Set([REPO_ROOT]);
-  for (const e of EXPECTED) {
-    const r = path.join(WORKSPACE_ROOT, e.folder);
-    if (fs.existsSync(r)) roots.add(r);
-  }
+  // Scope: this repo's root only (#1185). Sibling folders (sealbox, scroogellm) are
+  // other repos whose layout this check does not own.
+  const roots = [REPO_ROOT];
   let shadowed = 0;
   for (const root of roots) {
     for (const h of findShadowingEntries(root, undefined, pythonModuleInstalled)) {
