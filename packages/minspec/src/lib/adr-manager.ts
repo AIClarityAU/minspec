@@ -802,7 +802,52 @@ export function statusProseWouldInvert(
  * `unparseable` lines are returned untouched, because silently rewording a hand-authored
  * rationale is a worse failure than a caught parity error.
  */
-export function reconcileBodyStatus(content: string, status: AdrStatus): string {
+export interface ReconcileBodyStatusOptions {
+  /**
+   * ISO date (`YYYY-MM-DD`) to stamp on every claim whose status actually CHANGES (#943).
+   * Omitted → the token is swapped and nothing else on the line moves.
+   */
+  readonly stampDate?: string;
+}
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Stamp the transition date onto a claim whose token was just rewritten (#943).
+ *
+ * Swapping the token alone turns `Proposed (2026-06-01).` into `Accepted (2026-06-01).` —
+ * the PROPOSAL date now reads as the acceptance date, a false signpost the parity gate
+ * cannot see (it compares tokens, not dates). The old date is kept, labelled with the old
+ * status, in the shape the corpus already uses by hand (DR-040: `Accepted (2026-07-26;
+ * proposed 2026-06-23)`):
+ *
+ *   `Proposed (2026-06-01).`  → `Accepted (TODAY; proposed 2026-06-01).`
+ *   `**Proposed** 2026-08-24` → `**Accepted** TODAY (proposed 2026-08-24)`
+ *   `**Proposed.** Body.`     → `**Accepted (TODAY).** Body.`
+ *
+ * `rest` is the text that followed the old token on its line; the return value replaces it.
+ */
+function stampTransition(rest: string, oldToken: string, date: string): string {
+  const paren = rest.match(/^([*_]*\s*\(\s*)(\d{4}-\d{2}-\d{2})/);
+  if (paren) {
+    return `${paren[1]}${date}; ${oldToken} ${paren[2]}${rest.slice(paren[0].length)}`;
+  }
+  const bare = rest.match(/^([*_]*)(\s+)(\d{4}-\d{2}-\d{2})/);
+  if (bare) {
+    return `${bare[1]}${bare[2]}${date} (${oldToken} ${bare[3]})${rest.slice(bare[0].length)}`;
+  }
+  return ` (${date})${rest}`;
+}
+
+export function reconcileBodyStatus(
+  content: string,
+  status: AdrStatus,
+  options: ReconcileBodyStatusOptions = {},
+): string {
+  const { stampDate } = options;
+  if (stampDate !== undefined && !ISO_DATE_RE.test(stampDate)) {
+    throw new Error(`reconcileBodyStatus: stampDate must be YYYY-MM-DD, got "${stampDate}"`);
+  }
   const claims = inspectAllStatusClaims(content, 'dr');
   const targets = claims.filter((c): c is { kind: 'comparable'; token: string; line: number } =>
     c.kind === 'comparable',
@@ -827,10 +872,38 @@ export function reconcileBodyStatus(content: string, status: AdrStatus): string 
     const replacement = wasCapitalised
       ? status.charAt(0).toUpperCase() + status.slice(1)
       : status;
-    lines[idx] =
-      lines[idx].slice(0, m.index) + replacement + lines[idx].slice(m.index + m[1].length);
+    const oldToken = m[1].toLowerCase();
+    let rest = lines[idx].slice(m.index + m[1].length);
+    // Stamp only a real transition — re-setting the same status must stay a no-op.
+    if (stampDate !== undefined && oldToken !== status) {
+      rest = stampTransition(rest, oldToken, stampDate);
+    }
+    lines[idx] = lines[idx].slice(0, m.index) + replacement + rest;
   }
   return lines.join('\n');
+}
+
+/**
+ * The #626 parity check, run INSIDE the write path (#943): throw when any comparable body
+ * claim in `content` disagrees with `status`. The gate at commit/CI time catches a split
+ * only after the ext has already written it; this refuses to write it in the first place.
+ * Uses the same reader as the gate (`inspectAllStatusClaims`), so it can never pass a file
+ * the gate would fail.
+ */
+export function assertBodyStatusParity(filePath: string, content: string, status: AdrStatus): void {
+  for (const c of inspectAllStatusClaims(content, 'dr')) {
+    if (c.kind === 'comparable' && c.token !== status) {
+      throw new Error(
+        `Refusing to set ${path.basename(filePath)} to "${status}": its body status line ` +
+          `(line ${c.line}) would still read "${c.token}", leaving the file asserting two ` +
+          `statuses. Edit that line to read "${status}" and retry. Nothing was written.`,
+      );
+    }
+  }
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 /**
@@ -850,6 +923,11 @@ export function reconcileBodyStatus(content: string, status: AdrStatus): string 
  * SPEC-095 FR-6: the synthesize branch is taken only when the first non-blank line is not
  * `---` ({@link adrFrontmatterState}). A record that opens with `---` but whose block cannot
  * be read throws, naming the file, and nothing is written.
+ *
+ * #943: on both branches the body status claims are rewritten too, a changed claim is
+ * stamped with today's date (`Accepted (TODAY; proposed 2026-06-01)`), and the #626
+ * parity check runs on the result before anything is written — a split state throws
+ * instead of landing on disk.
  */
 export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   if (!ADR_STATUSES.has(status)) {
@@ -861,17 +939,10 @@ export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   const state = adrFrontmatterState(content);
   if (state === 'unreadable') throw unreadableFrontmatterError(filePath);
   const fmMatch = content.match(FRONTMATTER_RE);
-  if (!fmMatch) {
-    // No frontmatter — synthesize one and prepend it, preserving the body
-    // verbatim (only collapsing leading blank lines before the heading).
-    const block = `---\n${synthesizeAdrFrontmatter(filePath, content, status)}\n---`;
-    fs.writeFileSync(filePath, restoreLineEndings(`${block}\n\n${content.replace(/^\s*\n+/, '')}`, original), 'utf-8');
-    return status;
-  }
 
-  // #1833 — check BEFORE writing anything. Refusing after the frontmatter write would
-  // leave the file asserting two statuses, which is the state this whole mechanism
-  // exists to prevent.
+  // #1833 — check BEFORE writing anything, on BOTH branches. Refusing after the
+  // frontmatter write would leave the file asserting two statuses, which is the state
+  // this whole mechanism exists to prevent.
   const inverts = statusProseWouldInvert(content, status);
   if (inverts) {
     throw new Error(
@@ -886,6 +957,25 @@ export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
         `the corpus DR that first triggered this rule has since been corrected and no ` +
         `longer illustrates it — see #2074.)`,
     );
+  }
+
+  // #943 — the body is reconciled (and the transition dated) on BOTH branches, then the
+  // #626 parity check runs on the exact bytes about to be written. The synthesize branch
+  // used to skip the body entirely: a pre-MinSpec DR whose `## Status` read `Proposed`
+  // came out with frontmatter `accepted` over it — the split this issue reported.
+  const stamp = { stampDate: todayIso() };
+
+  if (!fmMatch) {
+    // No frontmatter — synthesize one and prepend it, preserving the body
+    // verbatim apart from its status claims (only collapsing leading blank lines
+    // before the heading). The date is derived from the ORIGINAL body, before the
+    // stamp adds today's date to it.
+    const block = `---\n${synthesizeAdrFrontmatter(filePath, content, status)}\n---`;
+    const body = reconcileBodyStatus(content.replace(/^\s*\n+/, ''), status, stamp);
+    const next = `${block}\n\n${body}`;
+    assertBodyStatusParity(filePath, next, status);
+    fs.writeFileSync(filePath, restoreLineEndings(next, original), 'utf-8');
+    return status;
   }
 
   const yaml = fmMatch[1];
@@ -910,7 +1000,9 @@ export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   const updated = content.replace(FRONTMATTER_RE, () => block);
   // #1624 — the body's `## Status` section is the third place this status lives.
   // Writing only the frontmatter here is what broke parity on every acceptance.
-  fs.writeFileSync(filePath, restoreLineEndings(reconcileBodyStatus(updated, status), original), 'utf-8');
+  const next = reconcileBodyStatus(updated, status, stamp);
+  assertBodyStatusParity(filePath, next, status);
+  fs.writeFileSync(filePath, restoreLineEndings(next, original), 'utf-8');
   return status;
 }
 
