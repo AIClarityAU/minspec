@@ -1,7 +1,7 @@
 ---
 id: SPEC-335
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the spec-to-code ownership contract (SPEC-038/SPEC-051/SPEC-081 follow-through)
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   Specify phase only. Expected surface: validateOwnership in packages/minspec/src/lib/spec-validator.ts plus a backfill of existing spec frontmatter. Neither is built.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
