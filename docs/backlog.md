@@ -29,3 +29,4 @@ Newest first.
 - 2026-11-16: SPEC-353 migration - re-cite existing tests with FR-N/INV-N ids so the literal-citation matcher does not read tested specs as unmapped; do before FR-6 is enabled project-wide (source: SPEC-353)
 - 2026-11-16: SPEC-353 cross-boundary payload/schema contract tests (named in #52, out of scope for v1) - needs a definition of "cross-boundary payload" first (source: SPEC-353)
 - 2026-11-16: SPEC-353 DQ-3 - widen FR-3 public-API scope from packages/shared to packages/minspec/src if the shared-only scope misses real gaps (source: SPEC-353)
+- 2026-11-19 - Rule 28 (epic-id uniqueness, #396) checks one tree only; unlike Rule 17 (DR) and Rule 18 (spec) it has no cross-PR witness, so two concurrent PRs adding the same EPIC-NNN pass their own checks and collide on the base. Add a filename-keyed open-PR epic claim check (source: PR #3843 architect review)

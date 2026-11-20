@@ -50,7 +50,7 @@ import { SessionPresenceManager } from './lib/presence';
 import { detectTools, getToolFilePath, type DetectedTools } from './lib/tool-detector';
 import { injectContextToFile, removeContextFromFile, type ActiveSpecContext } from './lib/context-injector';
 import { parkTopic, createParkingLotEntry, type ParkResult } from './lib/parking-lot';
-import { NotOptedInError } from './lib/opt-in';
+import { showedOptInRefusal } from './commands/opt-in-refusal';
 import {
   MinSpecCodeLensProvider,
   MinSpecSpecFileLensProvider,
@@ -64,12 +64,13 @@ import { parseSpec } from './lib/spec';
 import { loadConfig, resolveAndValidate } from './lib/config';
 import { trackActiveAdrEditor } from './lib/active-adr';
 import { recordApprovableView } from './lib/recent-approvables';
-import { resolveTargetFolderNonInteractive } from './lib/resolve-folder';
+import { resolveTargetFolderNonInteractive, initLastPickMemory } from './lib/resolve-folder';
 import { registerReferenceDiagnostics } from './lib/diagnostics';
 import { evaluateConstitution } from './lib/constitution-nudge';
 import { listSpecs } from './lib/spec-catalog';
 
 export function activate(context: vscode.ExtensionContext): void {
+  initLastPickMemory(context.workspaceState);
   trackActiveSpecEditor(context);
   trackActiveAdrEditor(context);
 
@@ -1087,16 +1088,6 @@ function handleFileSaveDriftCheck(
   if (!isFileInScope(session, doc.uri.fsPath, workspaceRoot)) {
     showDriftWarning(doc.uri.fsPath, workspaceRoot, relativePath);
   }
-}
-
-/**
- * Show a store's opt-in refusal as MinSpec's own message (SPEC-096 FR-8).
- * Returns false, having shown nothing, for any other error.
- */
-function showedOptInRefusal(err: unknown): boolean {
-  if (!(err instanceof NotOptedInError)) return false;
-  vscode.window.showErrorMessage(err.message);
-  return true;
 }
 
 /**
