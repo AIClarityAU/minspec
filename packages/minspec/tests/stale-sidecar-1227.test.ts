@@ -4,12 +4,12 @@
  * process.exit) with a clean control so a red case cannot be a vacuous scan.
  */
 import { describe, it, expect } from 'vitest';
-import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { findStaleSidecars } from '../../../scripts/lib/stale-sidecar';
 import { specHash } from '../../shared/src/canonical';
+import { runTsxCli, REPO_ROOT } from './helpers/run-tsx-cli';
 
 const classify = (p: string) => (p.includes('/DR-') ? ('adr' as const) : p.endsWith('requirements.md') ? ('spec' as const) : undefined);
 
@@ -34,8 +34,9 @@ describe('findStaleSidecars (#1227)', () => {
 });
 
 describe('validate-frontmatter Rule 30 CLI (#1227)', () => {
-  const TSX = path.join(process.cwd(), 'node_modules', '.bin', 'tsx');
-  const SCRIPT = path.join(process.cwd(), 'scripts', 'validate-frontmatter.ts');
+  // Absolute, worktree-safe tsx + script (helpers/run-tsx-cli): process.cwd()-relative paths
+  // made a missing binary read as empty output, so every negative assertion passed vacuously.
+  const SCRIPT = path.join(REPO_ROOT, 'scripts', 'validate-frontmatter.ts');
   const SPEC = 'specs/x/SPEC-900-probe/requirements.md';
   const body = (extra: string) =>
     `---\nid: SPEC-900\nstatus: planning\ntier: T1\n${extra}---\n\n# Probe\n\nOne sentence.\n`;
@@ -49,14 +50,30 @@ describe('validate-frontmatter Rule 30 CLI (#1227)', () => {
       path.join(dir, '.minspec', 'approvals', `${SPEC}.json`),
       JSON.stringify({ specPath: SPEC, specHash: specHash(recordedFor), approvedAt: '2026-01-01T00:00:00.000Z', approvedBy: 'h@example.com', tier: 'T1', migrated: false, baselineBlob: '' }),
     );
-    const r = spawnSync(TSX, [SCRIPT], { cwd: dir, encoding: 'utf-8' });
+    const r = runTsxCli(SCRIPT, [], { cwd: dir });
     fs.rmSync(dir, { recursive: true, force: true });
-    return { out: `${r.stdout}${r.stderr}` };
+    return { out: r.output };
   }
 
   it('control: matching sidecar raises no stale-approval finding', () => {
     const c = body('');
-    expect(run(c, c).out).not.toContain('stale approval (#1227)');
+    const { out } = run(c, c);
+    expect(out, 'the validator must have actually run').toMatch(/frontmatter|validation|FAIL|WARN/i);
+    expect(out).not.toContain('stale approval (#1227)');
+  });
+  it('missing approved file: no stale finding and the check still runs (canonicalSpecHash returns null, not throws)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stale-1227-missing-'));
+    fs.mkdirSync(path.join(dir, '.minspec', 'approvals', path.dirname(SPEC)), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, '.minspec', 'approvals', `${SPEC}.json`),
+      JSON.stringify({ specPath: SPEC, specHash: specHash(body('')), approvedAt: '2026-01-01T00:00:00.000Z', approvedBy: 'h@example.com', tier: 'T1', migrated: false, baselineBlob: '' }),
+    );
+    const r = runTsxCli(SCRIPT, [], { cwd: dir });
+    fs.rmSync(dir, { recursive: true, force: true });
+    const out = r.output;
+    expect(out, 'the validator must have actually run').toMatch(/frontmatter|validation|FAIL|WARN/i);
+    expect(out).not.toContain('stale approval (#1227)');
+    expect(out).not.toContain('the stale-approval check could not run');
   });
   it('a hashed field added after approval fails the build', () => {
     const approved = body('');

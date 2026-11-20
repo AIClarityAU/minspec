@@ -342,8 +342,8 @@ const EXEMPT: Record<string, string> = {
   '15': 'ships as warn behind a config ratchet and fires only on T3/T4 specs past Clarify; covered by ownership tests',
   '21': 'needs the rendered CLAUDE.md template to be doubled; covered by doubled-sections tests',
   '22': 'ships as warn behind a config ratchet; covered by implement-evidence tests',
-  '30': 'needs a hash-bearing approval sidecar whose file drifted after approval; covered by stale-sidecar-1227.test.ts (#1227)',
   '27': 'ships as warn behind a config ratchet (decisionStatusContradiction); covered by decision-status-contradiction.test.ts (#1812)',
+  '30': 'needs a hash-bearing approval sidecar whose file drifted after approval; covered by stale-sidecar-1227.test.ts (#1227)',
 };
 
 // ---- Suites ----------------------------------------------------------------
