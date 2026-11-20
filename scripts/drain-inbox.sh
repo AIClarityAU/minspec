@@ -4233,7 +4233,7 @@ run_loop() {
 
     rc=0; run_cycle || rc=$?
     if $RUN_DIR_RESTART; then
-      echo "[drain] run dir is behind origin/main and this loop executes from it — stopping so drain-service.sh refreshes it and starts the new code (#3747)."; break
+      echo "[drain] RESTART-ON-MAIN-MOVE: run dir is behind origin/main and this loop executes from it — stopping so drain-service.sh refreshes the run dir and relaunches the new code in the same service start (#3747)."; break
     fi
     case "$rc" in
       0)

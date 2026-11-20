@@ -195,13 +195,14 @@ describe('a drain executing from the run dir never refreshes it under itself (#3
 });
 
 /** A drain stand-in: records how it was started, then runs a 1 s "loop" holding the lock. */
-function stub(label: string, realNextToIt: boolean): string {
+function stub(label: string, realNextToIt: boolean, moveFirst = false): string {
   return `#!/usr/bin/env bash
 if [[ "$1" == --continuous ]]; then
   echo "${label} $* root=\${MINSPEC_DRAIN_PRIMARY_ROOT-unset}" >> "$STUB_CALLS"
   (
     echo "$BASHPID" > "$MINSPEC_DRAIN_LOCK"
     sleep 1
+    ${moveFirst ? 'if [[ "$(wc -l < "$STUB_CALLS")" -le 1 ]]; then echo "[drain] RESTART-ON-MAIN-MOVE: stub, main moved."; fi' : ''}
     echo "[drain] loop exited."
     rm -f "$MINSPEC_DRAIN_LOCK"
   ) >>"$MINSPEC_DRAIN_LOG" 2>&1 &
@@ -262,6 +263,23 @@ describe('drain-service.sh launches the verified run-dir copy (#3747)', () => {
     expect(res.out).toContain(`starting the drain: ${f.run}/scripts/drain-inbox.sh --continuous`);
     expect(git(f.run, 'rev-parse', 'HEAD')).toBe(f.c2);
     expect(git(f.primary, 'rev-parse', 'HEAD')).toBe(f.c1);
+  });
+
+  it('a drain that stops because main moved is relaunched inside the SAME service start (finding: no systemd restart spent)', () => {
+    const f = fixture(
+      (seed) => {
+        fs.renameSync(path.join(seed, 'scripts/drain-inbox.sh'), path.join(seed, 'scripts/drain-inbox-real.sh'));
+        fs.writeFileSync(path.join(seed, 'scripts/drain-inbox.sh'), stub('primary', true), { mode: 0o755 });
+      },
+      (seed) => fs.writeFileSync(path.join(seed, 'scripts/drain-inbox.sh'), stub('run', false, true), { mode: 0o755 }),
+    );
+    const res = runService(f, {});
+    // First launch signals the move; the supervisor keeps looping and launches again; the
+    // second launch ends normally, so cmd_run exits 0 only after TWO launches.
+    expect(res.calls).toHaveLength(2);
+    expect(res.out).toContain('RESTART: origin/main moved');
+    expect(res.out).toContain('retrying in 1s (inside this start');
+    expect(res.code).toBe(0);
   });
 
   it('an explicit MINSPEC_DRAIN_SERVICE_DRAIN override runs in place', () => {
