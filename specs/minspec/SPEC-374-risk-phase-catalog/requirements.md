@@ -145,7 +145,12 @@ catalog is the missing link from *what tripped* to *what that trip demands*.
 - **FR-9: Satisfaction is structural.** The way an obligation is satisfied depends on DQ-2.
   Under the recommended option it is a required section, checked by SPEC-013's single
   `hasSection(artifact, heading)` predicate (SPEC-013 FR-2): no second predicate, presence
-  and shape only, never a quality judgement (SPEC-013 R4).
+  and shape only, never a quality judgement (SPEC-013 R4). That predicate is **not built**:
+  SPEC-013 is `implements: none`, and the `hasSection` that does exist
+  (`packages/minspec/src/lib/spec-validator.ts:222`) is a different, narrower predicate over
+  mockup/API/acceptance-criteria names. Under DQ-2(a), enforcing mode (FR-8) therefore cannot
+  ship until SPEC-013 FR-2 is built. Advisory mode does not depend on it, because advisory
+  checks no satisfaction.
 
 ## Acceptance Criteria
 
@@ -162,9 +167,14 @@ catalog is the missing link from *what tripped* to *what that trip demands*.
   `destructive_schema_op` together yield **one** migration + rollback obligation carrying
   all three explains. `sensitive_sink` + `public_api_changed` yield exactly two obligations.
   *(FR-3, FR-5)*
-- **AC-5: Disposition coverage.** A test collects every literal `name:` the consequence
-  analyzers can emit. It fails if any name is absent from both the catalog's `tripsOn` lists
-  and its `noObligation` list, or appears in both. Mutation control: deleting `concurrency`
+- **AC-5: Disposition coverage.** A test collects every signal name the consequence
+  analyzers can emit: the `name` of each `ClassificationSignal` they push, or an exported
+  list of those names. It does **not** grep every literal `name:` in
+  `consequence-analyzers.ts`, because the pattern tables there (`SENSITIVE_REGEXES`,
+  `CONCURRENCY_PATTERNS`, lines 437-513) also use `name:` for pattern labels such as
+  `'Promise.all'` and `'timer'`, which are not signal names. The test fails if any signal
+  name is absent from both the catalog's `tripsOn` lists and its `noObligation` list, or
+  appears in both. Mutation control: deleting `concurrency`
   from the table makes the test fail. *(FR-4)*
 - **AC-6: An unknown name is reported, not dropped.** A consequence signal named
   `future_signal_x` appears in `unmapped` and the result is not *structurally clear*.
@@ -298,3 +308,6 @@ The judgement calls, each with the recommended option first:
   [#90](https://github.com/AIClarityAU/minspec/issues/90). The SPEC-097 id collision on
   branch `agent/issue-90` belongs to #90.
 - A DR on new `Phase` values: only if DQ-2 resolves to (b). Otherwise none.
+- SPEC-013 FR-2's shared `hasSection` predicate:
+  [SPEC-013](../SPEC-013-risk-section-policy/requirements.md). Under DQ-2(a) it blocks
+  enforcing mode (FR-9).
