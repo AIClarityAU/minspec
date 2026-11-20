@@ -10,6 +10,7 @@ bear on a near-term decision, file it as an issue and strike it here with the is
 
 Newest first.
 
+- 2026-11-12 - move the byte-order-mark fix into the shared spec-hash code once the Windows BOM spec-gate fix lands; measured: `canonical.py --hash` and `specHash` agree on a BOM-prefixed spec, so nothing is wrong today (source: PR #3437, BOM fix)
 - 2026-11-12 - the agent-config secret check covers GitHub user identity only; other MCP servers' API keys in agent config are unchecked (source: SPEC-226, Out of Scope)
 - 2026-11-12 - stopping the harness from recording a secret inside a `permissions.allow` rule is prevention, not detection, so SPEC-226's check cannot cover it (source: SPEC-226, Out of Scope)
 - 2026-11-12 - run `npm run check:template-version` in the release job as the independent second witness for the local pre-push template-version gate; wiring it into per-PR main CI was declined because every concurrent template PR would then edit the same version line (source: #3427)
