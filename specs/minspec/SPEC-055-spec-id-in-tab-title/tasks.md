@@ -35,11 +35,11 @@ Rules for every task:
   request. A test that asserts an absence already true (AC-3, AC-4) has a meta test instead,
   fed the text it must reject, and that meta test is the proof it can fire.
 - Test cases key on text, never on line numbers. The numbers in [design.md](design.md) are
-  those of `ef84097b` and move.
+  those of `6ebb41827` and move.
 - Pull requests say `Refs #897`, never `Closes`: #897 carries the deferred title feature and
   must stay open (AC-5).
 - Re-measure before 1.1 and 4.1: if a new status-bar item or priority comment has landed on
-  main since `612386d0`, add it to the AC-1 sweep and the AC-2 count (the plan went stale once,
+  main since `6ebb41827`, add it to the AC-1 sweep and the AC-2 count (the plan went stale once,
   when #737 added the fourth item after the first measurement).
 - Add no import of a network or LLM module and no second progress or active-spec resolver
   (AC-6, FR-6, INV-3, INV-4).
@@ -55,9 +55,11 @@ Rules for every task:
   Test: `packages/minspec/tests/status-bar.test.ts`, new `describe('AC-1')` - the helpers
   `tsFiles`, `commentText`, `codeText`, `badPriorityComments` from the TypeScript compiler's
   comment ranges, with their meta tests, and the AC-1 scan with `$(shield) MinSpec` and
-  `per-spec progress item` only. Prerequisites: none.
-  *Done when:* the scan is red on the unchanged file (four sites) and green after, and the
-  file's code is unchanged apart from comments.
+  `per-spec progress item`, plus `badPriorityComments` empty (the retired phrases wait for 1.2).
+  The meta tests flag the 99, 98 and 96 "just left of" forms (design.md, AC-1). Prerequisites: none.
+  *Done when:* the scan is red on the unchanged file at five sites (the header, and the four
+  priority comments 99, 98, 97 and 96) and green after, and the file's code is unchanged apart
+  from comments.
 - [ ] **1.2** (FR-1, AC-1, PQ2 decision) Comments in `packages/minspec/src/commands/status.ts`,
   `packages/minspec/src/lib/active-spec.ts`, `packages/minspec/src/lib/spec-progress.ts` and
   `packages/minspec/src/extension.ts`, and the comments, title and assertion message in
@@ -80,7 +82,7 @@ Rules for every task:
   The existing Global scan stays unchanged. Prerequisites: none.
   *Done when:* green, the meta test counts as design.md states, and a temporary fifth write site
   in any source file goes red, quoted in the pull request. If a fifth site has landed on `main`
-  since `ef84097b`, read whether only a user choice reaches it before pinning it; if not, stop
+  since `6ebb41827`, read whether only a user choice reaches it before pinning it; if not, stop
   and report it, because that is the AC-4 failure itself.
 
 ## 2 - User-facing copy (PQ2 decision)
@@ -89,10 +91,15 @@ Rules for every task:
   `## Status Bar` section; the signpost paragraph above it stays.
   `packages/minspec/src/commands/example.ts` - the checkbox sentence in the generated example
   becomes "The sidebar updates automatically as you check items off."
+  `packages/minspec/README.md` - only the "Status Bar" section's sentence "Two more items appear
+  only when there is something to do": it names two items, and the queue-depth item (README
+  documents it under the queue command) makes three, so add it and say three. Nothing else in
+  the README changes; `package.json` is not edited, because what it says about the status bar on
+  `6ebb41827` is true.
   Test: `packages/minspec/tests/status-bar.test.ts` - that markdown file holds no `## Status Bar`
-  heading and the example source holds no `sidebar and status bar`. Prerequisites: 1.2.
-  *Done when:* red on the unchanged files, green after. README and `package.json` are not edited:
-  what they say about the status bar on `ef84097b` is true.
+  heading, the example source holds no `sidebar and status bar`, and the README holds no
+  `Two more items`. Prerequisites: 1.2.
+  *Done when:* red on the unchanged files, green after.
 
 ## 3 - The tracker
 

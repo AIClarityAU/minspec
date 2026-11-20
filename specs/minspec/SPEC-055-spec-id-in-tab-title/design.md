@@ -18,9 +18,11 @@ reports `verdict: APPROVED` (stored = computed = `1cf24a62…`). FR-1..FR-6, AC-
 INV-1..INV-5 and DQ-1..DQ-5 are settled there and are not re-litigated. This is HOW, not
 WHAT or WHY.
 **Dependency budget:** zero new npm dependencies, zero new files.
-**Re-checked:** 2026-10-31 against origin/main `ef84097b`: still `verdict: APPROVED`, same hash.
-[Decisions](#decisions) and [Drift since the draft](#drift-since-the-draft) are from that
-re-check; where they differ from the `d43f235a` measurements below, they win.
+**Measured on:** 2026-11-21 against origin/main `6ebb41827`: still `verdict: APPROVED`, same
+hash. Every count and line number in this document was re-measured there, except where a line
+names an older commit on purpose (`d43f235a`, `ef84097b` and `612386d0` in history sentences).
+[Decisions](#decisions) and [Drift since the draft](#drift-since-the-draft) win over any older
+figure. Test cases key on text, never on these numbers.
 
 ## Decisions
 
@@ -29,7 +31,7 @@ decision. Each can be undone in under a day, and none changes a sentence in requ
 
 | Question | Choice | Why | Rejected |
 |---|---|---|---|
-| PQ2 - does FR-1's sweep reach past comments? | **(a)**, on what is still stale on `ef84097b`: the "Status Bar" section of `media/walkthrough/explore-sidebar.md`, the "sidebar and status bar" sentence in `src/commands/example.ts`, and the test title and message in `src/test/views.test.ts`. | FR-1 says MUST remove "every stale reference", and INV-1 bars a surface asserting what is not there. DQ-2's "the remaining work is the comment sweep" describes what was known on 2026-08-14 and restricts nothing. The cost named in PQ2 has shrunk: the README and `package.json` sites were already fixed, so no README section goes and no asset is orphaned. | (b) comments only: the walkthrough and every generated example keep describing an item that does not exist, the defect EPIC-002 exists to prevent. |
+| PQ2 - does FR-1's sweep reach past comments? | **(a)**, on what is still stale on `6ebb41827`: the "Status Bar" section of `media/walkthrough/explore-sidebar.md`, the "sidebar and status bar" sentence in `src/commands/example.ts`, and the test title and message in `src/test/views.test.ts`. | FR-1 says MUST remove "every stale reference", and INV-1 bars a surface asserting what is not there. DQ-2's "the remaining work is the comment sweep" describes what was known on 2026-08-14 and restricts nothing. The cost named in PQ2 has shrunk: the README "Status Bar" section and the `package.json` walkthrough sentence were already rewritten, so no README section is deleted and no asset is orphaned; one README sentence still undercounts the items and is edited at task 2.1 (see Drift). | (b) comments only: the walkthrough and every generated example keep describing an item that does not exist, the defect EPIC-002 exists to prevent. |
 | PQ3 - pin config-write sites? | **(a)**, per-file counts in `AC4_PINNED`, plus the pin on `.vscode` paths below. | AC-4's fail clause needs a test that can fire, and source text cannot show reachability. A correctly gated new site costs one reviewed line in the pin; a silent write that passes every test costs an invariant-3 breach. The pin only ever adds a failure, so it contradicts no sentence of AC-4. | (b) no pin: a silent Workspace write passes every test, so AC-4's fail clause is unenforced. |
 | PQ4 - static AC-3 scan of `status-bar.ts`? | **(a)**, scan `codeText` of `src/views/status-bar.ts` for both identifiers. | The behavioural test mocks all three classes, so it cannot see a focus-keyed `text` set inside one. The file holds neither identifier today, so a permitted non-text use, which has no current instance, costs one reviewed edit of the test. | (b) behavioural test alone: blind inside the classes, the place the defect would return. |
 
@@ -44,69 +46,74 @@ together.
 
 ## Drift since the draft
 
-Measured on `ef84097b`:
+Measured on `6ebb41827`:
 
-- **PQ1's facts stand, and there are four items now.** Four `createStatusBarItem` calls on the
-  plan's base `612386d0`: `status-bar.ts:118`, `:176`, `:234` and `:292`. The fourth is
-  `MinSpecQueueDepthStatusBar` (priority 96, `minspec.viewQueue`), added by `e0a3c432` (#737,
-  after `ef84097b`). The `ef84097b` figures below are three-item figures; line numbers on the
-  base are `:120`, `:178`, `:236`, `:294` for the priority comments. The header is still `:1-11`.
-- **Part of PQ2's list is already gone.** `packages/minspec/README.md:181-183` now describes
-  the three real items that existed on `ef84097b` truthfully (a fourth, the queue-depth item, has landed since; re-check that README paragraph at task 2.1). The `package.json` sentence "The status bar tracks your
-  active spec at a glance." and the `status-bar.png` link no longer exist, and
-  `media/screenshots/status-bar.png` is absent. `package.json:603` and README:171 describe the
-  next-task signpost, which exists: not stale, no edit.
+- **PQ1's facts stand, and there are four items now.** Four `createStatusBarItem` calls in
+  `status-bar.ts`: `:137`, `:195`, `:253` and `:311`, with the priority comments at `:139`
+  (99), `:197` (98), `:255` (97) and `:313` (96). The fourth is `MinSpecQueueDepthStatusBar`
+  (priority 96, `minspec.viewQueue`), added by `e0a3c432` (#737, after `ef84097b`). The header
+  is still `:1-11`.
+- **Part of PQ2's list is already gone.** The `package.json` sentence "The status bar tracks
+  your active spec at a glance." and the `status-bar.png` link no longer exist, and
+  `media/screenshots/status-bar.png` is absent. `package.json:623` and README:172 describe the
+  next-task signpost, which exists: not stale, no edit. **README:182-184, the "Status Bar"
+  section, is edited at task 2.1:** it says "Two more items appear only when there is something
+  to do" and names the harness-commit and tidy-primary items, but the queue-depth item (README:260
+  documents it: "A status bar item shows the count whenever any are waiting") makes that
+  three, so the sentence is false on `6ebb41827`. One sentence changes; the section stays.
 - **Moved:** `explore-sidebar.md:30-36`, `example.ts:208-209`, and the comment at
-  `extension.ts:943` ("the same way the status bar does").
-- **A fourth config-write site.** `packages/minspec/src/commands/getting-started.ts:75`, added by SPEC-042's
+  `extension.ts:1010` ("the same way the status bar does").
+- **A fourth config-write site.** `packages/minspec/src/commands/getting-started.ts:77`, added by SPEC-042's
   Getting Started page: `config().update(…, ConfigurationTarget.Workspace)`, reached only from
   `writeSetting` calls in `packages/minspec/src/views/getting-started-webview.ts:174` and `:204`, from webview
   click messages. Its call form is one `configWriteSites` as first drafted would not count.
   The contract below covers it.
 - **`StatusBarSpec` is gone.** #2218 renamed it to `SpecProgressView` under #994. The header
-  of `spec-progress.ts:12-16` records that and stays. `status-bar.ts` no longer imports from
+  of `spec-progress.ts` records that and stays. `status-bar.ts` no longer imports from
   `lib/spec-progress`, so "the status bar and the active-spec summary both import them"
   (`spec-progress.ts:8-9`) is itself stale and joins the sweep, as does "passed to the status
   bar for display" (`:23`).
-- **Focus handlers unchanged:** still `extension.ts:77`, `active-spec.ts:156`, `active-adr.ts:64`.
+- **Focus handlers unchanged:** `extension.ts:83`, `active-spec.ts:156`, `active-adr.ts:64`.
   `recordApprovableView` feeds only Alt+A's picker.
 - **#1628 is closed**, so its entry under Risks and Follow-ups no longer names an open path. I
   did not test whether the reconciler still re-closes reopened issues.
 - **#897 still has `blockedBy` count 0** and carries the `hold:specify` label, which fits the
   deferral. Every task pull request here says `Refs #897`, never `Closes`.
 
-## What this Plan designs against (measured on `d43f235a`)
+## What this Plan designs against (measured on `6ebb41827`)
 
-1. **Four status-bar items, not two** (three when measured on `d43f235a`; the fourth, priority 96
+1. **Four status-bar items, not two** (three when first measured on `d43f235a`; the fourth, priority 96
    `minspec.viewQueue`, class `MinSpecQueueDepthStatusBar`, landed in `e0a3c432`, #737). `packages/minspec/src/views/status-bar.ts` calls
-   `createStatusBarItem` at :110 (priority 99, `minspec.nextTask`), :168 (98,
-   `minspec.commitHarnessRefresh`) and :226 (97, `minspec.tidyPrimary`; class
-   `MinSpecTidyPrimaryStatusBar` at :222, wired at `extension.ts:278-301`). The third landed in
+   `createStatusBarItem` at :137 (priority 99, `minspec.nextTask`), :195 (98,
+   `minspec.commitHarnessRefresh`), :253 (97, `minspec.tidyPrimary`; class
+   `MinSpecTidyPrimaryStatusBar`) and :311 (96, `minspec.viewQueue`). The third landed in
    `f97abb46` (#1712, keep the primary checkout clean) on 2026-08-29; the approval sidecar
    records `approvedAt` 2026-08-19. AC-2 is false today - PQ1.
-2. **AC-1's offenders moved and grew.** The header `:1-11` and `:112` are where AC-1 says;
-   AC-1's `:166` is now `:170`; a fourth reversed comment sits at `:228`
-   (`97, // just left of the harness-commit recovery item (priority 98)`). AC-1's "anywhere
+2. **AC-1's offenders moved and grew.** The header `:1-11` and the 99 comment (`:139`) are where
+   AC-1 says; AC-1's `:166` is now `:197`; a third reversed comment sits at `:255`
+   (`97, // just left of the harness-commit recovery item (priority 98)`) and a fourth at `:313`
+   (`96, // just left of the tidy-primary item (priority 97)`). That is five sites on
+   `6ebb41827`: the header and four priority comments. AC-1's "anywhere
    under `packages/minspec/src`" covers it. Direction per the `vscode` typings: "Higher values
    mean the item should be shown more to the left" (line 11640 of the vendored `@types/vscode`
    declarations).
 3. **More comments describe the removed item** (all under `packages/minspec/src`, so AC-1
    applies): `packages/minspec/src/commands/status.ts:6-9` ("Status bar click handler", "the active spec the
    status bar displays"); `packages/minspec/src/lib/active-spec.ts:13-15` ("the status bar watcher (in
-   extension.ts)") and `:79-80`; `packages/minspec/src/lib/spec-progress.ts:8-10` and `:21`;
-   `extension.ts:903-905` ("the same way the status bar does"); `packages/minspec/src/test/views.test.ts:8`,
+   extension.ts)") and `:79-80`; `packages/minspec/src/lib/spec-progress.ts:8-10` and `:23`;
+   `extension.ts:1010` ("the same way the status bar does"); `packages/minspec/src/test/views.test.ts:8`,
    `:59-61`, `:68-72`.
 4. **Non-comment references to the removed item exist** in shipped files - PQ2.
 5. **No status bar follows focus.** The three `onDidChangeActiveTextEditor` handlers are
-   `extension.ts:75` (`recordApprovableView`), `packages/minspec/src/lib/active-spec.ts:156` (`rememberSpecEditor`)
+   `extension.ts:83` (`recordApprovableView`), `packages/minspec/src/lib/active-spec.ts:156` (`rememberSpecEditor`)
    and `packages/minspec/src/lib/active-adr.ts:64` (`rememberAdrEditor`); none updates a status-bar item. The status
-   bars' `workspaceRoot` is a `const` set once at `extension.ts:112` by
+   bars' `workspaceRoot` is a `const` set once at `extension.ts:120` by
    `resolveTargetFolderNonInteractive` (`packages/minspec/src/lib/resolve-folder.ts:49-60`), which reads the active
    editor at activation only.
-6. **Configuration writes.** Three production sites, all `ConfigurationTarget.Workspace`,
-   each behind a user choice: `packages/minspec/src/commands/classify.ts:176-178` inside
-   `else if (choice === AUTO_CLASSIFY)` (:171); `packages/minspec/src/commands/migrate.ts:43-45` after
-   `if (!pick) return;` (:31); `extension.ts:620-629` (`enableAutoClassify`), whose only caller
+6. **Configuration writes.** Three production sites (a fourth, `getting-started.ts:77`, is under Drift), all `ConfigurationTarget.Workspace`,
+   each behind a user choice: `packages/minspec/src/commands/classify.ts:198` inside
+   the `AUTO_CLASSIFY` choice branch; `packages/minspec/src/commands/migrate.ts:45` after
+   the `if (!pick) return;` guard; `extension.ts:756` (`enableAutoClassify`), whose only caller
    is `packages/minspec/src/lib/auto-bootstrap.ts:714-715` inside
    `if (step.alwaysAction && choice === step.alwaysAction)` (:711). No non-comment line outside
    `src/test/` names a `.vscode` path. `grep -rn 'window\.title' packages/minspec/src` returns 0.
@@ -134,7 +141,7 @@ AC-6 holds vacuously and says so: nothing below adds an import or a resolver.
 
 | FR | What this design does |
 |---|---|
-| FR-1 | Comment sweep (AC-1) and the non-comment references left on `ef84097b` (PQ2 decision). |
+| FR-1 | Comment sweep (AC-1) and the non-comment references left on `6ebb41827` (PQ2 decision). |
 | FR-2 | Nothing to build: no surface kept or added claims the active spec; the on-click message already carries the id (`packages/minspec/src/commands/status.ts:55-56`, `summary.id`). |
 | FR-3 | Nothing to build; AC-3's tests pin that no status-bar item follows focus. |
 | FR-4 | No title influence (DQ-3 = defer); AC-4's tests pin the config-write sites. |
@@ -143,20 +150,21 @@ AC-6 holds vacuously and says so: nothing below adds an import or a resolver.
 
 ## Components, by path
 
-No new file. Paths under `packages/minspec/`. Line numbers are `ef84097b`'s; key edits and
+No new file. Paths under `packages/minspec/`. Line numbers are `6ebb41827`'s; key edits and
 tests on the text, not the number.
 
 | File | Change | Serves |
 |---|---|---|
-| `src/views/status-bar.ts` | Comments only. Header `:1-11` rewritten to say what the file holds (one left-aligned item per class; higher priority renders further left), with no tier/phase/progress format. `:113` becomes `99, // leftmost MinSpec item; a higher priority renders further left`; `:171` becomes `98, // just right of the next-task signpost (priority 99)`; `:229` becomes `97, // just right of the harness-commit recovery item (priority 98)`; the queue-depth item's `96, // just left of the tidy-primary item (priority 97)` (base `:294`) becomes `96, // just right of the tidy-primary item (priority 97)`, the same reversed-direction error. | FR-1, AC-1 |
+| `src/views/status-bar.ts` | Comments only. Header `:1-11` rewritten to say what the file holds (one left-aligned item per class; higher priority renders further left), with no tier/phase/progress format. `:139` becomes `99, // leftmost MinSpec item; a higher priority renders further left`; `:197` becomes `98, // just right of the next-task signpost (priority 99)`; `:255` becomes `97, // just right of the harness-commit recovery item (priority 98)`; the queue-depth item's `96, // just left of the tidy-primary item (priority 97)` (`:313`) becomes `96, // just right of the tidy-primary item (priority 97)`, the same reversed-direction error. | FR-1, AC-1 |
 | `src/commands/status.ts` | Comment `:6-9`: the `minspec.status` command handler, with no status-bar claim. | FR-1, AC-1 |
 | `src/lib/active-spec.ts` | Comments `:13-15`, `:79-80`: drop the claim that a status-bar watcher or status-bar click consumes it. | FR-1, AC-1 |
 | `src/lib/spec-progress.ts` | Comments `:8-10`, `:23`: drop the status-bar consumer claim. | FR-1, AC-1 |
-| `src/extension.ts` | Comment `:943-945`: "the shared `fromFrontmatter` (`src/lib/spec-progress.ts`)" in place of "the same way the status bar does". | FR-1, AC-1 |
+| `src/extension.ts` | Comment `:1010`: "the shared `fromFrontmatter` (`src/lib/spec-progress.ts`)" in place of "the same way the status bar does". | FR-1, AC-1 |
 | `src/test/views.test.ts` | Comments `:8`, `:59-61`, `:68-72`, the title `:58` and the message `:65`: the test checks that `minspec.status` is registered, nothing more. | FR-1, AC-1, PQ2 |
 | `media/walkthrough/explore-sidebar.md` | Delete the `## Status Bar` section (`:30-36`). The signpost paragraph at `:9-13` stays; it is true. | FR-1, PQ2 |
 | `src/commands/example.ts` | `:208-209`, in the generated example: "The sidebar updates automatically as you check items off." | FR-1, PQ2 |
-| `tests/status-bar.test.ts` | New `describe` blocks: AC-1 scan, AC-3 static scan, the PQ2 copy check, and (blocked on PQ1) the AC-2 count pin. | AC-1, AC-2, AC-3, FR-1 |
+| `README.md` | The "Status Bar" section's sentence "Two more items appear only when there is something to do" and its list: add the queue-depth item (a count of queued phase-advance requests), so the sentence says three. Nothing else in the README changes. | FR-1, INV-1 |
+| `tests/status-bar.test.ts` | New `describe` blocks: AC-1 scan, AC-3 static scan, the PQ2 copy check (now including the README sentence), and (blocked on PQ1) the AC-2 count pin. | AC-1, AC-2, AC-3, FR-1 |
 | `tests/extension.test.ts` | One new `it` in `describe('activate()')` (:408). | AC-3 |
 | `tests/invariant3-project-local-prefs.test.ts` | New `it`s and a meta `it` in `describe('INVARIANT 3 …')`. No existing assertion changes. | AC-4 |
 
@@ -188,7 +196,8 @@ function badPriorityComments(src: string): string[];  // each line matching
 - **AC-1**, over `tsFiles(src/)`: `commentText` contains neither `$(shield) MinSpec` nor
   `per-spec progress item`, and `badPriorityComments` is empty for every file. **Meta:**
   `badPriorityComments` flags `99, // just left of the per-spec progress item (priority 100)`
-  and `98, // just left of the next-task signpost (priority 99)`, and passes
+  `98, // just left of the next-task signpost (priority 99)` and
+  `96, // just left of the tidy-primary item (priority 97)` (the queue-depth form), and passes
   `98, // just right of the next-task signpost (priority 99)`. The same scan holds the retired
   phrases this sweep removes, so the other source files cannot drift back: `status bar watcher`,
   `status-bar click`, `Status bar click handler`, `the status bar displays`,
@@ -199,8 +208,8 @@ function badPriorityComments(src: string): string[];  // each line matching
   exactly `AC2_PINNED.length`; the pairings are the existing
   per-class tests (:81-85, :258-262, :134-138 for the tidy-primary item, and the queue-depth
   item's own priority test). **`AC2_PINNED`
-  is PQ1's answer.** Under AC-2 as approved it has two entries and the test is red on the
-  plan's base `612386d0` (four sites).
+  is PQ1's answer.** Under AC-2 as approved it has two entries and the test is red on
+  `6ebb41827` (four sites).
 - **AC-3, static** (`tests/status-bar.test.ts`): `codeText` of `src/views/status-bar.ts`
   contains neither `activeTextEditor` nor `onDidChangeActiveTextEditor`. **Meta:** the check
   fails on a sample holding either identifier in code, and passes when it appears only in a
@@ -211,7 +220,7 @@ function badPriorityComments(src: string): string[];  // each line matching
   (:17-19); call every handler captured by the `onDidChangeActiveTextEditor` mock (:97) with a
   fake spec-file editor and with `undefined`; advance 1000 ms (past the 300 ms debounces in
   `activate()`); assert no `update` call on any of the three.
-  **Non-vacuity:** at least one handler was captured (`extension.ts:77` registers one).
+  **Non-vacuity:** at least one handler was captured (`extension.ts:83` registers one).
 - **AC-4** (`tests/invariant3-project-local-prefs.test.ts`), over `sourceFiles(SRC_DIR)` minus
   `src/test/` (the bundle is built from `src/extension.ts` alone,
   `scripts/build-extension.sh:73`, `:76`, and no production file imports from `src/test/`),
@@ -226,7 +235,7 @@ function badPriorityComments(src: string): string[];  // each line matching
   `const cfg = vscode.workspace.getConfiguration(); cfg.update('window.title', '${rootName}', true)`,
   1 for `const c = () => vscode.workspace.getConfiguration('x'); c().update('k', 1)`, and 3 for
   the three joined. **The `.vscode` half of AC-4:** over the same files and stripping,
-  non-comment lines matching `/\.vscode[\\/'"]/` are pinned to the one on `ef84097b`,
+  non-comment lines matching `/\.vscode[\\/'"]/` are pinned to the one on `6ebb41827`,
   `packages/minspec/src/lib/onboarding-settings.ts:73`, a description string that writes nothing. Its meta test feeds
   `path.join(root, '.vscode', 'settings.json')`. The existing Global scan is unchanged; its
   blindness to a boolean `true` target is #1944, not this spec.
@@ -249,7 +258,7 @@ Implement PR body.
 
 [tasks.md](tasks.md) holds the runs; the order is:
 
-1. T0 tests first. AC-1 is red on the plan's base `612386d0` (five sites: the header and four priority comments). AC-3 and AC-4 assert absences that
+1. T0 tests first. AC-1 is red on `6ebb41827` (five sites: the header and four priority comments). AC-3 and AC-4 assert absences that
    already hold, so their meta tests are what show each scan can fire. AC-2 waits on PQ1.
 2. Comment sweep; AC-1 goes green.
 3. PQ2 edits.
@@ -260,7 +269,7 @@ Implement PR body.
 The options as first posed, on `d43f235a`. PQ2, PQ3 and PQ4 are answered under
 [Decisions](#decisions); PQ1 is open.
 
-- **PQ1 - AC-2 pins two items; the plan's base `612386d0` creates four.** The tidy-primary item
+- **PQ1 - AC-2 pins two items; `6ebb41827` creates four.** The tidy-primary item
   (`status-bar.ts:222-261`, priority 97, `minspec.tidyPrimary`) and the queue-depth item
   (priority 96, `minspec.viewQueue`, #737) landed after approval, so
   AC-2's own fail clause ("a third `createStatusBarItem` call appears … without this criterion
@@ -304,7 +313,7 @@ The options as first posed, on `d43f235a`. PQ2, PQ3 and PQ4 are answered under
   also fails on uses that set no text, e.g. `if (!vscode.window.activeTextEditor) item.hide()`,
   which AC-3 permits; as in PQ3, source text cannot show what a value is derived from.
   **(a) (rec)** Scan: `codeText` of `src/views/status-bar.ts` contains neither identifier (it
-  has none on `d43f235a`), so any use fails until a reviewed diff updates the test. *Cost:* a
+  has none on `6ebb41827`), so any use fails until a reviewed diff updates the test. *Cost:* a
   permitted non-text use also goes red, which AC-3's wording does not ask for. **(b)** No scan;
   the behavioural test alone. *Cost:* that test cannot see inside the status-bar classes,
   because `packages/minspec/tests/extension.test.ts:233-238` mocks all three, so a focus-keyed `text` set inside
@@ -315,7 +324,7 @@ The options as first posed, on `d43f235a`. PQ2, PQ3 and PQ4 are answered under
 - No runtime logic, no status-bar item, no title feature (DQ-3 = defer, carried by #897).
 - No edit to requirements.md by any task; PQ1, if answered (a), goes through Clarify.
 - No change to the existing invariant-3 Global scan; its gap is #1944.
-- No change to how `workspaceRoot` is resolved (`extension.ts:112`): it is fixed at
+- No change to how `workspaceRoot` is resolved (`extension.ts:120`): it is fixed at
   activation, so AC-3's "recomputed" condition does not apply, and no FR asks for it.
 - No edit to other specs, DRs or `CHANGELOG.md` (records, not signposts).
 - No CI, merge-gate or machinery change; no DR (DQ-5).
