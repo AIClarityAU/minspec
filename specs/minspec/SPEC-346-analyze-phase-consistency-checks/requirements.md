@@ -79,13 +79,9 @@ Add a deterministic, offline **analyze** phase between `tasks` and `implement` t
 - **D1 — Does an error finding block `implement`?**
   (a) **Advisory only (rec)** — show and diagnose, never block; cheapest, no false-block risk while the heuristics are unproven on the corpus. Cost: a T3/T4 spec can still enter implement with gaps, so "required" means "must be run", not "must be clean".
   (b) Block until clean or explicitly waived — real gate, but regex-level traceability will produce false positives that stall agents and the founder.
-  **Recorded selection: the recommended option,** (a), advisory only: show and diagnose, never block. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D2 — Id convention for traceability.** (a) **Require explicit `FR-n`/`AC-n` ids cited in task text (rec)** — deterministic; cost: existing specs/tasks that cite by prose or `SPEC/FR3` form will report gaps until migrated (see CLAUDE.md DR-053 id grammar; the analyzer should accept both `FR-3` and `FR3`). (b) Heading-text matching — tolerant but ambiguous and brittle.
-  **Recorded selection: the recommended option,** (a), require explicit `FR-n`/`AC-n` ids cited in task text, accepting both `FR-3` and `FR3`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D3 — Where the analyzer lives.** (a) **`packages/minspec/src/lib/` (rec)** — nearest to lifecycle; cost: not reusable by headless CI/agents. (b) `@aiclarity/shared` — reusable by dispatch scripts and a CI check, at the cost of widening the shared surface.
-  **Recorded selection: the recommended option,** (a), `packages/minspec/src/lib/`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D4 — Existing specs' `phases:` map.** (a) **Treat missing `analyze` as not-applicable until the spec next reaches tasks-done (rec)** — no mass edit. (b) Backfill `analyze: pending` into all specs — noisy and would touch hash-locked files.
-  **Recorded selection: the recommended option,** (a), treat a missing `analyze` as not-applicable until the spec next reaches tasks-done. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D5 — Epic.** Epic fit (EPIC-002 "Signpost Integrity") is a guess; reviewer to confirm or name the right epic.
   **Recommended (agent, 2026-11-17):** EPIC-003 (SDD Core Methodology), whose Goal names "the phase
   model (specify → clarify → plan → tasks → implement)" and the gates "that make a spec safe to
@@ -94,7 +90,6 @@ Add a deterministic, offline **analyze** phase between `tasks` and `implement` t
   from SPEC-012 and SPEC-041, the cross-artifact checks filed under EPIC-002, whose Goal
   ("deterministic completeness predicates") also fits the analyzer itself. A genuine fit
   judgement, so not recorded.
-  **Recorded selection: the recommended option,** EPIC-003 (SDD Core Methodology). The `epic:` frontmatter is not changed by this record; that edit is left to Plan or sign-off. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D6 — Tier of this spec.** Issue estimates T3; it changes the phase enum used by many consumers — confirm T3 vs T4.
   **Recommended (agent, 2026-11-17):** T4. The `Phase` type and `PHASES` list
   (`packages/minspec/src/lib/config.ts:8-11`) are consumed by 13 non-test source files under
@@ -102,4 +97,3 @@ Add a deterministic, offline **analyze** phase between `tasks` and `implement` t
   frontmatter, so this changes a cross-boundary contract - cost: T4 makes Clarify required
   (`config.ts:176`) and takes the spec out of the T3 lane where an agent pick closes Clarify. The
   tier decides the approval class, so it is the founder's.
-  **Recorded selection: the recommended option,** T4, the conservative direction, which keeps founder sign-off. The `tier:` frontmatter is not changed by this record. At T4 this spec is outside DR-123's T3 scope, so these recorded picks do not close Clarify on their own: the founder's sign-off decides every one of them. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
