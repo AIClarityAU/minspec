@@ -10,6 +10,10 @@ bear on a near-term decision, file it as an issue and strike it here with the is
 
 Newest first.
 
+- 2026-11-12 - move the byte-order-mark fix into the shared spec-hash code once the Windows BOM spec-gate fix lands; measured: `canonical.py --hash` and `specHash` agree on a BOM-prefixed spec, so nothing is wrong today (source: PR #3437, BOM fix)
+- 2026-11-12 - the agent-config secret check covers GitHub user identity only; other MCP servers' API keys in agent config are unchecked (source: SPEC-226, Out of Scope)
+- 2026-11-12 - stopping the harness from recording a secret inside a `permissions.allow` rule is prevention, not detection, so SPEC-226's check cannot cover it (source: SPEC-226, Out of Scope)
+- 2026-11-12 - run `npm run check:template-version` in the release job as the independent second witness for the local pre-push template-version gate; wiring it into per-PR main CI was declined because every concurrent template PR would then edit the same version line (source: #3427)
 - 2026-10-31 - DR-092 follow-up (d) still applies to any adopter that keeps its hand-written `minspec-ci-parity.yml`, whose remedy text keeps the self-defeating advice; moot wherever the managed copy replaces it (source: SPEC-079 DQ-3, the parity-ownership record, number 120, in docs/decisions/)
 - 2026-10-31 - constitution invariants are numbered, so `CON/INV-<slug>` has no target until they are named, which is an edit to the constitution (source: DR-053 §9, #3439)
 - 2026-10-30 - a normal build dispatch whose only deliverable is a spec or decision record, with a legitimate `Closes #N`, is refused by the delegated spec merge with `spec-pr-closes-build-issue`; fails closed, code left as it is (source: #3351)
