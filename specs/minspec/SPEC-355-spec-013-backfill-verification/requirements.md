@@ -270,7 +270,7 @@ finding fixed on one of them stales that approval.
 
 SPEC-013 itself states L0-L3 + FR-10 "ship independently" of SPEC-006 (hollow-test
 scanner, feeds L4) and SPEC-010's #121 amendment (coverage DAG, feeds FR-11); both are
-`specifying` today.
+`implementing` on main today (not yet `done`).
 
 - **Option A — run L0-L3 + FR-10 as soon as SPEC-013 ships them; file a second,
   later pass for L4/FR-11 once SPEC-006/SPEC-010 land (rec).** Matches SPEC-013's own
