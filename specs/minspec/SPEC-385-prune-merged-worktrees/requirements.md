@@ -1,5 +1,5 @@
 ---
-id: SPEC-343
+id: SPEC-385
 type: requirements
 status: specifying
 tier: T3
@@ -17,7 +17,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-343: MinSpec: Prune Merged Worktrees — squash-merge aware, never silent-delete
+# SPEC-385: MinSpec: Prune Merged Worktrees — squash-merge aware, never silent-delete
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human
 > reads it, resolves the open questions under **Decisions needed (Clarify)**, and approves
@@ -70,7 +70,9 @@ until the human invokes it.
   would have destroyed them. The design below is built around **positive proof** of safety
   (merged, clean, no unpushed commits, not presence-occupied), mirroring the fail-safe
   posture [DR-065](../../../docs/decisions/DR-065.md) already established for mutating a
-  shared checkout: *"any doubt discards nothing"* (DR-065 Amendment §bounds, item 2).
+  shared checkout: any doubt discards nothing (the fail-safe contract of
+  `isCheckoutOccupied` in `packages/minspec/src/lib/presence.ts`, where every missing-dir,
+  read, parse or kill error returns "occupied").
 
 - **A mutation this shape has one directly-reusable precedent in this codebase.**
   `minspec.tidyPrimary` (`packages/minspec/src/commands/tidy-primary.ts`,
@@ -94,9 +96,9 @@ until the human invokes it.
 - **This is a genuinely new mutation class, not a widened instance of an existing
   sanction.** [DR-065](../../../docs/decisions/DR-065.md) §5 sanctions exactly one
   *automatic, unattended* operation (`merge --ff-only`, by drain/loop tooling, gated on
-  G1–G4) and its 2026-08-30 amendment sanctions exactly one more (discarding a
-  byte-identical dirty *file*, same unattended-tooling gating). Neither covers *this*
-  command, but neither needs to be amended either: every mutation this spec proposes is a
+  G1–G4). DR-065's 2026-08-30 amendment, which would have sanctioned a second
+  operation, is WITHDRAWN and never accepted, so it is not relied on here. That
+  sanction does not cover *this* command, and does not need to be amended: every mutation this spec proposes is a
   **human clicking a named button in the editor**, never something a drain/loop script runs
   on its own. DR-065 §5 is explicit that the extension side only ever offers "a
   consent-gated sync, never a silent one" — this command IS that consent gate, for a
