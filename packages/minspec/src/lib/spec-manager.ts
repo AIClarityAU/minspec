@@ -24,6 +24,7 @@ import {
   SPEC_KIT_FILES,
 } from './spec-layout';
 import { restoreLineEndings } from './text-io';
+import { listSpecs } from './spec-catalog';
 
 /** Summary of a spec for listing/display */
 export interface SpecSummary {
@@ -253,6 +254,25 @@ function findSpecEntry(specsDir: string, specId: string): SpecEntry | null {
     }
   }
   return null;
+}
+
+/**
+ * By-id resolution that agrees with the recursive catalog (#1452). Top-level
+ * lookup first (unchanged flat / spec-kit behaviour), then fall back to the
+ * `listSpecs` walk so product-nested specs (`specs/<product>/<spec>/...`) resolve.
+ * Deliberately NOT folded into `findSpecEntry`: `migrateLayout` shares that and
+ * moving nested specs is SPEC-053's scoped decision.
+ */
+function resolveSpecEntry(rootDir: string, specsDir: string, specId: string): SpecEntry | null {
+  const top = findSpecEntry(specsDir, specId);
+  if (top) return top;
+  const hit = listSpecs(rootDir).find((s) => s.id === specId);
+  if (!hit) return null;
+  const dir = path.dirname(hit.filePath);
+  if (path.basename(hit.filePath) === 'spec.md' && isSpecKitDirEntry(path.basename(dir))) {
+    return { kind: 'spec-kit', dirPath: dir, specMdPath: hit.filePath };
+  }
+  return { kind: 'flat', filePath: hit.filePath };
 }
 
 function readEntry(entry: SpecEntry): ParsedSpec {
@@ -548,7 +568,7 @@ export function listSpecsShallow(
  */
 export function getSpec(rootDir: string, specId: string): SpecDetail | null {
   const specsDir = resolveSpecsDir(rootDir);
-  const entry = findSpecEntry(specsDir, specId);
+  const entry = resolveSpecEntry(rootDir, specsDir, specId);
   if (!entry) return null;
 
   try {
