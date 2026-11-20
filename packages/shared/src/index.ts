@@ -12,3 +12,4 @@ export * from './trust-model'; // SPEC-017 Slice 6 — TrustChartModel + renderT
 export * from './review-signals';
 export * from './next-task';
 export * from './project-prefix'; // DR-053 — cross-project reference prefixes (#500)
+export * from './contracts'; // DR-041 — Approvable union (#325)
