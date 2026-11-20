@@ -31,7 +31,7 @@ phases:
 
 > **This is a SPECIFICATION ONLY.** No code, script, or corpus edit is created by this
 > document. It is the Specify-phase artifact for
-> [#142](https://github.com/AIClarityAU/minspec/issues/142), which triage classified
+> #142, which triage classified
 > `T3/T4` — the spec is the gate, not the fix, and the fix itself cannot start before a
 > dependency (SPEC-013) ships.
 
@@ -315,7 +315,7 @@ those files.
 - **Turning the floor into a standing CI/editor gate for future specs/DRs.** SPEC-013's own
   FR-6 and FR-13 (FR-8).
 - **Re-laying out the corpus to the canonical Zone A/Zone B order.** Tracked separately at
-  [#167](https://github.com/AIClarityAU/minspec/issues/167) per SPEC-013's own Follow-ups —
+  #167 per SPEC-013's own Follow-ups —
   a structural reorder, mechanically distinct from the content dispositions this pass
   performs, even though both pair with the same 2026-06-04 backfill.
 - **Semantic/LLM review of content quality (reality-check, round-table).** EPIC-007
@@ -327,7 +327,7 @@ those files.
 
 ## Traceability
 
-- **Issue:** [#142](https://github.com/AIClarityAU/minspec/issues/142) — "once SPEC-013
+- **Issue:** #142 — "once SPEC-013
   floor is built, run it across all existing specs + DRs."
 - **Dependency:** [SPEC-013](../SPEC-013-risk-section-policy/requirements.md) (the floor
   this spec runs; `status: implementing`), consuming [SPEC-006](../SPEC-006-stub-completeness-gate/requirements.md)
@@ -341,8 +341,8 @@ those files.
   (cross-checks lifecycle), [DR-012](../../../docs/decisions/DR-012.md) /
   [DR-034](../../../docs/decisions/DR-034.md) (the approval hash DQ-1 works around, not
   through), [DR-066](../../../docs/decisions/DR-066.md) (no silent gate, INV-2).
-- **Sibling, not absorbed:** [#167](https://github.com/AIClarityAU/minspec/issues/167)
-  (canonical zone re-layout), [#121](https://github.com/AIClarityAU/minspec/issues/121)
+- **Sibling, not absorbed:** #167
+  (canonical zone re-layout), #121
   (SPEC-010 DAG amendment feeding FR-11).
 
 ## Alternatives considered and rejected
@@ -363,8 +363,14 @@ Recorded because this spec was written without a live conversation (DR-086 §4, 
 
 ## Id note
 
-Originally drafted as `SPEC-097`, which collided with the approved
-`SPEC-097-watcher-config-source` (caught by `npm run validate`'s duplicate-id check).
-Renumbered to `SPEC-355`: the highest `SPEC-NNN` on disk at drafting was `SPEC-354`.
+Originally drafted as `SPEC-097`, which collided with `SPEC-097-watcher-config-source`
+(caught by `npm run validate`'s duplicate-id check). That spec's frontmatter reads
+`status: planning`; it also carries a founder approval record,
+`.minspec/approvals/specs/minspec/SPEC-097-watcher-config-source/requirements.md.json`
+(approved 2026-11-12, `specHash` `47b583db…`, which matched `specHash()` of its content on
+main when this note was revised). The collision is by id alone, so it holds whatever that
+spec's status or approval state. Renumbered to `SPEC-355`: the highest `SPEC-NNN` on disk at
+drafting was `SPEC-354`. Higher ids have merged since; that gap is expected and is not a
+collision, because only a duplicate `SPEC-355` would be one.
 Open pull requests are not visible from this no-network dispatch; if `SPEC-355` collides at
 review time, renumber per the same convention.
