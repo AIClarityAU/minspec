@@ -4,7 +4,7 @@ type: requirements
 status: specifying
 tier: T3
 product: minspec
-epic: EPIC-006  # fail-closed / visible gates: a retry that fails identically every cycle and burns the drain's error budget is a silent-brake failure
+epic: EPIC-009  # Team Readiness — concurrent multi-session coordination (worktree reclaim built on the SPEC-044 claim/lease)
 aspects: [dispatch, worktrees, drain, crash-recovery, invariant-2]
 relates_to: ["#3909", "#3452", DR-066, SPEC-044]
 implements: none
@@ -17,7 +17,7 @@ implements_reason: >-
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human reads it,
 > answers *Decisions needed (Clarify)*, and approves it before code changes.
 
-Materializes [#3909](https://github.com/AIClarityAU/minspec/issues/3909). Sibling: #3452 (stale
+Materializes #3909. Sibling: #3452 (stale
 *branch* left behind; handled by `scripts/lib/issue-branch.sh`). This is the stale *worktree
 registration* half. Claim/lease semantics: SPEC-044, DR-066.
 
