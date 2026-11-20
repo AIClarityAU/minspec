@@ -82,7 +82,14 @@ class Sink {
 /** Run every "Yes" corpus rule over `root`. Never throws; a rule that cannot run is a finding. */
 export function runCorpusRules(root: string): CorpusFinding[] {
   const s = new Sink(root);
-  const config = loadConfig(root);
+  // loadConfig is total today (it catches its own read/parse errors), but "never throws" must not
+  // hang on that: a throw is an error finding and the run continues on the defaults.
+  let config = DEFAULT_CONFIG;
+  try {
+    config = loadConfig(root);
+  } catch (err) {
+    s.unrunnable('corpus.config', 'the project config could not be loaded', err, true, path.join(root, '.minspec', 'config.json'));
+  }
   const specsDir = path.join(root, 'specs');
   const decisionsDir = path.join(root, config.decisionsDir);
   const read = (f: string): string => fs.readFileSync(f, 'utf-8');
@@ -129,7 +136,7 @@ export function runCorpusRules(root: string): CorpusFinding[] {
     const drFiles = walkOptionalRoot(decisionsDir, '.md').map((f) => ({ file: s.rel(f), content: read(f) }));
     for (const d of checkDeclaredDrIds(drFiles)) s.add('corpus.dr-id', path.join(root, d.files[0]), 'error', `DR id ${d.kind} - ${d.message}`);
   } catch (err) {
-    s.unrunnable('corpus.dr-id', 'the DR id uniqueness check could not run', err, false, decisionsDir);
+    s.unrunnable('corpus.dr-id', 'the DR id uniqueness check could not run', err, true, decisionsDir);
   }
 
   // Rule 20: `## In plain terms` (warn).
@@ -149,7 +156,7 @@ export function runCorpusRules(root: string): CorpusFinding[] {
       .map((f) => ({ file: s.rel(f), content: read(f) }));
     for (const d of checkDeclaredSpecIds(specFiles)) s.add('corpus.spec-id-collision', path.join(root, d.files[0]), 'error', `Spec id ${d.kind} - ${d.message}`);
   } catch (err) {
-    s.unrunnable('corpus.spec-id-collision', 'the spec id uniqueness check could not run', err, false, specsDir);
+    s.unrunnable('corpus.spec-id-collision', 'the spec id uniqueness check could not run', err, true, specsDir);
   }
 
   // Rule 8: INDEX.md status vs DR status (FATAL).
@@ -167,7 +174,7 @@ export function runCorpusRules(root: string): CorpusFinding[] {
       s.add('corpus.dr-amendment', path.join(decisionsDir, `${g.target}.md`), 'error', `DR amendment not carried out - ${g.message}`);
     }
   } catch (err) {
-    s.unrunnable('corpus.dr-amendment', 'the DR-amendment check could not run', err, false, decisionsDir);
+    s.unrunnable('corpus.dr-amendment', 'the DR-amendment check could not run', err, true, decisionsDir);
   }
   try {
     for (const g of validatePendingDrAmendments(decisionsDir)) {
