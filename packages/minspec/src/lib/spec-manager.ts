@@ -24,6 +24,7 @@ import {
   SPEC_KIT_FILES,
 } from './spec-layout';
 import { restoreLineEndings } from './text-io';
+import { listSpecs } from './spec-catalog';
 
 /** Summary of a spec for listing/display */
 export interface SpecSummary {
@@ -67,24 +68,11 @@ export interface SpecDetail {
 }
 
 // --- Slug generation ---
-
-/**
- * Convert a title to a URL-friendly slug.
- * Lowercase, non-alphanumeric → hyphens, collapsed, trimmed, max 50 chars.
- */
-export function slugify(title: string): string {
-  let slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-
-  if (slug.length > 50) {
-    slug = slug.slice(0, 50).replace(/-$/, '');
-  }
-
-  return slug;
-}
+// `slugify` lives in ./slug (SPEC-040 FR-6 / #988: re-homed so epic-manager and
+// friends need not import this module for it). Re-exported so every existing
+// `from './spec-manager'` site is unchanged.
+export { slugify } from './slug';
+import { slugify } from './slug';
 
 // --- ID generation ---
 
@@ -266,6 +254,25 @@ function findSpecEntry(specsDir: string, specId: string): SpecEntry | null {
     }
   }
   return null;
+}
+
+/**
+ * By-id resolution that agrees with the recursive catalog (#1452). Top-level
+ * lookup first (unchanged flat / spec-kit behaviour), then fall back to the
+ * `listSpecs` walk so product-nested specs (`specs/<product>/<spec>/...`) resolve.
+ * Deliberately NOT folded into `findSpecEntry`: `migrateLayout` shares that and
+ * moving nested specs is SPEC-053's scoped decision.
+ */
+function resolveSpecEntry(rootDir: string, specsDir: string, specId: string): SpecEntry | null {
+  const top = findSpecEntry(specsDir, specId);
+  if (top) return top;
+  const hit = listSpecs(rootDir).find((s) => s.id === specId);
+  if (!hit) return null;
+  const dir = path.dirname(hit.filePath);
+  if (path.basename(hit.filePath) === 'spec.md' && isSpecKitDirEntry(path.basename(dir))) {
+    return { kind: 'spec-kit', dirPath: dir, specMdPath: hit.filePath };
+  }
+  return { kind: 'flat', filePath: hit.filePath };
 }
 
 function readEntry(entry: SpecEntry): ParsedSpec {
@@ -561,7 +568,7 @@ export function listSpecsShallow(
  */
 export function getSpec(rootDir: string, specId: string): SpecDetail | null {
   const specsDir = resolveSpecsDir(rootDir);
-  const entry = findSpecEntry(specsDir, specId);
+  const entry = resolveSpecEntry(rootDir, specsDir, specId);
   if (!entry) return null;
 
   try {

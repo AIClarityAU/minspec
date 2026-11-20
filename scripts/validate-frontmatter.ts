@@ -45,15 +45,18 @@ import {
 } from '../packages/minspec/src/lib/reference-checker';
 import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
 import { checkStatusParity, inspectStatusLine, inspectAllStatusClaims } from '../packages/minspec/src/lib/status-parity';
-import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold';
+import { checkManagedRegionMarkers, MINSPEC_GITIGNORE_ENTRIES } from '../packages/minspec/src/lib/scaffold';
+import { missingGitignoreEntries } from './lib/gitignore-entries';
 // The corpus walkers, under their former local names. `safeGlob` now tolerates ONLY an
 // absent root; every other read failure reaches the rule's own catch instead of being
 // turned into an empty corpus (#1999).
 import { drsMissingPlainTerms } from './lib/dr-required-sections';
 import { walkFilesByExt as glob, walkOptionalRoot as safeGlob } from './lib/corpus-walk';
+import { findDecisionContradictions } from './lib/decision-status-contradiction';
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
 import { checkDrFrontmatterClosedSet } from './lib/dr-closed-set';
 import { checkDeclaredSpecIds } from './lib/spec-id-collision';
+import { checkDeclaredEpicIds } from './lib/epic-id-collision';
 import { findWrongDelegationCitations, isCorrectedSpec, type Delegation } from './lib/delegation-citation';
 import {
   SELF_HOSTED_TEMPLATE_NAMES,
@@ -496,6 +499,25 @@ try {
   );
 }
 
+// Rule 28 (FATAL, #396): epic-id uniqueness — the third register beside Rule 17 (DR) and
+// Rule 18 (spec). Concurrent `max+1` allocation hands two epics one id; the dangling-ref
+// check cannot see it because a duplicate still resolves. Fails CLOSED and visibly when the
+// corpus cannot be listed or read (invariant 2).
+{
+  const epicIdFiles: { file: string; content: string }[] = [];
+  eachFile(
+    'Rule 28',
+    listCorpus('Rule 28', epicsDir, '.md', true).filter((f) => /^EPIC-\d+/.test(basename(f))),
+    true,
+    (file) => {
+      epicIdFiles.push({ file: relative(ROOT, file), content: readFileSync(file, 'utf-8') });
+    },
+  );
+  for (const defect of checkDeclaredEpicIds(epicIdFiles)) {
+    fail(join(ROOT, defect.files[0]), `Epic id ${defect.kind} — ${defect.message}`);
+  }
+}
+
 // Rule 26 (FATAL, #1641): decision-record frontmatter closed set. The spec side has
 // CLOSED_SET_FIELDS; a DR `status:` was only compared to INDEX.md (Rule 8), never to a
 // legal value set. Asserts `status` is present and legal, and rejects retired field
@@ -884,6 +906,30 @@ async function checkCiReviewTemplatesFresh(): Promise<void> {
       else warn(`implement-evidence ${relative(ROOT, file)}: ${v.message}`);
     }
   });
+}
+
+// Rule 27 (#1812, `decision.status-contradiction`): one document marking the SAME decision id
+// (`D<n>`/`OQ<n>`/`PQ<n>`) both open ("still open", "remain open", "Decision needed — D1") and
+// resolved ("RESOLVED <date> — ...") — the stale-sibling defect ai-review caught post-push in
+// #1658 and #1797. A marker match on this repo's own vocabulary, NOT a general consistency
+// checker: contradictions phrased outside the conventional forms are missed (ai-review stays
+// the backstop). `warn` by default, `error` via `decisionStatusContradiction` (FR-7 ratchet).
+{
+  const dcCfg = loadConfig(ROOT);
+  const dcFailsClosed = dcCfg.decisionStatusContradiction === 'error';
+  const dcRoots = [specsDir, resolveDecisionsDir()];
+  for (const root of dcRoots) {
+    eachFile('Rule 27', listCorpus('Rule 27', root, '.md', dcFailsClosed), dcFailsClosed, (file) => {
+      for (const f of findDecisionContradictions(readFileSync(file, 'utf-8'))) {
+        const msg =
+          `${f.id} is marked open at line ${f.openLine} and resolved at line ${f.resolvedLine} ` +
+          `(#1812). Update every register that states it (frontmatter comment, FR bodies, Clarify ` +
+          `block, DR note) so the document says one thing.`;
+        if (dcFailsClosed) fail(file, msg);
+        else warn(`decision-status-contradiction ${relative(ROOT, file)}: ${msg}`);
+      }
+    });
+  }
 }
 
 // Rule 14 (harden, #760): every MANAGED_REGION_TEMPLATES output path present on
@@ -1319,6 +1365,21 @@ try {
     join(ROOT, '.minspec', 'delegations.json'),
     `delegation-citation check could not run (${err instanceof Error ? err.message : String(err)}) — failing closed (#3463).`,
   );
+}
+
+// #383: committed .gitignore must cover every MINSPEC_GITIGNORE_ENTRIES line. The runtime
+// writer (ensureGitignoreEntries) is extension-version-dependent; a stale VSIX never
+// backfilled template-baseline.json, which then leaked untracked. Fails closed on an
+// unreadable .gitignore. Only applies where MinSpec is opted in (.minspec/ present).
+if (existsSync(join(ROOT, '.minspec'))) {
+  const giPath = join(ROOT, '.gitignore');
+  try {
+    for (const m of missingGitignoreEntries(readFileSync(giPath, 'utf-8'), MINSPEC_GITIGNORE_ENTRIES)) {
+      fail(giPath, `missing MinSpec ephemeral-data entry "${m}" (MINSPEC_GITIGNORE_ENTRIES, #383). Add it, or it leaks untracked.`);
+    }
+  } catch (err) {
+    fail(giPath, `gitignore-entries check could not run (${err instanceof Error ? err.message : String(err)}) - failing closed (#383).`);
+  }
 }
 
 checkCiReviewTemplatesFresh().then(() => {
