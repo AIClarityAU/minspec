@@ -64,12 +64,13 @@ import { parseSpec } from './lib/spec';
 import { loadConfig, resolveAndValidate } from './lib/config';
 import { trackActiveAdrEditor } from './lib/active-adr';
 import { recordApprovableView } from './lib/recent-approvables';
-import { resolveTargetFolderNonInteractive } from './lib/resolve-folder';
+import { resolveTargetFolderNonInteractive, initLastPickMemory } from './lib/resolve-folder';
 import { registerReferenceDiagnostics } from './lib/diagnostics';
 import { evaluateConstitution } from './lib/constitution-nudge';
 import { listSpecs } from './lib/spec-catalog';
 
 export function activate(context: vscode.ExtensionContext): void {
+  initLastPickMemory(context.workspaceState);
   trackActiveSpecEditor(context);
   trackActiveAdrEditor(context);
 
