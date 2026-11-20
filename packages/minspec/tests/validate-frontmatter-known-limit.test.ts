@@ -22,13 +22,13 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { TSX_BIN } from './helpers/run-tsx-cli';
 
 const REPO_ROOT = process.cwd();
 const SCRIPT_PATH = path.join(REPO_ROOT, 'scripts', 'validate-frontmatter.ts');
 // Resolve the repo-local tsx by absolute path rather than via `npx` — see
 // validate-frontmatter-claim-words.test.ts for why `npx` is unsafe here (the
 // fixture cwd is outside the repo, and `npx` could try to FETCH tsx).
-const TSX_BIN = path.join(REPO_ROOT, 'node_modules', '.bin', 'tsx');
 
 function writeSrcFile(tmpDir: string, relPathUnderPackages: string, content: string): void {
   const full = path.join(tmpDir, 'packages', relPathUnderPackages);
