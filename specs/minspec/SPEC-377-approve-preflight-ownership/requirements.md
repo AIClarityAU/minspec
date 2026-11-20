@@ -6,10 +6,10 @@ tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - an approval that cannot land is a false signpost
 aspects: [approval, validator, preflight, ownership, silent-gate, tier-0]
-relates_to: ["#1179", "#1177", "#1064", "#1115", "#137", SPEC-038, SPEC-022, SPEC-045, SPEC-371, DR-003]
+relates_to: ["#1179", "#1177", "#1064", "#1115", "#137", "#1806", SPEC-038, SPEC-051, SPEC-022, SPEC-045, SPEC-371, DR-003]
 ---
 
-# SPEC-377: Approve Spec pre-flights the past-Clarify ownership rule before it advances the phase (Requirements)
+# SPEC-377: Approve Spec past-Clarify ownership pre-flight - residual gaps after the shipped guard (Requirements)
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human reads
 > it, answers *Decisions needed (Clarify)*, and approves it before code changes.
@@ -18,62 +18,66 @@ Materializes [#1179](https://github.com/AIClarityAU/minspec/issues/1179): approv
 succeeded, then CI rejected it (`ownership.implements.missing`), and the only fix (adding
 `implements:`) voids the approval just given.
 
-## Root cause (mechanism + missing gate)
+## Root cause (mechanism + gate status)
 
-- **Mechanism.** `approveSpec` (`packages/minspec/src/commands/approve.ts`, the `try` block after the
-  approver check) calls `advanceSpecToImplementing` for a `new`/`specifying` spec. That writes
-  `status: planning` and `phases.plan: in-progress`.
-- `validateOwnership` (`packages/minspec/src/lib/spec-validator.ts`, ~line 989-1034) fires only when
-  `phases.plan` is `in-progress` or `done` (`inBuildPath`), on a T3+ primary spec. So **the act of
-  approving is what arms the rule**; it is evaluated only afterwards, in CI.
-- The fix is not free: `stripLifecycle` (`packages/shared/src/canonical.ts:60`) drops only `status:` and
-  `phases:`. `implements:`/`affects:` are hashed, so adding them after approval makes
-  `resolveStatus` return `stale`.
-- **Missing gate.** The approve command has no mirror of the validator's past-Clarify rules, so it can
-  mint a state that is approved and unlandable. Same asymmetry class as #137 and the SPEC-004 `epic:`
-  defect. Contrast `resolveBranchDestination` (`approve-commit.ts`), which mirrors the pre-commit hook so
-  the command refuses before acting.
+- **Mechanism.** `approveSpec` calls `advanceSpecToImplementing` for a `new`/`specifying` spec, writing
+  `status: planning` and `phases.plan: in-progress`. `validateOwnership`
+  (`packages/minspec/src/lib/spec-validator.ts`, ~line 989-1034) fires only when `phases.plan` is
+  `in-progress`/`done`, so **the act of approving is what arms the rule**.
+- **The pre-flight gate already ships (corrected; an earlier draft claimed it was missing).**
+  `packages/minspec/src/commands/approve.ts:317-330` calls `assertOwnershipDeclaredForAdvance`
+  (`packages/minspec/src/lib/ownership-advance-guard.ts:66`) BEFORE any write; it delegates to
+  `violationsIntroducedByApproval` (`spec-validator.ts:1210`), which re-runs `validateSpec` on the
+  post-advance phase map and returns only newly-introduced `error`-severity violations. It was added in
+  #1806 / SPEC-051 for the same bug class (#1300, #1348). `approval.ts` and `spec.ts` reach the same
+  guard, so there is one enforcement point.
+- **Why #1179 happened anyway (not re-verified against the pre-#1806 tree; treat as inferred).** The
+  report predates the shared guard. Two residual mechanisms remain, and they are all this spec now
+  covers:
+  1. **Config ratchet.** `ownership.implements.missing` is `error` only when
+     `ownershipDeclaration === 'error'` (`spec-validator.ts:1031`; default `'warn'`,
+     `config.ts:179`), and the guard filters to `error` severity (`spec-validator.ts:1220`). A repo on
+     the default is never refused at approve time. This repo is on `error` (`.minspec/config.json:57`).
+  2. **Fail-open guard.** On an evaluation error the guard `console.warn`s and lets the advance
+     proceed (`ownership-advance-guard.ts:96-101`), relying on CI as the backstop.
+- **Hash void-on-edit trap (unchanged, still true).** `stripLifecycle` (`packages/shared/src/canonical.ts:60`)
+  drops only `status:` and `phases:`; `implements:`/`affects:` are hashed, so adding them after approval
+  makes `resolveStatus` return `stale`. The guard prevents reaching that state for error-severity rules;
+  it does not remove the trap.
 
 ## Functional requirements
 
-1. **FR-1 Pre-flight before the write.** For a spec that Approve would advance (the `wasPreImpl` case),
-   the command evaluates the validator rules that the advance would newly arm, against the spec as it
-   would look after the advance, BEFORE `advanceSpecToImplementing` and `recordApproval`. At minimum:
-   `ownership.implements.missing` and `ownership.implements.invalid`.
-2. **FR-2 One source of truth.** The pre-flight calls the validator's own rule function (or a shared,
-   exported predicate it also uses) and shows the validator's own message. No second hand-written copy of
-   the rule (duplicate predicates drift; cf. SPEC-371).
-3. **FR-3 Refuse, don't half-act.** On a violation the command writes nothing: no phase advance, no
-   sidecar, no commit. The refusal names the rule and the exact fix.
-4. **FR-4 Offer the free edit.** The refusal offers to add the missing field while the spec is still
-   unapproved (editing is free then): open the spec at the frontmatter with an `implements:` stub, or
-   offer the `implements: none` + `implements_reason:` escape. After the human saves, re-running Approve
-   proceeds. The command never invents the owned-path list itself.
-5. **FR-5 No-op when armed rules are already satisfied.** T1/T2 specs, specs that already declare valid
-   ownership, and re-approval of an already-advanced spec (not `wasPreImpl`) are unaffected: no new
-   prompt, same behaviour as today.
-6. **FR-6 Parity test.** A test asserts that for every spec shape (T1-T4, with/without `implements:`,
-   `none` with/without reason, invalid token), the pre-flight verdict equals the verdict of
-   `validateSpec` run on the post-advance file. The test must fail if a rule is added to the
-   post-advance validator set but not to the pre-flight.
-7. **FR-7 Fail closed, visibly.** If the pre-flight itself errors (unreadable file, parse failure), the
-   command refuses with that error; it never proceeds as if the check passed (constitution invariant 2).
-8. **FR-8 Offline.** No network call (invariant 1); runs only under the `.minspec/` opt-in marker
+Already shipped (do NOT re-specify; Plan must verify with tests, not rebuild): pre-flight before the
+write, single source of truth via `violationsIntroducedByApproval`, refuse-without-writing, and the
+refusal modal with "Open Spec" (`approve.ts:317-330`). Remaining scope:
+
+1. **FR-1 Audit existing coverage.** Confirm by test that, under `ownershipDeclaration: 'error'`, a T3
+   spec with no `implements:` / no valid `none` + `implements_reason:` is refused with no file change,
+   sidecar, or commit (AC-1), and that the verdict equals `validateSpec` on the post-advance file.
+   Add only the tests missing from the existing guard suite.
+2. **FR-2 Decide the fail-open/fail-closed tension (Decision 2).** Constitution invariant 2 says a
+   missing or errored witness fails closed and visibly; the guard is deliberately and test-pinned
+   fail-open. Either amend the guard to refuse on infrastructure error, or record in a DR why the
+   announced degrade plus CI backstop satisfies invariant 2.
+3. **FR-3 Decide the warn-config gap (Decision 1).** Under `ownershipDeclaration: 'warn'`, approval can
+   still mint a state that later needs a hashed edit. Decide whether to leave it (warnings never gate
+   approval) or surface the pending warning at approve time without blocking.
+4. **FR-4 Hash trap (Decision 3).** Decide whether `implements:`/`affects:` should be lifecycle fields.
+5. **FR-5 No-op elsewhere.** T1/T2, already-declared specs, and re-approval of an advanced spec behave as
+   today.
+6. **FR-6 Offline and opt-in.** No network call (invariant 1); runs only under the `.minspec/` marker
    (invariant 3).
 
 ## Acceptance criteria
 
-- AC-1: Approving a T3 spec with no `implements:` and no `none` escape leaves the spec file byte-identical,
-  creates no sidecar and no commit, and shows the validator's `ownership.implements.missing` message
-  (FR-1, FR-3).
-- AC-2: After adding `implements: [<valid path>]` and re-running Approve, the approval succeeds and
-  `npm run validate` passes on the result with no further edit; the hash recorded equals the hash of the
-  landed file (FR-1, FR-4).
-- AC-3: `implements: none` without `implements_reason:` is refused; with a reason it is accepted (FR-2).
-- AC-4: A T1/T2 spec approves exactly as before (FR-5).
-- AC-5: The FR-6 parity test exists and goes red when the pre-flight omits a rule the validator applies
-  post-advance.
-- AC-6: Reproduction of #1177: SPEC-045 as it stood (T3, no `implements:`) is refused, not approved.
+- AC-1: Under `ownershipDeclaration: 'error'`, approving a T3 spec with no ownership declaration leaves
+  the file byte-identical, creates no sidecar or commit, and shows the validator's own message (test
+  exists or is added).
+- AC-2: After adding a valid `implements:` and re-running Approve, approval succeeds and
+  `npm run validate` passes on the result with no further edit.
+- AC-3: Each Clarify decision below is answered, and a DR is filed for any behaviour change to the
+  fail-open guard or the hashed-field set.
+- AC-4: A T1/T2 spec approves exactly as before.
 
 ## Invariants the change must not break
 
@@ -87,21 +91,18 @@ succeeded, then CI rejected it (`ownership.implements.missing`), and the only fi
 
 ## Decisions needed (Clarify)
 
-1. **Should `implements:`/`affects:` be lifecycle (stripped from the hash) instead?**
-   - **A. Pre-flight only (rec).** Smallest blast radius; closes the deadlock for every future spec;
-     the ownership claim stays part of what the human signed. Cost: the human must declare ownership
-     before approving, even for a spec whose code list is still uncertain.
-   - **B. Also strip `implements:`/`affects:` in `stripLifecycle`.** Removes the void-on-edit trap
-     generally. Cost: an ownership claim (which arms the spec-gate) becomes changeable without
-     re-approval, and every existing approval hash changes, so all sidecars would need migration; needs
-     its own DR and a hash-migration plan. Could follow A later if the trap recurs.
-   - **C. Neither**: keep today's behaviour. Not recommended; the deadlock stays.
-2. **Which rules does the pre-flight cover?** (rec) Every rule `validateSpec` would report as an error
-   on the post-advance file (generic), not only ownership. Cost: more refusals at approve time, though
-   each is a defect CI would already reject. Alternative: ownership rules only; cheaper, but leaves the
-   same asymmetry for the next rule that keys off `phases.plan`.
-3. **Escape-hatch UX.** (rec) Refusal modal with "Open spec" action that inserts an `implements:` stub.
-   Cost: touches the spec file before approval. Alternative: message only.
+1. **Warn-config gap.** Under the default `ownershipDeclaration: 'warn'`, should Approve surface the
+   pending `ownership.implements.missing` warning (non-blocking)? **(rec) Surface, non-blocking.** Cost:
+   one more prompt for repos that opted into warn; warnings never gate approval, so no deadlock.
+   Alternative: leave as is (no cost, gap remains).
+2. **Guard fail-open vs invariant 2.** **(rec) Keep fail-open, record the reasoning in a DR** (the
+   degrade is announced and CI is the independent second witness). Cost: an approval can still land
+   unchecked when the guard itself breaks. Alternative: fail closed; cost: a guard bug makes approval
+   unavailable, and the existing tests pinning fail-open must change.
+3. **Strip `implements:`/`affects:` from the hash?** **(rec) No (option A, status quo).** Cost: the human
+   must declare ownership before approving. Option B removes the void-on-edit trap but lets an
+   arming claim change without re-approval, changes every existing approval hash, and needs its own DR
+   plus a sidecar migration plan.
 
 ## Follow-ups (tracked)
 
