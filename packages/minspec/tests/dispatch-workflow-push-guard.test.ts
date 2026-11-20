@@ -1,6 +1,7 @@
 /**
  * T0 — every dispatch publish path consults the workflow-push guard (#1269, #1120).
- * The App token cannot push `.github/workflows/`; a path that skips the check strands
+ * Unless the capability probe confirms `workflows: write`, the forge rejects a
+ * `.github/workflows/` push; a path that skips the check strands
  * a finished build. Text-level wiring test, matching sibling dispatch-*.test.ts style.
  */
 import { describe, it, expect } from 'vitest';
@@ -32,6 +33,10 @@ function fnBody(name: string): string {
 describe('workflow-push guard covers every publish path (#1269)', () => {
   it('shared predicate consults workflow_push_allowed', () => {
     expect(fnBody('workflow_publish_blocked')).toContain('workflow_push_allowed');
+  });
+
+  it('shared predicate honours the capability probe (agrees with pre-push hook)', () => {
+    expect(fnBody('workflow_publish_blocked')).toContain('workflow_permission_granted');
   });
 
   it('shepherd publish uses the shared predicate', () => {
