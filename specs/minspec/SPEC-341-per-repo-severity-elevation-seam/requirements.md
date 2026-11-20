@@ -1,7 +1,7 @@
 ---
 id: SPEC-341
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute Extension (Autopilot Mode, DR-036)
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Nothing is built yet; the seam, the startup hook and the T0 tests are all
   planned (#237).
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -72,6 +72,14 @@ Deliverable registry (#233), pipeline-state file (#234), forged-approval guard a
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 3 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 - **Q1 Config shape.** (a) `severityElevation: { classes: string[] }` generic list **(rec)** - one key, extensible; cost: a free-form list needs validation (FR-6). (b) A single boolean `autopilotStrict` - simplest to set at startup; cost: all-or-nothing, cannot ratchet one class and invites mode-coupling in core. (c) Per-rule keys like `ownershipDeclaration` - matches precedent; cost: a new key per rule, which is the sprawl this seam avoids.
+
+  **Recorded selection: the recommended option,** option (a), `severityElevation: { classes: string[] }`. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **Q2 Tier floor.** Should elevated coverage also fail T1 specs (no acceptance/aspect at T1)? (a) No, T1 stays exempt **(rec)** - matches the tier ceremony table; cost: a T1 spec with nothing still builds. (b) Yes - strictest; cost: forces ceremony on one-sentence specs, against tenet 2.
+
+  **Recorded selection: the recommended option,** option (a), no, T1 stays exempt. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **Q3 Where startup lives.** No Autopilot startup code exists yet. (a) This spec only ships the seam plus a pure helper that returns the elevation config; startup wiring lands with the Autopilot runner **(rec)** - keeps scope small; cost: the "startup sets it" criterion is verified at the helper, not end to end. (b) Build a minimal startup entry here - end-to-end proof; cost: scope expansion into the runner (#234/#235 territory).
+
+  **Recorded selection: the recommended option,** option (a), ship only the seam plus a pure helper, and startup wiring lands with the Autopilot runner. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.

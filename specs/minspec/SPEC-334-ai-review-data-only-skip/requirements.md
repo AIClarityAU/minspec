@@ -1,7 +1,7 @@
 ---
 id: SPEC-334
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-010  # Reviewer Across All Approvables - cost of the ai-review panel on pushes that change no code
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Expected surface: one pure seam in .github/scripts/ai-review-guard.js, a step in
   .github/workflows/ai-review.yml, and the matching scaffolded templates (ci-review-templates.ts). None is built.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -186,6 +186,8 @@ Neither finding is acted on in this spec (CLAUDE.md triage rule 1).
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 3 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 1. **What conclusion a skip posts.**
    - (a) **`action_required` (rec)**. It blocks a required `ai-review` check, which keeps invariant 4, and
      it already means "not reviewed, re-run to review" in this codebase. Cost: a PR whose head is a skip
@@ -196,18 +198,24 @@ Neither finding is acted on in this spec (CLAUDE.md triage rule 1).
      merge unreviewed.
    - (c) Post no check-run, so the check stays pending. Cost: "Expected - waiting for status" with no
      reason shown, which goes against the visible-failure rule.
+
+   **Recorded selection: the recommended option,** option (a), `action_required`. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 2. **Pattern syntax.**
    - (a) **A JavaScript regular expression, evaluated by the guard (rec).** One matcher in one tested place.
      Cost: it is not strictly the POSIX ERE the issue names (`[[:digit:]]` is not supported), so the
      documentation must say "JavaScript regex".
    - (b) A newline-separated glob list (gitignore style). It is more familiar for paths, but it needs a glob
      engine in the guard, or a dependency, and its semantics differ from `paths-ignore`.
+
+   **Recorded selection: the recommended option,** option (a), a JavaScript regular expression evaluated by the guard. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 3. **Which rounds can anchor.**
    - (a) **Only a recorded pass (rec).** It reuses the existing `review-round:v1` record, which is written
      only for a pass (`ai-review-guard.js:922-925`), so no new record format is needed. Cost: a PR sitting
      on `ai-review:changes` still pays the full panel on every data push until it is fixed.
    - (b) A pass or a voter-completed `changes` round. That also saves on blocked PRs, but needs a new
      record on `changes` rounds, and so a format change to the round record.
+
+   **Recorded selection: the recommended option,** option (a), only a recorded pass. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 ## Decision record
 
