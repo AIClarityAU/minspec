@@ -265,14 +265,20 @@ describe('session-identity — the last full check, with its age', () => {
 
 describe('session-identity — without flock', () => {
   it('still runs one full check at a time (mkdir lock fallback)', async () => {
-    // A PATH of symlinks to every tool on the real PATH except flock.
+    // A PATH of symlinks to every tool on the real PATH except flock. First PATH entry
+    // wins, as in a shell lookup. Track the names already linked rather than asking
+    // fs.existsSync(dest): that follows the link, so a DANGLING tool on PATH reads as
+    // absent and is linked again (EEXIST) when a later PATH dir repeats it — which a CI
+    // runner's PATH does (/bin is /usr/bin; /snap/bin is listed twice).
     const bin = path.join(home, 'bin-noflock');
     fs.mkdirSync(bin, { recursive: true });
+    const linked = new Set<string>(['flock']);
     for (const d of (process.env.PATH ?? '/usr/bin:/bin').split(':')) {
-      if (!fs.existsSync(d)) continue;
+      if (!d || !fs.existsSync(d)) continue;
       for (const f of fs.readdirSync(d)) {
-        const dest = path.join(bin, f);
-        if (f !== 'flock' && !fs.existsSync(dest)) fs.symlinkSync(path.join(d, f), dest);
+        if (linked.has(f)) continue;
+        linked.add(f);
+        fs.symlinkSync(path.join(d, f), path.join(bin, f));
       }
     }
     stub({ locRc: 0, fullSleep: 3 });
