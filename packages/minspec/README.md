@@ -218,6 +218,7 @@ All settings are under the `minspec.*` namespace in VS Code Settings.
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
+| `minspec.defaultProject` | `string` | `""` | Multi-root workspaces: workspace folder name (or absolute path) commands target when the active editor is not inside any folder. Empty reuses the last project you picked, else prompts |
 | `minspec.specsDir` | `string` | `"specs"` | Directory for spec files, relative to workspace root |
 | `minspec.decisionsDir` | `string` | `"docs/decisions"` | Directory for Architecture Decision Records, relative to workspace root |
 | `minspec.specsLayout` | `"flat"` or `"spec-kit"` | `"flat"` | One file per spec, or one folder per spec with separate `spec.md`, `plan.md` and `tasks.md` (strict Spec Kit layout) |
