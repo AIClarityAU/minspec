@@ -4,13 +4,39 @@ import { pickFolderPath } from './workspace';
 
 /**
  * Resolve the workspace folder a write-command should target. Multi-root safe:
- * prefers the active editor's folder, else prompts the user to pick one.
+ * prefers the active editor's folder, else the `minspec.defaultProject` setting
+ * (folder name or absolute path), else the last folder the user picked, else
+ * prompts the user to pick one (AIClarityAU/minspec#299).
  *
  * Surfaces the "no folder open" error itself. Returns undefined on no-folder OR
  * on a cancelled pick — callers should `if (!folder) return;` with no extra
  * message. Replaces `workspaceFolders?.[0]`, which silently targeted the first
  * folder in a multi-root workspace (AIClarityAU/minspec#123).
  */
+const LAST_PICK_KEY = 'minspec.lastPickedProject';
+let lastPick: string | undefined;
+let lastPickMemento: vscode.Memento | undefined;
+
+/** Wire workspaceState so the last picked project survives reloads. */
+export function initLastPickMemory(memento: vscode.Memento | undefined): void {
+  lastPickMemento = memento;
+  lastPick = undefined;
+}
+
+/**
+ * Match the `minspec.defaultProject` setting against workspace folders: by
+ * folder name first, then by exact absolute path. Returns the fsPath, or
+ * undefined for an empty/unmatched value (falls through to the next rule).
+ */
+export function matchDefaultProject(
+  folders: { name: string; fsPath: string }[],
+  setting: string | undefined,
+): string | undefined {
+  const want = setting?.trim();
+  if (!want) return undefined;
+  return (folders.find(f => f.name === want) ?? folders.find(f => f.fsPath === want))?.fsPath;
+}
+
 export async function resolveTargetFolder(): Promise<string | undefined> {
   const folders = vscode.workspace.workspaceFolders ?? [];
   if (folders.length === 0) {
@@ -24,10 +50,25 @@ export async function resolveTargetFolder(): Promise<string | undefined> {
   );
   if (resolved) return resolved;
 
-  // Multiple folders and no active-file match → ask which project.
-  const picked = await vscode.window.showWorkspaceFolderPick({
-    placeHolder: 'MinSpec: select the project for this command',
+  // No active-file match → configured default project, else last pick, else ask.
+  const byName = (f: vscode.WorkspaceFolder): { name: string; fsPath: string } => ({
+    name: f.name,
+    fsPath: f.uri.fsPath,
   });
+  const configured = vscode.workspace.getConfiguration?.('minspec').get<string>('defaultProject');
+  const fromSetting = matchDefaultProject(folders.map(byName), configured);
+  if (fromSetting) return fromSetting;
+  const last = lastPick ?? lastPickMemento?.get<string>(LAST_PICK_KEY);
+  if (last && folders.some(f => f.uri.fsPath === last)) return last;
+
+  const picked = await vscode.window.showWorkspaceFolderPick({
+    placeHolder:
+      'MinSpec: select the project for this command (set minspec.defaultProject to skip this)',
+  });
+  if (picked) {
+    lastPick = picked.uri.fsPath;
+    void lastPickMemento?.update(LAST_PICK_KEY, lastPick);
+  }
   return picked?.uri.fsPath;
 }
 
