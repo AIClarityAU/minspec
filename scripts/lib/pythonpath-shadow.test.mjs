@@ -112,3 +112,31 @@ test('checker: shadow in a SIBLING repo does not fail; same shadow in THIS repo 
   assert.equal(own.status, 1, own.stdout + own.stderr);
   assert.match(own.stdout, /coverage\.py shadows python module "coverage"/);
 });
+
+// #1185 review on #3872: `test-all.sh --coverage` runs Vitest with --coverage, which
+// by default writes a bare `coverage/` at the repo root, then runs this checker, which
+// then (correctly) flags that dir whenever python3 lacks coverage.py. The documented
+// run therefore went red on its own output. CI reads ./coverage/coverage-summary.json
+// (workflow, not editable here), so the default dir stays; only the LOCAL script
+// redirects Vitest's report to a directory that cannot shadow an adapter module.
+test('test-all.sh --coverage sends Vitest output to a non-shadowing, gitignored dir', () => {
+  const sh = fs.readFileSync(path.join(REPO, 'scripts', 'test-all.sh'), 'utf8');
+  const line = sh.split('\n').find((l) => /npx vitest run --coverage/.test(l) && !l.trim().startsWith('#'));
+  assert.ok(line, 'test-all.sh must still run `npx vitest run --coverage`');
+  const m = line.match(/--coverage\.reportsDirectory=(\S+)/);
+  assert.ok(m, `coverage run must set --coverage.reportsDirectory (found: ${line.trim()})`);
+  const dir = m[1].replace(/^['"]|['"]$/g, '');
+  const d = tmp();
+  fs.mkdirSync(path.join(d, dir));
+  assert.deepEqual(findShadowingEntries(d), [], `${dir}/ would shadow a python adapter module`);
+  const ignored = fs.readFileSync(path.join(REPO, '.gitignore'), 'utf8').split('\n').map((l) => l.trim());
+  assert.ok(ignored.includes(`${dir}/`) || ignored.includes(dir), `.gitignore must list ${dir}/`);
+});
+
+// Finding 2: a shadowing hit must not hide the discovery summary or the zero-checks guard.
+test('checker: a shadowing hit still prints the discovery summary before failing', { skip: !picomatchDir && 'picomatch not resolvable' }, () => {
+  const own = runChecker('repo');
+  assert.equal(own.status, 1, own.stdout + own.stderr);
+  assert.match(own.stdout, /known gaps \(no Testing-panel controller\)/);
+  assert.match(own.stderr, /repo-root entr(y|ies) would break/);
+});

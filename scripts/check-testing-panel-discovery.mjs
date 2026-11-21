@@ -272,23 +272,17 @@ function main() {
   // other repos whose layout this check does not own.
   const roots = [REPO_ROOT];
   let shadowed = 0;
+  let shadowFailed = false;
   for (const root of roots) {
     for (const h of findShadowingEntries(root, undefined, pythonModuleInstalled)) {
       shadowed++;
       console.log(`  FAIL  ${root}/${h.entry} shadows python module "${h.module}" on the injected PYTHONPATH`);
     }
   }
-  if (shadowed > 0) {
-    console.error(
-      `FAIL  ${shadowed} repo-root entr${shadowed === 1 ? 'y' : 'ies'} would break the Python controller's ` +
-        `Coverage profile (every python test reports "error"; CLI and Run profile still pass).\n` +
-        `      Fix: delete/move the entry, or install the real module (Vitest's coverage/ report\n` +
-        `      dir is harmless once coverage.py is installed — a bare directory only wins\n` +
-        `      when no regular package of that name exists).`,
-    );
-    process.exit(1);
+  shadowFailed = shadowed > 0;
+  if (!shadowFailed) {
+    console.log(`runnability: no repo-root entry shadows a python adapter module.\n`);
   }
-  console.log(`runnability: no repo-root entry shadows a python adapter module.\n`);
 
   console.log(`known gaps (no Testing-panel controller):`);
   for (const g of KNOWN_GAPS) console.log(`  - ${g}`);
@@ -307,6 +301,17 @@ function main() {
         '      This is a failure, not a pass: a discovery gate that verifies nothing\n' +
         '      reports green over an unverified claim. Likely causes: no config file\n' +
         '      resolved, or every expected folder is missing from disk.',
+    );
+    process.exit(1);
+  }
+
+  if (shadowFailed) {
+    console.error(
+      `FAIL  ${shadowed} repo-root entr${shadowed === 1 ? 'y' : 'ies'} would break the Python controller's ` +
+        `Coverage profile (every python test reports "error"; CLI and Run profile still pass).\n` +
+        `      Fix: delete/move the entry, or install the real module (Vitest's coverage/ report\n` +
+        `      dir is harmless once coverage.py is installed — a bare directory only wins\n` +
+        `      when no regular package of that name exists).`,
     );
     process.exit(1);
   }

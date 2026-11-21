@@ -153,7 +153,7 @@ if [ "$WITH_COVERAGE" -eq 1 ]; then
   # Coverage thresholds come from .minspec/config.json (coverage.minimumPercentage),
   # read by vitest.config.ts — NOT from a VS Code setting, so a headless run and the
   # Testing panel's coverage profile gate on the same number.
-  run_suite "MinSpec · Vitest (+coverage)" vitest "$MINSPEC_ROOT" npx vitest run --coverage
+  run_suite "MinSpec · Vitest (+coverage)" vitest "$MINSPEC_ROOT" npx vitest run --coverage --coverage.reportsDirectory=.vitest-coverage
 else
   run_suite "MinSpec · Vitest" vitest "$MINSPEC_ROOT" npx vitest run
 fi
