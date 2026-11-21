@@ -30,6 +30,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { runTsxCli, REPO_ROOT } from './helpers/run-tsx-cli';
+import { MINSPEC_GITIGNORE_ENTRIES } from '../src/lib/scaffold';
 
 const SCRIPT_PATH = path.join(REPO_ROOT, 'scripts', 'validate-frontmatter.ts');
 
@@ -66,6 +67,8 @@ const GOLDEN: Files = {
     '---\nid: SPEC-002\ntype: requirements\nstatus: new\ntier: T1\nepic: EPIC-001\n---\n\n' +
     '# Beta\n\n**Status:** New\n\nBody.\n',
   'packages/demo/src/limit.ts': '// This is a known limit of the demo (#12).\nexport const x = 1;\n',
+  // #383: the gitignore gate runs wherever .minspec/ exists and fails closed without it.
+  '.gitignore': MINSPEC_GITIGNORE_ENTRIES.join('\n') + '\n',
   // Rule 25 only runs when this file exists, so the golden control must carry it.
   '.minspec/delegations.json': JSON.stringify({
     delegations: [{ id: 'DLG-001', covers: ['spec-approval', 'engineering-dr-acceptance'] }],
@@ -316,6 +319,16 @@ const MUTANTS: Mutant[] = [
     severity: 'FAIL',
     expect: /DR frontmatter — field `approved-by` is a retired spelling/,
     mutate: (f) => replaceOnce(f, 'docs/decisions/DR-001.md', 'date: 2026-01-01\n---', 'date: 2026-01-01\napproved-by: x\n---'),
+  },
+  {
+    rules: ['28'],
+    name: 'two epic files declaring one id',
+    severity: 'FAIL',
+    expect: /Epic id duplicate/,
+    alsoTrips: [/Epic id mismatch/],
+    mutate: (f) => {
+      f['docs/epics/EPIC-002-other.md'] = '---\nid: EPIC-001\nslug: other\ntitle: Other\n---\n\n# Other\n';
+    },
   },
 ];
 
