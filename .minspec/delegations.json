@@ -13,6 +13,18 @@
       "tiers": ["T1", "T2", "T3", "T4"],
       "reviewBy": "2027-01-17",
       "tripwire": { "metric": "repeat-fix-share", "max": 0.13 }
+    },
+    {
+      "id": "DLG-002",
+      "decision": "DR-122",
+      "words": "g",
+      "said": "2026-11-13",
+      "source": "Founder's reply to queue item cg1112 (the operator task queue, outside this repo), choosing option g: agents may select the recommended answer to a T3 spec's Clarify items, recorded under the bot's own name, SPEC-217, SPEC-227 and every T4 spec excepted. His reply was the single key quoted in words; the option's full text is not recorded in this repo. Inert until DR-122 is accepted; the exclusions are enforced in scripts/lib/autonomy.ts clarifySelectionRefusal, not by this entry.",
+      "repo": "AIClarityAU/minspec",
+      "covers": ["clarify-selection"],
+      "tiers": ["T3"],
+      "reviewBy": "2027-02-13",
+      "tripwire": { "metric": "repeat-fix-share", "max": 0.13 }
     }
   ]
 }

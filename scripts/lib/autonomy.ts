@@ -240,13 +240,24 @@ export function readAutonomy(repoRoot: string, env: NodeJS.ProcessEnv = process.
 // `scripts/lib/delegated-approval.ts` is the only path that writes a bot record (after
 // an independent AI review pass). The repeat-fix share comes from
 // `scripts/lib/repeat-fix-share.ts`.
+//
+// `clarify-selection` (DR-122, proposed) has NO consumer yet: no writer asks
+// `evaluateDelegation` for it, so it changes nothing until #3688 lands, and nothing
+// at all until DR-122 is accepted.
 
 /** The only actor a delegation admits. Exact match: no trimming, no casing. */
 export const BOT_ACTOR = 'minspec-sdd[bot]';
 
-/** Acts a delegation may cover. Anything else in a record drops the record. */
-export type DelegatedAct = 'spec-approval' | 'engineering-dr-acceptance';
-const DELEGATED_ACTS: readonly DelegatedAct[] = ['spec-approval', 'engineering-dr-acceptance'];
+/**
+ * Acts a delegation may cover. Anything else in a record drops the record.
+ *
+ * `clarify-selection` (DR-122, proposed): the bot selects the RECOMMENDED answer to a
+ * T3 spec's Clarify items, recorded under its own name. It is a separate act from
+ * `spec-approval`: a delegation that covers one never covers the other, and the
+ * clarify gate in `evaluateDelegation` (`clarifySelectionRefusal`) applies to it alone.
+ */
+export type DelegatedAct = 'spec-approval' | 'engineering-dr-acceptance' | 'clarify-selection';
+const DELEGATED_ACTS: readonly DelegatedAct[] = ['spec-approval', 'engineering-dr-acceptance', 'clarify-selection'];
 
 export type Tier = 'T1' | 'T2' | 'T3' | 'T4';
 const TIERS: readonly Tier[] = ['T1', 'T2', 'T3', 'T4'];
@@ -274,7 +285,16 @@ export interface Delegation {
 export interface DelegationRequest {
   readonly repo: string;
   readonly act: DelegatedAct;
-  readonly tier: Tier;
+  /**
+   * The artifact's tier as read from its frontmatter. `undefined` means it could not be
+   * read, and an unreadable tier is never covered: no delegation lists `undefined`.
+   */
+  readonly tier: Tier | undefined;
+  /**
+   * For `clarify-selection`: the spec whose Clarify items are answered (`SPEC-NNN`).
+   * Required for that act, and bound to `paths`; ignored by every other act.
+   */
+  readonly specId?: string;
   /** Who will be recorded as having approved. */
   readonly actor: string;
   /** Who wrote the artifact being approved. */
@@ -301,6 +321,11 @@ export interface DelegationVerdict {
     | 'verdict-by-author'
     | 'direction-record'
     | 'no-paths'
+    | 'spec-id-unreadable'
+    | 'spec-id-mismatch'
+    | 'spec-excluded'
+    | 'tier-unreadable'
+    | 'tier-excluded'
     | 'touches-governance'
     | 'tripwire-unknown'
     | 'tripwire-tripped'
@@ -330,7 +355,74 @@ const GOVERNANCE_PATHS: ReadonlySet<string> = new Set([
   'scripts/lib/autonomy.sh',
   'docs/decisions/DR-086.md',
   'docs/decisions/DR-108.md',
+  'docs/decisions/DR-122.md',
 ]);
+
+// ─── clarify-selection's own gate (DR-122) ──────────────────────────────────
+//
+// Hard-coded rather than read from `.minspec/delegations.json`, so no record can widen
+// it: a delegation entry listing T4, or omitting an exclusion, still meets these
+// refusals. This module is itself a governance path, so no delegated approval can
+// edit the list either.
+
+/**
+ * Specs whose Clarify answers stay the founder's, by NUMBER (so `SPEC-0217` and
+ * `spec-217` are the same spec and cannot slip past). Named in DR-122's exclusion list.
+ */
+export const CLARIFY_SELECTION_EXCLUDED_SPECS: readonly number[] = Object.freeze([217, 227]);
+
+/** The only tier whose Clarify answers the bot may select. Every T4 spec is excluded. */
+export const CLARIFY_SELECTION_TIERS: readonly Tier[] = Object.freeze(['T3'] as Tier[]);
+
+const SPEC_ID = /^SPEC-(\d+)$/i;
+const SPEC_IN_PATH = /SPEC-(\d+)/gi;
+
+/**
+ * Why a `clarify-selection` request is refused before any delegation is consulted, or
+ * `undefined` when it passes this gate (it still needs a live, covering delegation).
+ * Fails closed at every branch: unreadable spec id, a path naming another spec (or no
+ * spec), an excluded spec named anywhere, an unreadable tier, any tier but T3.
+ */
+export function clarifySelectionRefusal(
+  r: Pick<DelegationRequest, 'specId' | 'tier' | 'paths'>,
+): { reason: DelegationVerdict['reason']; detail: string } | undefined {
+  const m = SPEC_ID.exec((r.specId ?? '').trim());
+  if (!m) {
+    return { reason: 'spec-id-unreadable', detail: `clarify-selection needs a SPEC-NNN id, got ${JSON.stringify(r.specId)}.` };
+  }
+  const n = Number(m[1]);
+  const named = new Set<number>([n]);
+  for (const p of r.paths) {
+    const inPath = [...normPath(p).matchAll(SPEC_IN_PATH)].map((x) => Number(x[1]));
+    for (const x of inPath) named.add(x);
+    if (inPath.length === 0 || inPath.some((x) => x !== n)) {
+      return {
+        reason: 'spec-id-mismatch',
+        detail: `path ${p} does not belong to SPEC-${n}: a clarify selection covers one spec's own files only.`,
+      };
+    }
+  }
+  const excluded = [...named].filter((x) => CLARIFY_SELECTION_EXCLUDED_SPECS.includes(x));
+  if (excluded.length > 0) {
+    return {
+      reason: 'spec-excluded',
+      detail: `SPEC-${excluded[0]}'s Clarify answers stay the founder's (DR-122 exclusion list).`,
+    };
+  }
+  if (r.tier === undefined || !TIERS.includes(r.tier)) {
+    return {
+      reason: 'tier-unreadable',
+      detail: `tier ${JSON.stringify(r.tier)} is not T1..T4: a tier is never invented, so the spec is refused.`,
+    };
+  }
+  if (!CLARIFY_SELECTION_TIERS.includes(r.tier)) {
+    return {
+      reason: 'tier-excluded',
+      detail: `clarify-selection covers T3 specs only; a ${r.tier} spec's Clarify answers stay the founder's.`,
+    };
+  }
+  return undefined;
+}
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const normPath = (p: string) => p.replace(/\\/g, '/').replace(/^\.\//, '');
@@ -372,6 +464,10 @@ export function evaluateDelegation(
   if (r.paths.length === 0) {
     return no('no-paths', 'no paths stated: an approval with no stated scope cannot be checked.');
   }
+  if (r.act === 'clarify-selection') {
+    const refused = clarifySelectionRefusal(r);
+    if (refused) return no(refused.reason, refused.detail);
+  }
   const gov = r.paths.map(normPath).filter((p) => GOVERNANCE_PATHS.has(p));
   if (gov.length > 0) {
     return no('touches-governance', `governance files are never approved on a delegation: ${gov.join(', ')}`);
@@ -385,7 +481,7 @@ export function evaluateDelegation(
 
   for (const d of delegations) {
     if (d.repo.toLowerCase() !== r.repo.toLowerCase()) continue;
-    if (!d.covers.includes(r.act) || !d.tiers.includes(r.tier)) continue;
+    if (!d.covers.includes(r.act) || r.tier === undefined || !d.tiers.includes(r.tier)) continue;
     if (decisionStatus(d.decision) !== 'accepted') continue;
     if (!ISO_DATE.test(d.reviewBy) || r.today > d.reviewBy) continue;
     if (r.repeatFixShare > d.tripwire.max) {
