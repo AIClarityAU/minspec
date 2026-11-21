@@ -53,6 +53,7 @@ import { findStaleSidecars } from './lib/stale-sidecar';
 import { checkStatusParity, inspectStatusLine, inspectAllStatusClaims } from '../packages/minspec/src/lib/status-parity';
 import { checkManagedRegionMarkers, MINSPEC_GITIGNORE_ENTRIES } from '../packages/minspec/src/lib/scaffold';
 import { missingGitignoreEntries } from './lib/gitignore-entries';
+import { parseFrontmatter, domainDocFailures, specIdFailure } from './lib/domain-doc-rules';
 // The corpus walkers, under their former local names. `safeGlob` now tolerates ONLY an
 // absent root; every other read failure reaches the rule's own catch instead of being
 // turned into an empty corpus (#1999).
@@ -77,23 +78,8 @@ const ROOT = process.cwd();
 let errors = 0;
 let warnings = 0;
 
-// `\r?\n`, not `\n` — a CRLF checkout (Windows `core.autocrlf=true`; this repo's
-// `.gitattributes` pins `specs/**` and `.minspec/approvals/**` to LF but not
-// `docs/decisions/**` or `docs/epics/**`, #2465) must still match this anchor. A
-// bare `\n` silently returns `{}` on every CRLF file: every frontmatter-bearing
-// rule below then reads it as having NO frontmatter rather than failing loudly,
-// which is exactly invariant 2's "no silent gate". Mirrors the Python twin's
-// intent already proven out in `declaredSpecId` (spec-id-collision.ts).
-function parseFrontmatter(content: string): Record<string, string> {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!match) return {};
-  const fm: Record<string, string> = {};
-  for (const line of match[1].split('\n')) {
-    const [key, ...rest] = line.split(':');
-    if (key && rest.length) fm[key.trim()] = rest.join(':').trim();
-  }
-  return fm;
-}
+// `parseFrontmatter` lives in scripts/lib/domain-doc-rules.ts (shared with the headless core,
+// SPEC-136 FR-3); its CRLF handling is documented there (#2465).
 
 function fail(file: string, message: string): void {
   console.error(`FAIL ${relative(ROOT, file)}: ${message}`);
@@ -161,18 +147,7 @@ const domainDir = join(ROOT, 'docs', 'domain');
 {
   const domainFiles = listCorpus('Rule 1/3/4', domainDir, '.md', true);
   eachFile('Rule 1/3/4', domainFiles, true, (file) => {
-    const content = readFileSync(file, 'utf-8');
-    const fm = parseFrontmatter(content);
-
-    if (fm['type'] !== 'domain') {
-      fail(file, 'missing `type: domain` frontmatter');
-    }
-    if (/^- \[ \]/m.test(content)) {
-      fail(file, 'task checklists (- [ ]) not allowed in domain docs');
-    }
-    if (/acceptance criteria/i.test(content)) {
-      fail(file, 'acceptance criteria not allowed in domain docs');
-    }
+    for (const message of domainDocFailures(readFileSync(file, 'utf-8'))) fail(file, message);
   });
 }
 
@@ -323,9 +298,8 @@ if (epicRegistry.fileCount > 0 && epicRefs.size === 0) {
     const content = readFileSync(file, 'utf-8');
     const fm = parseFrontmatter(content);
 
-    if (!fm['id'] || !/^SPEC-\d+$/.test(fm['id'])) {
-      fail(file, 'missing or invalid `id: SPEC-NNN` frontmatter');
-    }
+    const idFailure = specIdFailure(content);
+    if (idFailure) fail(file, idFailure);
 
     if (epicRefs.size > 0) {
       const ref = epicRef(fm['epic']);
