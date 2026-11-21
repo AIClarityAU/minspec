@@ -128,11 +128,44 @@ describe('drain-inbox.sh: the terminal "die on stale" path is gone (#773)', () =
     expect(DRAIN_SRC).not.toMatch(/^\s*43\)/m); // the run_loop case
   });
 
+  // #3594: assert the ORDER of real calls, not a character window. A comment that merely
+  // names the function used to satisfy a 400-char slice (passing with the call deleted)
+  // and an unrelated added line pushed it out (failing with the call intact).
+  const runCycleBody = (src: string): string[] => {
+    const start = src.indexOf('\nrun_cycle() {');
+    const end = src.indexOf('\n}\n', start);
+    return src
+      .slice(start + 1, end)
+      .split('\n')
+      .filter((l) => !/^\s*#/.test(l));
+  };
+  // Index of the ensure_fresh_run_dir CALL and of the first triage/dispatch call.
+  const callOrder = (lines: string[]): { refresh: number; dispatch: number } => ({
+    refresh: lines.findIndex((l) => /^\s*ensure_fresh_run_dir\s*(\|\|.*)?$/.test(l)),
+    dispatch: lines.findIndex((l) => /"\$(TRIAGE|DISPATCH)"/.test(l)),
+  });
+  const refreshPrecedesDispatch = (src: string): boolean => {
+    const { refresh, dispatch } = callOrder(runCycleBody(src));
+    return refresh >= 0 && dispatch >= 0 && refresh < dispatch;
+  };
+
   it('run_cycle refreshes the run dir before dispatching', () => {
-    expect(DRAIN_SRC).toContain('ensure_fresh_run_dir');
-    // Called inside run_cycle (before Step 1 triage).
-    const cycle = DRAIN_SRC.slice(DRAIN_SRC.indexOf('run_cycle() {'));
-    expect(cycle.slice(0, 400)).toContain('ensure_fresh_run_dir');
+    expect(refreshPrecedesDispatch(DRAIN_SRC)).toBe(true);
+  });
+
+  it('mutant: deleting the ensure_fresh_run_dir call from run_cycle fails the order check', () => {
+    const lines = runCycleBody(DRAIN_SRC);
+    const { refresh } = callOrder(lines);
+    expect(refresh).toBeGreaterThanOrEqual(0);
+    // Rebuild a source whose run_cycle has the call line removed but its comments kept.
+    const start = DRAIN_SRC.indexOf('\nrun_cycle() {');
+    const end = DRAIN_SRC.indexOf('\n}\n', start);
+    const mutated =
+      DRAIN_SRC.slice(0, start) +
+      DRAIN_SRC.slice(start, end).replace(/^\s*ensure_fresh_run_dir\s*$/m, '') +
+      DRAIN_SRC.slice(end);
+    expect(mutated).not.toBe(DRAIN_SRC);
+    expect(refreshPrecedesDispatch(mutated)).toBe(false);
   });
 });
 

@@ -58,7 +58,7 @@ function missingTasksSpec(root: string, id: string, tier = 'T3'): string {
       '---',
       `id: ${id}`,
       'type: requirements',
-      'status: implementing',
+      'status: specifying',
       'product: minspec',
       `tier: ${tier}`,
       '---',
