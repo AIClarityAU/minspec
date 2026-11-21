@@ -14,8 +14,8 @@ implements_reason: >-
   is decided at Plan, after Clarify picks the field shape (Q1), when the deny is active (Q2),
   how wide the protected set is (Q3) and whether it ships to adopters now (Q4).
 phases:
-  specify: in-progress
-  clarify: pending
+  specify: done
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -218,6 +218,8 @@ the deny passes even when everything is denied (memory `f-test-can-pass`).
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 5 selections below is an agent pick of the option marked **(rec)**, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 **Q1 — Name and shape of the provenance field.**
 - **a (rec)** Reuse DR-108's existing optional `basis` field and add a third form,
   `blueprint:<hash>`. Absent means `founder`. It is one field with one vocabulary, already
@@ -226,6 +228,8 @@ the deny passes even when everything is denied (memory `f-test-can-pass`).
 - b Use #235's literal shape: a new `provenance: human | blueprint` plus `derivedFrom`.
   *Cost:* it overlaps with `basis`, giving two fields that can disagree, and it cannot be
   named `approvedBy` because that name is taken.
+
+**Recorded selection: the recommended option,** option a, reuse `basis` with a `blueprint:<hash>` form. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 **Q2 — When the FR-4 deny is active.**
 - **a (rec)** Only when the session's launcher sets `MINSPEC_AUTOPILOT=1` (the dispatcher and
@@ -238,6 +242,8 @@ the deny passes even when everything is denied (memory `f-test-can-pass`).
 - c When `.minspec/config.json` has `autopilot: true`. *Cost:* in this repo, the same as (b)
   once set. Its only advantage over (a) is that it lives in a file.
 
+**Recorded selection: the recommended option,** option a, active only when the launcher sets `MINSPEC_AUTOPILOT=1`. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+
 **Q3 — How wide the protected set is.**
 - **a (rec)** #235's two paths, plus `.minspec/approvals/**`, `.minspec/delegations.json`, and
   the hook wiring (`.claude/settings*.json`, `scripts/hooks/spec-gate.*`, the new hook).
@@ -246,6 +252,8 @@ the deny passes even when everything is denied (memory `f-test-can-pass`).
   sessions an agent can no longer fix the hook wiring itself.
 - b Only #235's two paths. *Cost:* the self-delegation and unhook routes stay open, so A3 is
   closed in name only.
+
+**Recorded selection: the recommended option,** option a, the wide protected set. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 **Q4 — Where it ships.**
 - **a (rec)** Build it in this repo's dev-time hooks (`scripts/hooks/`, `.claude/settings.json`)
@@ -257,11 +265,15 @@ the deny passes even when everything is denied (memory `f-test-can-pass`).
   in other repos (invariant 3, opt-in-gated), and the design must be made for a Blueprint
   flow that has not been specified.
 
+**Recorded selection: the recommended option,** option a, dev-time hooks and extension predicate now; adopter shipping is a follow-up. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+
 **Q5 — A Bash text guard on approval-path writes.**
 - **a (rec)** No. State the Bash residual (done above) and rely on CI (FR-6). *Cost:* an agent
   that writes the file from Bash still produces a local "approved" until CI sees the PR.
 - b Yes, `host-write-guard.py`-style. *Cost:* it catches only honest commands, false-blocks
   `git add` / `git commit` of real founder approvals, and has to be maintained.
+
+**Recorded selection: the recommended option,** option a, no Bash text guard; rely on CI. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 ## Out of scope
 
