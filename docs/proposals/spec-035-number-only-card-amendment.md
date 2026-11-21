@@ -48,5 +48,7 @@ gain the number-only card.
 
 **If approved,** FR8 and INV-graceful-degrade are edited to carve out this case and this
 section is folded into FR8; an acceptance criterion is added under Acceptance Criteria.
-**Merging this change voids the current SPEC-035 approval** (hash-locked, DR-012); re-approval
-in the editor ("MinSpec: Approve Spec") is the founder's route.
+Merging this proposal file changes nothing in SPEC-035 and voids no approval. The later step
+does: a separate PR that folds this text into SPEC-035's `requirements.md` voids the
+hash-locked approval (DR-012) until the founder re-approves it in the editor ("MinSpec:
+Approve Spec").
