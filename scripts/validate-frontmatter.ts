@@ -15,7 +15,7 @@
  * quietly, per `.minspec/constitution.md` invariant 2.
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, statSync } from 'fs';
 import { join, relative, dirname, sep, basename } from 'path';
 import {
   validateDrSequence,
@@ -26,6 +26,8 @@ import {
 } from '../packages/minspec/src/lib/adr-manager';
 import {
   validateSplitLayoutCoverage,
+  validateShardIdConsistency,
+  type ShardIdFile,
   checkAcceptanceCriteria,
   validateOwnership,
   validateImplementEvidence,
@@ -41,6 +43,7 @@ import { DEFAULT_CONFIG, loadConfig } from '../packages/minspec/src/lib/config';
 import type { Tier } from '../packages/minspec/src/lib/config';
 import {
   checkReferences,
+  checkCitationFidelity,
   type ReferenceRegistry,
 } from '../packages/minspec/src/lib/reference-checker';
 import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
@@ -332,17 +335,19 @@ if (epicRegistry.fileCount > 0 && epicRefs.size === 0) {
   });
 }
 
-// Rule 7 (non-fatal): split-layout cross-file coverage (#111). For each spec
+// Rule 7 (coverage non-fatal, shard-id agreement fatal): split-layout cross-file coverage (#111). For each spec
 // DIRECTORY whose sibling files carry split `type:` frontmatter, warn when the
 // SET does not cover the tier's required, file-backed phases (a T3 dir with only
 // requirements.md is missing design.md + tasks.md). The #93 fix correctly skips
 // the in-FILE phase-section check per split file; this is the dir-level backstop
-// it deferred. WARNS only — matches the extension's warning severity, so a
-// mid-authoring requirements-only dir surfaces but never fails the build.
+// it deferred. Coverage gaps WARN only (warning severity), so a mid-authoring
+// requirements-only dir surfaces without failing the build. A design/tasks `id:` differing from
+// requirements' FAILS via validateShardIdConsistency (#493, #439).
 {
   const specFiles = listCorpus('Rule 7', specsDir, '.md', false);
   // Group by containing directory; each dir is one split-layout unit.
   const byDir = new Map<string, SplitLayoutFile[]>();
+  const shardsByDir = new Map<string, ShardIdFile[]>();
   eachFile('Rule 7', specFiles, false, (file) => {
     const fm = parseFrontmatter(readFileSync(file, 'utf-8'));
     const type = (fm['type'] ?? '').toLowerCase();
@@ -354,11 +359,21 @@ if (epicRegistry.fileCount > 0 && epicRefs.size === 0) {
     const tier = /^T[1-4]$/.test(tierToken) ? (tierToken as Tier) : undefined;
     list.push({ type, ...(tier ? { tier } : {}) });
     byDir.set(dir, list);
+    // Shard ids (#493): only self-declared split-layout phase files are shards of
+    // one spec; reuse validateShardIdConsistency (#439) rather than a second checker.
+    if (type === 'requirements' || type === 'design' || type === 'tasks') {
+      const shards = shardsByDir.get(dir) ?? [];
+      shards.push({ fileName: basename(file), id: (fm['id'] ?? '').split(/\s+/)[0] });
+      shardsByDir.set(dir, shards);
+    }
   });
   eachFile('Rule 7', [...byDir.keys()], false, (dir) => {
     const result = validateSplitLayoutCoverage(byDir.get(dir) ?? [], DEFAULT_CONFIG);
     for (const v of result.violations) {
       warn(`split-coverage ${relative(ROOT, dir)}: ${v.message}`);
+    }
+    for (const v of validateShardIdConsistency(shardsByDir.get(dir) ?? []).violations) {
+      fail(dir, `${v.rule}: ${v.message}`);
     }
   });
 }
@@ -668,8 +683,22 @@ function loadReferenceExemptions(reg: ReferenceRegistry): Set<string> {
       ...registry,
       fileExists: (relPath) =>
         existsSync(join(artifactDir, relPath)) || existsSync(join(ROOT, relPath)),
+      readFile: (relPath) => {
+        for (const p of [join(artifactDir, relPath), join(ROOT, relPath)]) {
+          try {
+            if (statSync(p).isFile()) return readFileSync(p, 'utf-8');
+          } catch {
+            // try the next candidate
+          }
+        }
+        return undefined;
+      },
     };
     for (const v of checkReferences(content, scopedRegistry)) {
+      warn(`ref-check ${relative(ROOT, file)}: ${v.message}`);
+    }
+    // Fidelity tier (#1643): warning severity — line bound + nearby-literal echo.
+    for (const v of checkCitationFidelity(content, scopedRegistry)) {
       warn(`ref-check ${relative(ROOT, file)}: ${v.message}`);
     }
   });
