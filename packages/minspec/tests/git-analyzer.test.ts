@@ -1469,7 +1469,7 @@ describe('binary files', () => {
     expect(findSignal(signals, 'files_changed')!.value).toBe(2);
   }, 30000);
 
-  it.fails('SHOULD total the text side only — today it is NaN, which reads as T4', async () => {
+  it('totals the text side only — a binary file adds no lines (#1197)', async () => {
     const signals = await analyzeGitDiff(repoWithStagedBinary());
     const lines = findSignal(signals, 'lines_changed')!;
     expect(lines.value).toBe(2); // a.ts +1/-1; logo.png contributes no lines
@@ -1488,7 +1488,7 @@ describe('binary files', () => {
     expect(files.get('a.ts')!.insertions).toBe(1);
   }, 30000);
 
-  it.fails('SHOULD give a binary file numeric line counts — today they are undefined', async () => {
+  it('gives a binary file numeric zero line counts (#1197)', async () => {
     const file = byPath(await buildConsequenceInput(repoWithStagedBinary())).get('logo.png')!;
     expect(file.insertions).toBe(0);
     expect(file.deletions).toBe(0);
