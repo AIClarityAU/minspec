@@ -185,7 +185,17 @@ comments at `a3a4a3e8`; it was not run. Task 7 re-reads each row against the cod
 | 20 `## In plain terms` (#2921) | `drsMissingPlainTerms` (`scripts/lib/dr-required-sections.ts`) | Yes (warn). The Python validator warns on it too |
 | 20 doubled frontmatter (#2467) | `detectDoubledFrontmatter` (`adr-manager.ts`) | Yes (warn) |
 | 21 generated harness file | `buildContext`, `renderTemplate`, `parseSections` and `detectDoubledTemplateHeadings` (`template-engine.ts`, `merge-refresh.ts`), composed in the script's own loop; the core repeats that loop over `TEMPLATE_NAMES` | Yes (warn). Every function is exported and editor-free; only the loop is the caller's, as for rule 20 doubled frontmatter |
-| 24 known limit in product source | inline | **Left out.** It reads MinSpec's own `packages/` source, not a project's specs |
+| 24 known limit in product source (#2684; the script has TWO rules numbered 24) | inline | **Left out.** It reads MinSpec's own `packages/` source, not a project's specs |
+| 24 implement close-out (#1595; the other rule numbered 24) | `validateImplementCloseout` (`spec-validator.ts`), called from `validateSpec` | **Left out in this pull request.** `validateSpec` only reports it when given `taskTally`; the core's `validate` passes none (`operations.ts`, the `validateSpec` options), so the finding never appears. No test covers it. Porting it needs `readSpecTaskTally` wired into the options, which task 7 does not do; FR-3 stays open for this rule |
+| 25 delegation authority citation (FATAL, #3463) | inline in the script | **Left out in this pull request.** Not called by `corpus-rules.ts` and no fixture trips it. It reads `.minspec/delegations.json` against spec text; no task in `tasks.md` schedules it, so FR-3 stays open for this rule |
+| 26 DR frontmatter closed set (FATAL, #1641) | `checkDrFrontmatterClosedSet` (`scripts/lib/dr-closed-set.ts`) | **Left out in this pull request.** The function is editor-free and could be called, but `corpus-rules.ts` does not call it and no fixture trips it; no task schedules it, so FR-3 stays open for this rule |
+| 27 decision status contradiction (#1812) | `findDecisionContradictions` | **Left out in this pull request.** Not called by `corpus-rules.ts`; no fixture trips it; no task schedules it, so FR-3 stays open for this rule |
+| 28 epic id uniqueness (FATAL, #396) | `checkDeclaredEpicIds` | **Left out in this pull request.** Not called by `corpus-rules.ts`; no fixture trips it; no task schedules it, so FR-3 stays open for this rule |
+
+One severity difference is deliberate (invariant 2, fail closed). When rule 16, 17 or 18 cannot run
+(an unreadable corpus or a throwing check), the script warns and the core reports an `error`
+(`corpus-rules.ts`, the `unrunnable` calls with `failClosed` true). A green core run therefore
+never hides a check that did not happen.
 
 Severities are the script's: the core reports a finding at the severity the script's call
 site gives it. Two functions live under `scripts/lib/`; the core imports them where they
