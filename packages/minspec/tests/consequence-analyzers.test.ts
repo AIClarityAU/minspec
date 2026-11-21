@@ -24,6 +24,7 @@ import {
   type ClassificationSignal,
 } from '../src/lib/consequence-analyzers';
 import { classify } from '../src/lib/classifier';
+import { HIGH_SIGNAL_NAMES } from '../src/lib/auto-merge';
 import { DEFAULT_CONFIG, TIERS, type Tier } from '../src/lib/config';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -239,6 +240,22 @@ describe('SPEC-023 FR-2 — public-API surface delta', () => {
     );
     const sig = signals.find((s) => s.name === 'public_api_removed')!;
     expect(sig.tierContribution).toBe('T3');
+  });
+
+  it('a package.json-only diff emits a manifest_changed consequence signal (#414)', () => {
+    const diff = input([
+      file({
+        path: 'packages/x/package.json',
+        oldContent: '{"dependencies":{}}',
+        content: '{"dependencies":{"left-pad":"1.0.0"}}',
+      }),
+    ]);
+    const signals = publicApiAnalyzer(diff);
+    expect(signals.map((s) => s.name)).toEqual(['manifest_changed']);
+    expect(HIGH_SIGNAL_NAMES.has(signals[0].name)).toBe(true);
+    expect(runConsequenceAnalyzers(diff).some((s) => s.name === 'manifest_changed')).toBe(true);
+    const deleted = publicApiAnalyzer(input([file({ path: 'package.json', status: 'deleted' })]));
+    expect(deleted.map((s) => s.name)).toEqual(['manifest_changed']);
   });
 
   it('ignores non-public-surface internal files', () => {
