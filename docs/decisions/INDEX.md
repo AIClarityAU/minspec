@@ -978,4 +978,12 @@ _No summary available._
 <!-- dr-summary:DR-123 auto=76071625ecdd -->
 The founder answered this as runner queue item clarsel on 2026-11-17 (words in triggered_by). The delegated-approval record says in its section 4 that a queue item cannot carry consent, because any session can write the queue. So the answer is not binding until it sits in a committed record the founder accepts. This is that record. **It binds nothing until he accepts it.**
 <!-- /dr-summary:DR-123 -->
+
+## [DR-124 — Approving a document commits it - commit-on-approve is default on, commits only the approval's own files, never pushes, and minspec.commitOnApprove is the opt-out](DR-124.md)
+
+*Status: proposed · Date: 2026-11-19*
+
+<!-- dr-summary:DR-124 auto=b3c6f8a249ed -->
+SPEC-022 FR-1 (specs/minspec/SPEC-022-approval-foundation/requirements.md:77) says approval ground truth is **committed** to the repo. Before #576 the approval record was only git-*tracked*: written to disk and left in the working tree. Nothing committed it. So an approval could sit uncommitted indefinitely, be lost to a checkout or a reset, or be swept into an unrelated commit by another session. "Committed ground truth" was a claim the code did not keep.
+<!-- /dr-summary:DR-124 -->
 <!-- minspec:dr-index:end -->
