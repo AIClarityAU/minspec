@@ -1,0 +1,23 @@
+--- a/cos.py	2026-11-22 10:58:53.437638328 +1100
++++ b/cos.py	2026-11-22 10:58:53.449159193 +1100
+@@ -4242,14 +4242,17 @@
+         print(f"  could not record update mark ({type(e).__name__})")
+ 
+ 
+-PRDRIVE_SKIP_LABELS = ("parked", "agent-quarantined")
++# `awaiting-approval` / `needs-human-review`: the only remaining blocker is a human approval, so
++# the PR cannot merge however current it is, and it goes BEHIND again on the next merge to main
++# (strict mode), throwing the update away (#3934).
++PRDRIVE_SKIP_LABELS = ("parked", "agent-quarantined", "awaiting-approval", "needs-human-review")
+ 
+ 
+ def prdrive_skip_label(labs):
+     """Pure: the label that makes pr-drive skip a PR, or None.
+ 
+-    A PR carrying `parked`, `agent-quarantined` or any `hold:*` label can never be
+-    bot-merged, so it must not take the one-at-a-time update slot or count as in flight."""
++    A PR carrying `parked`, `agent-quarantined`, `awaiting-approval`, `needs-human-review` or
++    any `hold:*` label can never be bot-merged, so it must not take the one-at-a-time update slot or count as in flight."""
+     for l in sorted(labs):
+         if l in PRDRIVE_SKIP_LABELS or l.startswith("hold:"):
+             return l
