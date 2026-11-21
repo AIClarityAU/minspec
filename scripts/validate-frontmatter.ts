@@ -46,7 +46,10 @@ import {
   checkCitationFidelity,
   type ReferenceRegistry,
 } from '../packages/minspec/src/lib/reference-checker';
-import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
+import { listOrphanedRecords, listRecords } from '../packages/minspec/src/lib/approval-store';
+import { canonicalSpecHash } from '../packages/minspec/src/lib/approval';
+import { classifyApprovablePath } from '../packages/minspec/src/lib/approvable';
+import { findStaleSidecars } from './lib/stale-sidecar';
 import { checkStatusParity, inspectStatusLine, inspectAllStatusClaims } from '../packages/minspec/src/lib/status-parity';
 import { checkManagedRegionMarkers, MINSPEC_GITIGNORE_ENTRIES } from '../packages/minspec/src/lib/scaffold';
 import { missingGitignoreEntries } from './lib/gitignore-entries';
@@ -719,6 +722,51 @@ try {
 } catch (err) {
   // listOrphanedRecords tolerates an absent approvals dir itself (#2000).
   reportUnrunnable('Rule 10', 'the orphaned-approval check could not run', err, false);
+}
+
+// Rule 30 (FATAL for specs, #1227): a committed approval sidecar must match the file it
+// approves. #1205 landed an approval and #1181 then added `implements:` (a hashed field),
+// so `main` read `status: planning` while the record resolved `stale`; both PRs were green
+// because CI checked the field's presence, never the approval it invalidated. The pre-commit
+// race gate (#424) sees one commit; this sees the merged tree. Decision-record/epic sidecars
+// warn only (existing corpus drift); orphans are Rule 10's.
+try {
+  const exemptFile = join(ROOT, 'scripts', 'stale-approval-exemptions.json');
+  const exempt = new Map<string, string>();
+  // ABSENT list = the declared "no known debt" state; a present-but-malformed one fails closed.
+  if (existsSync(exemptFile)) {
+    try {
+      const parsed = JSON.parse(readFileSync(exemptFile, 'utf-8')) as { exemptions?: Array<{ path?: unknown; reason?: unknown }> };
+      if (!Array.isArray(parsed.exemptions)) throw new Error('missing "exemptions" array');
+      for (const e of parsed.exemptions) {
+        if (typeof e.path !== 'string' || e.path === '') throw new Error(`bad exemption path ${JSON.stringify(e.path)}`);
+        if (typeof e.reason !== 'string' || e.reason.trim() === '') throw new Error(`exemption ${e.path} has no written reason`);
+        exempt.set(e.path, e.reason);
+      }
+    } catch (err) {
+      exempt.clear();
+      reportUnrunnable('Rule 30', 'the stale-approval exemption list could not be loaded, so NO exemptions were applied', err, true, exemptFile);
+    }
+  }
+  const staleNow = new Set<string>();
+  for (const s of findStaleSidecars(
+    listRecords(ROOT),
+    (p) => canonicalSpecHash(join(ROOT, p)),
+    (p) => classifyApprovablePath(p),
+  )) {
+    const msg =
+      `stale approval (#1227) - sidecar records specHash ${s.recorded.slice(0, 12)}... but the file now hashes to ${s.current.slice(0, 12)}.... ` +
+      'A hashed field changed after approval; re-run "MinSpec: Approve Spec" (or revert the edit) so the signpost and the record agree.';
+    staleNow.add(s.specPath);
+    const debt = exempt.get(s.specPath);
+    if (s.fatal && debt === undefined) fail(join(ROOT, s.specPath), msg);
+    else warn(`${s.specPath}: ${msg}${debt !== undefined ? ` [known debt: ${debt}]` : ''}`);
+  }
+  for (const p of exempt.keys()) {
+    if (!staleNow.has(p)) warn(`${p}: no longer stale - remove it from scripts/stale-approval-exemptions.json.`);
+  }
+} catch (err) {
+  reportUnrunnable('Rule 30', 'the stale-approval check could not run', err, true);
 }
 
 // Rule 11 (FATAL, #626): the body status line must match frontmatter `status:`.
