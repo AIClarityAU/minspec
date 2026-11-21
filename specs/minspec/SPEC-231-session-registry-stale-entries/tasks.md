@@ -57,8 +57,14 @@ touch the same two files, so they run in sequence, never in parallel.
 
 ## 3 - The cleanup planner, deleting nothing (FR-2/3/4/5, AC-1/2/4/5/6)
 
+- [ ] **3.0** Verification, no repository file edited: design [C] measures the 24 h grace
+  from file `mtime` and has not checked that the CLI refreshes it while the process runs.
+  Start a real CLI session, note its `<pid>.json` `mtime` and `updatedAt`, wait long enough
+  for the CLI to have any periodic write, and record in the pull request body whether `mtime`
+  advanced. If it did not, stop and amend design [C] and this task list to the recorded
+  death-time fallback in design [C] before starting 3.1; do not ship the `mtime` rule.
 - [ ] **3.1** `packages/minspec/tests/session-panel.test.ts` - cases that call `plan_cleanup`
-  through the same import harness with fake `read`, `stat_of`, `state_of`, `opted_in` and a
+  through the same import harness with fake `read`, `stat_of`, `state_of`, `opted_in`, an `announced` set and a
   fixed `now`:
   AC-1 three `.json` files sharing one `sessionId`, one live, one absent pid, one reused pid,
   all older than 24 h: `remove` holds exactly the two dead;
@@ -70,8 +76,10 @@ touch the same two files, so they run in sequence, never in parallel.
   that other folder is opted in (invariant 5 across folders); with the hook's folder not
   opted in, nothing is planned;
   an unparseable `.json` sets `partial` and empties `remove`;
-  a corrupt #2633 state file sets `partial` and empties `remove`;
-  a dead entry first seen 60 s ago in the state file is kept;
+  a dead entry in the `announced` set is kept, and the same entry not in it is planned;
+  the window boundary: an entry first seen exactly `ANNOUNCE_WINDOW_S` (600 s) ago is kept
+  and one first seen 601 s ago may be removed, driven through `decide_announcements` so the
+  planner's input and the announcer agree;
   a symlink, a directory and a name like `../x.json` or `notes.txt` are never in `remove`.
   Plus one case for `opted_in` against a real temporary tree: `.git` + `.minspec/` is in,
   `.git` alone is out, `.minspec/` with no `.git` above it is out, a nested folder inside an
@@ -101,6 +109,12 @@ touch the same two files, so they run in sequence, never in parallel.
   disk, over 24 h old, never announced, so absent from the state file) survives a start in
   folder A, and a later first start in B still announces it as a SESSION LOSS, then keeps it
   until the window has passed;
+  unwritable state file: with the state path made unwritable, a dead human-panel entry over
+  24 h old is announced on the first start AND kept, and a second start 60 s later (inside
+  the window) still announces it and still keeps it (the fail-open behaviour #2633 has
+  today; the planner is fed `to_announce`, not a reread of the file);
+  window boundary end to end: with the state file back-dated to exactly 600 s the entry is
+  announced and kept, at 601 s it is not announced and is removed;
   same folder, nothing to announce: a dead entry for the hook's folder with no transcript,
   over 24 h old, is removed on the first start;
   executor failure: with the executor forced to raise a non-`OSError` exception (for example
@@ -117,7 +131,9 @@ touch the same two files, so they run in sequence, never in parallel.
   docstring (:62-63), in `decide_announcements` (:375-376) and the `mode_start` comment (:782), and the `.key` file under "WHAT IT ASSUMES ABOUT
   THE CLI").
   *Done when:* 4.1 is green, every existing case is unchanged and green, and
-  `grep -n "never cleaned up" scripts/hooks/session-panel.py` returns nothing. Tier T2.
+  `grep -n "never cleaned" scripts/hooks/session-panel.py` returns nothing (it matches the
+  module docstring at :62, where "never cleaned" ends the line and "up" starts the next, as
+  well as :375 and :782). Tier T2.
 
 ## Not in these tasks
 

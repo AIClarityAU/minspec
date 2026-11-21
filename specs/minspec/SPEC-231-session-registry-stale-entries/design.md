@@ -74,7 +74,7 @@ directory itself (see [C]) so it can count those as unknown rather than not see 
 ## [C] FR-3, FR-5, AC-1/2/4/5/6: the planner deletes nothing
 
 ```python
-def plan_cleanup(directory, folder, names, read, stat_of, state_of, opted_in, now, seen_at):
+def plan_cleanup(directory, folder, names, read, stat_of, state_of, opted_in, now, announced):
     """-> {"remove": [paths], "unknown": [names], "kept": int, "partial": bool}"""
 ```
 
@@ -94,7 +94,17 @@ The executor in [D] passes the real functions.
   the `.json` and its paired `.key` files (AC-5). The CLI writes `updatedAt` into the entry
   (the fixture in `packages/minspec/tests/session-panel.test.ts` `register()` mirrors it), so
   I believe, unverified against the CLI source, that `mtime` tracks the last write by the
-  process.
+  process. That belief carries the grace period: if the CLI writes the entry once at start
+  and never again, a long-running session that crashed a minute ago has an old `mtime` and
+  would be removed at once, defeating D3. So task 3 opens with a verification step (3.0): run
+  a real CLI session past the point where its own entry's `mtime` would show a rewrite and
+  record whether `mtime` advances while the process runs, and what the entry holds. If it
+  does advance, `mtime` stands as written. If it does not, the plan changes before any
+  code lands: the grace period is then measured from a death time MinSpec records itself,
+  the first start that sees the entry dead writes that time to a small file beside the #2633
+  state file, and no entry is removed until it has been seen dead for `GRACE_S` (an entry the
+  planner has not yet seen dead is kept). That amendment is a change to this design and
+  tasks 3 to 4, made before 3.2, never a silent fallback in the code.
 - **Same folder only, and only after the announce step (FR-5, AC-6, invariant 5).** The
   planner considers an entry only when `entry["cwd"] == folder`, the hook's own folder, which
   must itself pass `opted_in(folder)` (the nearest ancestor holding `.git`, directory or file,
@@ -111,8 +121,8 @@ The executor in [D] passes the real functions.
   entry of folder B, B's first start would find nothing to announce, and invariant 5 (how a
   lost session is announced stays unchanged) would break across folders. Restricting to the
   current folder closes that: an entry of this folder has just been through the announce
-  step, so it is either announced (then in the state file with `first_seen = now`, and kept
-  by the window below) or has nothing to announce (no transcript, or not a human panel), and
+  step, so it is either announced (then in `to_announce`, and kept
+  by the announce set below) or has nothing to announce (no transcript, or not a human panel), and
   deleting it changes no announcement. Rejected alternative: also removing other-folder
   entries whose `sessionId` the state file lists as seen longer than `ANNOUNCE_WINDOW_S` ago.
   It is safe for invariant 5 but it reaches into other folders' state, and it leaves every
@@ -123,14 +133,29 @@ The executor in [D] passes the real functions.
   made: a dead entry is cleaned only when a session next starts in its own opted-in folder,
   so dead entries of folders never started again, and of non-MinSpec repos, keep
   accumulating.
-- **Announce window (invariant 5).** Within the folder, an entry whose `sessionId` the #2633
-  state file (`seen_at`) shows as first seen less than `ANNOUNCE_WINDOW_S` ago is kept, so
-  every session that starts inside the window is still told, exactly as today. The state file
-  is read after the announce step and without the lock; if it exists but cannot be read or
-  parsed, the planner sets `partial` and removes nothing. Rejected alternative: ignoring the
-  window. A session-start in the window would then find the entry already gone and not be told,
-  which changes #2633's behaviour. A recent-transcript loss (within `RECENT_S`) is reported
-  from the transcript, not the registry, so removing its entry does not change that report.
+- **Announce set (invariant 5).** Within the folder, an entry whose `sessionId` is in the
+  `to_announce` set that `mode_start` got back from `decide_announcements` (:804) this run is
+  kept. The planner takes that set as its `announced` argument and does NOT reread the #2633
+  state file. `decide_announcements` announces a sessionId first seen no more than
+  `ANNOUNCE_WINDOW_S` ago (`now - first_seen <= ANNOUNCE_WINDOW_S`, :431) and a never-seen
+  one, so every session that starts inside the window is still told, exactly as today, and the
+  planner and the announcer cannot disagree on the boundary: an entry first seen exactly 600 s
+  ago is announced and therefore kept, one first seen 601 s ago is not announced and may go.
+  Why the set and not a reread (review finding, rv-3290-31f1e1f5): when the state write fails
+  (`except OSError: pass`, :437-440) `decide_announcements` still announces but records
+  nothing, and a reread finds no record and would delete an over-24 h dead entry, so a second
+  start inside the window is no longer told where today it is (fail open). The set is the
+  value the announce step actually acted on, so it is correct whether or not the write
+  worked, and it needs no second parse, no lock-free read and no `partial` case for a corrupt
+  state file. Rejected alternative: keep the reread and mark the plan `partial` when the
+  write failed. It needs a new signal out of `decide_announcements` (its return is a bare
+  set) and leaves the second parse in place. Cost of the choice made: `mode_start` must hold
+  `to_announce` to the end of the function, and when `stale` is empty the set is empty
+  (nothing was announced, so nothing is kept for that reason). Rejected alternative: ignoring
+  the window. A session-start in the window would then find the entry already gone and not be
+  told, which changes #2633's behaviour. A recent-transcript loss (within `RECENT_S`) is
+  reported from the transcript, not the registry, so removing its entry does not change that
+  report.
 - **Keys (AC-4).** A `.key` is removed only when its pid prefix belongs to a `.json` this plan
   removes. A `.key` whose entry is live, unknown, young or absent is kept. Orphan `.key` files
   with no `.json` are out of this spec's scope and are not touched.
