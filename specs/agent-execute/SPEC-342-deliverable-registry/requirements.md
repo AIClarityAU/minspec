@@ -8,6 +8,8 @@ epic: EPIC-007  # Agent Execute Extension
 aspects: [autopilot, spec-gate, deliverables, no-silent-gate]
 relates_to: [DR-036, DR-012, DR-031, SPEC-038]
 affects: [scripts/hooks/spec-gate.py]  # gains a third ownership signal (deliverable_paths)
+implements: none
+implements_reason: creates no file this spec can name yet. FR-2 to FR-5 extend the shared scripts/hooks/spec-gate.py (already in affects), FR-7 extends the shared spec-validator.ts and its ownership-path-rules.ts parity, and the FR-6 startup check lands in an Autopilot runner that does not exist in this repo yet, so its path is a Plan decision. Declaring the shared files would freeze them for every other session until approval.
 phases:
   specify: in-progress
   clarify: pending

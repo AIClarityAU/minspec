@@ -424,7 +424,7 @@ Issue #74 confirmed against Anthropic's official Legal-and-compliance docs that 
 *Status: accepted · Date: 2026-07-12*
 
 <!-- dr-summary:DR-053 auto=0000000000000000 -->
-Per-repo-local SDD ids stay unprefixed (DR-027 separate registers); a reference that SPANS projects carries the target project's short prefix from the committed table `.minspec/project-prefixes.md` — SDD refs `<PREFIX>-<ID>` (MS-SPEC-019, SC-DR-007), issue/PR refs `<PREFIX>#<N>` (MS#500, SC#26). Unknown prefix is advisory, never fatal. Ships the Tier-0 core (`@aiclarity/shared` project-prefix module: parsePrefixTable/resolveRef/formatCrossRef/suggestPrefixDeterministic) + seed table + CLAUDE.md convention; Tier-1 validate-advisory + toast deferred to #614.
+Per-repo-local SDD ids stay unprefixed (DR-027 separate registers); every approvable item and its typed paragraphs gets a short, typeable, slash-joined id `PROJECT/APPROVABLE/PARAGRAPH` (v2, accepted 2026-07-14) — `MIN/SP19/FR3`, with 3-letter project codes from the committed table `.minspec/project-prefixes.md` and left-to-right elision when context implies a segment (`SP19/FR3`, `FR3`). Supersedes the v1 dash grammar (`MS-SPEC-019`, `MS#500`). Unknown project code is advisory, never fatal. Ships the Tier-0 core (`@aiclarity/shared` project-prefix module) + seed table + CLAUDE.md convention; corpus migration and the v2 emitter are tracked in #679 and #681, Tier-1 validate-advisory + toast in #614.
 <!-- /dr-summary:DR-053 -->
 
 ## [DR-054 — Reframe the network posture — data-sovereignty + bring-your-own-LLM (incl. local) + deterministic core supersede "air-gapped" as the product identity; adopt one shared GitHub App (minspec-sdd[bot]) + an OIDC token-broker as the reviewer-identity seam, with customer-own-app as the enterprise override](DR-054.md)
@@ -916,6 +916,14 @@ The step "Post honest ai-review verdict check-run" (.github/workflows/ai-review.
 <!-- dr-summary:DR-114 auto=5fb445350927 -->
 scripts/drain-inbox.sh defaults to concurrency 1 and carries a caveat (around lines 407-411): two queued issues touching the same file still produce competing pull requests, because each agent branches from origin/main and cannot see an unmerged sibling, so "keep the default at 1 until same-file serialisation exists, and de-duplicate the queue first". That caveat was written for the session-start drain.
 <!-- /dr-summary:DR-114 -->
+
+## [DR-115 — The MinSpec App secrets are optional in the scaffolded review stack; without them the review posts with GITHUB_TOKEN as github-actions[bot]](DR-115.md)
+
+*Status: proposed · Date: 2026-10-28*
+
+<!-- dr-summary:DR-115 auto=f4b6ddc36218 -->
+ai-review.yml refuses to run unless CLAUDE_CODE_OAUTH_TOKEN, MINSPEC_APP_ID and MINSPEC_APP_PRIVATE_KEY are all set (.github/workflows/ai-review.yml:204-215), and the setup probe mirrors that (packages/minspec/src/lib/ruleset-advisor.ts:734-738). DR-054 intended consumer repos not to hold the App key (the shared broker, SPEC-034, is still in planning). Until the broker exists, every new repo needs the two App secrets set by hand, and the founder could not get review on a new work-PC repo without them.
+<!-- /dr-summary:DR-115 -->
 
 ## [DR-116 — MinSpec has a machine-facing command line (the headless core's), for hooks, workflows and agents only - no MinSpec text tells a person to type it, and its result schema minspec-core/0 is unstable](DR-116.md)
 
