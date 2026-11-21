@@ -1,7 +1,7 @@
 ---
 id: SPEC-335
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the spec-to-code ownership contract (SPEC-038/SPEC-051/SPEC-081 follow-through)
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   Specify phase only. Expected surface: validateOwnership in packages/minspec/src/lib/spec-validator.ts plus a backfill of existing spec frontmatter. Neither is built.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -59,8 +59,16 @@ Root cause (mechanism plus missing gate): the escape check validates that a reas
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 3 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 1. **Reject deferral reasons vs move the guard.**
    - **(rec) Reject deferral reasons** as `ownership.implements.missing` and backfill the specs. Keeps SPEC-051 FR-1. Cost: reddens validate for every flagged spec until backfilled, so it must land with or after the backfill, and the backfill is real per-spec evidence work (64 specs and counting).
    - Accept the deferral as a recognised state and move the guard to the plan-to-tasks advance. Cost: reverses SPEC-051 FR-1 (ownership no longer in the approved bytes) and reintroduces the post-approval re-approval trap SPEC-051 removed.
+
+   **Recorded selection: the recommended option,** reject deferral reasons as `ownership.implements.missing` and backfill the specs. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 2. **Matcher shape.** (rec) A short fixed phrase list (FR-1): cheap, deterministic, offline; cost: an agent can paraphrase a deferral past it, so it is a speed bump, not proof. Alternative: require `implements_reason` to cite a structural marker (for example an `owns-nothing:` prefix): stricter and not paraphrasable; cost: touches every legitimate `none` reason in the corpus.
+
+   **Recorded selection: the recommended option,** a short fixed phrase list (FR-1). Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 3. **Sequencing with #2323.** Land the writer fix first (rec; cost: delays the gate), or bundle both here (cost: larger T3 diff, two concerns in one PR).
+
+   **Recorded selection: the recommended option,** land the writer fix (#2323) first. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
