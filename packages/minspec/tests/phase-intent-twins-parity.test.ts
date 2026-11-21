@@ -1,5 +1,5 @@
 /**
- * #899 / DR-069 §3 — the three phase-intent twins must agree per phase state.
+ * #899 / DR-069 §3 (freeze-gate twins constraint) — the three phase-intent twins must agree per phase state.
  *
  * `getSpecStatus` (lifecycle.ts), `phaseIntentStatus` (scripts/lib/phase-intent-status.ts,
  * used by migrate-approvals) and `phase_intent_status` (scripts/hooks/spec-gate.py)
