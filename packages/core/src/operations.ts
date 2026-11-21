@@ -14,6 +14,7 @@ import { epicRefSet } from '../../minspec/src/lib/epic-manager';
 import { readShardIdFiles } from '../../minspec/src/lib/spec-layout';
 import { validateSpec } from '../../minspec/src/lib/spec-validator';
 import { listSpecs } from '../../minspec/src/lib/spec-catalog';
+import { runCorpusRules } from './corpus-rules';
 import { hasOptInMarker, notOptedInMessage } from '../../minspec/src/lib/opt-in';
 
 declare const __MINSPEC_CORE_VERSION__: string | undefined;
@@ -200,6 +201,8 @@ const validateOperation: Operation = {
         findings.push({ file, rule: 'spec.unreadable', severity: 'error', message: `Cannot read ${file} - ${errorMessage(e)}` });
       }
     }
+    // The corpus rules (FR-3): one call per "Yes" row of design.md, at the script's severity.
+    for (const c of runCorpusRules(ctx.root)) findings.push(c);
     const failed = findings.some((f) => f.severity === 'error');
     return { outcome: failed ? 'fail' : 'pass', findings };
   },

@@ -99,6 +99,10 @@ function eligibleInput(over: Partial<AutoMergeInput> = {}): AutoMergeInput {
     // #490 / DR-058: low-blast now requires an AFFIRMATIVE signal — the eligible
     // shape carries a docs/test-only certification (reach-unavailable alone is
     // unmeasured → high). No exported touch.
+    // NOTE: `reviewSignals.changedFiles` above is product source, a combo production
+    // never pairs with this signal (detectLowBlastDocsTest only fires when EVERY path
+    // is docs/test). Harmless here — decideAutoMerge is a pure unit and trusts the
+    // supplied signals — but it is a fixture shortcut, not a realistic diff.
     consequenceSignals: [reachUnavailable(), lowBlastDocsTestOnly()],
     mode: 'consequence-hybrid',
     proverResult: provenProver(),
