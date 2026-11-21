@@ -127,3 +127,57 @@ export function checkApprovables(
   }
   return out;
 }
+
+// ── #3831: a live delegation makes a voided approval the expected state ──────────────────
+//
+// THE DEADLOCK. Under a delegation (DLG-001, DR-108) the bot re-approves a spec only after
+// its content has merged (`delegated-approval.ts`, `pr-not-merged`), and a pull request may
+// not carry both a content change and its own approval (`approval-integrity.ts`, DR-081
+// section 5). Refusing `sidecar-not-restaged` here then left no sanctioned way to edit an
+// approved spec at all. When a live delegation covers the spec, the void is expected: the
+// commit lands with a warning, the spec reads stale until the delegated caller re-approves
+// it, and the freeze gate (`scripts/hooks/spec-gate.py`) keeps refusing code against it.
+//
+// NARROW ON PURPOSE. Only `sidecar-not-restaged` is ever downgraded. A staged sidecar that
+// does not match (`sidecar-mismatch`, the e9f82ca shape) or cannot be read is an approval
+// given to the wrong bytes, which no delegation excuses. The coverage witness is asked only
+// for an eligible failure, and a witness that throws is "not covered" (fail closed).
+
+export interface RaceCoverage {
+  readonly covered: boolean;
+  /** Why: the delegation id when covered, the refusal reason when not. */
+  readonly detail: string;
+}
+
+export interface RaceOutcome {
+  /** Failures that still refuse the commit. */
+  readonly refusals: RaceFailure[];
+  /** Voided approvals a live delegation covers: reported, not refused. */
+  readonly warnings: RaceFailure[];
+}
+
+export function applyDelegationCoverage(
+  failures: readonly RaceFailure[],
+  coverage: (failure: RaceFailure) => RaceCoverage,
+): RaceOutcome {
+  const refusals: RaceFailure[] = [];
+  const warnings: RaceFailure[] = [];
+  for (const f of failures) {
+    if (f.check !== 'sidecar-not-restaged') {
+      refusals.push(f);
+      continue;
+    }
+    let c: RaceCoverage;
+    try {
+      c = coverage(f);
+    } catch (e) {
+      c = { covered: false, detail: `the delegation check could not run: ${(e as Error).message}` };
+    }
+    if (c.covered === true) {
+      warnings.push({ ...f, detail: `${f.detail}\n      allowed: ${c.detail}` });
+    } else {
+      refusals.push({ ...f, detail: `${f.detail}\n      no delegation covers it: ${c.detail}` });
+    }
+  }
+  return { refusals, warnings };
+}
