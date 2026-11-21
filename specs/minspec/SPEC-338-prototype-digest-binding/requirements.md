@@ -7,6 +7,7 @@ product: minspec
 epic: EPIC-007  # Agent Execute — Autopilot Mode
 aspects: [approval, staleness, gate, never-wrong, autopilot]
 relates_to: [DR-036, SPEC-022, SPEC-041, DR-062, DR-012]
+implements: [packages/shared/src/prototype-digest.ts, scripts/hooks/prototype_digest.py]
 ---
 
 # MinSpec — Prototype digest bound into the overview (Requirements)
