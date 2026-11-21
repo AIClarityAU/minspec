@@ -38,6 +38,7 @@ import {
   renderManagedFile,
   renderManagedBlock,
 } from '../src/lib/template-registry';
+import { parseSpec } from '../src/lib/spec';
 import { splitManagedRegion } from '../src/lib/merge-refresh';
 import { useShellTimeout } from './helpers/shell-timeout';
 
@@ -590,6 +591,51 @@ describe('python validate.py mirrors the Node validator core checks (#246)', () 
     const py = runValidatePy();
     expect(py.code).toBe(1);
     expect(py.stderr).toContain('specs/spec-x/spec.md');
+  });
+
+  it.skipIf(!hasPy)('a spec with a leading UTF-8 BOM passes (full scan) (#2477)', () => {
+    writeSpec('specs/spec-001/spec.md', '\uFEFF---\nid: SPEC-001\nstatus: specifying\n---\n# ok\n');
+    expect(runValidatePy().code).toBe(0);
+  });
+
+  it.skipIf(!hasPy)('agrees with Node: a leading-BOM spec passes both (TS/Python parity) (#2477)', () => {
+    writeSpec('specs/spec-001/spec.md', '\uFEFF---\nid: SPEC-001\nstatus: specifying\n---\n# ok\n');
+    const tsId = parseSpec(fs.readFileSync(path.join(tmpDir, 'specs/spec-001/spec.md'), 'utf-8')).frontmatter.id;
+    expect(tsId).toMatch(/^SPEC-\d+$/);
+    expect(runValidatePy().code).toBe(0);
+  });
+
+  it('parseSpec strips a leading BOM for parsing but keeps it in source (#2477)', () => {
+    const text = '\uFEFF---\nid: SPEC-001\nstatus: specifying\n---\n# ok\n';
+    const withBom = parseSpec(text);
+    const without = parseSpec(text.slice(1));
+    expect(withBom.frontmatter.id).toBe('SPEC-001');
+    expect(withBom.frontmatter).toEqual(without.frontmatter);
+    expect(withBom.raw).toBe(without.raw);
+    expect(withBom.source).toBe(text);
+  });
+
+  it.skipIf(!hasPy)('a staged spec with a leading UTF-8 BOM passes (--pre-commit) (#2477)', () => {
+    writeSpec('specs/spec-001/spec.md', '\uFEFF---\nid: SPEC-001\nstatus: specifying\n---\n# ok\n');
+    const git = (...args: string[]) =>
+      execFileSync('git', args, { cwd: tmpDir, stdio: 'pipe', encoding: 'utf-8' });
+    git('init', '-q');
+    git('add', 'specs/spec-001/spec.md');
+    let code = 0;
+    let stderr = '';
+    try {
+      execFileSync('python3', [path.join(tmpDir, VALIDATE_PY), '--pre-commit'], {
+        cwd: tmpDir,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (e: unknown) {
+      const err = e as { status?: number; stderr?: string };
+      code = err.status ?? 1;
+      stderr = err.stderr ?? '';
+    }
+    expect(stderr).toBe('');
+    expect(code).toBe(0);
   });
 
   it.skipIf(!hasPy)('python parses an inline comment on id (id: SPEC-001 # note)', () => {

@@ -5,6 +5,12 @@ All notable changes to the MinSpec extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.29] - 2026-11-15
+
+### Fixed
+
+- A spec file that starts with a UTF-8 byte order mark (as Windows editors write) is no longer silently skipped by the scaffolded spec gate and hooks (#2477).
+
 ## [0.1.27] - 2026-10-04
 
 The preview release for the VS Code Marketplace, and the first version built for publishing since 0.1.16. Versions 0.1.17 to 0.1.26, below, were local builds, so an update from 0.1.16 brings everything from 0.1.17 on. This section lists what changed after 0.1.26.

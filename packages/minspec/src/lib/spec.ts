@@ -286,7 +286,11 @@ export function parseSpec(content: string): ParsedSpec {
   // every read seam that flows through the parser (readSpecFile, readSpecKitDir,
   // the custom editor, …). The rule is the one `text-io` owns (SPEC-095 FR-1); the text
   // as handed in is kept as `source`, so a writer can give the file its endings back.
-  const normalized = prepareText(content);
+  // A leading UTF-8 BOM is dropped for parsing only (#2477): FRONTMATTER_RE anchors on
+  // `^---`, so a BOM spec yielded id '' and vanished from listSpecs. This is the TS twin
+  // of the Python readers' utf-8-sig. `source` below keeps the BOM, so the approval hash
+  // (which retains it, canonical.{ts,py}) and a writer's round trip are unchanged.
+  const normalized = prepareText(content).replace(/^\uFEFF/, '');
   const raw = normalized;
 
   // Extract frontmatter
