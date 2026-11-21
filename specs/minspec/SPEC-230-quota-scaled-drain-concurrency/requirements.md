@@ -15,8 +15,8 @@ relates_to: [SPEC-044, SPEC-062, SPEC-074, SPEC-078, "#2853", "#1208", "#2514", 
 implements: [packages/minspec/tests/drain-concurrency-width.test.ts]
 affects: [scripts/drain-inbox.sh, scripts/remediate-pr.sh, packages/minspec/tests/drain-concurrency.test.ts]
 phases:
-  specify: in-progress
-  clarify: pending
+  specify: done
+  clarify: done   # D1-D3 answered 2026-10-25 (see Decisions needed (Clarify)); spec still unapproved
   plan: pending
   tasks: pending
   implement: pending
@@ -26,7 +26,7 @@ phases:
 
 > **This is a SPECIFICATION ONLY.** It was written for issue #2853 (scale drain and
 > dispatch concurrency to quota headroom). Nothing is built until a human reads it,
-> resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
+> reviews the recorded [Clarify decisions](#decisions-needed-clarify) (D1-D3, answered 2026-10-25), and approves it.
 
 ## In plain terms
 
@@ -82,7 +82,7 @@ across the windows the reading reports. `W` is a pure, deterministic function of
 - **non-decreasing** in binding headroom, all else equal;
 - **never above** the configured maximum (FR-3) or the host ceiling (FR-4).
 
-The exact mapping from headroom to width is decided in Clarify D1.
+The mapping is decided in Clarify D1 (founder, 2026-10-25): `W = 1 + floor(binding headroom / MINSPEC_DRAIN_WIDTH_STEP)` with the step defaulting to 10 percentage points, clamped to the configured maximum and host ceiling (so 51pp gives 6).
 
 **FR-2. One pool for builds and remediation.** Dispatch builds and PR remediation agents
 draw from a single slot pool of width `W`. The total number of drain-launched agents in
@@ -91,9 +91,9 @@ still in flight, rather than only after the dispatch phase ends.
 
 **FR-3. Configured maximum.** `MINSPEC_DRAIN_CONCURRENCY` keeps its name and becomes the
 upper bound on `W` rather than a fixed width. Unset means adaptive, up to the default maximum
-(Clarify D3). `MINSPEC_DRAIN_CONCURRENCY=1` restores today's strictly serial behaviour
+of 6 (Clarify D3, founder, 2026-10-25). `MINSPEC_DRAIN_CONCURRENCY=1` restores today's strictly serial behaviour
 byte-for-byte on the dispatch path. A malformed value falls back to 1 and says so, as
-`_validated_concurrency` does today. The hard absolute ceiling of 8 stays unless D3 changes it.
+`_validated_concurrency` does today. The hard absolute ceiling of 8 stays (D3 did not change it).
 
 **FR-4. Host ceiling.** Independently of quota, a launch is refused when the host cannot
 carry another agent: available memory (`MemAvailable` from `/proc/meminfo`) below a
@@ -116,7 +116,7 @@ is the model.
 
 **FR-7. Reader.** `scripts/drain-inbox.sh --concurrency` prints, in one line, the width the
 drain would use right now and why, for example
-`width 4 of max 8 | binding 7d headroom 51.2pp | host ok (mem 13.1G, load 3.9/12) | <quota_cap_line>`.
+`width 6 of max 6 | binding 7d headroom 51.2pp | host ok (mem 13.1G, load 3.9/12) | <quota_cap_line>`.
 It spends nothing (`QUOTA_BOOTSTRAP_ADMITS=0`, as `quota_cap_line`), exits 0 when `W >= 1`
 and 42 when `W` is 0. Anything outside the script that asks "how much may run?" reads this
 line instead of holding its own figure.
@@ -136,8 +136,9 @@ never counted as idle. `stall` is the defect state: the acceptance criteria requ
 rare.
 
 **FR-10. Same-file collisions are bounded.** Widening must not turn the competing-PR risk
-(`scripts/drain-inbox.sh:376-381`) into unbounded rework. The mechanism is Clarify D2; whatever
-is chosen, the drain measures the rate of drain pull requests that need a conflict-driven
+(`scripts/drain-inbox.sh:376-381`) into unbounded rework. The mechanism is Clarify D2 (founder, 2026-10-25): competing pull requests are accepted and, when
+rework passes 25% of the last 8 drain pull requests, the maximum drops to 1 for the rest of the
+cycle. The drain measures the rate of drain pull requests that need a conflict-driven
 re-run or are closed as superseded, and logs it per cycle so the trade can be re-tuned on data.
 
 ## Invariants (must not break)
@@ -203,6 +204,8 @@ re-run or are closed as superseded, and logs it per cycle so the trade can be re
   under headroom, using a rolling per-agent burn rate from successive readings. Tracks reality.
   Cost: a new stateful estimator that can be wrong on a cold start, and much harder to test.
 
+> **Decided (founder's Clarify answer, 2026-10-25, queue item c230): option (a), fixed steps.** One extra slot per `MINSPEC_DRAIN_WIDTH_STEP` percentage points of binding headroom, default 10pp, clamped to the maximum. Accepted cost: it ignores how fast agents actually burn quota, so the step may need re-tuning once FR-10/FR-9 data exists. Set aside: (b) measured burn.
+
 **D2. Same-file collisions.**
 - (a) **(rec)** Accept competing pull requests and bound them by measurement: log the
   collision/rework rate (FR-10) and drop the maximum to 1 automatically for the rest of the
@@ -215,6 +218,8 @@ re-run or are closed as superseded, and logs it per cycle so the trade can be re
 - (c) Keep dispatch serial and widen only remediation. Cost: builds stay the bottleneck, so the
   founder's outcome is only partly met.
 
+> **Decided (founder's Clarify answer, 2026-10-25, queue item c230): option (a), accept and bound by measurement.** Competing pull requests are allowed; the drain logs the collision/rework rate and drops the maximum to 1 for the rest of the cycle when rework passes 25% of the last 8 drain pull requests. Accepted cost: some rework tokens are spent before the tripwire trips, and the merge queue's `strict` base updates (#1394) get more frequent. Set aside: (b) serialise on declared scope, (c) serial dispatch.
+
 **D3. Default maximum when unset.**
 - (a) **(rec)** 6: half the cores, leaving room for the founder's own sessions. Cost: on an
   otherwise idle host it under-fills by up to half.
@@ -222,6 +227,8 @@ re-run or are closed as superseded, and logs it per cycle so the trade can be re
   pressure alongside interactive sessions.
 - (c) Keep 1 and require opt-in. Cost: the machine stays idle by default, which is the
   defect #2853 reports.
+
+> **Decided (founder's Clarify answer, 2026-10-25, queue item c230): option (a), default maximum 6.** Accepted cost: on an otherwise idle host it under-fills by up to half. Set aside: (b) 8, (c) keep 1 and opt in.
 
 ## Alternatives rejected
 
