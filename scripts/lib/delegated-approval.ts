@@ -54,7 +54,7 @@ import {
   type DelegationWitnesses,
 } from './approval-actor';
 import { readRepeatFixShare, utcToday } from './repeat-fix-share';
-import { openClarifyDetail } from './clarify-open';
+import { openClarifyDetail, clarifyPhaseDetail } from './clarify-open';
 import { readContentPullRequest } from './content-pr';
 import { readSpecFile, parseSpec, advanceSpecToImplementing } from '../../packages/minspec/src/lib/spec';
 import { deriveStatus, phasesForApproval } from '../../packages/minspec/src/lib/lifecycle';
@@ -221,6 +221,8 @@ export function planDelegatedApproval(input: PlanInput): PlanResult {
   if (act === 'spec-approval') {
     const open = openClarifyDetail(artifactContent);
     if (open !== undefined) return no('clarify-open', open);
+    const phase = clarifyPhaseDetail(artifactContent, tier);
+    if (phase !== undefined) return no('clarify-pending', phase);
   }
   // The delegation to cite: the first that covers this repo and act. `checkApprovalActor`
   // re-judges it in full, so picking a non-covering one only produces a refusal.
@@ -576,6 +578,8 @@ export function specNotApprovable(repoRoot: string, abs: string, content?: strin
   const parsed = content === undefined ? readSpecFile(abs) : parseSpec(content);
   const status = parsed.frontmatter.status;
   if (isTerminalSpecStatus(status)) return `the spec is ${String(status)}, past the approval gate`;
+  const clarify = clarifyPhaseDetail(parsed.raw, parsed.frontmatter.tier);
+  if (clarify !== undefined) return clarify;
   // The approval hash covers the body, and the lifecycle write rewrites a body status word
   // (setBodyStatusToken) to the derived status. A delegated approval must leave the body untouched (DR-081 s5:
   // the exemption covers the record, never the approvable), so refuse up front.

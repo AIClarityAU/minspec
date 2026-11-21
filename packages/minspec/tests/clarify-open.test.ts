@@ -111,3 +111,40 @@ describe('findOpenClarify (#3059)', () => {
     }
   });
 });
+
+import { clarifyPhaseDetail } from '../../../scripts/lib/clarify-open';
+
+describe('clarifyPhaseDetail (#3102)', () => {
+  const fm = (clarify: string, tier = 'T3') =>
+    `---\nid: SPEC-1\ntier: ${tier}\nphases:\n  specify: done\n  clarify: ${clarify}\n  plan: pending\n---\n\n# x\n`;
+  it('refuses a T3/T4 spec whose Clarify phase is pending or in progress', () => {
+    expect(clarifyPhaseDetail(fm('pending'), 'T3')).toMatch(/phases\.clarify: pending/);
+    expect(clarifyPhaseDetail(fm('in-progress', 'T4'), 'T4')).toMatch(/in-progress/);
+  });
+  it('accepts done and skipped, with a trailing comment', () => {
+    expect(clarifyPhaseDetail(fm('done'), 'T3')).toBeUndefined();
+    expect(clarifyPhaseDetail(fm('skipped'), 'T3')).toBeUndefined();
+    expect(clarifyPhaseDetail(fm('done   # resolved'), 'T3')).toBeUndefined();
+  });
+  it('fails closed on an absent phases map for T3, and ignores T1/T2', () => {
+    expect(clarifyPhaseDetail('---\nid: SPEC-1\ntier: T3\n---\n', 'T3')).toMatch(/absent/);
+    expect(clarifyPhaseDetail(fm('pending', 'T2'), 'T2')).toBeUndefined();
+    expect(clarifyPhaseDetail(fm('pending'), undefined)).toBeUndefined();
+  });
+  // Founder decision, runner queue item clarsel, 2026-11-17: an agent's recorded pick of the
+  // (rec) option closes a T3 Clarify question, and sign-off ratifies it. The SPEC-311 shape
+  // ("answered, not ratified", #3399) with clarify: done passes both witnesses; the same
+  // spec with one question left unrecorded is still refused by the text witness.
+  it('a T3 spec whose questions carry agent-recorded (rec) picks and clarify: done is admitted', () => {
+    const section =
+      '## Decisions needed (Clarify)\n\nRecorded selections: each of the 2 selections below is the option this document marks recommended, copied by the runner\'s agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.\n\n' +
+      '1. **Surface.** (rec) A new command; cost: one more command.\n\n   **Recorded selection: the recommended option,** a new command. Recorded by the runner\'s agent on 2026-11-13 as the document\'s (rec) option; the approver may change it.\n' +
+      '2. **Confirmation.** (rec) A non-modal toast; cost: one click.\n\n   **Recorded selection: the recommended option,** a non-modal toast. Recorded by the runner\'s agent on 2026-11-13 as the document\'s (rec) option; the approver may change it.\n';
+    const spec = fm('done') + '\n' + section;
+    expect(clarifyPhaseDetail(spec, 'T3')).toBeUndefined();
+    expect(findOpenClarify(spec).open).toBe(false);
+    const oneOpen = section.replace(/\n\n   \*\*Recorded selection: the recommended option,\*\* a non-modal toast\.[^\n]*\n/, '\n');
+    expect(oneOpen).not.toBe(section);
+    expect(findOpenClarify(fm('done') + '\n' + oneOpen).open).toBe(true);
+  });
+});

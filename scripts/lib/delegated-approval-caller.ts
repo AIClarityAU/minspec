@@ -56,7 +56,7 @@ import { BOT_ACTOR, evaluateDelegation, parseDelegations, type Delegation, type 
 import { actForPath, frontmatterField } from './approval-actor';
 import { readContentPullRequest } from './content-pr';
 import { readRepeatFixShare, utcToday } from './repeat-fix-share';
-import { openClarifyDetail } from './clarify-open';
+import { openClarifyDetail, clarifyPhaseDetail } from './clarify-open';
 import { specNotApprovable } from './delegated-approval';
 
 /** The commit identity of `minspec-sdd[bot]` (the App's bot user). */
@@ -406,6 +406,16 @@ export function runCaller(opts: CallerOptions, deps: CallerDeps): CallerReport {
       const open = openClarifyDetail(content);
       if (open !== undefined) {
         skip(artifact, 'clarify-open', open);
+        continue;
+      }
+      // The Clarify phase field itself (#3102): a T3/T4 spec whose phases.clarify is not
+      // done/skipped is refused here, before specNotApprovable (which asks the same), so the
+      // skip names the precise reason. A recorded agent pick of the (rec) option closes a
+      // question (founder decision, runner queue item clarsel, 2026-11-17); this check only
+      // reads the field the Clarify step sets.
+      const phase = clarifyPhaseDetail(content, frontmatterField(content, 'tier'));
+      if (phase !== undefined) {
+        skip(artifact, 'clarify-pending', phase);
         continue;
       }
       // The rest of the CLI's refusal (incomplete spec, ownership not declared for the
