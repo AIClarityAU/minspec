@@ -717,6 +717,24 @@ try {
 // race gate (#424) sees one commit; this sees the merged tree. Decision-record/epic sidecars
 // warn only (existing corpus drift); orphans are Rule 10's.
 try {
+  const exemptFile = join(ROOT, 'scripts', 'stale-approval-exemptions.json');
+  const exempt = new Map<string, string>();
+  // ABSENT list = the declared "no known debt" state; a present-but-malformed one fails closed.
+  if (existsSync(exemptFile)) {
+    try {
+      const parsed = JSON.parse(readFileSync(exemptFile, 'utf-8')) as { exemptions?: Array<{ path?: unknown; reason?: unknown }> };
+      if (!Array.isArray(parsed.exemptions)) throw new Error('missing "exemptions" array');
+      for (const e of parsed.exemptions) {
+        if (typeof e.path !== 'string' || e.path === '') throw new Error(`bad exemption path ${JSON.stringify(e.path)}`);
+        if (typeof e.reason !== 'string' || e.reason.trim() === '') throw new Error(`exemption ${e.path} has no written reason`);
+        exempt.set(e.path, e.reason);
+      }
+    } catch (err) {
+      exempt.clear();
+      reportUnrunnable('Rule 30', 'the stale-approval exemption list could not be loaded, so NO exemptions were applied', err, true, exemptFile);
+    }
+  }
+  const staleNow = new Set<string>();
   for (const s of findStaleSidecars(
     listRecords(ROOT),
     (p) => canonicalSpecHash(join(ROOT, p)),
@@ -725,8 +743,13 @@ try {
     const msg =
       `stale approval (#1227) - sidecar records specHash ${s.recorded.slice(0, 12)}... but the file now hashes to ${s.current.slice(0, 12)}.... ` +
       'A hashed field changed after approval; re-run "MinSpec: Approve Spec" (or revert the edit) so the signpost and the record agree.';
-    if (s.fatal) fail(join(ROOT, s.specPath), msg);
-    else warn(`${s.specPath}: ${msg}`);
+    staleNow.add(s.specPath);
+    const debt = exempt.get(s.specPath);
+    if (s.fatal && debt === undefined) fail(join(ROOT, s.specPath), msg);
+    else warn(`${s.specPath}: ${msg}${debt !== undefined ? ` [known debt: ${debt}]` : ''}`);
+  }
+  for (const p of exempt.keys()) {
+    if (!staleNow.has(p)) warn(`${p}: no longer stale - remove it from scripts/stale-approval-exemptions.json.`);
   }
 } catch (err) {
   reportUnrunnable('Rule 30', 'the stale-approval check could not run', err, true);

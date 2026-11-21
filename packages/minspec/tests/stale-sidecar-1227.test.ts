@@ -82,4 +82,23 @@ describe('validate-frontmatter Rule 30 CLI (#1227)', () => {
     expect(out).toContain('stale approval (#1227)');
     expect(out).toMatch(/FAIL specs\/x\/SPEC-900-probe\/requirements\.md/);
   });
+  it('a spec on the known-debt list downgrades to a visible WARN; a fixed one is flagged for removal', () => {
+    const approved = body('');
+    const edited = body('implements: [scripts/x.ts]\n');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'stale-1227-debt-'));
+    fs.mkdirSync(path.join(dir, '.minspec', 'approvals', path.dirname(SPEC)), { recursive: true });
+    fs.mkdirSync(path.join(dir, path.dirname(SPEC)), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(dir, SPEC), edited);
+    fs.writeFileSync(
+      path.join(dir, '.minspec', 'approvals', `${SPEC}.json`),
+      JSON.stringify({ specPath: SPEC, specHash: specHash(approved), approvedAt: '2026-01-01T00:00:00.000Z', approvedBy: 'h@example.com', tier: 'T1', migrated: false, baselineBlob: '' }),
+    );
+    fs.writeFileSync(path.join(dir, 'scripts', 'stale-approval-exemptions.json'), JSON.stringify({ exemptions: [{ path: SPEC, reason: 'test debt' }] }));
+    const r = runTsxCli(SCRIPT, [], { cwd: dir });
+    fs.rmSync(dir, { recursive: true, force: true });
+    expect(r.output).toContain('stale approval (#1227)');
+    expect(r.output).toContain('[known debt: test debt]');
+    expect(r.output).not.toMatch(/FAIL specs\/x\/SPEC-900-probe\/requirements\.md: stale/);
+  });
 });
