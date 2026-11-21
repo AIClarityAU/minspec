@@ -10,6 +10,8 @@ bear on a near-term decision, file it as an issue and strike it here with the is
 
 Newest first.
 
+- 2026-11-16 - `git-analyzer.ts:188-210` reads a version bump as a new dependency and a failed diff as "none"; decide whether classification should use SPEC-114 FR-11's dependency count instead (source: SPEC-114, #133)
+- 2026-11-16 - once ten specs have passed through SPEC-114 FR-3 (seam-contract check), measure how many answered `contracts: none` (source: SPEC-114, #133)
 - 2026-11-12 - move the byte-order-mark fix into the shared spec-hash code once the Windows BOM spec-gate fix lands; measured: `canonical.py --hash` and `specHash` agree on a BOM-prefixed spec, so nothing is wrong today (source: PR #3437, BOM fix)
 - 2026-11-12 - the agent-config secret check covers GitHub user identity only; other MCP servers' API keys in agent config are unchecked (source: SPEC-226, Out of Scope)
 - 2026-11-12 - stopping the harness from recording a secret inside a `permissions.allow` rule is prevention, not detection, so SPEC-226's check cannot cover it (source: SPEC-226, Out of Scope)
