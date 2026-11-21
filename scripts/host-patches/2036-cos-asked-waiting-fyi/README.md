@@ -32,6 +32,14 @@ caught the drift - one shared classifier every arrow consumer must call - did no
 
 None of this dispatches anything; `cmd_nudge` is unchanged.
 
+Where the hunks land (so the diff context is not misread): the new `human_ask` /
+`item_tally` helpers are *inserted before* `def cmd_nudge` (that `def` line is only
+diff context, not an edit), the `cmd_asked` body is rewritten, and the last hunk (the
+`QUOTA WALL` / `ASKING YOU` / `NOTHING FOR YOU` classifier) is inside `cmd_waiting`,
+which begins before it (`def cmd_waiting` precedes the `kind = "QUOTA WALL"` line in
+the base). No line of `cmd_nudge`'s body is touched, and `test_waiting` exercises that
+classifier.
+
 ## Evidence (agent reading, 2026-11-20, against base sha256 `3cb6c734…64f4`)
 
 - `asked-waiting-fyi.test.py` FAILS against the unpatched base (14 failures, e.g.
