@@ -805,6 +805,14 @@ MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull req
 The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, and asked on 2026-10-01 for the extension to be published just before the visualiser work, about a week out. The constitution puts a Marketplace publish in Phase 2 and says Phase 2 work may not displace unfinished Phase 1 work, so publishing now needs a recorded exception, with its scope and preconditions stated.
 <!-- /dr-summary:DR-100 -->
 
+## [DR-101 — Walking-skeleton completion is a deterministic tie-break term, declared by an epic's `skeleton:` list - read by the resolver, never inferred](DR-101.md)
+
+*Status: proposed · Date: 2026-10-01*
+
+<!-- dr-summary:DR-101 auto=c33940de233c -->
+Triggered by: #297 (vertical-slice completion as a priority signal). DR-019 (deterministic next-task ordering) ranks pending human tasks by severity class and then by a within-class order, which DR-039 (goals drive priority) widened to (epic.order, goal-rank, priority, artifact-id). The code is compareRanked at packages/shared/src/next-task.ts:1045-1051. Every term before artifact-id is a human weight; artifact-id is an arbitrary deterministic pick.
+<!-- /dr-summary:DR-101 -->
+
 ## [DR-102 — Checkbox state leaves the canonical approval hash - a ticked task-list item records progress, and the hash covers the contract](DR-102.md)
 
 *Status: accepted · Date: 2026-10-04*
