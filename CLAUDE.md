@@ -222,9 +222,9 @@ DR-008 dispatch security.
 
 Triage agent auto-dispatches T1-T2 issues (`agent-ready`). T3-T4 get `needs-review` — human approves spec/plan before agent starts. Per SDD FR-2: Clarify phase required for T3-T4.
 
-**Who closes Clarify on a T3 spec** (DR-123, proposed: the founder decision from runner queue
+**Who closes Clarify on a T3 spec** (DR-123, accepted: the founder decision from runner queue
 item clarsel, 2026-11-17, in a committed record because a queue item alone cannot carry
-consent; this paragraph merges only once he accepts it). An agent's recorded pick of the option
+consent). An agent's recorded pick of the option
 the spec marks recommended closes that question. The pick is written in the "answered, not
 ratified" form from #3399 (Clarify settled on 23 specs): a `Recorded selection:` line that
 names the (rec) option and says an agent copied it and no human chose it. When every question
