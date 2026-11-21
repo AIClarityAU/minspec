@@ -17,6 +17,10 @@
 #     (flock), at most every 30 min — and its verdict is printed at the next session start
 #     WITH ITS AGE. A check that stopped completing reads as stale, never as a quiet week.
 #
+# Portability: `stat -c %Y` and `flock` are GNU/Linux. Dev and CI are Linux-only today; on
+# macOS the age would read as 0 (no re-run until the file is replaced). Without flock the
+# one-at-a-time guard falls back to an atomic mkdir lock. Revisit if a macOS dev appears.
+#
 # Its own file, like session-autonomy.sh, so a test can EXECUTE it without also firing the
 # drain, the radar or the branch guardrail. Never fatal, and the background run is detached
 # from the hook's stdout — a hook that held its pipe open would hold the session start.
@@ -72,7 +76,7 @@ age_s=""
 [ -s "$last" ] && age_s=$(( now - $(stat -c %Y "$last" 2>/dev/null || echo "$now") ))
 
 verdict=""
-[ -n "$age_s" ] && { verdict=$(grep '^IDENTITY-BOUNDARY ' "$last" 2>/dev/null | tail -1); verdict="${verdict#*]: }"; }
+[ -n "$age_s" ] && { verdict=$(grep '^IDENTITY-BOUNDARY ' "$last" 2>/dev/null | tail -1); verdict="${verdict#*]: }"; verdict=$(printf '%s' "$verdict" | tr -d '[:cntrl:]'); }
 if [ -z "$age_s" ]; then
   echo "🔑 Identity: no full check has completed here yet — one is running in the background."
 elif [ -z "$verdict" ]; then
@@ -116,7 +120,18 @@ fi
 if [ -z "$age_s" ] || [ "$age_s" -ge "$FRESH_S" ]; then
   (
     exec 9>"$STATE/$host.lock"
-    if command -v flock >/dev/null 2>&1; then flock -n 9 || exit 0; fi
+    if command -v flock >/dev/null 2>&1; then
+      flock -n 9 || exit 0
+    else
+      # No flock: fall back to an atomic mkdir lock so de-duplication still holds. A lock
+      # dir older than the run's own timeout (300 s, plus slack) belongs to a dead run.
+      lockd="$STATE/$host.lockd"
+      if [ -d "$lockd" ] && [ $(( $(date +%s) - $(stat -c %Y "$lockd" 2>/dev/null || date +%s) )) -ge 600 ]; then
+        rmdir "$lockd" 2>/dev/null
+      fi
+      mkdir "$lockd" 2>/dev/null || exit 0
+      trap 'rmdir "$lockd" 2>/dev/null' EXIT
+    fi
     tmp="$last.$$"
     timeout 300 "$IBC" >"$tmp" 2>&1
     # Only a run that reached its verdict replaces the last result; a killed or hung run
