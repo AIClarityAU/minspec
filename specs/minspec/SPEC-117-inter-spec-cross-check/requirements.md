@@ -31,7 +31,6 @@ phases:
 > specify-only gate (DR-076 solo-mode ceremony / #1169). Nothing may be built from it until a
 > human approves it.
 
-**Status:** specifying
 **Issue:** [#147](https://github.com/AIClarityAU/minspec/issues/147) — inter-spec cross-check as a Slice 2 (reality-check reviewer) AI check
 **Rests on:** [DR-029](../../../docs/decisions/DR-029.md) (self-audit + trust stack, §3 and §8 build slices) ·
 [DR-030](../../../docs/decisions/DR-030.md) (spec prose is untrusted input) ·
