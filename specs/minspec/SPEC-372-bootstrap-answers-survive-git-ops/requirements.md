@@ -130,13 +130,18 @@ is a different property from a dismissed toast.
    - **C: keep the file, add a tracked-file detector** (warn/untrack when `preferences.json` is
      tracked). Cost: leaves the `git clean -x` / fresh-clone loss in place, i.e. fixes only the case
      that already has a gitignore gate.
+
+   **Recorded selection: the recommended option,** A, amend DR-078 with a dated note splitting consents (stay project-file) from UI dismissals (workspaceState). Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 2. **`workspaceState` vs `globalState`.** The issue title says globalState, its body says
    workspaceState. **Rec: `workspaceState`** (per-workspace, matches the constitution-nudge pattern,
    respects invariant 3). Cost: the answer is re-asked once per distinct workspace/clone location,
    which is the very annoyance for a user with many worktrees (each worktree path is a separate
    workspace). `globalState` keyed by remote URL would fix that but is machine-wide state.
+   **Recorded selection: the recommended option,** `workspaceState`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 3. **Which keys move?** Rec: only the prompt dismissals (FR-1). Cost: `autoClassifyOnCommit` — the
    *"Always classify"* answer — stays in the file and is still lost on `git clean -x`. Moving it too
    widens scope into DR-078 consent territory (its guard reads it ahead of the VS Code setting).
+   **Recorded selection: the recommended option,** only the prompt dismissals (FR-1) move. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 4. **Migration cleanup.** Rec: leave old keys in the file (FR-5). Cost: stale data lingers; deleting
    it is a write MinSpec makes into a file the user may track.
+   **Recorded selection: the recommended option,** leave old keys in the file (FR-5). Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
