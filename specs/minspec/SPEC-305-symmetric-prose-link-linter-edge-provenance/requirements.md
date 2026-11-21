@@ -6,8 +6,6 @@ tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — edge trustworthiness
 aspects: [dag, edges, linter, provenance, tier-0, determinism, never-wrong]
-implements: none
-implements_reason: creates no file this spec can name yet. FR-1 to FR-10 describe a new linter and tag validator whose module paths are not named, and D5 runs it inside the existing npm run validate, so where it lives is a Plan decision.
 depends_on: [SPEC-012]
 relates_to: [SPEC-041, DR-019, DR-062, DR-023]
 ---

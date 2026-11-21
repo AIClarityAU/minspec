@@ -8,8 +8,6 @@ epic: EPIC-003  # SDD Core Methodology - a required check must exist and be visi
 aspects: [ai-review, github-actions, check-run, no-silent-gate, fail-closed, head-base-skew, machinery]
 depends_on: []
 relates_to: [DR-090, "#1925", "#1834", "#1839", "#1120", "#486", "#1728", "#1688", "#2018"]
-implements: none
-implements_reason: creates no file this spec can name yet. FR-1 to FR-5 change the existing ai-review.yml and ai-review-guard.js and their regenerated templates (already in affects), and where FR-6's single list of required and optional guard exports lives is a Plan decision.
 # Ownership declared in Specify, before approval mints a hash (SPEC-038). Nothing is
 # built from this spec until it is approved. The work lands in .github/workflows, which
 # the App cannot push (#1120): a human pushes it.

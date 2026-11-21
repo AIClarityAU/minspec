@@ -8,8 +8,11 @@ epic: EPIC-001  # Explorer Epic Grouping - a visual cross-artifact map is the na
 aspects: [ux, traceability, data]
 depends_on: [DR-013]
 relates_to: [SPEC-012, DR-100, "#182", "#211"]
-implements: none
-implements_reason: creates no file this spec can name yet. DQ-1 to DQ-4 now record their selections (a native TreeView minimap and a webview expanded view, hand-rolled layout), but no FR names the new provider, panel or layout module, so their paths are a Plan decision.
+# No `implements:` yet. DQ-1 to DQ-3 below are unresolved, and the file list a Clarify
+# answer produces is what `implements:` binds (SPEC-038 FR-1 to FR-3) — binding it to a
+# guess now would stale on the first DQ a human answers differently from the recommendation.
+# The "Requirements (drafted under the recommended options)" note under each FR says which
+# option it assumes; `implements:` is left for Plan, once Clarify records real answers.
 # No `affects:` either: every file this spec's FRs name below
 # (`artifact-graph.ts`, `epic-manager.ts`, `adr-manager.ts`, `spec.ts`) is read, not
 # modified — FR-4 is explicit that this spec must not add exports or fields to them. A

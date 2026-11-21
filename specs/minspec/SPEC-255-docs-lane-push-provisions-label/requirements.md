@@ -7,8 +7,6 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a new opt-in forge write; DR-081 re-homed the sibling SPEC-050 from EPIC-009 for the same reason (EPIC-009 needs >1 actor sharing the repo)
 aspects: [docs-lane, consent, forge-write, blast-radius, adopter-parity]
 relates_to: [SPEC-039, SPEC-050, DR-098, DR-081, DR-071, "#2257", "#2243"]
-implements: none
-implements_reason: creates no file this spec can name yet. FR-1 to FR-6 change the existing push-docs-lane.ts and approval-pr.ts, and FR-8's new test file is not named, so its path is a Plan decision. Declaring the shared files would freeze them for every other session until approval.
 phases:
   specify: in-progress
   clarify: pending

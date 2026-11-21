@@ -6,8 +6,6 @@ tier: T3
 product: minspec
 epic: EPIC-005  # Auto Structure Repair — the corrupt-artifact half that SPEC-005 parked
 relates_to: [SPEC-005, SPEC-218]  # SPEC-005: parent, additive/missing-only repair, this spec is its "Out of scope" corrupt-artifact item. SPEC-218: owns config-corruption detection/visibility; this spec consumes it
-implements: none
-implements_reason: creates no file this spec can name yet. FR-1 to FR-9 add corrupt-artifact detection and a consented repair whose module paths are not named, and config.json detection reuses SPEC-218's loader, so where the code lives is a Plan decision.
 ---
 
 # MinSpec — Corrupt-artifact repair (Requirements)
