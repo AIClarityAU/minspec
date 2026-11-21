@@ -7,6 +7,9 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a human act needs a witness the agent cannot forge
 aspects: [approval, dr-acceptance, extension-command, no-silent-gate]
 relates_to: [SPEC-251, SPEC-290, SPEC-041, DR-065, DR-056, DR-062, "#3017", "#3016", "#2861", "#2992", "#2628"]
+affects: [packages/minspec/src/commands/adr.ts, packages/minspec/package.json]
+implements: none
+implements_reason: creates no file of its own. The Accept Amendment command (Clarify decision 1) sits beside acceptAdrCommand and setAdrStatusCommand in the shared packages/minspec/src/commands/adr.ts, reusing their identity gate and writeRecord path (FR-3, FR-4), plus one command contribution in packages/minspec/package.json (FR-7); both are listed in affects:.
 phases:
   specify: in-progress
   clarify: pending
