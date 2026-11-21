@@ -8,6 +8,7 @@ epic: EPIC-007  # Agent Execute Extension
 aspects: [autopilot, spec-gate, deliverables, no-silent-gate]
 relates_to: [DR-036, DR-012, DR-031, SPEC-038]
 affects: [scripts/hooks/spec-gate.py]  # gains a third ownership signal (deliverable_paths)
+implements: [scripts/hooks/spec-gate.py, scripts/validate-frontmatter.ts]
 phases:
   specify: in-progress
   clarify: pending
