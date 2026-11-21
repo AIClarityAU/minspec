@@ -88,10 +88,14 @@ The `awaiting-approval` applier (SPEC-031 FR-9a). Changing the remediation cap o
 - **D1 — Rename `needs-human-review` to `needs-human-fix`?**
   - (a) **Keep the name** *(rec)*: ~68 files reference it, including dispatch gating and fixtures. With eager application gone the name is no longer misleading; a rename buys disambiguation from `awaiting-approval` that the polarity change already delivers. Cost: the word "review" still reads like an approval prompt to a new reader.
   - (b) Rename: unambiguous. Cost: a large cross-file change on gate machinery, a transition window with two names, and breakage risk in consumers' dashboards and saved searches.
+
+  **Recorded selection: the recommended option,** (a), keep the name `needs-human-review`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D2 — Fail-closed backstop (workflow errored, no verdict).**
   - (a) **Keep eager** *(rec)*: with no verdict nothing can remediate, so a human genuinely is next. Cost: contradicts the issue's literal item 1; a flaky workflow (token mint, install) summons the human for infra noise.
   - (b) Drop the label, rely on the red status and `ai-review-retry`: queue stays clean. Cost: an errored run sits silently red with no human signal if retry also fails, which edges toward a silent gate.
   - (c) Apply only after one automatic re-run also errors: best of both, but adds state and a new workflow path.
+
+  **Recorded selection: the recommended option,** (a), keep the fail-closed backstop eager. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D3 — Is item 1 closed by what already shipped?** If D1(a) and D2(a) are chosen, the remaining work is FR-6 plus tidying the issue's stale description; the issue could close after the wiring test lands. Alternatively keep it open for D1(b)/D2(b).
 
   **Answer (fact, agent, 2026-11-17):** half of item 1 has shipped; whether the other half closes it
