@@ -1,0 +1,110 @@
+--- a/cos.py
++++ b/cos.py
+@@ -1819,20 +1819,44 @@
+     rows = load_sessions(enrich=True)
+     live = [r for r in rows if r["state"] == "LIVE"]
+     live.sort(key=lambda r: -(idle_secs(r) or 0))
+-    n = 0
++    n, quiet = 0, []
+     for r in live:
+         if not r["tpath"]:
+             continue
+         txt = last_assistant_text(r["tpath"])
+-        if not txt or ("➡️" not in txt and "Your turn" not in txt):
++        # #2036: the arrow's bare PRESENCE is not an ask. human_ask() classifies each
++        # item through the same item_actor() cmd_nudge uses, so a block of pure [fyi]
++        # (or [act]) is not reported as a question for the human. It fails closed: an
++        # unmarked, unknown, malformed or vetoed item is a human ask, and a block that
++        # cannot be read at all is shown as an ask rather than dropped.
++        asking, items = human_ask(txt)
++        if not asking:
++            if items:
++                quiet.append((r["name"], items))
+             continue
+         n += 1
+         idl = idle_secs(r)
+         print(f"\n{r['name'][:52]}   idle {fmt_age(idl) if idl else '?'}")
+-        for line in txt.split("➡️")[1:4]:
+-            print(f"   ➡️ {' '.join(line.split())[:150]}")
++        if not items:
++            print("   (an action block with no readable arrow item - shown as an ask, "
++                  "unclassified)")
++        human = [it for it in items if it[0] == "human"]
++        for _actor, why, seg in human[:3]:
++            print(f"   ➡️ [{why}] {' '.join(seg.split())[:140]}")
++        if len(human) > 3:
++            print(f"   ... and {len(human) - 3} more human item(s)")
++        other = [it for it in items if it[0] != "human"]
++        if other:
++            print(f"   (+ {item_tally(other)} in the same block - not asks, not shown)")
+     if not n:
+         print("no live session is currently holding a question for you")
++    if quiet:
++        # Printed, never silently skipped (invariant 2): a reader can see which
++        # sessions were judged to hold nothing for the human, and why.
++        print(f"\n{len(quiet)} session(s) hold an action block with nothing for you "
++              f"(every item [act] or [fyi]) - not counted as questions:")
++        for name, items in quiet:
++            print(f"   {name[:52]:<53} {item_tally(items)}")
+     return 0
+ 
+ 
+@@ -5053,6 +5077,41 @@
+     return (ok, counts)
+ 
+ 
++def human_ask(txt):
++    """(asking, items) - does ONE assistant turn hold anything for a HUMAN? (#2036)
++
++    `items` is [(actor, why, segment)] for every arrow item, each classified by
++    item_actor() - the same parser cmd_nudge dispatches on, so the display
++    surfaces (asked, waiting) and the relay path can never disagree about what an
++    item is. `asking` is True when ANY item resolves to "human".
++
++    Fails closed, toward the human and never toward "fyi" (property 1 above):
++      - an unmarked, unknown, malformed or vetoed item resolves to "human"
++        inside item_actor(), so it is an ask;
++      - a turn that carries an arrow or "Your turn" but no readable item
++        (pending_items() is None) is an ask with items == [] - it cannot be
++        classified, so it is shown, exactly as it was before the marker existed.
++    Only a block whose every item is explicitly [fyi] or [act] is not an ask.
++    A turn with no arrow and no "Your turn" is (False, []).
++    """
++    if not txt:
++        return (False, [])
++    segs = pending_items(txt)
++    if segs is None:
++        return ((ARROW in txt or "Your turn" in txt), [])
++    items = [item_actor(s) + (s,) for s in segs]
++    return (any(actor == "human" for actor, _why, _seg in items), items)
++
++
++def item_tally(items):
++    """'2 act, 1 fyi' style count of classified (actor, why, segment) items."""
++    n = {}
++    for actor, _why, _seg in items:
++        n[actor] = n.get(actor, 0) + 1
++    label = {"agent": "act"}
++    return ", ".join(f"{n[a]} {label.get(a, a)}" for a in ("human", "agent", "fyi") if a in n)
++
++
+ def cmd_nudge(args):
+     """Which parked sessions should be nudged RIGHT NOW - and, crucially, which should not.
+ 
+@@ -5194,10 +5253,15 @@
+         if idl is None or idl < 300:
+             continue
+         txt = last_assistant_text(r["tpath"]) if r["tpath"] else ""
++        # #2036: classify the items, not the arrow's presence. A block whose every
++        # item is [fyi]/[act] is not ASKING YOU; anything unclassifiable still is.
++        asking, items = human_ask(txt)
+         if LIMIT_RE.search(txt):
+             kind = "QUOTA WALL"
+-        elif "➡️" in txt or "Your turn" in txt:
++        elif asking:
+             kind = "ASKING YOU"
++        elif items:
++            kind = f"NOTHING FOR YOU ({item_tally(items)})"
+         elif txt.rstrip().endswith("?"):
+             kind = "ASKED A QUESTION"
+         else:
