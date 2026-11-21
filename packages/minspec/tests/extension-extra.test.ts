@@ -262,6 +262,7 @@ vi.mock('../src/lib/active-adr', () => ({
 }));
 vi.mock('../src/lib/resolve-folder', () => ({
   resolveTargetFolderNonInteractive: vi.fn(() => '/tmp/test-workspace'),
+  initLastPickMemory: vi.fn(),
 }));
 // Auto-bootstrap stubbed: runBootstrap is a no-op promise; isWatchedGitPath
 // uses the real predicate so the git-watcher filter is exercised honestly.

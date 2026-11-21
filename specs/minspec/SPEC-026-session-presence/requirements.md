@@ -347,16 +347,26 @@ scope).
 
 1. **Arbitration.** Without a tie-break, two live sessions each staging the shared file
    each see the other as a live contender and BOTH are rejected — a deadlock. Rule: when
-   FR-12 would reject P, compare `startedAt` of self (from `.minspec/session.json`) with
-   the contending peer's. The **earlier-started session is the holder and is ALLOWED**;
+   FR-12 would reject P, compare the presence-record `startedAt` (FR-2) of self with
+   the contending peer's. **Both sides of the comparison come from presence records:**
+   self's key is the `startedAt` field of self's own record,
+   `.minspec/sessions/<MY_SESSION>.session.json`, where `MY_SESSION` is resolved per FR-11
+   (`.minspec/session.json` may supply only the session **id**, never the key). The
+   `startedAt` inside `.minspec/session.json` (`SessionState.startedAt`, the time the scope
+   was declared) is a different event from the presence `startedAt` (the time the session
+   activated), and `session.json` is one file per working tree, so two sessions in the
+   same tree would read the same value — it MUST NOT be used as an arbitration key
+   (amended 2026-10-29, #3332). The **earlier-started session is the holder and is ALLOWED**;
    only the **later-started session is rejected** and told to wait / pick another doc
    (FR-16) — not "open a worktree" (approvables edit on `main`, DR-051). **Total tie-break
    (closes INV-9):** `startedAt` is canonical fixed-width ISO-8601 UTC (ms precision, FR-2)
    so lexical order == chronological; on **equal** `startedAt` (same millisecond), the
    **lexicographically-lower `sessionId` holds** — a deterministic total order both engines
    compute identically, so exactly one session is ever the holder and two same-second
-   sessions can never both commit. (If self has no resolvable `startedAt`, treat self as
-   later → the conservative side blocks, never both.)
+   sessions can never both commit. (If `MY_SESSION` **is resolved** but self's presence
+   record is absent, unreadable, or missing the `startedAt` field, treat self as later →
+   the conservative side blocks, never both. An **unresolved** `MY_SESSION` is not covered
+   here: it is governed by item 2 and fails open to ALLOW, never self-block.)
 2. **Self-fallback.** If `MY_SESSION` is unresolved (trailer absent — bare-terminal human,
    or trailer hook bypassed), the backstop MUST NOT let a session's own presence record
    block its own commit. It additionally excludes any record whose `pid` is the committing
