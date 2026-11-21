@@ -18,11 +18,11 @@ import { spawnSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { TSX_BIN } from "./helpers/run-tsx-cli";
 
 const REPO_ROOT = process.cwd();
 const SCRIPT_PATH = path.join(REPO_ROOT, "scripts", "validate-frontmatter.ts");
 // Absolute tsx (not npx): cwd is a tmpdir outside the repo; npx could try to fetch it.
-const TSX_BIN = path.join(REPO_ROOT, "node_modules", ".bin", "tsx");
 
 const COULD_NOT_RUN = "could not run on this file";
 const BAD = "aaa-unreadable.md";
