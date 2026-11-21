@@ -1,0 +1,14 @@
+{
+  "specPath": "docs/decisions/DR-115.md",
+  "specHash": "58142706a416fa0dbf85a1ce309de6e8496ace0eeb3c0f2c86bc5e9bea9af1c8",
+  "approvedAt": "2026-11-21T11:21:47.837Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "engineering-dr-acceptance",
+  "author": "session:agent/issue-2982",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3217#issuecomment-7061260493"
+}
