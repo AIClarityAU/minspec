@@ -16,6 +16,8 @@ import {
 import { parseSpec } from '../src/lib/spec';
 import type { MinspecConfig, SpecsLayout } from '../src/lib/config';
 import { DEFAULT_CONFIG } from '../src/lib/config';
+import { readRecord, writeRecord, sidecarPath } from '../src/lib/approval-store';
+import { approveSpec, classifyBaseline, getApprovalStatus, refKey } from '../src/lib/approval';
 
 /** Create a temporary project directory with .minspec/config.json */
 function makeTmpProject(layout: SpecsLayout = 'flat'): string {
@@ -1025,5 +1027,134 @@ describe('createSpec — hash-lock reminder (#1510)', () => {
     const once = fs.readFileSync(p, 'utf-8');
     const count = (s: string) => s.split('# 🔒 Approval is recorded').length - 1;
     expect(count(once)).toBe(1);
+  });
+});
+
+describe('migrateLayout() approval sidecars (#3441)', () => {
+  let rootDir: string;
+
+  afterEach(() => {
+    if (rootDir) fs.rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it('moves the sidecar with its spec, re-keyed, and leaves none orphaned', () => {
+    rootDir = makeTmpProject('flat');
+    const s = createSpec(rootDir, 'Feature one', 'T3');
+    const oldRel = path.relative(rootDir, s.filePath).split(path.sep).join('/');
+    writeRecord(rootDir, {
+      specPath: oldRel,
+      specHash: 'a'.repeat(64),
+      approvedAt: '2026-01-01T00:00:00.000Z',
+      approvedBy: 'h@example.com',
+      tier: 'T3',
+      migrated: false,
+      baselineBlob: '',
+    });
+
+    const result = migrateLayout(rootDir, 'spec-kit');
+    expect(result.success).toBe(true);
+
+    expect(readRecord(rootDir, oldRel)).toBeUndefined();
+    expect(fs.existsSync(sidecarPath(rootDir, oldRel))).toBe(false);
+    const newRel = path.relative(rootDir, path.join(rootDir, DEFAULT_CONFIG.specsDir, '001-feature-one', 'spec.md'))
+      .split(path.sep).join('/');
+    const moved = readRecord(rootDir, newRel);
+    expect(moved?.specPath).toBe(newRel);
+    expect(moved?.specHash).toBe('a'.repeat(64));
+    // hash is carried, not re-minted; the fake hash was stale before migration, so it is not blamed on it
+    expect(result.warning).toBeUndefined();
+  });
+
+  it('moves the sidecar spec-kit to flat as well', () => {
+    rootDir = makeTmpProject('spec-kit');
+    const s = createSpec(rootDir, 'Feature one', 'T3');
+    const oldRel = path.relative(rootDir, s.filePath).split(path.sep).join('/');
+    writeRecord(rootDir, {
+      specPath: oldRel,
+      specHash: 'b'.repeat(64),
+      approvedAt: '2026-01-01T00:00:00.000Z',
+      approvedBy: 'h@example.com',
+      tier: 'T3',
+      migrated: false,
+      baselineBlob: '',
+    });
+
+    expect(migrateLayout(rootDir, 'flat').success).toBe(true);
+
+    expect(readRecord(rootDir, oldRel)).toBeUndefined();
+    expect(fs.existsSync(sidecarPath(rootDir, oldRel))).toBe(false);
+    const newRel = `${DEFAULT_CONFIG.specsDir}/SPEC-001-feature-one.md`;
+    const moved = readRecord(rootDir, newRel);
+    expect(moved?.specPath).toBe(newRel);
+    expect(moved?.specHash).toBe('b'.repeat(64));
+  });
+
+  it('carries a real approval hash unchanged and warns, with the baseline caveat, when it now reads stale', () => {
+    rootDir = makeTmpProject('flat');
+    const s = createSpec(rootDir, 'Feature one', 'T3');
+    const rec = approveSpec(rootDir, s.filePath, 'T3', 'human@example.com');
+
+    const result = migrateLayout(rootDir, 'spec-kit');
+    const newRel = `${DEFAULT_CONFIG.specsDir}/001-feature-one/spec.md`;
+    expect(readRecord(rootDir, newRel)?.specHash).toBe(rec.specHash);
+    expect(getApprovalStatus(rootDir, path.join(rootDir, newRel))).toBe('stale');
+    expect(result.warning).toMatch(/1 approval moved/);
+    expect(result.warning).toMatch(/may have no baseline/);
+  });
+
+  it('moves the gzip baseline snapshot with the sidecar, so it still classifies as recovered', () => {
+    rootDir = makeTmpProject('flat');
+    const s = createSpec(rootDir, 'Feature one', 'T3');
+    const oldRel = path.relative(rootDir, s.filePath).split(path.sep).join('/');
+    const rec = approveSpec(rootDir, s.filePath, 'T3', 'human@example.com');
+    expect(rec.baselineBlob).toBe('gzip:fallback');
+    const snapDir = path.join(rootDir, '.minspec', 'snapshots');
+    expect(fs.existsSync(path.join(snapDir, `${refKey(oldRel)}.json.gz`))).toBe(true);
+
+    expect(migrateLayout(rootDir, 'spec-kit').success).toBe(true);
+
+    const newRel = `${DEFAULT_CONFIG.specsDir}/001-feature-one/spec.md`;
+    expect(fs.existsSync(path.join(snapDir, `${refKey(oldRel)}.json.gz`))).toBe(false);
+    expect(fs.existsSync(path.join(snapDir, `${refKey(newRel)}.json.gz`))).toBe(true);
+    expect(classifyBaseline(rootDir, readRecord(rootDir, newRel)!)).toBe('recovered');
+  });
+
+  it('does not count a spec that was already stale before migration', () => {
+    rootDir = makeTmpProject('flat');
+    const s = createSpec(rootDir, 'Feature one', 'T3');
+    const oldRel = path.relative(rootDir, s.filePath).split(path.sep).join('/');
+    writeRecord(rootDir, {
+      specPath: oldRel,
+      specHash: 'a'.repeat(64), // never matches: stale before and after
+      approvedAt: '2026-01-01T00:00:00.000Z',
+      approvedBy: 'h@example.com',
+      tier: 'T3',
+      migrated: false,
+      baselineBlob: '',
+    });
+    const result = migrateLayout(rootDir, 'spec-kit');
+    expect(result.success).toBe(true);
+    expect(result.warning).toBeUndefined();
+  });
+
+  it('moves no sidecar or snapshot when a later spec fails the migration', () => {
+    rootDir = makeTmpProject('spec-kit');
+    const a = createSpec(rootDir, 'Feature one', 'T3');
+    createSpec(rootDir, 'Feature two', 'T3');
+    const oldRel = path.relative(rootDir, a.filePath).split(path.sep).join('/');
+    approveSpec(rootDir, a.filePath, 'T3', 'human@example.com');
+    // Spec two's flat target already exists, so the migration fails after spec one was written.
+    fs.writeFileSync(path.join(rootDir, DEFAULT_CONFIG.specsDir, 'SPEC-002-feature-two.md'), 'x', 'utf-8');
+
+    const result = migrateLayout(rootDir, 'flat');
+    expect(result.success).toBe(false);
+    expect(readRecord(rootDir, oldRel)).toBeDefined();
+    expect(fs.existsSync(path.join(rootDir, '.minspec', 'snapshots', `${refKey(oldRel)}.json.gz`))).toBe(true);
+  });
+
+  it('adds no warning when no approvals exist', () => {
+    rootDir = makeTmpProject('flat');
+    createSpec(rootDir, 'Feature one', 'T3');
+    expect(migrateLayout(rootDir, 'spec-kit').warning).toBeUndefined();
   });
 });

@@ -12,7 +12,7 @@ import type { ApprovalStatus } from '../lib/approval';
 // Path-keyed since SPEC-022 (FR-1): approval ground truth is keyed by the spec's
 // repo-relative path, not its id, so the lookup no longer takes a specId.
 export type ApprovalLookupFn = (rootDir: string, specFilePath: string) => ApprovalStatus;
-import { getApprovalStatus } from '../lib/approval';
+import { getApprovalStatus, getApprovalRecord } from '../lib/approval';
 import type { SpecSummary } from '../lib/spec-manager';
 import { EpicGroupingState, EpicGroupNode, buildEpicGroups } from './epic-grouping';
 import type { ListEpicsFn } from './epic-grouping';
@@ -161,7 +161,14 @@ export class SpecNode extends vscode.TreeItem {
      * way, so FR-3 holds by construction, not a parallel code path.
      */
     diffOnClick = false,
+    /**
+     * #741: the approval record is `migrated:true` (provenance unverified — an
+     * approval the human never verifiably performed). Only meaningful when
+     * `approval === 'approved'`; a stale/unapproved row ignores it.
+     */
+    migrated = false,
   ) {
+    const unverified = migrated && approval === 'approved';
     const displayTitle = epicGrouped ? stripProductPrefix(spec.title, spec.product) : spec.title;
     super(`${compressSpecId(spec.id)}: ${displayTitle}`, vscode.TreeItemCollapsibleState.None);
 
@@ -183,6 +190,7 @@ export class SpecNode extends vscode.TreeItem {
     //   stale \u2192 \u26a0 warning. otherwise \u2192 status icon.
     const iconId =
       terminal ? statusIcon(spec.status)
+        : unverified ? 'unlock'
         : approval === 'approved' ? 'lock'
           : approval === 'stale' ? 'warning'
             : statusIcon(spec.status);
@@ -193,6 +201,7 @@ export class SpecNode extends vscode.TreeItem {
     // harmless because the icon is authoritative.
     const approvalTag =
       terminal ? ''
+        : unverified ? ' \u00b7 approved \u00b7 unverified'
         : approval === 'approved' ? ' \u00b7 approved'
           : approval === 'stale' ? ' \u00b7 stale' : '';
     this.description = `${spec.tier} \u00b7 ${meter} ${pct}% \u00b7 ${phaseLabel}${approvalTag}`;
@@ -223,6 +232,7 @@ export class SpecNode extends vscode.TreeItem {
     // to also match specNode.stale so those actions are NOT lost on this row.
     const base = terminal
       ? 'specNode.terminal'
+      : unverified ? 'specNode.migrated'
       : approval === 'approved' ? 'specNode.approved'
       : approval === 'stale' ? 'specNode.stale'
       : 'specNode';
@@ -239,7 +249,8 @@ export class SpecNode extends vscode.TreeItem {
     this.contextValue = flags ? `${base} ${flags}` : base;
 
     const approvalLine =
-      approval === 'approved' ? 'Approval: \ud83d\udd12 approved (content-bound) \u2014 sealed to this content, not yet built'
+      unverified ? 'Approval: \ud83d\udd13 approved \u2014 UNVERIFIED provenance (migrated record, not a verified human approval); re-approve to verify'
+        : approval === 'approved' ? 'Approval: \ud83d\udd12 approved (content-bound) \u2014 sealed to this content, not yet built'
         : approval === 'stale' ? 'Approval: \u26a0 STALE \u2014 spec edited since approval, re-approve required'
           : 'Approval: \u2014 not approved';
     this.tooltip = `${spec.id}: ${spec.title}\nTier: ${spec.tier}\nStatus: ${spec.status}\nPhase: ${phaseLabel}\nProgress: ${spec.phasesDone}/${spec.phasesTotal} required phases (${pct}%)\n${approvalLine}`;
@@ -440,7 +451,17 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
 
   /** Build a SpecNode tagged with its current approval status. */
   private toSpecNode(root: string, spec: SpecSummary, epicGrouped = false, diffOnClick = false): SpecNode {
-    return new SpecNode(spec, this.safeApproval(root, spec), epicGrouped, diffOnClick);
+    const approval = this.safeApproval(root, spec);
+    return new SpecNode(spec, approval, epicGrouped, diffOnClick, approval === 'approved' && this.safeMigrated(root, spec));
+  }
+
+  /** #741: is the spec's approval record flagged `migrated` (unverified provenance)? Best-effort: false on any error. */
+  private safeMigrated(root: string, spec: SpecSummary): boolean {
+    try {
+      return getApprovalRecord(root, spec.filePath)?.migrated === true;
+    } catch {
+      return false;
+    }
   }
 
   private getStatusGroups(root: string, allSpecs: SpecSummary[]): SpecGroupNode[] {
