@@ -1,7 +1,7 @@
 ---
 id: SPEC-289
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - PRs from contributors who do not use MinSpec
@@ -14,9 +14,9 @@ implements_reason: >-
   a new pure classifier module, config schema) are fixed at Plan, after Decisions D1-D6 are
   answered and the FR-0 baseline is measured.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
