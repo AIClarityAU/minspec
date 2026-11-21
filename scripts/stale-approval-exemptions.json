@@ -4,6 +4,7 @@
     { "path": "specs/minspec/SPEC-012-next-task-resolver/requirements.md", "reason": "edited after approval by #3608 (signpost predicate generalised); awaiting re-approval." },
     { "path": "specs/minspec/SPEC-026-session-presence/requirements.md", "reason": "edited after approval by #3333 (FR-13.1 arbitration key amended); awaiting re-approval." },
     { "path": "specs/minspec/SPEC-033-repo-governance-provisioning/requirements.md", "reason": "edited after approval by #3610 (clarify refinements re-checked); awaiting re-approval." },
-    { "path": "specs/minspec/SPEC-042-onboarding-checklist/requirements.md", "reason": "edited after approval by #3573 (FR-12/AC-10 dropped); awaiting re-approval." }
+    { "path": "specs/minspec/SPEC-042-onboarding-checklist/requirements.md", "reason": "edited after approval by #3573 (FR-12/AC-10 dropped); awaiting re-approval." },
+    { "path": "specs/minspec/SPEC-023-consequence-screen/requirements.md", "reason": "edited after approval by #3837 (FR-9/AC-16 affirmative low-blast signal documented, DR-058/#490); awaiting re-approval." }
   ]
 }
