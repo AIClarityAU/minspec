@@ -803,6 +803,14 @@ MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull req
 The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, and asked on 2026-10-01 for the extension to be published just before the visualiser work, about a week out. The constitution puts a Marketplace publish in Phase 2 and says Phase 2 work may not displace unfinished Phase 1 work, so publishing now needs a recorded exception, with its scope and preconditions stated.
 <!-- /dr-summary:DR-100 -->
 
+## [DR-101 — Walking-skeleton completion is a deterministic tie-break term, declared by an epic's `skeleton:` list - read by the resolver, never inferred](DR-101.md)
+
+*Status: proposed · Date: 2026-10-01*
+
+<!-- dr-summary:DR-101 auto=c33940de233c -->
+Triggered by: #297 (vertical-slice completion as a priority signal). DR-019 (deterministic next-task ordering) ranks pending human tasks by severity class and then by a within-class order, which DR-039 (goals drive priority) widened to (epic.order, goal-rank, priority, artifact-id). The code is compareRanked at packages/shared/src/next-task.ts:1045-1051. Every term before artifact-id is a human weight; artifact-id is an arbitrary deterministic pick.
+<!-- /dr-summary:DR-101 -->
+
 ## [DR-102 — Checkbox state leaves the canonical approval hash - a ticked task-list item records progress, and the hash covers the contract](DR-102.md)
 
 *Status: accepted · Date: 2026-10-04*
@@ -906,6 +914,14 @@ The step "Post honest ai-review verdict check-run" (.github/workflows/ai-review.
 <!-- dr-summary:DR-114 auto=5fb445350927 -->
 scripts/drain-inbox.sh defaults to concurrency 1 and carries a caveat (around lines 407-411): two queued issues touching the same file still produce competing pull requests, because each agent branches from origin/main and cannot see an unmerged sibling, so "keep the default at 1 until same-file serialisation exists, and de-duplicate the queue first". That caveat was written for the session-start drain.
 <!-- /dr-summary:DR-114 -->
+
+## [DR-115 — The MinSpec App secrets are optional in the scaffolded review stack; without them the review posts with GITHUB_TOKEN as github-actions[bot]](DR-115.md)
+
+*Status: proposed · Date: 2026-10-28*
+
+<!-- dr-summary:DR-115 auto=f4b6ddc36218 -->
+ai-review.yml refuses to run unless CLAUDE_CODE_OAUTH_TOKEN, MINSPEC_APP_ID and MINSPEC_APP_PRIVATE_KEY are all set (.github/workflows/ai-review.yml:204-215), and the setup probe mirrors that (packages/minspec/src/lib/ruleset-advisor.ts:734-738). DR-054 intended consumer repos not to hold the App key (the shared broker, SPEC-034, is still in planning). Until the broker exists, every new repo needs the two App secrets set by hand, and the founder could not get review on a new work-PC repo without them.
+<!-- /dr-summary:DR-115 -->
 
 ## [DR-116 — MinSpec has a machine-facing command line (the headless core's), for hooks, workflows and agents only - no MinSpec text tells a person to type it, and its result schema minspec-core/0 is unstable](DR-116.md)
 

@@ -12,6 +12,8 @@ relates_to: [DR-090, "#1925", "#1834", "#1839", "#1120", "#486", "#1728", "#1688
 # built from this spec until it is approved. The work lands in .github/workflows, which
 # the App cannot push (#1120): a human pushes it.
 affects: [.github/workflows/ai-review.yml, .github/scripts/ai-review-guard.js, scripts/gen-ci-templates.mjs, packages/minspec/src/lib/hook-templates.ts, packages/minspec/tests/managed-region-templates.test.ts]
+implements: none
+implements_reason: creates no file of its own. Every change edits an existing shared managed template or its generated copy, all listed in affects: (ai-review.yml, ai-review-guard.js, gen-ci-templates.mjs, hook-templates.ts, managed-region-templates.test.ts).
 phases:
   specify: in-progress
   clarify: pending
