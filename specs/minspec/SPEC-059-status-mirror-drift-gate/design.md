@@ -4,9 +4,9 @@ type: design
 # tier lives on requirements.md, the single tier-carrying approvable. A tier on a sibling
 # document is read by spec-gate.py as a second, unapproved spec. (SPEC-059 is T3.)
 # phases mirror requirements.md. This file has no approval record of its own, so its
-# status is what deriveStatus computes for an unsigned file with these phases
-# (specifying) - the value the corpus rule this plan adds reads as clean.
-status: specifying
+# status is derived from requirements.md's record (SPEC-212 design, "Interaction with
+# SPEC-059"): approved, with plan in progress, derives planning.
+status: planning
 product: minspec
 epic: EPIC-002  # Signpost Integrity
 relates_to: [SPEC-022, SPEC-061, SPEC-014, SPEC-018, DR-034, DR-069, DR-108, "#1807", "#1513", "#917"]

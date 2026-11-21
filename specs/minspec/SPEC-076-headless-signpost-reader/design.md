@@ -1,7 +1,7 @@
 ---
 id: SPEC-076
 type: design
-status: specifying
+status: planning
 product: minspec
 epic: EPIC-002  # Signpost Integrity
 ---
