@@ -7,6 +7,8 @@ product: minspec
 epic: EPIC-009  # concurrent multi-session coordination; the shared-checkout sweep rule belongs here
 aspects: [approval, commit-gate, shared-checkout, no-silent-gate, enforce-dont-trust]
 relates_to: [SPEC-140, SPEC-069, DR-081, DR-003, "#2041", "#1376", "#168"]
+implements: none
+implements_reason: creates no file this spec can name yet. Decision 1 puts the gate in the existing .githooks/pre-commit and the generated adopter hook template, Decision 2 fixes the existing lib/approval-recover.ts, and the gate module's name and the FR-7 CI step are Plan decisions. Declaring those shared files would freeze them for every other session until approval.
 phases:
   specify: in-progress
   clarify: pending
