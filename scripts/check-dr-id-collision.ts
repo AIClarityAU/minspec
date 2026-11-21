@@ -132,6 +132,16 @@ const GH_BIN = process.env.DR_ID_GH_BIN?.trim() || 'gh';
 /** A failure caused by the API rate limit, not by a collision or a bad answer (#3077). */
 class RateLimitError extends GateError {}
 
+/** A failure from GitHub's side (HTTP 5xx) that outlasted the retries — infrastructure, not a collision (#3906). */
+class InfraError extends GateError {}
+
+/** A transient server-side failure in `gh`'s stderr / stdout. */
+const SERVER_ERROR_RE = /HTTP 5\d\d/;
+
+/** Retries for a transient 5xx, with exponential backoff from 2s (2s, 4s, 8s), capped by the wait bound. */
+const SERVER_ERROR_RETRIES = 3;
+const SERVER_ERROR_BACKOFF_MS = 2000;
+
 /** What a rate-limited response looks like in `gh`'s stderr / stdout. */
 const RATE_LIMIT_RE = /rate limit|HTTP 429|RATE_LIMITED/i;
 
@@ -192,7 +202,17 @@ function rateLimitWaitMs(): number {
  * after the wait comes back `failed` with its stderr, and `ghOrFail` names it.
  */
 function gh(args: string[]): GhResult {
-  const first = rawGh(args);
+  let first = rawGh(args);
+  // #3906: GitHub answers transient 5xx (e.g. "diff is temporarily unavailable", HTTP 500) under
+  // load. Retry a bounded number of times with backoff before the caller treats it as a failure.
+  for (let i = 0; i < SERVER_ERROR_RETRIES && first.failed; i++) {
+    const text = `${first.stderr}\n${first.stdout}`;
+    if (RATE_LIMIT_RE.test(text) || !SERVER_ERROR_RE.test(text)) break;
+    const backoff = Math.min(maxRateLimitWaitMs(), SERVER_ERROR_BACKOFF_MS * 2 ** i);
+    console.error(`gh hit a transient server error; retry ${i + 1}/${SERVER_ERROR_RETRIES} in ${Math.round(backoff / 1000)}s.`);
+    sleepMs(backoff);
+    first = rawGh(args);
+  }
   if (!first.failed || !RATE_LIMIT_RE.test(`${first.stderr}\n${first.stdout}`)) return first;
   const wait = rateLimitWaitMs();
   console.error(`gh was rate limited; waiting ${Math.round(wait / 1000)}s for the window to reset, then retrying once.`);
@@ -232,6 +252,11 @@ function ghFailure(prefix: string, r: GhResult): GateError {
   if (RATE_LIMIT_RE.test(`${r.stderr}\n${r.stdout}`)) {
     return new RateLimitError(
       `RATE LIMITED (not a DR id collision) — ${prefix} even after waiting for the limit to reset:\n${detail}`,
+    );
+  }
+  if (SERVER_ERROR_RE.test(`${r.stderr}\n${r.stdout}`)) {
+    return new InfraError(
+      `GITHUB INFRASTRUCTURE ERROR (not a DR id collision) — ${prefix} after ${SERVER_ERROR_RETRIES} retries; re-run the check:\n${detail}`,
     );
   }
   return new GateError(`${prefix}:\n${detail}`);
