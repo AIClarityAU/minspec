@@ -7,7 +7,11 @@ product: minspec
 epic: EPIC-002  # Signpost Integrity - a decision or epic whose frontmatter block cannot be parsed reads as `proposed`, so the signpost names an accepted decision as the next task
 aspects: [frontmatter, unreadable-state, overloaded-null, adr, epic, artifact-graph, silent-gate, tier-0]
 relates_to: [SPEC-095, DR-003, "#2468", "#2397", "#2404", "#968"]
-implements: [packages/minspec/src/lib/adr-manager.ts, packages/minspec/src/lib/epic-manager.ts, packages/minspec/src/lib/artifact-graph.ts]
+affects: [packages/minspec/src/lib/adr-manager.ts, packages/minspec/src/lib/epic-manager.ts, packages/minspec/src/lib/artifact-graph.ts]  # adr/epic-manager owned by SPEC-041
+implements: none
+implements_reason: >-
+  Specify phase only; the code is not built yet. The files named under `affects:` already exist and are
+  owned by other specs, so this spec owns none. Which files it owns is declared at Plan.
 phases:
   specify: in-progress
   clarify: pending

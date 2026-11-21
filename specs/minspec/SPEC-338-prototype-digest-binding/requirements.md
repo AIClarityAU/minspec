@@ -7,7 +7,11 @@ product: minspec
 epic: EPIC-007  # Agent Execute — Autopilot Mode
 aspects: [approval, staleness, gate, never-wrong, autopilot]
 relates_to: [DR-036, SPEC-022, SPEC-041, DR-062, DR-012]
-implements: [packages/shared/src/canonical.ts, scripts/hooks/canonical.py, scripts/hooks/spec-gate.py, scripts/validate-frontmatter.ts, packages/minspec/src/lib/approval.ts]
+affects: [packages/shared/src/canonical.ts, scripts/hooks/canonical.py, scripts/hooks/spec-gate.py, scripts/validate-frontmatter.ts, packages/minspec/src/lib/approval.ts]  # approval.ts owned by SPEC-041
+implements: none
+implements_reason: >-
+  Specify phase only; the code is not built yet. The files named under `affects:` already exist and are
+  owned by other specs, so this spec owns none. Which files it owns is declared at Plan.
 ---
 
 # MinSpec — Prototype digest bound into the overview (Requirements)

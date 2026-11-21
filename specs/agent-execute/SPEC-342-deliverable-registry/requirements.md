@@ -8,7 +8,10 @@ epic: EPIC-007  # Agent Execute Extension
 aspects: [autopilot, spec-gate, deliverables, no-silent-gate]
 relates_to: [DR-036, DR-012, DR-031, SPEC-038]
 affects: [scripts/hooks/spec-gate.py]  # gains a third ownership signal (deliverable_paths)
-implements: [scripts/hooks/spec-gate.py, scripts/validate-frontmatter.ts]
+implements: none
+implements_reason: >-
+  Specify phase only; the code is not built yet. The files named under `affects:` already exist and are
+  owned by other specs, so this spec owns none. Which files it owns is declared at Plan.
 phases:
   specify: in-progress
   clarify: pending
