@@ -13,7 +13,7 @@ implements_reason: >-
   graded (DQ-3).
 phases:
   specify: done
-  clarify: done
+  clarify: pending
   plan: pending
   tasks: pending
   implement: pending
@@ -247,7 +247,7 @@ actually ships.
 
 ## Decisions needed (Clarify)
 
-Recorded selections: each of the 3 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+Agent suggestions, not recorded selections: each of the 3 suggestions below names the option this document marks recommended. This is a T4 spec. The decision that lets an agent's (rec) pick close Clarify covers T3 only, so these suggestions do not close Clarify. The founder answers each question at Clarify, and may take or change any suggestion; until then Clarify stays open.
 
 ### DQ-1 — Does "Reference (T3) / Create-update (T4)" actually gate anything?
 
@@ -264,7 +264,7 @@ Recorded selections: each of the 3 selections below is an agent pick of the opti
   same shape of drift #19 was filed to close, just moved one level down. If chosen, FR-2
   must be deleted and the mapping table's wording corrected in the same change (INV-1).
 
-**Recorded selection: the recommended option,** option A, enforce via the existing DR-012 mechanism. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+**Agent suggestion (not a recorded selection):** the recommended option, option A, enforce via the existing DR-012 mechanism. Suggested 2026-11-17. No human chose it, and on this T4 spec it does not close the question.
 
 ### DQ-2 — Backfill the 219 existing specs, or rely on absent-key tolerance?
 
@@ -279,7 +279,7 @@ Recorded selections: each of the 3 selections below is an agent pick of the opti
   can collide with every in-flight PR touching those same files' frontmatter (the same
   sequencing cost SPEC-096's DQ-6 named for a smaller set).
 
-**Recorded selection: the recommended option,** option A, no migration; rely on absent-key tolerance. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+**Agent suggestion (not a recorded selection):** the recommended option, option A, no migration; rely on absent-key tolerance. Suggested 2026-11-17. No human chose it, and on this T4 spec it does not close the question.
 
 ### DQ-3 — Validator severity for FR-3's new check
 
@@ -291,7 +291,7 @@ Recorded selections: each of the 3 selections below is an agent pick of the opti
   adopter's or this repo's own `.minspec/constitution.md` content, so an immediate hard
   failure risks blocking on content nobody has audited yet.
 
-**Recorded selection: the recommended option,** option A, `warn` with the future-ratchet shape. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+**Agent suggestion (not a recorded selection):** the recommended option, option A, `warn` with the future-ratchet shape. Suggested 2026-11-17. No human chose it, and on this T4 spec it does not close the question.
 
 ## Out of Scope
 
