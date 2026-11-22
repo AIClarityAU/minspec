@@ -1,0 +1,11 @@
+# Python hook coverage config (#1256). Used by scripts/python-coverage.sh.
+# `parallel` makes every process write its own .coverage.<host>.<pid>.<rand>
+# file (gitignored, #1196) so subprocess runs of spec-gate.py are not lost;
+# `coverage combine` then merges them.
+[run]
+branch = True
+parallel = True
+# source is passed absolutely by the test helper: the gate subprocess runs with
+# a fixture-repo cwd, so a relative `source` would match nothing.
+omit =
+    */test_*.py

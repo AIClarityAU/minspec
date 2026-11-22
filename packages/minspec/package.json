@@ -188,17 +188,17 @@
       {
         "command": "minspec.specExplorer.toggleEpicGrouping",
         "title": "MinSpec: Toggle Group by Epic (Specs)",
-        "icon": "$(milestone)"
+        "icon": "$(list-tree)"
       },
       {
         "command": "minspec.adrExplorer.toggleEpicGrouping",
         "title": "MinSpec: Toggle Group by Epic (Decisions)",
-        "icon": "$(milestone)"
+        "icon": "$(list-tree)"
       },
       {
         "command": "minspec.backlog.toggleEpicGrouping",
         "title": "MinSpec: Toggle Group by Epic (Backlog)",
-        "icon": "$(milestone)"
+        "icon": "$(list-tree)"
       },
       {
         "command": "minspec.acceptAdr",
@@ -409,17 +409,17 @@
         },
         {
           "command": "minspec.approveSpec",
-          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.stale)?( |$)/",
+          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.stale|\\.migrated)?( |$)/",
           "group": "inline"
         },
         {
           "command": "minspec.approveSpec",
-          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.stale)?( |$)/",
+          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.stale|\\.migrated)?( |$)/",
           "group": "2_approval@1"
         },
         {
           "command": "minspec.revokeApproval",
-          "when": "view == minspecStatus && viewItem =~ /^specNode\\.approved( |$)/",
+          "when": "view == minspecStatus && viewItem =~ /^specNode\\.(approved|migrated)( |$)/",
           "group": "2_approval@2"
         },
         {
@@ -457,6 +457,12 @@
     "configuration": {
       "title": "MinSpec",
       "properties": {
+        "minspec.defaultProject": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "description": "Multi-root workspaces: workspace folder name (or absolute path) that commands target when the active editor is not inside any folder. Empty = reuse the last project you picked, else prompt."
+        },
         "minspec.specsDir": {
           "type": "string",
           "default": "specs",

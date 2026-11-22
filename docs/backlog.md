@@ -10,6 +10,12 @@ bear on a near-term decision, file it as an issue and strike it here with the is
 
 Newest first.
 
+- 2026-11-16 - `git-analyzer.ts:188-210` reads a version bump as a new dependency and a failed diff as "none"; decide whether classification should use SPEC-114 FR-11's dependency count instead (source: SPEC-114, #133)
+- 2026-11-16 - once ten specs have passed through SPEC-114 FR-3 (seam-contract check), measure how many answered `contracts: none` (source: SPEC-114, #133)
+- 2026-11-12 - move the byte-order-mark fix into the shared spec-hash code once the Windows BOM spec-gate fix lands; measured: `canonical.py --hash` and `specHash` agree on a BOM-prefixed spec, so nothing is wrong today (source: PR #3437, BOM fix)
+- 2026-11-12 - the agent-config secret check covers GitHub user identity only; other MCP servers' API keys in agent config are unchecked (source: SPEC-226, Out of Scope)
+- 2026-11-12 - stopping the harness from recording a secret inside a `permissions.allow` rule is prevention, not detection, so SPEC-226's check cannot cover it (source: SPEC-226, Out of Scope)
+- 2026-11-12 - run `npm run check:template-version` in the release job as the independent second witness for the local pre-push template-version gate; wiring it into per-PR main CI was declined because every concurrent template PR would then edit the same version line (source: #3427)
 - 2026-10-31 - DR-092 follow-up (d) still applies to any adopter that keeps its hand-written `minspec-ci-parity.yml`, whose remedy text keeps the self-defeating advice; moot wherever the managed copy replaces it (source: SPEC-079 DQ-3, the parity-ownership record, number 120, in docs/decisions/)
 - 2026-10-31 - constitution invariants are numbered, so `CON/INV-<slug>` has no target until they are named, which is an edit to the constitution (source: DR-053 §9, #3439)
 - 2026-10-30 - a normal build dispatch whose only deliverable is a spec or decision record, with a legitimate `Closes #N`, is refused by the delegated spec merge with `spec-pr-closes-build-issue`; fails closed, code left as it is (source: #3351)
@@ -24,3 +30,9 @@ Newest first.
 - 2026-11-13: `scripts/approve-issue.sh` comment near `CLEAR_LABELS` still cites `dispatch-ready-check.sh`'s "`for gate in ...` list" and says the test "extracts both lists from source"; since #3722 (drain skips human-held issues) the list is `COUNTERMAND_LABELS`, read via `--countermand-labels`. Comment-only sweep.
 - 2026-11-14: Autopilot hardening issues #233-#238 are escalated and unrouted; items A3/A4 harden approvals even without Autopilot, so they are worth doing on their own.
 - 2026-11-14: triage-inbox prints "WARNING: could not clear superseded label(s) on #N: agent-crashed ... clear it by hand" when the issue does not carry that label at all (16 times in the 2026-11-14 drain log, e.g. #737 carries only agent-ready,feat,role:dev). Removing an absent label is treated as a failure, so the warning is a false alarm that invites needless hand edits. Fix: skip labels the issue does not carry before removal.
+- 2026-11-16: SPEC-353 DQ-1 - mint stable INV-N ids on `.minspec/constitution.md` invariants (mirrors G-N); FR-2 of the test-completeness gate cannot proceed to Plan until a human picks Option A or B (source: SPEC-353)
+- 2026-11-16: SPEC-353 DQ-2 - add an `invariants:` frontmatter field plus a validator rule for a T3/T4 spec with it empty (DR-003 missing-direction asymmetry); same gate as DQ-1 (source: SPEC-353)
+- 2026-11-16: SPEC-353 migration - re-cite existing tests with FR-N/INV-N ids so the literal-citation matcher does not read tested specs as unmapped; do before FR-6 is enabled project-wide (source: SPEC-353)
+- 2026-11-16: SPEC-353 cross-boundary payload/schema contract tests (named in #52, out of scope for v1) - needs a definition of "cross-boundary payload" first (source: SPEC-353)
+- 2026-11-16: SPEC-353 DQ-3 - widen FR-3 public-API scope from packages/shared to packages/minspec/src if the shared-only scope misses real gaps (source: SPEC-353)
+- 2026-11-19 - Rule 28 (epic-id uniqueness, #396) checks one tree only; unlike Rule 17 (DR) and Rule 18 (spec) it has no cross-PR witness, so two concurrent PRs adding the same EPIC-NNN pass their own checks and collide on the base. Add a filename-keyed open-PR epic claim check (source: PR #3843 architect review)

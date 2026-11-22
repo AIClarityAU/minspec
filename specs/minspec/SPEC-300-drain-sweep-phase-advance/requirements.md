@@ -12,6 +12,11 @@ phases:
   plan: pending
   tasks: pending
   implement: pending
+implements:
+  - scripts/drain-sweep.ts
+  - scripts/drain-inbox.sh
+  - packages/minspec/src/lib/phase-advance-queue.ts
+  - packages/minspec/tests/phase-advance-queue.test.ts
 ---
 
 # Drain-sweep second trigger — deterministic phase-advance enqueue
@@ -242,6 +247,7 @@ Implements: [DR-057](../../../docs/decisions/DR-057.md) §3 (second trigger).
   gaining a write mode (rejected above) or spawning a subprocess and parsing its
   output (an indirection with no benefit here, since both would run in-process in the
   same Node/tsx invocation `run_cycle` already uses for `rank-issues.ts`).
+  **Recorded selection: the recommended option,** a new script (e.g. `scripts/drain-sweep.ts`) importing `buildArtifactGraph` / `resolvePipeline` / `artifactFileIndex`, not a mode on `next-task.ts`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 - **Per-cycle cap.** FR-4 ships with no cap in v1. If the live corpus ever produces a
   burst of simultaneously-ready specs large enough to matter (write cost, log noise),
   a cap may be worth adding later, mirroring `_dispatch_cap`
@@ -249,12 +255,14 @@ Implements: [DR-057](../../../docs/decisions/DR-057.md) §3 (second trigger).
   corpus size makes this a real cost, and premature capping risks silently deferring
   a ready spec with no visible signal (the same failure mode FR-4 exists to avoid for
   ordering). Revisit if #737 (queue-depth visibility) surfaces a real burst.
+  **Recorded selection: the recommended option,** defer: no per-cycle cap in v1. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 - **Cadence.** Does the sweep run every `run_cycle` (same cadence as inbox triage), or
   on a slower interval (since `tasks.md` readiness changes far less often than the
   inbox)? **Recommendation: every cycle**, for simplicity and because FR-3's
   idempotent overwrite makes a redundant run cheap; a slower cadence is an
   optimization with no correctness benefit and one more interval constant to tune and
   explain. Cost: a few extra cheap resolver runs per hour on an otherwise-idle repo.
+  **Recorded selection: the recommended option,** every cycle. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 
 ## Out of scope
 

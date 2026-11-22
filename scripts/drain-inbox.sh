@@ -940,6 +940,29 @@ provision_run_dir_modules() {
   return 0
 }
 
+# scripts_tree_current <exec-root> (#3747): exit 0 iff every file under scripts/ in the
+# run dir's HEAD (origin/main once verified) has the same content under <exec-root>/scripts,
+# the tree this process sources its libs from and resolves sibling scripts against.
+# Comparing drain-inbox.sh alone missed a stale lib it sources. A file present only in
+# <exec-root> is not compared: nothing on main can reach it. A missing or unreadable file
+# makes hash-object fail, which counts as NOT current (fail closed). Read-only: no -w.
+scripts_tree_current() {
+  local exec_root="$1" listing want got
+  listing="$(git -C "$DRAIN_RUN_DIR" ls-tree -r HEAD -- scripts 2>/dev/null)" || return 1
+  [[ -n "$listing" ]] || return 1
+  want="$(awk '$2 == "blob" { print $3 }' <<<"$listing")"
+  got="$(awk -F'\t' -v root="$exec_root/" '{ split($1, m, " "); if (m[2] == "blob") print root $2 }' <<<"$listing" \
+    | git -C "$DRAIN_RUN_DIR" hash-object --no-filters --stdin-paths 2>/dev/null)" || return 1
+  [[ -n "$want" && "$want" == "$got" ]]
+}
+
+# RUN_DIR_RESTART (#3747): set by ensure_fresh_run_dir when THIS process executes from the
+# run dir and origin/main has moved past it. The run dir is then left untouched (a reset
+# would rewrite the files a running bash reads incrementally and the libs it sources), the
+# cycle is skipped and the loop ends, so drain-service.sh refreshes the run dir while no
+# drain runs from it and starts the new code.
+RUN_DIR_RESTART=false
+
 # ensure_fresh_run_dir (#773): guarantee the pipeline scripts we run this cycle are
 # CURRENT, by maintaining a dedicated worktree hard-synced to origin/main and
 # repointing TRIAGE/DISPATCH/REMEDIATE at ITS copies. This replaces the old
@@ -979,10 +1002,28 @@ ensure_fresh_run_dir() {
 
   GIT_TERMINAL_PROMPT=0 git -C "$PRIMARY_ROOT" fetch origin main -q 2>/dev/null || true
 
+  # Executing FROM the run dir (drain-service.sh starts it there, #3747): never create,
+  # reset or provision it under ourselves. Rejected alternative: a fresh versioned dir per
+  # refresh with an atomic switch, which costs an npm install per main commit and a
+  # cleanup sweep for dirs a running process may still hold. Here, behind origin/main
+  # means stop and let the supervisor refresh it between processes.
+  local executing_from_run_dir=false
+  [[ "$(readlink -m -- "$SCRIPT_DIR" 2>/dev/null)" == "${run_canon}/scripts" ]] && executing_from_run_dir=true
+  if $executing_from_run_dir; then
+    local here_head here_origin
+    here_head="$(git -C "$DRAIN_RUN_DIR" rev-parse HEAD 2>/dev/null || echo 'norun')"
+    here_origin="$(git -C "$PRIMARY_ROOT" rev-parse origin/main 2>/dev/null || echo 'noorigin')"
+    if [[ "$here_head" != "$here_origin" ]]; then
+      RUN_DIR_RESTART=true
+      echo "[drain] origin/main moved (run=${here_head:0:7} origin=${here_origin:0:7}) and this drain executes from the run dir — not refreshing it under the running script; ending the loop so drain-service.sh refreshes it and starts the new code (#3747)."
+      return 0
+    fi
+  fi
+
   # (Re)create the worktree if it is missing or not a usable checkout. Use git's own
   # worktree removal (not a blind rm) to unregister a stale/broken one; only rm a
   # leftover path when it is NOT a populated checkout, so we never nuke real content.
-  if [[ ! -e "${DRAIN_RUN_DIR}/scripts/drain-inbox.sh" ]]; then
+  if ! $executing_from_run_dir && [[ ! -e "${DRAIN_RUN_DIR}/scripts/drain-inbox.sh" ]]; then
     git -C "$PRIMARY_ROOT" worktree remove --force "$DRAIN_RUN_DIR" 2>/dev/null || true
     git -C "$PRIMARY_ROOT" worktree prune 2>/dev/null || true
     [[ -e "$DRAIN_RUN_DIR" && ! -d "${DRAIN_RUN_DIR}/scripts" ]] && rm -rf "$DRAIN_RUN_DIR" 2>/dev/null || true
@@ -1004,12 +1045,15 @@ ensure_fresh_run_dir() {
 
   # Hard-sync to origin/main — the self-heal. On any git error we do NOT trust the run
   # dir (see the verify-before-repoint below); we never die.
-  git -C "$DRAIN_RUN_DIR" reset --hard origin/main -q 2>/dev/null \
-    || echo "[drain] WARNING: could not resync run-dir to origin/main." >&2
+  # Skipped when executing from the run dir: it is already at origin/main (checked above).
+  if ! $executing_from_run_dir; then
+    git -C "$DRAIN_RUN_DIR" reset --hard origin/main -q 2>/dev/null \
+      || echo "[drain] WARNING: could not resync run-dir to origin/main." >&2
 
-  # node/tsx helpers (delegated-merge judge, auto-merge gate, ranker,
-  # render-review-signals) need the workspace's modules - see provision_run_dir_modules.
-  provision_run_dir_modules
+    # node/tsx helpers (delegated-merge judge, auto-merge gate, ranker,
+    # render-review-signals) need the workspace's modules - see provision_run_dir_modules.
+    provision_run_dir_modules
+  fi
 
   # VERIFY the run dir is ACTUALLY at origin/main before trusting it (#773 review,
   # MAJOR). Only then repoint children + tell them freshness is validated. If the reset
@@ -1024,7 +1068,17 @@ ensure_fresh_run_dir() {
     DISPATCH="${DRAIN_RUN_DIR}/scripts/dispatch-issue.sh"
     REMEDIATE="${DRAIN_RUN_DIR}/scripts/remediate-pr.sh"
     export MINSPEC_FRESHNESS_CHECKED=1
-    echo "[drain] run dir verified at origin/main (${run_head:0:7}) — pipeline scripts are current."
+    # The run dir is verified; the code THIS process runs is not necessarily it (#3747: the
+    # primary checkout, held behind main by an uncommitted approval). Say "current" only
+    # when the whole scripts/ tree this process runs from (itself and every lib it
+    # sources) matches origin/main's; otherwise say STALE.
+    local exec_root
+    exec_root="$(dirname -- "$SCRIPT_DIR")"
+    if scripts_tree_current "$exec_root"; then
+      echo "[drain] run dir verified at origin/main (${run_head:0:7}) — pipeline scripts are current; the executing scripts/ tree ($SCRIPT_DIR) matches origin/main."
+    else
+      echo "[drain] STALE: run dir verified at origin/main (${run_head:0:7}) but the executing scripts/ tree ($SCRIPT_DIR) differs from origin/main's — the drain's own logic or a lib it sources is NOT current; run it from the run dir (drain-service.sh does) (#3747)." >&2
+    fi
   else
     echo "[drain] WARNING: run dir NOT verified at origin/main (run=${run_head:0:7} origin=${origin_head:0:7}) — running in place; children re-check freshness (#481)." >&2
   fi
@@ -1731,16 +1785,10 @@ arm_delegated_spec_merges() {
   if [[ "$cursor" =~ ^[0-9]+$ ]]; then
     candidates=$(awk -v c="$cursor" '$1 > c' <<< "$candidates"; awk -v c="$cursor" '$1 <= c' <<< "$candidates")
   fi
-  # Delegated approval PRs (`dlg-approve/*`) are judged BEFORE the rest (#3825), each group
-  # still in cursor order. A BEHIND plan PR cannot be admitted until its update turn, yet it
-  # took judgement slots ahead of approval PRs that could be armed at once. Ordering only.
-  local dlg_prs
-  dlg_prs=$(printf '%s' "$rows" | jq -r '.[] | select((.headRefName // "") | startswith("dlg-approve/")) | .number' 2>/dev/null) || {
-    echo "[drain] WARNING: delegated spec merge NOT run: could not read the approval PR heads." >&2
-    return 0
-  }
-  candidates=$(awk 'NR == FNR { d[$1] = 1; next } ($1 in d)' <(printf '%s\n' "$dlg_prs") <(printf '%s\n' "$candidates")
-    awk 'NR == FNR { d[$1] = 1; next } !($1 in d)' <(printf '%s\n' "$dlg_prs") <(printf '%s\n' "$candidates"))
+  # No dlg-approve ordering (#3949): every real approval PR changes the spec AND its
+  # `.minspec/approvals/<path>.json` sidecar, so the spec-only prefilter above never admits
+  # one, and the judge would refuse it (path-out-of-scope). Merging approval PRs belongs to
+  # the DR-119 lane (#3379), not this arm.
   while read -r pr; do
     [[ -n "$pr" ]] || continue
     if (( tried >= max )); then
@@ -2322,6 +2370,10 @@ run_cycle() {
   # CURRENT orchestration (self-heal, not die-on-stale). Never fatal — on failure it
   # falls back to in-place scripts and the cycle proceeds.
   ensure_fresh_run_dir
+  if $RUN_DIR_RESTART; then
+    echo "[drain] skipping this cycle: the run dir this drain executes from is behind origin/main (#3747)."
+    return 0
+  fi
 
   # Keep USER-FACING dormant shared checkouts current (gated; #168 / DR-051 §4a).
   # Runs every one-shot AND every continuous-loop iteration, which is the whole
@@ -4174,6 +4226,9 @@ run_loop() {
     fi
 
     rc=0; run_cycle || rc=$?
+    if $RUN_DIR_RESTART; then
+      echo "[drain] RESTART-ON-MAIN-MOVE: run dir is behind origin/main and this loop executes from it — stopping so drain-service.sh refreshes the run dir and relaunches the new code in the same service start (#3747)."; break
+    fi
     case "$rc" in
       0)
         consec=0

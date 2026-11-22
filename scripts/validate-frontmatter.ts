@@ -15,7 +15,7 @@
  * quietly, per `.minspec/constitution.md` invariant 2.
  */
 
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, statSync } from 'fs';
 import { join, relative, dirname, sep, basename } from 'path';
 import {
   validateDrSequence,
@@ -26,6 +26,8 @@ import {
 } from '../packages/minspec/src/lib/adr-manager';
 import {
   validateSplitLayoutCoverage,
+  validateShardIdConsistency,
+  type ShardIdFile,
   checkAcceptanceCriteria,
   validateOwnership,
   validateImplementEvidence,
@@ -41,11 +43,17 @@ import { DEFAULT_CONFIG, loadConfig } from '../packages/minspec/src/lib/config';
 import type { Tier } from '../packages/minspec/src/lib/config';
 import {
   checkReferences,
+  checkCitationFidelity,
   type ReferenceRegistry,
 } from '../packages/minspec/src/lib/reference-checker';
-import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
+import { listOrphanedRecords, listRecords } from '../packages/minspec/src/lib/approval-store';
+import { canonicalSpecHash } from '../packages/minspec/src/lib/approval';
+import { classifyApprovablePath } from '../packages/minspec/src/lib/approvable';
+import { findStaleSidecars } from './lib/stale-sidecar';
 import { checkStatusParity, inspectStatusLine, inspectAllStatusClaims } from '../packages/minspec/src/lib/status-parity';
-import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold';
+import { checkManagedRegionMarkers, MINSPEC_GITIGNORE_ENTRIES } from '../packages/minspec/src/lib/scaffold';
+import { missingGitignoreEntries } from './lib/gitignore-entries';
+import { parseFrontmatter, domainDocFailures, specIdFailure } from './lib/domain-doc-rules';
 // The corpus walkers, under their former local names. `safeGlob` now tolerates ONLY an
 // absent root; every other read failure reaches the rule's own catch instead of being
 // turned into an empty corpus (#1999).
@@ -55,6 +63,7 @@ import { findDecisionContradictions } from './lib/decision-status-contradiction'
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
 import { checkDrFrontmatterClosedSet } from './lib/dr-closed-set';
 import { checkDeclaredSpecIds } from './lib/spec-id-collision';
+import { checkDeclaredEpicIds } from './lib/epic-id-collision';
 import { findWrongDelegationCitations, isCorrectedSpec, type Delegation } from './lib/delegation-citation';
 import {
   SELF_HOSTED_TEMPLATE_NAMES,
@@ -69,23 +78,8 @@ const ROOT = process.cwd();
 let errors = 0;
 let warnings = 0;
 
-// `\r?\n`, not `\n` — a CRLF checkout (Windows `core.autocrlf=true`; this repo's
-// `.gitattributes` pins `specs/**` and `.minspec/approvals/**` to LF but not
-// `docs/decisions/**` or `docs/epics/**`, #2465) must still match this anchor. A
-// bare `\n` silently returns `{}` on every CRLF file: every frontmatter-bearing
-// rule below then reads it as having NO frontmatter rather than failing loudly,
-// which is exactly invariant 2's "no silent gate". Mirrors the Python twin's
-// intent already proven out in `declaredSpecId` (spec-id-collision.ts).
-function parseFrontmatter(content: string): Record<string, string> {
-  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-  if (!match) return {};
-  const fm: Record<string, string> = {};
-  for (const line of match[1].split('\n')) {
-    const [key, ...rest] = line.split(':');
-    if (key && rest.length) fm[key.trim()] = rest.join(':').trim();
-  }
-  return fm;
-}
+// `parseFrontmatter` lives in scripts/lib/domain-doc-rules.ts (shared with the headless core,
+// SPEC-136 FR-3); its CRLF handling is documented there (#2465).
 
 function fail(file: string, message: string): void {
   console.error(`FAIL ${relative(ROOT, file)}: ${message}`);
@@ -153,18 +147,7 @@ const domainDir = join(ROOT, 'docs', 'domain');
 {
   const domainFiles = listCorpus('Rule 1/3/4', domainDir, '.md', true);
   eachFile('Rule 1/3/4', domainFiles, true, (file) => {
-    const content = readFileSync(file, 'utf-8');
-    const fm = parseFrontmatter(content);
-
-    if (fm['type'] !== 'domain') {
-      fail(file, 'missing `type: domain` frontmatter');
-    }
-    if (/^- \[ \]/m.test(content)) {
-      fail(file, 'task checklists (- [ ]) not allowed in domain docs');
-    }
-    if (/acceptance criteria/i.test(content)) {
-      fail(file, 'acceptance criteria not allowed in domain docs');
-    }
+    for (const message of domainDocFailures(readFileSync(file, 'utf-8'))) fail(file, message);
   });
 }
 
@@ -315,9 +298,8 @@ if (epicRegistry.fileCount > 0 && epicRefs.size === 0) {
     const content = readFileSync(file, 'utf-8');
     const fm = parseFrontmatter(content);
 
-    if (!fm['id'] || !/^SPEC-\d+$/.test(fm['id'])) {
-      fail(file, 'missing or invalid `id: SPEC-NNN` frontmatter');
-    }
+    const idFailure = specIdFailure(content);
+    if (idFailure) fail(file, idFailure);
 
     if (epicRefs.size > 0) {
       const ref = epicRef(fm['epic']);
@@ -330,17 +312,19 @@ if (epicRegistry.fileCount > 0 && epicRefs.size === 0) {
   });
 }
 
-// Rule 7 (non-fatal): split-layout cross-file coverage (#111). For each spec
+// Rule 7 (coverage non-fatal, shard-id agreement fatal): split-layout cross-file coverage (#111). For each spec
 // DIRECTORY whose sibling files carry split `type:` frontmatter, warn when the
 // SET does not cover the tier's required, file-backed phases (a T3 dir with only
 // requirements.md is missing design.md + tasks.md). The #93 fix correctly skips
 // the in-FILE phase-section check per split file; this is the dir-level backstop
-// it deferred. WARNS only — matches the extension's warning severity, so a
-// mid-authoring requirements-only dir surfaces but never fails the build.
+// it deferred. Coverage gaps WARN only (warning severity), so a mid-authoring
+// requirements-only dir surfaces without failing the build. A design/tasks `id:` differing from
+// requirements' FAILS via validateShardIdConsistency (#493, #439).
 {
   const specFiles = listCorpus('Rule 7', specsDir, '.md', false);
   // Group by containing directory; each dir is one split-layout unit.
   const byDir = new Map<string, SplitLayoutFile[]>();
+  const shardsByDir = new Map<string, ShardIdFile[]>();
   eachFile('Rule 7', specFiles, false, (file) => {
     const fm = parseFrontmatter(readFileSync(file, 'utf-8'));
     const type = (fm['type'] ?? '').toLowerCase();
@@ -352,11 +336,21 @@ if (epicRegistry.fileCount > 0 && epicRefs.size === 0) {
     const tier = /^T[1-4]$/.test(tierToken) ? (tierToken as Tier) : undefined;
     list.push({ type, ...(tier ? { tier } : {}) });
     byDir.set(dir, list);
+    // Shard ids (#493): only self-declared split-layout phase files are shards of
+    // one spec; reuse validateShardIdConsistency (#439) rather than a second checker.
+    if (type === 'requirements' || type === 'design' || type === 'tasks') {
+      const shards = shardsByDir.get(dir) ?? [];
+      shards.push({ fileName: basename(file), id: (fm['id'] ?? '').split(/\s+/)[0] });
+      shardsByDir.set(dir, shards);
+    }
   });
   eachFile('Rule 7', [...byDir.keys()], false, (dir) => {
     const result = validateSplitLayoutCoverage(byDir.get(dir) ?? [], DEFAULT_CONFIG);
     for (const v of result.violations) {
       warn(`split-coverage ${relative(ROOT, dir)}: ${v.message}`);
+    }
+    for (const v of validateShardIdConsistency(shardsByDir.get(dir) ?? []).violations) {
+      fail(dir, `${v.rule}: ${v.message}`);
     }
   });
 }
@@ -495,6 +489,25 @@ try {
     `Spec-id uniqueness check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
       'Rule 18 validated NOTHING this run; do not read the green as a collision-free corpus.',
   );
+}
+
+// Rule 28 (FATAL, #396): epic-id uniqueness — the third register beside Rule 17 (DR) and
+// Rule 18 (spec). Concurrent `max+1` allocation hands two epics one id; the dangling-ref
+// check cannot see it because a duplicate still resolves. Fails CLOSED and visibly when the
+// corpus cannot be listed or read (invariant 2).
+{
+  const epicIdFiles: { file: string; content: string }[] = [];
+  eachFile(
+    'Rule 28',
+    listCorpus('Rule 28', epicsDir, '.md', true).filter((f) => /^EPIC-\d+/.test(basename(f))),
+    true,
+    (file) => {
+      epicIdFiles.push({ file: relative(ROOT, file), content: readFileSync(file, 'utf-8') });
+    },
+  );
+  for (const defect of checkDeclaredEpicIds(epicIdFiles)) {
+    fail(join(ROOT, defect.files[0]), `Epic id ${defect.kind} — ${defect.message}`);
+  }
 }
 
 // Rule 26 (FATAL, #1641): decision-record frontmatter closed set. The spec side has
@@ -647,8 +660,22 @@ function loadReferenceExemptions(reg: ReferenceRegistry): Set<string> {
       ...registry,
       fileExists: (relPath) =>
         existsSync(join(artifactDir, relPath)) || existsSync(join(ROOT, relPath)),
+      readFile: (relPath) => {
+        for (const p of [join(artifactDir, relPath), join(ROOT, relPath)]) {
+          try {
+            if (statSync(p).isFile()) return readFileSync(p, 'utf-8');
+          } catch {
+            // try the next candidate
+          }
+        }
+        return undefined;
+      },
     };
     for (const v of checkReferences(content, scopedRegistry)) {
+      warn(`ref-check ${relative(ROOT, file)}: ${v.message}`);
+    }
+    // Fidelity tier (#1643): warning severity — line bound + nearby-literal echo.
+    for (const v of checkCitationFidelity(content, scopedRegistry)) {
       warn(`ref-check ${relative(ROOT, file)}: ${v.message}`);
     }
   });
@@ -669,6 +696,51 @@ try {
 } catch (err) {
   // listOrphanedRecords tolerates an absent approvals dir itself (#2000).
   reportUnrunnable('Rule 10', 'the orphaned-approval check could not run', err, false);
+}
+
+// Rule 30 (FATAL for specs, #1227): a committed approval sidecar must match the file it
+// approves. #1205 landed an approval and #1181 then added `implements:` (a hashed field),
+// so `main` read `status: planning` while the record resolved `stale`; both PRs were green
+// because CI checked the field's presence, never the approval it invalidated. The pre-commit
+// race gate (#424) sees one commit; this sees the merged tree. Decision-record/epic sidecars
+// warn only (existing corpus drift); orphans are Rule 10's.
+try {
+  const exemptFile = join(ROOT, 'scripts', 'stale-approval-exemptions.json');
+  const exempt = new Map<string, string>();
+  // ABSENT list = the declared "no known debt" state; a present-but-malformed one fails closed.
+  if (existsSync(exemptFile)) {
+    try {
+      const parsed = JSON.parse(readFileSync(exemptFile, 'utf-8')) as { exemptions?: Array<{ path?: unknown; reason?: unknown }> };
+      if (!Array.isArray(parsed.exemptions)) throw new Error('missing "exemptions" array');
+      for (const e of parsed.exemptions) {
+        if (typeof e.path !== 'string' || e.path === '') throw new Error(`bad exemption path ${JSON.stringify(e.path)}`);
+        if (typeof e.reason !== 'string' || e.reason.trim() === '') throw new Error(`exemption ${e.path} has no written reason`);
+        exempt.set(e.path, e.reason);
+      }
+    } catch (err) {
+      exempt.clear();
+      reportUnrunnable('Rule 30', 'the stale-approval exemption list could not be loaded, so NO exemptions were applied', err, true, exemptFile);
+    }
+  }
+  const staleNow = new Set<string>();
+  for (const s of findStaleSidecars(
+    listRecords(ROOT),
+    (p) => canonicalSpecHash(join(ROOT, p)),
+    (p) => classifyApprovablePath(p),
+  )) {
+    const msg =
+      `stale approval (#1227) - sidecar records specHash ${s.recorded.slice(0, 12)}... but the file now hashes to ${s.current.slice(0, 12)}.... ` +
+      'A hashed field changed after approval; re-run "MinSpec: Approve Spec" (or revert the edit) so the signpost and the record agree.';
+    staleNow.add(s.specPath);
+    const debt = exempt.get(s.specPath);
+    if (s.fatal && debt === undefined) fail(join(ROOT, s.specPath), msg);
+    else warn(`${s.specPath}: ${msg}${debt !== undefined ? ` [known debt: ${debt}]` : ''}`);
+  }
+  for (const p of exempt.keys()) {
+    if (!staleNow.has(p)) warn(`${p}: no longer stale - remove it from scripts/stale-approval-exemptions.json.`);
+  }
+} catch (err) {
+  reportUnrunnable('Rule 30', 'the stale-approval check could not run', err, true);
 }
 
 // Rule 11 (FATAL, #626): the body status line must match frontmatter `status:`.
@@ -1344,6 +1416,21 @@ try {
     join(ROOT, '.minspec', 'delegations.json'),
     `delegation-citation check could not run (${err instanceof Error ? err.message : String(err)}) — failing closed (#3463).`,
   );
+}
+
+// #383: committed .gitignore must cover every MINSPEC_GITIGNORE_ENTRIES line. The runtime
+// writer (ensureGitignoreEntries) is extension-version-dependent; a stale VSIX never
+// backfilled template-baseline.json, which then leaked untracked. Fails closed on an
+// unreadable .gitignore. Only applies where MinSpec is opted in (.minspec/ present).
+if (existsSync(join(ROOT, '.minspec'))) {
+  const giPath = join(ROOT, '.gitignore');
+  try {
+    for (const m of missingGitignoreEntries(readFileSync(giPath, 'utf-8'), MINSPEC_GITIGNORE_ENTRIES)) {
+      fail(giPath, `missing MinSpec ephemeral-data entry "${m}" (MINSPEC_GITIGNORE_ENTRIES, #383). Add it, or it leaks untracked.`);
+    }
+  } catch (err) {
+    fail(giPath, `gitignore-entries check could not run (${err instanceof Error ? err.message : String(err)}) - failing closed (#383).`);
+  }
 }
 
 checkCiReviewTemplatesFresh().then(() => {
