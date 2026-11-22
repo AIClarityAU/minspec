@@ -1,7 +1,7 @@
 ---
 id: SPEC-340
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: agent-execute
 epic: EPIC-007  # Agent Execute Extension - Autopilot Mode (DR-036) runs inside the agent-dispatch surface
@@ -15,8 +15,8 @@ implements_reason: >-
   neither does a `gate-placement` config key. Which files this spec owns is declared at Plan.
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -211,6 +211,8 @@ core, but AC1 and AC9 must go through the production entry point.
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 3 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 **D1 - Which owner the list names.** The local remotes are `harvest316/<Repo>`. Session
 notes record an org move from harvest316 to AIClarityAU, and I have not checked
 (offline) whether these three repos moved.
@@ -219,6 +221,8 @@ notes record an org move from harvest316 to AIClarityAU, and I have not checked
   change. That fails closed, but it is a stop you will hit.
 - `b` both `harvest316/<Repo>` and `AIClarityAU/<Repo>` for each. Cost: twice the accepted
   slugs. Still exact names, so the extra risk is small.
+
+**Recorded selection: the recommended option,** option `a`, the exact slugs as observed (`harvest316/MeetLoop` and the other two). Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 **D2 - Whether to require the root-commit witness (FR6).**
 - `a` require it, with the core-root deny **(rec)**. It is the only witness an agent cannot
@@ -229,6 +233,8 @@ notes record an org move from harvest316 to AIClarityAU, and I have not checked
 - `b` remote URL only, which is what the issue text asks for. Cost: one editable file
   decides it, so T-3 stays open.
 
+**Recorded selection: the recommended option,** option `a`, require the root-commit witness, with the core-root deny. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+
 **D3 - How to treat extra remotes.**
 - `a` every remote, fetch and push, must name the same playground **(rec)**. Cost: a
   playground clone that also tracks a template or upstream remote is refused until that
@@ -236,6 +242,8 @@ notes record an org move from harvest316 to AIClarityAU, and I have not checked
 - `b` check only the remote the loop pushes to. Cost: it needs a reliable "which remote
   does the loop push to" answer, which is exactly what `git-remotes.ts` reports as
   `ambiguous`, and it leaves a planted remote harmless only if that resolution is right.
+
+**Recorded selection: the recommended option,** option `a`, every remote, fetch and push, must name the same playground. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 ## Follow-ups (tracked)
 

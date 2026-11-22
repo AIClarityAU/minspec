@@ -1,7 +1,7 @@
 ---
 id: SPEC-333
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute - the dev-time autonomous build/merge pipeline; the delegated merge lane is part of the drain (SPEC-062)
@@ -14,9 +14,9 @@ implements_reason: >-
   the delegated merge judge in scripts/lib/delegated-merge.ts, and the --delegated-spec-merge seam in
   scripts/dispatch-issue.sh. None of it is built.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -198,17 +198,23 @@ Two findings from the ignored review, checked against
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 5 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 1. **Does a later panel pass on the same head override an earlier dissent?**
    `a` **(rec)** No: any trusted dissent on the head refuses until the head moves or the
    *same source* posts a later `pass` on that head. Cost: a stale or wrong second review
    holds a pull request until someone re-runs that review or pushes. `b` Only verdicts
    newer than the panel pass count (the issue's minimum wording). Cost: re-running the panel
    on an unchanged head silently overrides an independent reviewer, which reopens #3287.
+
+   **Recorded selection: the recommended option,** option `a`, no: any trusted dissent on the head refuses until the head moves or the same source posts a later pass on that head. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 2. **Who is trusted to dissent?** `a` **(rec)** Only the allowlist (FR-4), with untrusted
    markers reported but not acted on. Cost: a real human `changes` comment without the bot
    identity does not block; a human uses `hold:*` for that, which already refuses. `b` Any
    author can block, only allowlisted authors can pass. Cost: anyone who can comment on a
    public pull request can stall the drain.
+
+   **Recorded selection: the recommended option,** option `a`, only the allowlist (FR-4). Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 3. **How FR-7 stops an armed spec merge.** `a` **(rec)** Move the spec arm to direct mode,
    like plans: merge only once every check is finished and green, with no native
    auto-merge. Cost: a spec pull request waits until the next drain cycle after its checks
@@ -216,6 +222,8 @@ Two findings from the ignored review, checked against
    every armed pull request each drain cycle, disarming on dissent. Cost: a merge can still
    land inside one drain cycle after a dissent, and the disarm step is new machinery whose
    own failure must be made visible.
+
+   **Recorded selection: the recommended option,** option `a`, move the spec arm to direct mode, with no native auto-merge. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 4. **Legacy free-text verdicts.** Until the runner emits the FR-3 marker, should a trusted
    comment containing a `VERDICT: changes` line also refuse? `a` **(rec)** Yes, as a
    transitional rule: a trusted comment matching `^VERDICT:\s*(\S+)` together with a full
@@ -224,8 +232,12 @@ Two findings from the ignored review, checked against
    form must be confirmed against a real comment body before the plan fixes it (not
    observable from this offline dispatch). `b` Marker only. Cost: the lane stays blind to
    second reviews until the runner change ships.
+
+   **Recorded selection: the recommended option,** option `a`, yes, as a transitional rule: a trusted `VERDICT:` line with a full 40-hex sha in the same comment counts. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 5. **Record the tightening in a decision record?** `a` **(rec)** No new DR: the change is a
    tightening (DR-108 section 2 allows it), reversible in under a day, and this spec is its
    record. Cost: DR-121 section 2's list of conditions no longer names every condition the
    code checks. `b` Amend DR-121 section 2.4. Cost: a founder acceptance for a change that
    only adds a refusal.
+
+   **Recorded selection: the recommended option,** option `a`, no new DR. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.

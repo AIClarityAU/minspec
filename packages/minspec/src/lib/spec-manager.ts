@@ -1,7 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Tier, Phase, SpecsLayout } from './config';
-import { hashLockReminder } from './approval-store';
+import { hashLockReminder, readRecord, writeRecord, removeRecord } from './approval-store';
+import { specRelPath, canonicalSpecHash, resolveStatus, refKey } from './approval';
 import { ensureDirectory } from './opt-in';
 import { loadConfig, PHASES, resolveAndValidate, DEFAULT_CONFIG } from './config';
 import type { SpecFrontmatter, ParsedSpec } from './spec';
@@ -24,6 +25,7 @@ import {
   SPEC_KIT_FILES,
 } from './spec-layout';
 import { restoreLineEndings } from './text-io';
+import { listSpecs } from './spec-catalog';
 
 /** Summary of a spec for listing/display */
 export interface SpecSummary {
@@ -67,24 +69,11 @@ export interface SpecDetail {
 }
 
 // --- Slug generation ---
-
-/**
- * Convert a title to a URL-friendly slug.
- * Lowercase, non-alphanumeric → hyphens, collapsed, trimmed, max 50 chars.
- */
-export function slugify(title: string): string {
-  let slug = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '');
-
-  if (slug.length > 50) {
-    slug = slug.slice(0, 50).replace(/-$/, '');
-  }
-
-  return slug;
-}
+// `slugify` lives in ./slug (SPEC-040 FR-6 / #988: re-homed so epic-manager and
+// friends need not import this module for it). Re-exported so every existing
+// `from './spec-manager'` site is unchanged.
+export { slugify } from './slug';
+import { slugify } from './slug';
 
 // --- ID generation ---
 
@@ -266,6 +255,25 @@ function findSpecEntry(specsDir: string, specId: string): SpecEntry | null {
     }
   }
   return null;
+}
+
+/**
+ * By-id resolution that agrees with the recursive catalog (#1452). Top-level
+ * lookup first (unchanged flat / spec-kit behaviour), then fall back to the
+ * `listSpecs` walk so product-nested specs (`specs/<product>/<spec>/...`) resolve.
+ * Deliberately NOT folded into `findSpecEntry`: `migrateLayout` shares that and
+ * moving nested specs is SPEC-053's scoped decision.
+ */
+function resolveSpecEntry(rootDir: string, specsDir: string, specId: string): SpecEntry | null {
+  const top = findSpecEntry(specsDir, specId);
+  if (top) return top;
+  const hit = listSpecs(rootDir).find((s) => s.id === specId);
+  if (!hit) return null;
+  const dir = path.dirname(hit.filePath);
+  if (path.basename(hit.filePath) === 'spec.md' && isSpecKitDirEntry(path.basename(dir))) {
+    return { kind: 'spec-kit', dirPath: dir, specMdPath: hit.filePath };
+  }
+  return { kind: 'flat', filePath: hit.filePath };
 }
 
 function readEntry(entry: SpecEntry): ParsedSpec {
@@ -561,7 +569,7 @@ export function listSpecsShallow(
  */
 export function getSpec(rootDir: string, specId: string): SpecDetail | null {
   const specsDir = resolveSpecsDir(rootDir);
-  const entry = findSpecEntry(specsDir, specId);
+  const entry = resolveSpecEntry(rootDir, specsDir, specId);
   if (!entry) return null;
 
   try {
@@ -723,6 +731,8 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
   const summaries = listSpecsShallow(rootDir);
   let migrated = 0;
   const toDelete: SpecEntry[] = [];
+  // Approval sidecars are keyed by the spec file's repo-relative path, so each moves with its spec (#3441).
+  const sidecarMoves: { from: string; to: string; fromHash: string | null }[] = [];
 
   for (const summary of summaries) {
     const entry = findSpecEntry(specsDir, summary.id);
@@ -744,6 +754,11 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
         };
       }
       writeSpecKitDir(dirPath, parsed);
+      sidecarMoves.push({
+        from: entryDisplayPath(entry),
+        to: path.join(dirPath, 'spec.md'),
+        fromHash: canonicalSpecHash(entryDisplayPath(entry)),
+      });
     } else {
       const fileName = `${parsed.frontmatter.id}-${slug}.md`;
       const filePath = path.join(specsDir, fileName);
@@ -764,6 +779,11 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
               .map((p) => fs.readFileSync(p, 'utf-8'))
           : [parsed.source ?? ''];
       fs.writeFileSync(filePath, restoreLineEndings(writeSpec(parsed), sources), 'utf-8');
+      sidecarMoves.push({
+        from: entryDisplayPath(entry),
+        to: filePath,
+        fromHash: canonicalSpecHash(entryDisplayPath(entry)),
+      });
     }
 
     toDelete.push(entry);
@@ -779,5 +799,57 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
     }
   }
 
+  // Re-key each sidecar to the new path. The recorded hash is carried over UNCHANGED —
+  // never re-minted: approval is a human act on specific content, and re-hashing here
+  // would approve bytes nobody reviewed. When the new representation canonicalises to a
+  // different hash (flat and spec-kit hold different bytes), the spec honestly reads
+  // stale, and the result says so rather than reporting a clean success.
+  let stale = 0;
+  for (const mv of sidecarMoves) {
+    const fromRel = specRelPath(rootDir, mv.from);
+    const toRel = specRelPath(rootDir, mv.to);
+    const rec = readRecord(rootDir, fromRel);
+    if (!rec) continue;
+    // The gzip baseline snapshot is keyed by the spec path too. Copy it to the new key
+    // BEFORE the record moves and drop the old one only after, so a failure at any step
+    // leaves the snapshot (and the sidecar) in place.
+    const snapDir = path.join(rootDir, '.minspec', 'snapshots');
+    const oldSnap = path.join(snapDir, `${refKey(fromRel)}.json.gz`);
+    const newSnap = path.join(snapDir, `${refKey(toRel)}.json.gz`);
+    let snapCopied = false;
+    try {
+      if (fs.existsSync(oldSnap)) {
+        fs.copyFileSync(oldSnap, newSnap);
+        snapCopied = true;
+      }
+    } catch {
+      // Best effort: the old snapshot stays; the record's baseline then reads unrecoverable, visibly.
+    }
+    writeRecord(rootDir, { ...rec, specPath: toRel });
+    removeRecord(rootDir, fromRel);
+    if (snapCopied) {
+      try {
+        fs.unlinkSync(oldSnap);
+      } catch {
+        // Leaving the old copy behind loses nothing.
+      }
+    }
+    // Count only specs this migration made stale; one already stale did not change.
+    if (
+      resolveStatus(rec, mv.fromHash) === 'approved' &&
+      resolveStatus(rec, canonicalSpecHash(mv.to)) !== 'approved'
+    ) {
+      stale++;
+    }
+  }
+
+  if (stale > 0) {
+    return {
+      success: true,
+      migrated,
+      target,
+      warning: `${stale} approval${stale === 1 ? '' : 's'} moved with the spec but now read stale (the ${target} representation hashes differently) — re-run "MinSpec: Approve Spec" after review. A re-review diff may have no baseline for these records, because the new path has no git history holding the approved content.`,
+    };
+  }
   return { success: true, migrated, target };
 }
