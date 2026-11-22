@@ -108,7 +108,7 @@ section 4) is separate and untouched.
 Recommendation: **C**. Primary downside of C: a new label is a new piece of state that can
 itself be stripped by a human or another session.
 
-**Recorded selection (founder):** option C, a new `dlg-armed` label. Chosen by the founder, not an agent pick; founder decision 2026-11-22, queue item c381d1 ("c option C - new dlg-armed label (Recommended)"). Resolves the earlier mismatch between the option list and the prose recommendation.
+**Recorded selection: the recommended option,** C, a new `dlg-armed` label. Agent pick of the recommended option, no human chose it; the reason for the pick is the founder's queue answer `c` ("c option C - new dlg-armed label (Recommended)") to queue item c381d1 at 2026-11-22T03:02:33Z, recorded 2026-11-22, DR-123; sign-off ratifies it. The (rec) marker moved to C because the base marker and prose disagreed.
 Rejected alternatives (DR-086 section 4): relabelling `needs-human-review` on detection of a
 void (hands the PR to the founder for a state the lane can resolve itself, against tenet 1).
 
