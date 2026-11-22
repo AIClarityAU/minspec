@@ -7,6 +7,9 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+useShellTimeout();
 
 const SCRIPTS = path.resolve(__dirname, '../../../scripts');
 const SRC = fs.readFileSync(path.join(SCRIPTS, 'remediate-pr.sh'), 'utf-8');
