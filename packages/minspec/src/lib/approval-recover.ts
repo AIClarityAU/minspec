@@ -166,6 +166,22 @@ function spliceTargetEntry(rel: readonly string[], indexRel: string, src: string
   }
 }
 
+/**
+ * Symlink `<rootDir>/node_modules` into the recovery worktree when the primary has one
+ * and the worktree does not. Never throws: a missing source or a refused symlink leaves
+ * the worktree as it was (see step 4b).
+ */
+function linkPrimaryNodeModules(rootDir: string, wt: string): void {
+  try {
+    const src = path.join(rootDir, 'node_modules');
+    const dst = path.join(wt, 'node_modules');
+    if (!fs.existsSync(src) || fs.existsSync(dst)) return;
+    fs.symlinkSync(src, dst, 'junction');
+  } catch {
+    // best-effort; the commit proceeds and a hook refusal is still a typed `failed`
+  }
+}
+
 export interface RecoverOptions {
   /** Slug used to derive the branch name (usually the approved artifact's id). */
   readonly slug: string;
@@ -249,6 +265,20 @@ export async function recoverProtectedBranchApproval(
       } catch (err) {
         return { outcome: 'failed', error: describeError(err) };
       }
+
+      // 4b. Give the commit's hooks the primary's toolchain (in97, 2026-11-22). A hook
+      //     run here resolves its tools from THIS checkout: this repo's approval-race
+      //     gate looks for `<checkout>/node_modules/.bin/tsx` and otherwise falls back
+      //     to `npx --no-install tsx`, which works only where an npx-cache entry happens
+      //     to hold tsx. Every approval commit stages a sidecar, so every recovery
+      //     reached that gate, failed closed on the founder's host, and left an empty
+      //     `approvals/*` branch with the approval still uncommitted. A symlink to the
+      //     primary's installed `node_modules` is the same thing a build worktree does
+      //     by hand. It is never staged (step 6 adds exact paths only) and cleanup
+      //     unlinks it without following it. Best-effort: with no `node_modules` in the
+      //     primary, or a filesystem that refuses symlinks, the commit runs exactly as
+      //     before and any hook refusal is still reported as `failed`.
+      linkPrimaryNodeModules(rootDir, wt);
 
       // 5. Copy each approval path in from the primary WORKING TREE (these files
       //    are uncommitted there — copying is the only way to reach them).
