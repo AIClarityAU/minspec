@@ -1,9 +1,14 @@
 {
   "specPath": "specs/minspec/SPEC-042-onboarding-checklist/requirements.md",
-  "specHash": "44fd2b7100cbe27178a6455e6fc74b9af77d8a42429e91ddd8ad35370a920ab6",
-  "approvedAt": "2026-10-18T07:14:43.875Z",
-  "approvedBy": "github@harvest316.com",
+  "specHash": "741a387a8495d6b1d2ae57931cf9e58566e5111cab7bb6de159364d21ac9dbe2",
+  "approvedAt": "2026-11-20T23:27:54.767Z",
+  "approvedBy": "minspec-sdd[bot]",
   "tier": "T3",
   "migrated": false,
-  "baselineBlob": "30af9b2d5ae2469510a0705076e503d3c204d6b8"
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:agent/issue-2361",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3573#issuecomment-7052766041"
 }
