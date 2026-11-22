@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-372-bootstrap-answers-survive-git-ops/requirements.md",
+  "specHash": "4236288b69a5e3231ca749a22459b810459fe4633c147944509a9db31eceec97",
+  "approvedAt": "2026-11-22T00:56:37.751Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:clarify-picks-a-1121",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3933#issuecomment-7071221736"
+}
