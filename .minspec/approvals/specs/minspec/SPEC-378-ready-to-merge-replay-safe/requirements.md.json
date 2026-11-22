@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-378-ready-to-merge-replay-safe/requirements.md",
+  "specHash": "b1f9c93ccd987abcccf70d3faad657200fe63f588ed544e214ffb29a5ba6bd3d",
+  "approvedAt": "2026-11-22T05:04:04.383Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:founder-picks-381-378-1122",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3954#issuecomment-7074417215"
+}
