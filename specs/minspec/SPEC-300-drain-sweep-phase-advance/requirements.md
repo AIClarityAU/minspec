@@ -12,6 +12,11 @@ phases:
   plan: pending
   tasks: pending
   implement: pending
+implements:
+  - scripts/drain-sweep.ts
+  - scripts/drain-inbox.sh
+  - packages/minspec/src/lib/phase-advance-queue.ts
+  - packages/minspec/tests/phase-advance-queue.test.ts
 ---
 
 # Drain-sweep second trigger — deterministic phase-advance enqueue
