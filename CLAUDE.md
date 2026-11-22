@@ -236,6 +236,14 @@ selection, names no recommended option, or the spec's own text keeps it open on 
 Clarify, and in which phase pair, is SPEC-320's open question (#3414); this rule settles only
 who closes it. This decision covers T3 only; it is not a delegation (#3411).
 
+**Interim tolerance for the `specify: in-progress, clarify: done` pair.** SPEC-320 (Clarify-done
+freeze) records that its validator rule will refuse this pair once built. Until that rule ships,
+reviewers do not block a spec pull request for carrying the pair. #3399 (Clarify settled on 23
+specs) already put it on main, and SPEC-320's FR5 (pre-blocking survey) lists every spec that
+would fail the rule so its Plan fixes or grandfathers each one. The tolerance ends when
+SPEC-320's validator rule merges, not when SPEC-320 is approved. Nothing here approves a spec
+or changes what approval sets.
+
 Roles: `scripts/roles/` — triage, dev, architect, security, reviewer.
 Dispatch: `scripts/dispatch-issue.sh <N>` — reads `role:X` label, loads role prompt.
 Triage: `scripts/triage-inbox.sh [N]` — processes inbox issues.
