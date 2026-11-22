@@ -7,6 +7,9 @@ product: minspec
 epic: EPIC-002  # Signpost Integrity — a green CI run that the editor would flag is a false signpost
 aspects: [validator, frontmatter, parity, ci-gate, silent-gate, tier-0]
 relates_to: ["#1033", "#972", "#137", "#1027", DR-003, SPEC-075]
+implements:
+  - packages/minspec/src/lib/spec-validator.ts
+  - scripts/validate-frontmatter.ts
 ---
 
 # SPEC-371: The CI frontmatter gate and the in-extension validator enforce one required-field schema (Requirements)

@@ -1,7 +1,7 @@
 ---
 id: SPEC-382
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline
@@ -11,6 +11,12 @@ implements: none
 implements_reason: >-
   Specified, not built by this dispatch. A partial fix already merged (#3086, commit d851c7442)
   covering only the in-repo launcher and only ten lessons; the remaining requirements are unbuilt.
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-382: Dispatched agent sessions load the lesson hook (Requirements)
