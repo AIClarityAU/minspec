@@ -112,6 +112,8 @@ breaks nothing today. The Plan phase must re-measure on the then-current corpus.
   - **B: `warn` for everything.** Same severity as the editor, so parity is literally
     identical. Cost: the warning count (107 today) already hides new warnings; the exact
     failure the issue reports ("a green run") recurs in practice.
+
+  **Recorded selection: the recommended option,** A, `fail` (fatal) for `*.missing`, `warn` for `*.unknown` / `*.unresolved`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 - **DQ-2 — Does #972 (`status` becomes `requiredWhen: isPrimarySpec`) ride in this change?**
   - **A (rec): No; keep `status` unconditionally required here, land #972 separately but
     gated on the parity test.** Smaller blast radius. Cost: #972 stays open and a second
@@ -119,6 +121,8 @@ breaks nothing today. The Plan phase must re-measure on the then-current corpus.
   - **B: Yes, bundle.** Matches the issue's "land together" wording. Cost: this spec then
     depends on #972's own undecided design, and a schema-meaning change rides with a
     plumbing fix.
+
+  **Recorded selection: the recommended option,** A, no: keep `status` unconditionally required here and land #972 separately, gated on the parity test. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 - **DQ-3 — How to share the rule.**
   - **A (rec): export `checkClosedSetField` (or a thin `validateClosedSetFields(raw, type)`
     wrapper) from `spec-validator.ts`.** Smallest change; CI keeps its own loop. Cost: CI
@@ -126,3 +130,5 @@ breaks nothing today. The Plan phase must re-measure on the then-current corpus.
   - **B: have CI call full `validateSpec` per file.** Strongest "single source". Cost: needs
     config, approval state and registry context CI does not currently assemble, and surfaces
     many unrelated warnings, so it is a larger T3 change with noisy first output.
+
+  **Recorded selection: the recommended option,** A, export `checkClosedSetField` (or a thin `validateClosedSetFields(raw, type)` wrapper) from `spec-validator.ts`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
