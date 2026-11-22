@@ -149,6 +149,30 @@ describe('approval race gate (#424)', () => {
     }
   });
 
+  it('names a missing toolchain as such, and still fails closed (#3963)', () => {
+    const hooks = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-race-hooks-'));
+    const emptyCache = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-race-cache-'));
+    try {
+      // Hook root with a checker script but NO node_modules, and an empty npx cache.
+      const root = path.join(hooks, 'r');
+      fs.mkdirSync(path.join(root, '.githooks'), { recursive: true });
+      fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+      fs.copyFileSync(path.join(REAL_HOOKS_DIR, 'pre-commit'), path.join(root, '.githooks', 'pre-commit'));
+      fs.chmodSync(path.join(root, '.githooks', 'pre-commit'), 0o755);
+      fs.writeFileSync(path.join(root, 'scripts', 'check-approval-sidecar-race.ts'), 'process.exit(0);\n');
+      git(['config', 'core.hooksPath', path.join(root, '.githooks')]);
+      write(SPEC, V2);
+      git(['add', SPEC]);
+      const r = commit({ DR_INDEX_GATE_OFF: '1', npm_config_cache: emptyCache });
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain('TOOLCHAIN MISSING');
+      expect(r.stderr).not.toContain('sidecar-not-restaged');
+    } finally {
+      fs.rmSync(hooks, { recursive: true, force: true });
+      fs.rmSync(emptyCache, { recursive: true, force: true });
+    }
+  });
+
   it('APPROVAL_RACE_GATE_OFF=1 bypasses only this gate', () => {
     write(SPEC, V2);
     git(['add', SPEC]);
