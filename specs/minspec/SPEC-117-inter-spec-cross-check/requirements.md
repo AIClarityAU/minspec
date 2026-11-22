@@ -427,6 +427,8 @@ in a DR before building (FR-13).
   **Cost:** two approvals instead of one for a single feature, and the finding contract
   (FR-13) has to be stated in both or owned by one and cited by the other.
 
+**Recorded selection: the recommended option,** `a`, this spec defines the lens as a contract; SPEC-016 is not edited. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
+
 ### CQ-2 (severity) — how a new deterministic check becomes load-bearing
 
 - **`d` — each check ships as a warning and flips to fatal once the corpus is clean for it
@@ -447,6 +449,8 @@ in a DR before building (FR-13).
   **Cost:** the baseline is a file, and a file can be edited to hide a finding. It becomes a
   thing that itself needs guarding.
 
+**Recorded selection: the recommended option,** `d`, each check ships as a warning under its own config key and flips to fatal once the corpus is clean for it. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
+
 ### CQ-3 (policy) — is a file under two specs' `implements:` an error?
 
 Measured: one instance today (`scripts/dispatch-issue.sh`, SPEC-044 `implementing` and
@@ -464,6 +468,8 @@ found no rule enforcing it corpus-wide.
   **Cost:** `facts owns` already reports it and nothing has acted on that; a second report
   is unlikely to change the outcome.
 
+**Recorded selection: the recommended option,** `g`, exactly one `implements:` owner; every other spec that changes the file uses `affects:`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
+
 ### CQ-4 (input) — the requirements seed is missing
 
 `specs/CROSS-CHECK-REPORT.md`, which #147 names as the seed, is not on `origin/main` or in
@@ -474,6 +480,8 @@ any locally known ref's history.
   and nobody will know which.
 - **`j` — you supply the report and this spec is revised against it before approval.**
   **Cost:** approval waits on locating a file from 2026-06-04 that may no longer exist.
+
+**Recorded selection: the recommended option,** `i`, accept the five lenses from the issue body as the full list. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 
 ### CQ-5 (scope) — build the semantic lens at all, given the research note against it?
 
@@ -491,6 +499,8 @@ contradiction engine and for growing the set of computably checkable claims inst
   **Cost:** the issue was framed by you as a "Slice 2 AI check"; under `l` contradictions
   between specs that no rule can compute (two specs stating incompatible policies in
   different words) stay uncaught.
+
+**Recorded selection: the recommended option,** `k`, keep Part C, sequenced after Part B and fed whole neighbour specs. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 
 ## Follow-ups (not yet filed)
 
