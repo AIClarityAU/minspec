@@ -95,18 +95,20 @@ section 4) is separate and untouched.
   armed PRs). Cost: the label lies while armed (#816: it says a human is next), and the
   shepherd's "human-held" logic (#3179) and any dashboard reading the label would treat armed
   PRs as human-held; the label must then be removed on merge by something else, or left stale.
-- **B. Sweep for "no label, no arm, not merged" PRs that carry the lane's audit marker (rec).**
+- **B. Sweep for "no label, no arm, not merged" PRs that carry the lane's audit marker.**
   The seam's "Delegated merge armed" comment (or a dedicated label such as `dlg-armed`) is
   the marker that makes FR-3 checkable; the drain re-judges marked PRs with no active arm.
   Keeps the label honest. Cost: one extra `gh` read per cycle plus a comment-parsing or
   new-label dependency; a deleted marker comment strands the PR again.
-- **C. Replace the label with a dedicated `dlg-armed` label at arm time** and treat
+- **C. Replace the label with a dedicated `dlg-armed` label at arm time (rec)** and treat
   `dlg-armed` + no arm as the re-queue state. Same as B with a durable, queryable marker and no
   comment parsing. Cost: new label to create and document, and a second hold-like label for
   the shepherd to learn about.
 
-Recommendation: **C** if a new label is acceptable, else B. Primary downside of C: a new label
-is a new piece of state that can itself be stripped by a human or another session.
+Recommendation: **C**. Primary downside of C: a new label is a new piece of state that can
+itself be stripped by a human or another session.
+
+**Recorded selection (founder):** option C, a new `dlg-armed` label. Chosen by the founder, not an agent pick; founder decision 2026-11-22, queue item c381d1 ("c option C - new dlg-armed label (Recommended)"). Resolves the earlier mismatch between the option list and the prose recommendation.
 Rejected alternatives (DR-086 section 4): relabelling `needs-human-review` on detection of a
 void (hands the PR to the founder for a state the lane can resolve itself, against tenet 1).
 

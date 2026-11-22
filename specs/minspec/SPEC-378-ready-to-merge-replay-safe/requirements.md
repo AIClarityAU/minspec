@@ -128,6 +128,8 @@ Bad state: PR #1176 was `ai-review:pass`, checks green, yet `BLOCKED`, because a
 4. **Should drain auto-remediation be restricted to the newest run?** Out of this spec's allowlist
    (scripts), so it is *not* required here; say whether to file it as a follow-up.
 
+   **Recorded selection (founder): closed, deferred to a follow-up.** Chosen by the founder, not an agent pick; founder decision 2026-11-22, queue item c378q4 ("f file the follow-up and close Q4 (Recommended)"). Follow-up filed as #3953 (remediate only newest CI run).
+
 ## Follow-ups (tracked)
 
-- Drain auto-remediation rerunning only the newest run: #1211 (decide in Decision 4; file separately if yes).
+- Drain auto-remediation rerunning only the newest run: #1211 (Decision 4 closed: deferred to #3953, remediate only newest CI run).
