@@ -47,6 +47,8 @@ export type { BrokerEnv };
  *   broken, not handed a bad request. Reporting it as `oidc_invalid` would blame the
  *   caller for our deployment and send an adopter hunting a token problem that does not
  *   exist.
+ * - `no_such_route` (404) / `method_not_allowed` (405) — routing refusals, not
+ *   "unbuilt feature": the old catch-all `not_implemented` (#1963) is retired.
  *
  * Tracked for the design update rather than resolved silently here.
  */
@@ -59,7 +61,8 @@ export type ErrorCode =
   | 'unexpected_field'
   | 'unsupported_profile'
   | 'broker_misconfigured'
-  | 'not_implemented';
+  | 'no_such_route'
+  | 'method_not_allowed';
 
 /** Fail-closed error body — never accompanied by a token. */
 export interface TokenError {
@@ -120,14 +123,14 @@ export function createFetchHandler(deps: HandlerDeps = {}) {
     const url = new URL(request.url);
 
     if (url.pathname !== TOKEN_PATH) {
-      return json({ error: 'not_implemented', reason: 'no such route' } satisfies TokenError, 404);
+      return json({ error: 'no_such_route', reason: 'no such route' } satisfies TokenError, 404);
     }
 
     // Method check precedes everything: a GET that fell through to the token path
     // should never reach verification logic.
     if (request.method !== 'POST') {
       return json(
-        { error: 'not_implemented', reason: 'POST required' } satisfies TokenError,
+        { error: 'method_not_allowed', reason: 'POST required' } satisfies TokenError,
         405,
       );
     }

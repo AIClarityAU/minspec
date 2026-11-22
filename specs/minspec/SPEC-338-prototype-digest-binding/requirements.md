@@ -1,12 +1,19 @@
 ---
 id: SPEC-338
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute — Autopilot Mode
 aspects: [approval, staleness, gate, never-wrong, autopilot]
 relates_to: [DR-036, SPEC-022, SPEC-041, DR-062, DR-012]
+implements: [packages/shared/src/prototype-digest.ts, scripts/hooks/prototype_digest.py]
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — Prototype digest bound into the overview (Requirements)

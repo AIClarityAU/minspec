@@ -127,6 +127,25 @@ from *dominant driver* to *ordinary inputs*).
   over-tiering bound must be re-checked. Numbers are **reported**, not hard-asserted (#91
   owns thresholds).
 
+- **FR-9 Affirmative low-blast signal (docs/test-only).** The analyzers above emit only
+  *raising* evidence. [DR-058](../../../docs/decisions/DR-058.md) (#490) adds the one
+  catalogued **affirmative-low** class, consumed by the auto-merge gate
+  ([SPEC-024](../SPEC-024-auto-merge-eligibility/requirements.md)): `detectLowBlastDocsTest`
+  (`scripts/auto-merge-gate.ts`) emits `name: "low_blast_docs_test_only"`
+  (`LOW_BLAST_DOCS_TEST`, `packages/minspec/src/lib/auto-merge.ts`; member of
+  `LOW_BLAST_SIGNAL_NAMES`), `tierContribution: 'T1'`, `axis: 'consequence'`,
+  `degraded: false`, iff the diff is non-empty and **every** changed path is inward
+  documentation or a test file. It grades **consequence, never size**: a large docs diff
+  is still low, a one-line product-source edit never is. It is **never** emitted when any
+  path is unclassifiable (empty, absolute, or containing `..` — fail closed, #1001), is an
+  outward-facing published doc (`OUTWARD_DOC_PATTERN`, #1001), or is a CI/build/governance
+  boundary path (`isBoundaryPath`, #422) — so the affirmative-low catalog and the
+  high-blast boundary set are disjoint. Absence of this signal means *unmeasured*, and
+  `classifyBlast` treats unmeasured as `high` (deny-by-default, DR-058). It does not alter
+  `classify()` or tier output (INV-2, INV-3): it is a certification read only by the
+  auto-merge blast classifier, and adding a new affirmative-low name requires a deliberate
+  edit to `LOW_BLAST_SIGNAL_NAMES` (kept in parity by `signal-names-parity.test.ts`).
+
 ## Acceptance Criteria
 
 Each criterion is a checkable pass/fail condition on the analyzers once built, traceable
@@ -214,6 +233,14 @@ built code, a target for Plan/Tasks to build against and for tests to prove.
   inspected, Then it imports no `vscode` and performs no network/AI call — git/disk IO
   enters only via the injected `ConsequenceInput`, never from inside the analyzer module.
   *(INV-1)*
+
+### I. Affirmative low-blast signal (FR-9)
+
+- **AC-16 — Docs/test-only certifies low; anything else does not.** Given a changed-file
+  set, When every path is inward documentation or a test file and none is outward-facing,
+  a boundary path, or unclassifiable, Then `detectLowBlastDocsTest` emits
+  `low_blast_docs_test_only`; When the set is empty or any path fails that test, Then it
+  emits nothing. *(FR-9, DR-058; tests: `auto-merge-gate.test.ts` `detectLowBlastDocsTest`)*
 
 ## Contract (TypeScript sketch — finalized in Plan)
 

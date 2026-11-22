@@ -370,6 +370,8 @@ below are written under its recommended option.
   different repository's product. It would also be the first constitution invariant that
   restates other documents instead of adding a rule.
 
+**Recorded selection: the recommended option,** Option A, the rule lives in this spec and both specs point to it; no new decision record. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
+
 ### DQ-2 - Does the list include the core's own commit-time refusals?
 
 The issue asks for two semantics. The code has a third (row B-2).
@@ -382,6 +384,8 @@ The issue asks for two semantics. The code has a third (row B-2).
   then stand in a normative document while `template-registry.ts:1200`, `:1431` and `:1459`
   refuse commits, and the seeded test case would teach a reviewer to accept a sentence the
   code contradicts. Under this option FR-3 and FR-4 lose their B-2 clause.
+
+**Recorded selection: the recommended option,** Option A, include row B-2. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 
 ### DQ-3 - How much of SPEC-001 and SPEC-019 changes?
 
@@ -396,6 +400,8 @@ The issue asks for two semantics. The code has a third (row B-2).
   but the issue's "SPEC-001 + SPEC-019 cross-reference it" is not met, and a reader of either
   spec alone still meets the bare sentence. This is the zero-sign-off option.
 
+**Recorded selection: the recommended option,** Option A, append one sentence to each of SPEC-001 and SPEC-019 (FR-4, FR-5). Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
+
 ### DQ-4 - Where does the test case live?
 
 - **Option A (rec) - in this repository, under `packages/minspec/tests/fixtures/cross-spec/`,
@@ -406,6 +412,8 @@ The issue asks for two semantics. The code has a third (row B-2).
 - **Option B - in the SealBox repository, beside the reviewer.** *Cost:* nothing in this
   repository pins it, the work cannot be done from here, and the frozen excerpts would sit
   away from the specs they quote.
+
+**Recorded selection: the recommended option,** Option A, the case lives in this repository under `packages/minspec/tests/fixtures/cross-spec/`, pinned by a test here. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 
 ### DQ-5 - Is #147 the SPEC-016 reality-check reviewer?
 
@@ -455,6 +463,8 @@ from the repository root is my reading of its docstring, unverified by running i
   normalises an agent using a gate's bypass. Not recommended.
 - **Option D - DQ-3 Option C (edit neither spec).** *Cost:* as stated under DQ-3; it makes
   this question moot.
+
+**Recorded selection: the recommended option,** Option A, revoke: the commit stages deletion of the two `requirements.md` sidecars with the edits, and the human approves both specs again afterwards. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 
 ## Why no new DR
 

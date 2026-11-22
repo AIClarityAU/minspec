@@ -2145,6 +2145,39 @@ hold_specify_scope() {
   echo "Specify-only dispatch for #$ISSUE produced out-of-scope changes — NOT published. Worktree left at: $WORKTREE"
 }
 
+# WORKFLOW-PUSH GUARD (#1120, #1269) — one predicate for EVERY publish path.
+# Prints the workflow files this branch changes and returns 0 when the push must NOT
+# happen: the forge rejects a workflow push unless the App holds `workflows: write`, and
+# it does so AFTER the build was spent. Returns 1 (nothing to refuse) when the operator
+# opted out, the capability probe CONFIRMS the grant (#1120 — same answer as the
+# pre-push hook; fails closed when the probe cannot answer), or the diff touches no
+# workflow file. The diff is three-dot (merge-base..branch): what this push introduces.
+workflow_publish_blocked() {
+  local wf
+  workflow_push_allowed && return 1
+  workflow_permission_granted && return 1
+  wf=$(agent_worktree_git diff --name-only origin/main..."$BRANCH" 2>/dev/null \
+       | grep -E "$WORKFLOW_PATH_RE" || true)  # swallow-ok: pre-flight advisory only; the real gate is server-side, which rejects a workflow push regardless of what this sees
+  [[ -n "$wf" ]] || return 1
+  printf '%s\n' "$wf"
+}
+
+hold_workflow_push() {
+  local wf="$1"
+  echo "🛑 workflow-push guard: NOT publishing #$ISSUE (role: $ROLE) — $BRANCH changes CI workflow files" >&2
+  echo "  and the App 'workflows' permission is not confirmed (AIClarityAU/minspec#1120):" >&2
+  printf '%s\n' "$wf" | sed 's/^/      /' >&2
+  gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
+    --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
+  gh issue edit "$ISSUE" --repo "$REPO" \
+    --remove-label "agent-running" \
+    --add-label "needs-human-review" 2>/dev/null || true
+  gh issue comment "$ISSUE" --repo "$REPO" \
+    --body "$(printf '## ⏸ Publish held — the diff touches CI workflow files\n\nThe build finished but **nothing was pushed**: the capability probe could not confirm the GitHub App holds `workflows: write` (#1120), so the forge may reject the push.\n\n```\n%s\n```\n\nThe worktree is left at `%s` (branch `%s`) — land it with a human credential carrying the `workflow` scope, or grant the permission (#1120).' \
+      "$wf" "$WORKTREE" "$BRANCH")" 2>/dev/null || true
+  echo "Workflow-touching dispatch for #$ISSUE — NOT published. Worktree left at: $WORKTREE"
+}
+
 # ── SPEC-044 Slice 2 — creator-owned PR shepherding (FR-4, FR-12, INV-5) ─────
 # The session that OPENED the PR drives it to merge instead of handing it to the drain.
 # Why: the drain's fresh remediator re-clones and starts near the context limit — the
@@ -2169,15 +2202,34 @@ SHEPHERD_MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"
 
 # Stop automating and make the dead end VISIBLE. Idempotent: the comment is posted at
 # most once per PR, so a poll loop can never spam it.
+#
+# shepherd_hand_off <pr> <reason> [human|stuck]   (#3835)
+#   human — the reason NAMES a human decision (e.g. a merge conflict): `needs-human-review`.
+#   stuck — the shepherd's OWN automation gave up (ceiling, attempt cap, rebase or fix that
+#           produced nothing): `agent-stuck`, NOT `needs-human-review`, so no consumer reads
+#           it as a human decision. Anything but the literal "human" fails closed to stuck.
+#           No code reads `agent-stuck` (grep: zero consumers); it is a visibility marker.
+#           Any later retry comes from the label-agnostic drain sweep (drain-inbox.sh
+#           `gh pr list --state open`), NOT from this label; remediate-pr.sh may still
+#           relabel `needs-human-review` when ITS own cap is hit.
 shepherd_hand_off() {
-  local pr_num="$1" reason="$2" already
-  gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
-    --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
-  gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+  local pr_num="$1" reason="$2" kind="${3:-stuck}" already label desc tail
+  if [[ "$kind" == "human" ]]; then
+    label="needs-human-review"
+    desc="Automated gate failed closed — a human must resolve"
+    tail='It is labelled `needs-human-review`; a human decision is needed and the creator will make no further automated attempts.'
+  else
+    label="agent-stuck"
+    desc="Automation gave up — a failure marker, not a human decision (no dedicated consumer)"
+    tail='It is labelled `agent-stuck`: this is an automation failure rather than a human decision. Nothing reads this label; a later drain sweep may retry it, and the remediation drain may escalate it to `needs-human-review` if it hits its own cap. The creator will make no further automated attempts.'
+  fi
+  gh label create "$label" --repo "$REPO" --color fbca04 \
+    --description "$desc" 2>/dev/null || true
+  gh pr edit "$pr_num" --repo "$REPO" --add-label "$label" 2>/dev/null || true
   already=$(gh pr view "$pr_num" --repo "$REPO" --json comments \
               --jq "[.comments[]? | select(.body | contains(\"$SHEPHERD_HANDOFF_MARKER\"))] | length" 2>/dev/null || echo 0)
   if [[ "${already:-0}" -eq 0 ]]; then
-    gh pr comment "$pr_num" --repo "$REPO" --body "$(printf '## 🫱 Creator-shepherd handed off\n\nThe session that opened this PR drove it as far as it could, then stopped because %s.\n\nIt is labelled `needs-human-review`; the creator will make no further automated attempts. %s' "$reason" "$SHEPHERD_HANDOFF_MARKER")" 2>/dev/null || true
+    gh pr comment "$pr_num" --repo "$REPO" --body "$(printf '## 🫱 Creator-shepherd handed off\n\nThe session that opened this PR drove it as far as it could, then stopped because %s.\n\n%s %s' "$reason" "$tail" "$SHEPHERD_HANDOFF_MARKER")" 2>/dev/null || true
   fi
 }
 
@@ -2198,9 +2250,7 @@ shepherd_publish() {
   #
   # Unconditional: this path always pushes with the App installation token, so unlike
   # the hook there is no credential to probe.
-  if ! workflow_push_allowed; then
-    wf=$(agent_worktree_git diff --name-only origin/main.."$BRANCH" 2>/dev/null \
-         | grep -E "$WORKFLOW_PATH_RE" || true)  # swallow-ok: pre-flight advisory only; the real gate is server-side, which rejects a workflow push regardless of what this sees
+  if wf=$(workflow_publish_blocked); then
     if [[ -n "$wf" ]]; then
       echo "  NOT publishing — $BRANCH changes CI workflow files and the App token"
       echo "  has no 'workflows' permission, so the push would be rejected server-side:"
@@ -2450,7 +2500,7 @@ shepherd_own_pr() {
       stop-capped)
         shepherd_hand_off "$pr_num" "the shared automated-attempt cap (${SHEPHERD_MAX_ATTEMPTS}) was reached without clearing the gate"; return 0 ;;
       stop-conflict)
-        shepherd_hand_off "$pr_num" "the branch conflicts with \`main\`, and resolving a conflict is a human's merge decision"; return 0 ;;
+        shepherd_hand_off "$pr_num" "the branch conflicts with \`main\`, and resolving a conflict is a human's merge decision" human; return 0 ;;
       stop-not-automation)
         echo "  PR #$pr_num is outside the automation scope — leaving it alone."; return 0 ;;
       stop-awaiting-human)
@@ -2654,6 +2704,10 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude
     # having passed both. Only armed in specify-only mode; a full build is unaffected.
     elif [[ "$SPECIFY_ONLY" == "1" ]] && SPECIFY_STRAYS=$(specify_scope_report); then
       hold_specify_scope "$SPECIFY_STRAYS"
+    # WORKFLOW-PUSH GUARD (#1269) — same `if`, same property: the main publish path is
+    # unreachable without passing it, exactly like the shepherd path.
+    elif WORKFLOW_STRAYS=$(workflow_publish_blocked); then
+      hold_workflow_push "$WORKFLOW_STRAYS"
     else
     # Credentialed/network ops happen HERE in the parent, never in the agent.
     # Push the branch the agent committed locally, then post its summary.
