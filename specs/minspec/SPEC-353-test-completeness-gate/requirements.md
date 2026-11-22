@@ -225,6 +225,8 @@ RD-3 was written to prevent).
     needs to change before FR-6 can safely block on invariant rows, and the
     acceptance criterion for FR-2 should be treated as blocked, not partially
     gradeable.
+
+  **Recorded selection: the recommended option,** Option A, mint stable `INV-N` ids on the invariants list, mirroring `G-N` (the constitution edit itself goes through its own flow, not this spec). Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 - **DQ-2 — "the spec touches invariant N" has no mechanical test today.**
   Even with stable ids (DQ-1), deciding *which* invariants a given spec
   "touches" (FR-2) is not yet a pure function — today it is inferred from
@@ -238,12 +240,14 @@ RD-3 was written to prevent).
   addendum names — a validator rule for "T3/T4 spec with an empty
   `invariants:` field" would need to ship alongside, which is Plan-phase
   scope, not Specify).
+  **Recorded selection: the recommended option,** require an explicit `invariants: [INV-N, ...]` frontmatter field, populated at Specify time. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 - **DQ-3 — should FR-3's public-API scope widen to `packages/minspec/src/**`
   later?** Recommend **(rec) stay `packages/shared` only for v1** (current
   wording) — cost: a `packages/minspec`-only public API change (e.g. a new
   exported command handler) gets no FR-3 coverage until a follow-up widens
   scope; the alternative (scope it in from day one) risks the exact noisy,
   trained-to-ignore outcome SPEC-006's R1 risk names for its own heuristic.
+  **Recorded selection: the recommended option,** stay `packages/shared` only for v1. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 
 ## Risks & Mitigations
 

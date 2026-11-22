@@ -111,6 +111,8 @@ numbers (label application, ranking), and new grammar forms nobody has measured 
      build gate and a drift check on top of what this issue removes.
    - **(c) Keep guard self-contained; add only a parity test** — smallest, ships nothing new.
      Cost: two copies remain; the test catches divergence but a ReDoS fix still needs two edits.
+
+   **Recorded selection: the recommended option,** (a), CommonJS `.js` module in `.github/scripts/`, `require`d by the guard, imported by the TS ranker. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 2. **Should PR bodies accept `Depends on`, the heading form, and colon-inside-bold?**
    - **(a) No — keep the guard's current narrow grammar** *(rec)* — the extra forms were
      measured only on issue bodies; PR bodies use "depends on" as narrative more often, and the
@@ -120,8 +122,11 @@ numbers (label application, ranking), and new grammar forms nobody has measured 
      measurement over PR bodies first (not done), and risks false `blocked-by` labels.
    - **(c) Accept only colon-inside-bold** (a punctuation variant, not a new keyword) — low risk.
      Cost: a half-measure; still two option sets.
+
+   **Recorded selection: the recommended option,** (a), no: keep the guard's current narrow grammar for PR bodies. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 3. **Recording.** Does the shared-module choice (1) meet the DR-359 filter (not undoable in
    under a day)? I believe not (a refactor), so no DR is proposed; say if you want one.
+   **Recorded selection: the recommended option,** no DR, the position the spec states (the shared-module choice is a refactor, undoable in under a day). Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 
 ## Follow-ups (tracked)
 
