@@ -1,7 +1,7 @@
 ---
 id: SPEC-330
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a status writer that leaves a comment describing the old value is a false signpost
@@ -14,9 +14,9 @@ implements_reason: >-
   (`epic-manager.ts`), `setAdrStatus` (`adr-manager.ts`), one shared helper, tests, and three corpus edits.
   None of it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
