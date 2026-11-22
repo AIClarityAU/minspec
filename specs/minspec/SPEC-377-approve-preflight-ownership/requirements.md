@@ -95,14 +95,17 @@ refusal modal with "Open Spec" (`approve.ts:317-330`). Remaining scope:
    pending `ownership.implements.missing` warning (non-blocking)? **(rec) Surface, non-blocking.** Cost:
    one more prompt for repos that opted into warn; warnings never gate approval, so no deadlock.
    Alternative: leave as is (no cost, gap remains).
+   **Recorded selection: the recommended option,** surface the pending warning, non-blocking. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 2. **Guard fail-open vs invariant 2.** **(rec) Keep fail-open, record the reasoning in a DR** (the
    degrade is announced and CI is the independent second witness). Cost: an approval can still land
    unchecked when the guard itself breaks. Alternative: fail closed; cost: a guard bug makes approval
    unavailable, and the existing tests pinning fail-open must change.
+   **Recorded selection: the recommended option,** keep fail-open and record the reasoning in a DR. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 3. **Strip `implements:`/`affects:` from the hash?** **(rec) No (option A, status quo).** Cost: the human
    must declare ownership before approving. Option B removes the void-on-edit trap but lets an
    arming claim change without re-approval, changes every existing approval hash, and needs its own DR
    plus a sidecar migration plan.
+   **Recorded selection: the recommended option,** no, option A, status quo: `implements:`/`affects:` stay in the hash. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 
 ## Follow-ups (tracked)
 
