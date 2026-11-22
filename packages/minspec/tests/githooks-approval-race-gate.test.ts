@@ -288,6 +288,16 @@ describe('approval race gate: delegation-covered spec edits (#3831)', () => {
     expect(commit(ENV).status).not.toBe(0);
   });
 
+  it('(c) a tier change staged in the same commit grants nothing: the tier is read from HEAD', () => {
+    seed({ delegations: record({ tiers: ['T1'] }) }); // HEAD spec is T3: out of scope
+    write(SPEC, T3V2.replace('tier: T3', 'tier: T1'));
+    git(['add', SPEC]);
+    const r = commit(ENV);
+    expect(r.status, r.stderr).not.toBe(0);
+    expect(r.stderr).toContain('sidecar-not-restaged');
+    expect(r.stderr).not.toContain('warning');
+  });
+
   it('covered spec, stale STAGED sidecar (sidecar-mismatch) still refuses', () => {
     seed();
     write(SPEC, T3V2);

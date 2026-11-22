@@ -69,13 +69,16 @@ function readCoverageContext(): CoverageContext | string {
   return { repo, delegations, share: readRepeatFixShare(root, 'HEAD', today).share, today };
 }
 
-function coverageFor(ctx: CoverageContext | string, specPath: string, stagedContent: string): RaceCoverage {
+function coverageFor(ctx: CoverageContext | string, specPath: string): RaceCoverage {
   if (typeof ctx === 'string') return { covered: false, detail: ctx };
   const act = actForPath(specPath);
   if (act !== 'spec-approval') return { covered: false, detail: 'only spec edits are covered' };
-  const tier = frontmatterField(stagedContent, 'tier');
+  // The tier is a witness like the rest: read from HEAD, so a commit cannot change a spec's
+  // tier into scope and grant itself coverage. Absent at HEAD or unreadable => not covered.
+  const headSpec = tryGit(['show', `HEAD:${specPath}`]);
+  const tier = headSpec === null ? undefined : frontmatterField(headSpec, 'tier');
   if (tier === undefined || !TIERS.includes(tier as Tier)) {
-    return { covered: false, detail: 'the staged spec declares no tier T1..T4' };
+    return { covered: false, detail: 'the committed (HEAD) spec declares no tier T1..T4' };
   }
   const decisionStatus = (id: string): string | undefined => {
     if (!/^DR-\d+$/.test(id)) return undefined;
@@ -156,10 +159,9 @@ function main(): number {
 
   // Witnesses are read only when an approval is being voided, and only once.
   let ctx: CoverageContext | string | undefined;
-  const content = new Map(items.map((it) => [it.path, it.stagedContent]));
   const { refusals, warnings } = applyDelegationCoverage(failures, (f) => {
     ctx ??= readCoverageContext();
-    return coverageFor(ctx, f.path, content.get(f.path) ?? '');
+    return coverageFor(ctx, f.path);
   });
 
   if (warnings.length > 0) {
