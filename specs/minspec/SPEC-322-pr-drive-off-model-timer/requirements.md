@@ -91,6 +91,8 @@ while the cap is closed.
 
 1. **Timer interval.** (a) 10 min **(rec)**: ~6 landings/hour, so 15 PRs in ~2.5 h; cost: more
    CI minutes and review re-triggers. (b) 30 min: cheaper, 15 PRs in ~7.5 h. (c) 2 h: no change.
+
+   **Recorded selection: the recommended option,** (a), a 10-minute timer interval. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
 2. **Review-cost bound.** If a push re-triggers the model review panel, who pays? (a) Accept it
    up to a stated share of the weekly budget per hour **(rec)**: cost: needs a number from the
    founder. (b) Skip branches whose update would re-trigger review: cost: those never land
@@ -98,5 +100,9 @@ while the cap is closed.
 3. **Where the timer lives.** (a) In the loop (a second short-sleep path) **(rec)**: one place,
    shares its lock; cost: edits the loop itself. (b) A separate host cron/systemd timer: no loop
    edit; cost: a second scheduler to monitor, and lock sharing must be proven.
+
+   **Recorded selection: the recommended option,** (a), the timer lives in the loop as a second short-sleep path and shares its lock. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
 4. **Scope vs #3453.** Fix only the closed-cap cadence here, leaving ordering to #3453
    **(rec)**; cost: armed founder PRs may still queue behind older machinery PRs until it ships.
+
+   **Recorded selection: the recommended option,** fix only the closed-cap cadence here and leave ordering to #3453. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
