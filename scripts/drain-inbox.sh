@@ -1785,16 +1785,10 @@ arm_delegated_spec_merges() {
   if [[ "$cursor" =~ ^[0-9]+$ ]]; then
     candidates=$(awk -v c="$cursor" '$1 > c' <<< "$candidates"; awk -v c="$cursor" '$1 <= c' <<< "$candidates")
   fi
-  # Delegated approval PRs (`dlg-approve/*`) are judged BEFORE the rest (#3825), each group
-  # still in cursor order. A BEHIND plan PR cannot be admitted until its update turn, yet it
-  # took judgement slots ahead of approval PRs that could be armed at once. Ordering only.
-  local dlg_prs
-  dlg_prs=$(printf '%s' "$rows" | jq -r '.[] | select((.headRefName // "") | startswith("dlg-approve/")) | .number' 2>/dev/null) || {
-    echo "[drain] WARNING: delegated spec merge NOT run: could not read the approval PR heads." >&2
-    return 0
-  }
-  candidates=$(awk 'NR == FNR { d[$1] = 1; next } ($1 in d)' <(printf '%s\n' "$dlg_prs") <(printf '%s\n' "$candidates")
-    awk 'NR == FNR { d[$1] = 1; next } !($1 in d)' <(printf '%s\n' "$dlg_prs") <(printf '%s\n' "$candidates"))
+  # No dlg-approve ordering (#3949): every real approval PR changes the spec AND its
+  # `.minspec/approvals/<path>.json` sidecar, so the spec-only prefilter above never admits
+  # one, and the judge would refuse it (path-out-of-scope). Merging approval PRs belongs to
+  # the DR-119 lane (#3379), not this arm.
   while read -r pr; do
     [[ -n "$pr" ]] || continue
     if (( tried >= max )); then

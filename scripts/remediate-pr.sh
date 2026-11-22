@@ -312,6 +312,26 @@ def review_bad:
   ((.labels // []) | any(.name == "ai-review:changes"))
   or ([ latest_checks[] | select((.name // "") == "ai-review") | (.conclusion // "")
         | select(. == "FAILURE" or . == "ERROR") ] | length > 0);
+# #3953 (SPEC-378 Decision 4, #1211): a rerun is only ever aimed at the NEWEST run of a workflow.
+# `latest_checks` keeps one entry per check identity, so a check that ran in an older run but
+# not in a newer one (path filter, renamed job) would still point a rerun at the older run, and
+# a replay of an older run can shadow the result of the newer one. run_id_of reads the digits after
+# `/actions/runs/` in the details/target URL (null when there is none); newest_run_ids maps each
+# workflow to the highest run id seen across ALL its latest checks (green or red);
+# in_newest_run keeps an entry only when its run is that one. An entry with no run id is not
+# filtered here: it yields no id downstream anyway.
+def run_id_of:
+  ((.detailsUrl // .targetUrl // "") | capture("/actions/runs/(?<id>[0-9]+)")? | .id) // null;
+# Note: newest by highest run id, while latest_checks picks by startedAt; a re-run of an older run (same id) can
+# be dropped as not-newest. That fails safe (no rerun), never a wrong rerun.
+def newest_run_ids:
+  [ latest_checks[] | (run_id_of) as $r | select($r != null)
+    | {w: (.workflowName // ""), id: ($r | tonumber)} ]
+  | group_by(.w) | map({key: .[0].w, value: (map(.id) | max)}) | from_entries;
+def in_newest_run($nr):
+  (run_id_of) as $r
+  | if $r == null then true
+    else ($nr[(.workflowName // "")] // 0) as $n | ($r | tonumber) == $n end;
 # The run that produced the verdict. Neither verdict check carries its id: the App posts
 # `ai-review` with no details_url, so its URL is the App homepage, and `ai-review/pass` has
 # no target_url. The id is on the job of workflow `ai-review-runner` (ai-review.yml), read
@@ -319,8 +339,9 @@ def review_bad:
 # only spend the one rerun.
 def review_run_ids:
   if review_bad then
-    latest_checks[] | select((.workflowName // "") == "ai-review-runner")
+    newest_run_ids as $nr | latest_checks[] | select((.workflowName // "") == "ai-review-runner")
     | select(outcome != "SKIPPED")
+    | select(in_newest_run($nr))
     | ((.detailsUrl // "") | capture("/actions/runs/(?<id>[0-9]+)")? | .id)
   else empty end;
 '
@@ -346,10 +367,12 @@ derive_failed_run_ids() {
   # $2 = "with-review" (#3036) also keeps the review run when the verdict is bad, so a
   # delegated-approval PR can be re-reviewed; the ready-to-merge gate is always excluded.
   jq -r --arg inc "${2:-}" "$ROLLUP_LATEST_JQ"'
-    [ ( latest_checks[]
+    newest_run_ids as $nr
+    | [ ( latest_checks[]
         | select(self_cert_gate | not)
         | select(outcome == "FAILURE" or outcome == "ERROR"
                  or outcome == "TIMED_OUT" or outcome == "CANCELLED")
+        | select(in_newest_run($nr))
         | ((.detailsUrl // .targetUrl // "") | capture("/actions/runs/(?<id>[0-9]+)")? | .id) ),
       ( if $inc == "with-review" then review_run_ids else empty end ) ]
     | map(select(. != null)) | unique | .[]' <<<"$1"
@@ -366,11 +389,29 @@ derive_review_run_ids() {
 # latest_checks: a queued rerun has no startedAt yet and would sort behind the verdict it is
 # about to replace. While a re-review runs, the old `ai-review` check and label still read
 # red, so acting on them would spend the PR's budget against a stale verdict.
+#
+# #3949: an entry counts only while it is plausibly running. GitHub can leave a check run
+# `in_progress` forever (actionlint on #3703, started 2026-11-13, conclusion already success),
+# and an unbounded "wait" on it deferred that PR every sweep with no word. So an entry is
+# NOT in flight when (a) it already carries a conclusion (inconsistent state; the verdict is
+# in) or (b) it started more than CHECK_STUCK_AFTER_SECS ago (default 6h). Case (b) is named
+# loudly on stderr so a stuck check is never a silent wait (constitution invariant 2).
 checks_in_flight() {
-  jq -r '[ (.statusCheckRollup // [])[]
-           | select((.status // "") == "QUEUED" or (.status // "") == "IN_PROGRESS"
+  local bound="${CHECK_STUCK_AFTER_SECS:-21600}"
+  [[ "$bound" =~ ^[0-9]+$ ]] || bound=21600
+  local unfinished='select((.status // "") == "QUEUED" or (.status // "") == "IN_PROGRESS"
                     or (.status // "") == "PENDING" or (.status // "") == "WAITING"
-                    or (.status // "") == "REQUESTED" or (.state // "") == "PENDING") ]
+                    or (.status // "") == "REQUESTED" or (.state // "") == "PENDING")'
+  local age='((.startedAt // "") as $t | if ($t == "" or $t == "0001-01-01T00:00:00Z") then 0 else (now - ($t | fromdateiso8601? // now)) end)'
+  jq -r --argjson bound "$bound" '(.statusCheckRollup // [])[]
+           | '"$unfinished"'
+           | select((.conclusion // "") == "" )
+           | select('"$age"' > $bound)
+           | "  Stuck check \(.name // .context // "?") since \(.startedAt) - older than \($bound)s, not counted as in flight (#3949)."' <<<"$1" >&2
+  jq -r --argjson bound "$bound" '[ (.statusCheckRollup // [])[]
+           | '"$unfinished"'
+           | select((.conclusion // "") == "")
+           | select('"$age"' <= $bound) ]
          | if length > 0 then "yes" else "no" end' <<<"$1"
 }
 

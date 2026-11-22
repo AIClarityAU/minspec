@@ -1,7 +1,7 @@
 ---
 id: SPEC-182
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - a required check must exist and be visible, or it is not a check
@@ -15,9 +15,9 @@ affects: [.github/workflows/ai-review.yml, .github/scripts/ai-review-guard.js, s
 implements: none
 implements_reason: creates no file of its own. Every change edits an existing shared managed template or its generated copy, all listed in affects: (ai-review.yml, ai-review-guard.js, gen-ci-templates.mjs, hook-templates.ts, managed-region-templates.test.ts).
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

@@ -1,7 +1,7 @@
 ---
 id: SPEC-375
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-010  # Reviewer Across All Approvables - a deliberate quota pause is a distinct, visible review state
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Expected surface: a first step in .github/workflows/ai-review.yml, a pickup branch in
   .github/workflows/ai-review-retry.yml, and the matching scaffolded templates (ci-review-templates.ts). None is built.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
