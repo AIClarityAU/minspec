@@ -1,7 +1,7 @@
 ---
 id: SPEC-352
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only (DR-076 / #1169 dispatch for a T3/T4 issue). File ownership is decided at
   Plan, after Clarify picks the legacy-corpus policy (Q1) and the witness shape (Q2).
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -88,6 +88,8 @@ accepted DR is authoritative, a never-approved one misinforms (CLAUDE.md: worst 
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 3 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 **Q1 — The ~100 accepted DRs with no sidecar.**
 - (a) **Baseline allowlist (rec):** commit a list of grandfathered DR ids; rule is fatal for all
   others, list may only shrink. Cost: a one-off list that records "accepted without approval"
@@ -97,6 +99,8 @@ accepted DR is authoritative, a never-approved one misinforms (CLAUDE.md: worst 
 - (c) Warn-only for legacy, fatal from a cutoff date. Cost: implicit cutoff, drifts, repeats the
   "warning joins ~110 others" failure Rule 16 documents.
 
+**Recorded selection: the recommended option,** option (a), a baseline allowlist of grandfathered DR ids that may only shrink. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+
 **Q2 — What counts as the witness.**
 - (a) **Sidecar only (rec):** reuses the existing content-hash mechanism. Cost: one producer; a
   hand-written sidecar passes unless SPEC-337's forged-approval guard also lands.
@@ -105,5 +109,9 @@ accepted DR is authoritative, a never-approved one misinforms (CLAUDE.md: worst 
 - (c) Both required (independent second witness per inv. 2). Cost: stricter, more friction on
   every accept.
 
+**Recorded selection: the recommended option,** option (a), the sidecar only. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
+
 **Q3 — Severity rollout.** Fatal at once (rec, after Q1 baseline makes the corpus green) vs
 warn for one release. Cost of rec: any in-flight DR PR that accepts without approval turns red.
+
+**Recorded selection: the recommended option,** fatal at once, after the baseline allowlist makes the corpus green. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.

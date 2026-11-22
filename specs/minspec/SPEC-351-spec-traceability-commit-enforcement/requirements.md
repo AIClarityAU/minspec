@@ -114,24 +114,37 @@ work not tied to a spec.
 - **D1 — Default severity.** (a) `warn` **(rec)** — safe in a freshly-opted-in repo, but advisory gates
   tend to be ignored (rubber-stamp risk, tenet 1). (b) `block` — real teeth, but a hard stop on every
   existing contributor's workflow on upgrade. (c) `off` — zero friction, feature invisible.
+  **Recorded selection: the recommended option,** (a), `warn`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D2 — Where the check lives.** (a) Extend `.githooks/commit-msg` **(rec)** — one hook, proven pattern,
   but couples this feature to the RCDD hook's file and the repo's hooks-path install. (b) New separate
   hook script — isolates concerns, but a second hook to install and keep in the harness manifest.
   (c) Extension-only (SCM input validation) — no hook, but bypassed by any CLI/agent commit, which is the
   main case that matters.
+  **Recorded selection: the recommended option,** (a), extend `.githooks/commit-msg`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D3 — Fail mode on internal error.** The RCDD hook fails open; invariant #2 says a required gate must
   fail closed. (a) Fail closed only when severity is `block`, open-with-advisory under `warn` **(rec)** —
   consistent with both, but two code paths to test. (b) Always open — simple, but a `block` setting can
   silently stop gating. (c) Always closed — strict, but a hook bug wedges every commit.
+  **Recorded selection: the recommended option,** (a), fail closed only when severity is `block`, open with an advisory under `warn`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D4 — Definition of "spec-governed paths"** for FR-3 exemptions and FR-4. (a) Any path under
   `packages/`, `scripts/`, `tests/` plus specs **(rec)** — cheap and predictable, but project-specific
   defaults leak into adopters unless made configurable. (b) Derive from each spec's `implements:`
   frontmatter — precise, but most specs do not list it. (c) Everything except docs — broad, noisy.
+  **Recorded selection: the recommended option,** (a), any path under `packages/`, `scripts/`, `tests/` plus specs. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D5 — Task-number source.** `task-N` requires stable task numbering in `tasks.md`. Confirm that
   checkbox order is the numbering, or require explicit task ids (a format change to existing specs).
+  **Recommended (agent, 2026-11-17):** explicit task ids, accepting the bold-prefix form most files
+  already use (`**1.1**`, `**T1**`). The tasks parser keeps no id, only text and done
+  (`packages/minspec/src/lib/spec.ts:115`, `:252-254`), and checkbox order is unstable: inserting a
+  task renumbers every later one, so an old `task-N` commit silently points at a different task.
+  36 of the 45 `tasks.md` files on this base already start their tasks with an explicit id - cost:
+  the other 9 get no `task-N` traceability until migrated, and the id format must be fixed (the
+  36 mix `1.1`, `T1`, `T1.1` and `A-T0-1`).
+  **Recorded selection: the recommended option,** explicit task ids, accepting the bold-prefix form most files already use (`**1.1**`, `**T1**`). Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D6 — Scope split.** Ship FR-1/FR-3/FR-5..8 first and FR-2/FR-4 (editor UI) after? **(rec)** yes — the
   hook is the part that enforces; the cost is a release where the helper is missing and users must type
   the prefix by hand.
+  **Recorded selection: the recommended option,** yes: ship FR-1/FR-3/FR-5..8 first and FR-2/FR-4 (editor UI) after. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 
 ## Open Questions
 
