@@ -22,7 +22,9 @@
  *     `switch`, `merge`, `rebase` or `reset` ever runs, and nothing is staged in
  *     the primary's index. Only read-only probes, a `fetch` (which moves a
  *     remote-tracking ref, not HEAD), and `worktree add`/`remove` (a SEPARATE
- *     worktree with a SEPARATE index).
+ *     worktree with a SEPARATE index). The only primary-side artifact is a
+ *     symlink INSIDE that temp worktree to the primary's node_modules (step 4b);
+ *     nothing is written to the primary.
  *   INV-2 (never throws). Every failure — no remote, offline, hook rejection,
  *     timeout, unreadable file — returns a typed result. An approval must never
  *     be lost or obscured by a recovery failure, and the caller's existing
@@ -319,9 +321,9 @@ export async function recoverProtectedBranchApproval(
       if (!hasDelta) return { outcome: 'nothing-to-commit', paths: rel };
 
       // 8. Commit. DR_INDEX_GATE_OFF=1 (NOT --no-verify) for the same reason
-      //    push-docs.sh uses it: the ephemeral worktree has no node_modules, so
-      //    ONLY the pre-commit hook's `npm run validate` step crashes on module
-      //    load. That step has this dedicated kill-switch. The two pure-bash gates
+      //    push-docs.sh uses it: the ephemeral worktree has no real node_modules
+      //    install (step 4b links only the primary's, for tsx), so the pre-commit
+      //    hook's `npm run validate` step crashes on module load. That step has this dedicated kill-switch. The two pure-bash gates
       //    (DR-029 born-`proposed`, and commit-msg RCDD) stay ACTIVE, and CI re-runs
       //    `npm run validate` on the resulting PR — no invariant hole.
       try {

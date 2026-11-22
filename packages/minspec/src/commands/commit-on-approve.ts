@@ -160,10 +160,13 @@ async function recoverOnProtectedBranch(
     console.warn(`MinSpec: approval recovery ${res.outcome} — ${res.error ?? 'no detail'}`);
     // in97: hand the reason back so the fallback toast can NAME it. A console line is
     // invisible to the founder; on 2026-11-22 five recoveries failed on a pre-commit gate
-    // and the only visible text was "NOT committed". First line only - hook stderr can
-    // run to pages, and the full text stays in the console line above.
+    // and the only visible text was "NOT committed". Only a real `failed` outcome is
+    // named: `nothing-to-commit` / `no-remote` / `offline` are not failures of saving,
+    // so they keep the plain fallback wording. First line only - hook stderr can run to
+    // pages, and the full text stays in the console line above.
+    if (res.outcome !== 'failed') return undefined;
     const firstLine = (res.error ?? '').split(/\r?\n/).find((l) => l.trim() !== '')?.trim();
-    return { failed: firstLine ? `${res.outcome}: ${firstLine}` : res.outcome };
+    return { failed: firstLine ?? 'no detail' };
   }
 
   // Success — the approval is committed on a branch and pushed. FINISH it into a PR
@@ -302,7 +305,7 @@ export async function commitApprovalIfEnabled(
       void vscode.window.showWarningMessage(
         `Approval written but NOT committed: '${current}' is the default branch, ` +
           `so a commit there could not be pushed. ` +
-          (recoveryFailure ? `Saving it on a branch failed (${recoveryFailure}). ` : '') +
+          (recoveryFailure ? `Saving it on a branch failed: ${recoveryFailure}. ` : '') +
           (named ? `${named} ${result.paths && result.paths.length === 1 ? 'is' : 'are'} in your working tree, uncommitted — ` : `Your files are saved in the working tree — `) +
           `commit ${named ? 'all of them' : 'them'} on a branch to keep them.`,
         SHOW_FILES_ACTION,
