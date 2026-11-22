@@ -1,7 +1,7 @@
 ---
 id: SPEC-385
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness — session/worktree lifecycle (G-8, git transparency); sibling of DR-065 (presence-gated mutation) and SPEC-057 (stranded-branch detection)
@@ -11,8 +11,8 @@ implements: [packages/minspec/src/lib/prune-worktrees.ts, packages/minspec/src/c
 affects: [packages/minspec/package.json, packages/minspec/src/extension.ts, packages/minspec/tests/invariants.test.ts, packages/minspec/README.md]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
