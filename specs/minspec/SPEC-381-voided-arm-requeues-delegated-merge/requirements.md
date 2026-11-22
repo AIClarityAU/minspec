@@ -95,21 +95,25 @@ section 4) is separate and untouched.
   armed PRs). Cost: the label lies while armed (#816: it says a human is next), and the
   shepherd's "human-held" logic (#3179) and any dashboard reading the label would treat armed
   PRs as human-held; the label must then be removed on merge by something else, or left stale.
-- **B. Sweep for "no label, no arm, not merged" PRs that carry the lane's audit marker (rec).**
+- **B. Sweep for "no label, no arm, not merged" PRs that carry the lane's audit marker.**
   The seam's "Delegated merge armed" comment (or a dedicated label such as `dlg-armed`) is
   the marker that makes FR-3 checkable; the drain re-judges marked PRs with no active arm.
   Keeps the label honest. Cost: one extra `gh` read per cycle plus a comment-parsing or
   new-label dependency; a deleted marker comment strands the PR again.
-- **C. Replace the label with a dedicated `dlg-armed` label at arm time** and treat
+- **C. Replace the label with a dedicated `dlg-armed` label at arm time (rec)** and treat
   `dlg-armed` + no arm as the re-queue state. Same as B with a durable, queryable marker and no
   comment parsing. Cost: new label to create and document, and a second hold-like label for
   the shepherd to learn about.
 
-Recommendation: **C** if a new label is acceptable, else B. Primary downside of C: a new label
-is a new piece of state that can itself be stripped by a human or another session.
+Recommendation: **C**. Primary downside of C: a new label is a new piece of state that can
+itself be stripped by a human or another session.
+
+**Recorded selection: the recommended option,** C, a new `dlg-armed` label. Agent pick of the recommended option, no human chose it; the reason for the pick is the founder's queue answer `c` ("c option C - new dlg-armed label (Recommended)") to queue item c381d1 at 2026-11-22T03:02:33Z, recorded 2026-11-22, DR-123; sign-off ratifies it. The (rec) marker moved to C because the base marker and prose disagreed.
 Rejected alternatives (DR-086 section 4): relabelling `needs-human-review` on detection of a
 void (hands the PR to the founder for a state the lane can resolve itself, against tenet 1).
 
 **D2 - Re-queue on every void, or cap it?** A PR whose head keeps moving could be re-judged
 each cycle. Recommend relying on FR-6's cap and cursor with no extra counter (rec); cost: a
 churning PR spends judge runs until its author stops pushing.
+
+**Recorded selection: the recommended option,** rely on FR-6's cap and cursor with no extra counter. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.

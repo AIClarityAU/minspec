@@ -21,6 +21,7 @@
     "check:swallowed-gate": "npx tsx scripts/check-swallowed-gate-signal.ts",
     "check:gate-signals": "npx tsx scripts/check-gate-signals.ts",
     "audit:gate-witnesses": "npx tsx scripts/audit-gate-witnesses.ts",
+    "check:script-binaries": "npx tsx scripts/check-script-binaries.ts",
     "check:orphaned-docstring": "npx tsx scripts/check-orphaned-docstring.ts",
     "check:template-version": "npx tsx scripts/check-template-version-bump.ts",
     "pretypecheck": "npm run build --workspace=@aiclarity/shared",
