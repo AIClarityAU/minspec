@@ -322,6 +322,8 @@ def review_bad:
 # filtered here: it yields no id downstream anyway.
 def run_id_of:
   ((.detailsUrl // .targetUrl // "") | capture("/actions/runs/(?<id>[0-9]+)")? | .id) // null;
+# Note: newest by highest run id, while latest_checks picks by startedAt; a re-run of an older run (same id) can
+# be dropped as not-newest. That fails safe (no rerun), never a wrong rerun.
 def newest_run_ids:
   [ latest_checks[] | (run_id_of) as $r | select($r != null)
     | {w: (.workflowName // ""), id: ($r | tonumber)} ]
