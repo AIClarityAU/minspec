@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-330-status-writers-consume-annotation/requirements.md",
+  "specHash": "3f6746890e2b1cafc5cf6bec3ccb0be3a07da1bc18272241c8a1ac7cccf2534b",
+  "approvedAt": "2026-11-22T00:28:34.501Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1120",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3911#issuecomment-7070998190"
+}

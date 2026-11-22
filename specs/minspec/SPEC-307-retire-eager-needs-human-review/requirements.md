@@ -1,7 +1,7 @@
 ---
 id: SPEC-307
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-010  # Reviewer Across All Approvables (same epic as SPEC-031, which owns the awaiting-approval signal this decouples from)
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   Specify phase only. Which files this spec owns is decided at Plan, after Decisions D1 to D3.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
 ---
 
