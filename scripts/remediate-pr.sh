@@ -366,11 +366,29 @@ derive_review_run_ids() {
 # latest_checks: a queued rerun has no startedAt yet and would sort behind the verdict it is
 # about to replace. While a re-review runs, the old `ai-review` check and label still read
 # red, so acting on them would spend the PR's budget against a stale verdict.
+#
+# #3949: an entry counts only while it is plausibly running. GitHub can leave a check run
+# `in_progress` forever (actionlint on #3703, started 2026-11-13, conclusion already success),
+# and an unbounded "wait" on it deferred that PR every sweep with no word. So an entry is
+# NOT in flight when (a) it already carries a conclusion (inconsistent state; the verdict is
+# in) or (b) it started more than CHECK_STUCK_AFTER_SECS ago (default 6h). Case (b) is named
+# loudly on stderr so a stuck check is never a silent wait (constitution invariant 2).
 checks_in_flight() {
-  jq -r '[ (.statusCheckRollup // [])[]
-           | select((.status // "") == "QUEUED" or (.status // "") == "IN_PROGRESS"
+  local bound="${CHECK_STUCK_AFTER_SECS:-21600}"
+  [[ "$bound" =~ ^[0-9]+$ ]] || bound=21600
+  local unfinished='select((.status // "") == "QUEUED" or (.status // "") == "IN_PROGRESS"
                     or (.status // "") == "PENDING" or (.status // "") == "WAITING"
-                    or (.status // "") == "REQUESTED" or (.state // "") == "PENDING") ]
+                    or (.status // "") == "REQUESTED" or (.state // "") == "PENDING")'
+  local age='((.startedAt // "") as $t | if ($t == "" or $t == "0001-01-01T00:00:00Z") then 0 else (now - ($t | fromdateiso8601? // now)) end)'
+  jq -r --argjson bound "$bound" '(.statusCheckRollup // [])[]
+           | '"$unfinished"'
+           | select((.conclusion // "") == "" )
+           | select('"$age"' > $bound)
+           | "  Stuck check \(.name // .context // "?") since \(.startedAt) - older than \($bound)s, not counted as in flight (#3949)."' <<<"$1" >&2
+  jq -r --argjson bound "$bound" '[ (.statusCheckRollup // [])[]
+           | '"$unfinished"'
+           | select((.conclusion // "") == "")
+           | select('"$age"' <= $bound) ]
          | if length > 0 then "yes" else "no" end' <<<"$1"
 }
 
@@ -1317,11 +1335,26 @@ RUN_MODEL="sonnet"
 RUN_PROMPT="$PROMPT"
 ESCALATED_ALREADY=0
 
+# Context-slim (#927, same root cause as #912): `claude -p` inside the worktree with
+# the default system prompt auto-loads the large CLAUDE.md + global CLAUDE.md +
+# auto-memory before the task starts -> autocompact thrash. Pass the dev role as the
+# SYSTEM PROMPT via --system-prompt-file (replaces that ambient load; auth-neutral,
+# subscription OAuth preserved). The task prompt already tells the agent to read
+# CLAUDE.md on demand. Kill-switch: MINSPEC_DISPATCH_SLIM_CONTEXT=0 restores the
+# default system prompt (same switch as dispatch-issue.sh).
+REMEDIATE_ROLE_FILE="${SCRIPT_DIR}/roles/dev.md"
+SYS_PROMPT_ARGS=()
+if [[ "${MINSPEC_DISPATCH_SLIM_CONTEXT:-1}" != "0" && -f "$REMEDIATE_ROLE_FILE" ]]; then
+  SYS_PROMPT_ARGS=(--system-prompt-file "$REMEDIATE_ROLE_FILE")
+  echo "  Context-slim: dev role via --system-prompt-file (#927)"
+fi
+
 echo "  Launching remediation agent (model: $RUN_MODEL, log: $LOG)..."
 while true; do
   if (cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$RUN_PROMPT" \
         "${AGENT_CONTEXT_ARGS[@]}" \
         ${AGENT_CAVEMAN_ARGS[@]+"${AGENT_CAVEMAN_ARGS[@]}"} \
+        ${SYS_PROMPT_ARGS[@]+"${SYS_PROMPT_ARGS[@]}"} \
         --model "$RUN_MODEL" \
         --allowedTools "$ALLOWED_TOOLS" \
         --output-format text 2>&1 | tee "$LOG"); then

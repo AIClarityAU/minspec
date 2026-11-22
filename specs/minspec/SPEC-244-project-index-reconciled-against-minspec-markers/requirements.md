@@ -1,7 +1,7 @@
 ---
 id: SPEC-244
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a canonical project list that is trusted rather than computed makes a missing project read as "no such project"
@@ -14,8 +14,8 @@ implements_reason: >-
   ~/.claude scripts, or the product) is Decision D1; ownership is declared at Plan.
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -165,11 +165,13 @@ appear in the chosen surface without the founder having to run anything.
 ## Decisions needed (Clarify)
 
 Each decision below carries a recorded selection: the option this document recommends, copied
-by an agent session (minspec-sdd[bot]) on 2026-11-12. These are agent recommendations, not
-ratified answers, so Clarify stays open. No human chose any option, and DLG-001 (DR-108, the
-delegated-approval record) covers approval only, not Clarify selections. The founder's answer on
-operator queue item c1106au (outside this repo) is not a committed record, and DR-108 section 4
-says a queue item cannot carry consent, so it does not close Clarify here.
+by an agent session (minspec-sdd[bot]) on 2026-11-12. Under DR-123 (a T3 spec, every question
+carrying a recommended option), each recorded pick of the recommended option closes its question.
+No human chose any option; approving the spec ratifies the picks, and the approver may change any
+of them first. DLG-001 (DR-108, the delegated-approval record) covers approval only and is not a
+Clarify answer. The founder's answer on operator queue item c1106au (outside this repo) is not a
+committed record, and DR-108 section 4 says a queue item cannot carry consent, so it closes nothing
+here.
 
 **D1. Where does the check live?**
 - (a) A dev-time script in this repo's `scripts/` **(rec)**, beside `check-primaries-clean.sh`
@@ -181,7 +183,7 @@ says a queue item cannot carry consent, so it does not close Clarify here.
 - (c) A MinSpec product command. Cost: widens the product surface with a feature about one
   person's directory layout, and scanning outside the open workspace strains invariant 3.
 
-**Recorded selection: Option (a)** - agent's recommended selection, not ratified.
+**Recorded selection: Option (a)** - Agent pick of the recommended option; no human chose it; sign-off ratifies it.
 
 **D2. What is the canonical "claimed" list?**
 - (a) The union of folders in every `*.code-workspace` directly under the scan root **(rec)**.
@@ -192,7 +194,7 @@ says a queue item cannot carry consent, so it does not close Clarify here.
 - (c) A new machine-readable portfolio registry with status per project (priority / paused /
   parked). Cost: one more hand-kept list; it fixes ordering visibility but adds a fourth source.
 
-**Recorded selection: Option (a)** - agent's recommended selection, not ratified.
+**Recorded selection: Option (a)** - Agent pick of the recommended option; no human chose it; sign-off ratifies it.
 
 **D3. How is a deliberate omission recorded?**
 - (a) An exclusion file next to the workspace files (e.g. `~/code/.minspec-unlisted`), one
@@ -202,7 +204,7 @@ says a queue item cannot carry consent, so it does not close Clarify here.
 - (c) No exclusion: every unlisted repository is reported forever. Cost: 10 permanent lines,
   which teaches readers to skip the output.
 
-**Recorded selection: Option (a)** - agent's recommended selection, not ratified.
+**Recorded selection: Option (a)** - Agent pick of the recommended option; no human chose it; sign-off ratifies it.
 
 **D4. Where is it surfaced?**
 - (a) One summary line plus names in this repo's SessionStart hook output **(rec)**. Cost: a
@@ -211,7 +213,7 @@ says a queue item cannot carry consent, so it does not close Clarify here.
   describes recurs.
 - (c) The drain loop's periodic report. Cost: visible only while a drain runs.
 
-**Recorded selection: Option (a)** - agent's recommended selection, not ratified.
+**Recorded selection: Option (a)** - Agent pick of the recommended option; no human chose it; sign-off ratifies it.
 
 **D5. Are the prose repo-mapping tables reconciled too?**
 - (a) No - reconcile workspace files only; add the voip-sms-inbox row as a one-time data fix
@@ -219,7 +221,7 @@ says a queue item cannot carry consent, so it does not close Clarify here.
 - (b) Yes - parse the markdown tables and require each priority project to have a row. Cost:
   a parser over prose, which breaks on any re-format, and needs D2(c) to know "priority".
 
-**Recorded selection: Option (a)** - agent's recommended selection, not ratified.
+**Recorded selection: Option (a)** - Agent pick of the recommended option; no human chose it; sign-off ratifies it.
 
 ## Follow-ups (tracked)
 

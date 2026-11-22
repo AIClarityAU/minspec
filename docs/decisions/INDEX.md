@@ -424,7 +424,7 @@ Issue #74 confirmed against Anthropic's official Legal-and-compliance docs that 
 *Status: accepted · Date: 2026-07-12*
 
 <!-- dr-summary:DR-053 auto=0000000000000000 -->
-Per-repo-local SDD ids stay unprefixed (DR-027 separate registers); a reference that SPANS projects carries the target project's short prefix from the committed table `.minspec/project-prefixes.md` — SDD refs `<PREFIX>-<ID>` (MS-SPEC-019, SC-DR-007), issue/PR refs `<PREFIX>#<N>` (MS#500, SC#26). Unknown prefix is advisory, never fatal. Ships the Tier-0 core (`@aiclarity/shared` project-prefix module: parsePrefixTable/resolveRef/formatCrossRef/suggestPrefixDeterministic) + seed table + CLAUDE.md convention; Tier-1 validate-advisory + toast deferred to #614.
+Per-repo-local SDD ids stay unprefixed (DR-027 separate registers); every approvable item and its typed paragraphs gets a short, typeable, slash-joined id `PROJECT/APPROVABLE/PARAGRAPH` (v2, accepted 2026-07-14) — `MIN/SP19/FR3`, with 3-letter project codes from the committed table `.minspec/project-prefixes.md` and left-to-right elision when context implies a segment (`SP19/FR3`, `FR3`). Supersedes the v1 dash grammar (`MS-SPEC-019`, `MS#500`). Unknown project code is advisory, never fatal. Ships the Tier-0 core (`@aiclarity/shared` project-prefix module) + seed table + CLAUDE.md convention; corpus migration and the v2 emitter are tracked in #679 and #681, Tier-1 validate-advisory + toast in #614.
 <!-- /dr-summary:DR-053 -->
 
 ## [DR-054 — Reframe the network posture — data-sovereignty + bring-your-own-LLM (incl. local) + deterministic core supersede "air-gapped" as the product identity; adopt one shared GitHub App (minspec-sdd[bot]) + an OIDC token-broker as the reviewer-identity seam, with customer-own-app as the enterprise override](DR-054.md)
@@ -803,6 +803,14 @@ MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull req
 The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, and asked on 2026-10-01 for the extension to be published just before the visualiser work, about a week out. The constitution puts a Marketplace publish in Phase 2 and says Phase 2 work may not displace unfinished Phase 1 work, so publishing now needs a recorded exception, with its scope and preconditions stated.
 <!-- /dr-summary:DR-100 -->
 
+## [DR-101 — Walking-skeleton completion is a deterministic tie-break term, declared by an epic's `skeleton:` list - read by the resolver, never inferred](DR-101.md)
+
+*Status: proposed · Date: 2026-10-01*
+
+<!-- dr-summary:DR-101 auto=c33940de233c -->
+Triggered by: #297 (vertical-slice completion as a priority signal). DR-019 (deterministic next-task ordering) ranks pending human tasks by severity class and then by a within-class order, which DR-039 (goals drive priority) widened to (epic.order, goal-rank, priority, artifact-id). The code is compareRanked at packages/shared/src/next-task.ts:1045-1051. Every term before artifact-id is a human weight; artifact-id is an arbitrary deterministic pick.
+<!-- /dr-summary:DR-101 -->
+
 ## [DR-102 — Checkbox state leaves the canonical approval hash - a ticked task-list item records progress, and the hash covers the contract](DR-102.md)
 
 *Status: accepted · Date: 2026-10-04*
@@ -907,6 +915,14 @@ The step "Post honest ai-review verdict check-run" (.github/workflows/ai-review.
 scripts/drain-inbox.sh defaults to concurrency 1 and carries a caveat (around lines 407-411): two queued issues touching the same file still produce competing pull requests, because each agent branches from origin/main and cannot see an unmerged sibling, so "keep the default at 1 until same-file serialisation exists, and de-duplicate the queue first". That caveat was written for the session-start drain.
 <!-- /dr-summary:DR-114 -->
 
+## [DR-115 — The MinSpec App secrets are optional in the scaffolded review stack; without them the review posts with GITHUB_TOKEN as github-actions[bot]](DR-115.md)
+
+*Status: proposed · Date: 2026-10-28*
+
+<!-- dr-summary:DR-115 auto=f4b6ddc36218 -->
+ai-review.yml refuses to run unless CLAUDE_CODE_OAUTH_TOKEN, MINSPEC_APP_ID and MINSPEC_APP_PRIVATE_KEY are all set (.github/workflows/ai-review.yml:204-215), and the setup probe mirrors that (packages/minspec/src/lib/ruleset-advisor.ts:734-738). DR-054 intended consumer repos not to hold the App key (the shared broker, SPEC-034, is still in planning). Until the broker exists, every new repo needs the two App secrets set by hand, and the founder could not get review on a new work-PC repo without them.
+<!-- /dr-summary:DR-115 -->
+
 ## [DR-116 — MinSpec has a machine-facing command line (the headless core's), for hooks, workflows and agents only - no MinSpec text tells a person to type it, and its result schema minspec-core/0 is unstable](DR-116.md)
 
 *Status: accepted · Date: 2026-10-28*
@@ -939,6 +955,14 @@ DR-076 (solo mode, accepted 2026-08-01) keeps "genuinely human moments", the fir
 The bot records delegated spec approvals, and no rule lets anything but the founder merge them, so they queue on a keystroke the delegation was meant to remove. | Count | Pull requests | Outcome under section 1 | |---|---|---| | 16 | #3154, #3155, #3244, #3356, #3358 to #3361, #3363 to #3365, #3370 to #3374 | Eligible once brought up to date | | 1 | #3357 | Refused: test failed on its head. All test files passed and…
 <!-- /dr-summary:DR-119 -->
 
+## [DR-120 — MinSpec owns minspec-ci-parity.yml as a managed template - the first file it claims that adopters wrote by hand, taken over only with consent, and changed afterwards only through a human-pushed refresh](DR-120.md)
+
+*Status: accepted · Date: 2026-10-31*
+
+<!-- dr-summary:DR-120 auto=71d14efeb889 -->
+Adopters check MinSpec's review files with a workflow MinSpec does not ship, so the check rejects what a sanctioned refresh writes and its file list falls behind what MinSpec scaffolds.
+<!-- /dr-summary:DR-120 -->
+
 ## [DR-121 — Plan artifacts merge on AI review once their spec is approved, through the delegated lane, under the delegated-approval merge lane's pins](DR-121.md)
 
 *Status: accepted · Date: 2026-11-06*
@@ -946,4 +970,20 @@ The bot records delegated spec approvals, and no rule lets anything but the foun
 <!-- dr-summary:DR-121 auto=a299007d3188 -->
 _No summary available._
 <!-- /dr-summary:DR-121 -->
+
+## [DR-123 — On a T3 spec, an agent's recorded pick of each Clarify question's recommended option closes Clarify, and approving the spec ratifies the picks](DR-123.md)
+
+*Status: accepted · Date: 2026-11-17*
+
+<!-- dr-summary:DR-123 auto=76071625ecdd -->
+The founder answered this as runner queue item clarsel on 2026-11-17 (words in triggered_by). The delegated-approval record says in its section 4 that a queue item cannot carry consent, because any session can write the queue. So the answer is not binding until it sits in a committed record the founder accepts. This is that record. **It binds nothing until he accepts it.**
+<!-- /dr-summary:DR-123 -->
+
+## [DR-124 — Approving a document commits it - commit-on-approve is default on, commits only the approval's own files, never pushes, and minspec.commitOnApprove is the opt-out](DR-124.md)
+
+*Status: proposed · Date: 2026-11-19*
+
+<!-- dr-summary:DR-124 auto=b3c6f8a249ed -->
+SPEC-022 FR-1 (specs/minspec/SPEC-022-approval-foundation/requirements.md:77) says approval ground truth is **committed** to the repo. Before #576 the approval record was only git-*tracked*: written to disk and left in the working tree. Nothing committed it. So an approval could sit uncommitted indefinitely, be lost to a checkout or a reset, or be swept into an unrelated commit by another session. "Committed ground truth" was a claim the code did not keep.
+<!-- /dr-summary:DR-124 -->
 <!-- minspec:dr-index:end -->

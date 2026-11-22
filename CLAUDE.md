@@ -222,6 +222,29 @@ DR-008 dispatch security.
 
 Triage agent auto-dispatches T1-T2 issues (`agent-ready`). T3-T4 get `needs-review` — human approves spec/plan before agent starts. Per SDD FR-2: Clarify phase required for T3-T4.
 
+**Who closes Clarify on a T3 spec** (DR-123, accepted: the founder decision from runner queue
+item clarsel, 2026-11-17, in a committed record because a queue item alone cannot carry
+consent). An agent's recorded pick of the option
+the spec marks recommended closes that question. The pick is written in the "answered, not
+ratified" form from #3399 (Clarify settled on 23 specs): a `Recorded selection:` line that
+names the (rec) option and says an agent copied it and no human chose it. When every question
+carries one, `phases.clarify: done` is a true claim, and approving the spec ratifies the picks.
+Reviewers do not block `clarify: done` because the picks are agent-recorded or because the text
+says the approver may change them. They still block it when a question has no recorded
+selection, names no recommended option, or the spec's own text keeps it open on purpose
+(SPEC-225 for the founder, SPEC-255 until a new DR). Which phase field records a closed
+Clarify is SPEC-320's open question (#3414); SPEC-320 Decisions item 2 already records that its
+validator will refuse the `specify: in-progress` pair (see below). This rule settles only who closes it. This decision covers T3 only; it is not a delegation (#3411).
+
+**Interim tolerance for the `specify: in-progress, clarify: done` pair.** SPEC-320 (Clarify-done
+freeze) records that its validator rule will refuse this pair once built. Until that rule ships,
+reviewers do not block a spec pull request for carrying the pair. No spec on main carries it
+today (checked on main 13e7bb28: none of the 28 specs at `specify: in-progress` has `clarify: done`); spec pull requests drafted before the rule ships may. The current cases are #3800
+(SPEC-311, accept amendment in accepted DR) and #3801 (SPEC-305, symmetric prose-link linter).
+The tolerance ends when
+SPEC-320's validator rule merges, not when SPEC-320 is approved. Nothing here approves a spec
+or changes what approval sets.
+
 Roles: `scripts/roles/` — triage, dev, architect, security, reviewer.
 Dispatch: `scripts/dispatch-issue.sh <N>` — reads `role:X` label, loads role prompt.
 Triage: `scripts/triage-inbox.sh [N]` — processes inbox issues.

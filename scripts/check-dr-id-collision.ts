@@ -132,8 +132,34 @@ const GH_BIN = process.env.DR_ID_GH_BIN?.trim() || 'gh';
 /** A failure caused by the API rate limit, not by a collision or a bad answer (#3077). */
 class RateLimitError extends GateError {}
 
+/** A failure from GitHub's side (HTTP 5xx) that outlasted the retries — infrastructure, not a collision (#3906). */
+class InfraError extends GateError {}
+
+/** A transient server-side failure in `gh`'s stderr / stdout. */
+const SERVER_ERROR_RE = /HTTP 5\d\d/;
+
+/** Retries for a transient 5xx, with exponential backoff from 2s (2s, 4s, 8s), capped by the wait bound. */
+const SERVER_ERROR_RETRIES = 3;
+const SERVER_ERROR_BACKOFF_MS = 2000;
+
 /** What a rate-limited response looks like in `gh`'s stderr / stdout. */
 const RATE_LIMIT_RE = /rate limit|HTTP 429|RATE_LIMITED/i;
+
+/**
+ * The ONE failure #3791 observed and the gate tolerates for an OTHER PR: GitHub refusing
+ * to render a diff ("this diff is temporarily unavailable due to heavy server load",
+ * HTTP 500). Anything that does not positively match (401/403, 502/503, timeouts,
+ * network faults, malformed output) is not this case and fails closed (DR-066).
+ */
+const UNRENDERABLE_DIFF_RE = /diff is temporarily unavailable/i;
+const HTTP_500_RE = /HTTP 500/;
+
+/**
+ * Most other open PRs the gate will skip as unreadable before it fails closed. Skipping
+ * is a bounded concession for the odd huge PR; beyond this, or when no other PR could be
+ * read at all, the comparison is too hollow to call a pass.
+ */
+const MAX_UNREADABLE_OTHER_PRS = 3;
 
 /**
  * Longest the gate will sleep waiting for the limit window to reset. 5 minutes by
@@ -176,7 +202,17 @@ function rateLimitWaitMs(): number {
  * after the wait comes back `failed` with its stderr, and `ghOrFail` names it.
  */
 function gh(args: string[]): GhResult {
-  const first = rawGh(args);
+  let first = rawGh(args);
+  // #3906: GitHub answers transient 5xx (e.g. "diff is temporarily unavailable", HTTP 500) under
+  // load. Retry a bounded number of times with backoff before the caller treats it as a failure.
+  for (let i = 0; i < SERVER_ERROR_RETRIES && first.failed; i++) {
+    const text = `${first.stderr}\n${first.stdout}`;
+    if (RATE_LIMIT_RE.test(text) || !SERVER_ERROR_RE.test(text)) break;
+    const backoff = Math.min(maxRateLimitWaitMs(), SERVER_ERROR_BACKOFF_MS * 2 ** i);
+    console.error(`gh hit a transient server error; retry ${i + 1}/${SERVER_ERROR_RETRIES} in ${Math.round(backoff / 1000)}s.`);
+    sleepMs(backoff);
+    first = rawGh(args);
+  }
   if (!first.failed || !RATE_LIMIT_RE.test(`${first.stderr}\n${first.stdout}`)) return first;
   const wait = rateLimitWaitMs();
   console.error(`gh was rate limited; waiting ${Math.round(wait / 1000)}s for the window to reset, then retrying once.`);
@@ -216,6 +252,11 @@ function ghFailure(prefix: string, r: GhResult): GateError {
   if (RATE_LIMIT_RE.test(`${r.stderr}\n${r.stdout}`)) {
     return new RateLimitError(
       `RATE LIMITED (not a DR id collision) — ${prefix} even after waiting for the limit to reset:\n${detail}`,
+    );
+  }
+  if (SERVER_ERROR_RE.test(`${r.stderr}\n${r.stdout}`)) {
+    return new InfraError(
+      `GITHUB INFRASTRUCTURE ERROR (not a DR id collision) — ${prefix} after ${SERVER_ERROR_RETRIES} retries; re-run the check:\n${detail}`,
     );
   }
   return new GateError(`${prefix}:\n${detail}`);
@@ -293,6 +334,39 @@ interface OtherPrFiles {
   entries: PrFileEntry[];
 }
 
+/** Every other open PR's files, plus the PRs whose files GitHub would not return. */
+interface OtherPrListing {
+  others: OtherPrFiles[];
+  unreadable: { pr: number; reason: string }[];
+}
+
+/**
+ * Like `prFileEntries`, but ONLY the unrenderable-diff failure for an OTHER PR is returned
+ * as `unreadable` instead of thrown (#3791); every other failure still throws. GitHub renders a diff to list a PR's files, and
+ * answers HTTP 500 "this diff is temporarily unavailable" for one it cannot render; that
+ * PR is not the PR under test, so it must not fail every other PR's check. Any other
+ * failure (rate limit, auth, 5xx, network) stays a red: it says nothing about one PR
+ * and the whole run is then unreliable.
+ */
+function tolerantPrFileEntries(repo: string, pr: number): PrFileEntry[] | { unreadable: string } {
+  const r = gh(['api', `repos/${repo}/pulls/${pr}/files`, '--paginate', '--slurp']);
+  if (r.failed) {
+    if (RATE_LIMIT_RE.test(`${r.stderr}\n${r.stdout}`)) {
+      throw ghFailure(`could not list the files changed by PR #${pr}`, r);
+    }
+    const text = `${r.stderr}\n${r.stdout}`;
+    if (!(UNRENDERABLE_DIFF_RE.test(text) && HTTP_500_RE.test(text))) {
+      throw ghFailure(`could not list the files changed by PR #${pr}`, r);
+    }
+    return { unreadable: r.stderr.trim().split('\n')[0]?.slice(0, 200) ?? 'unknown error' };
+  }
+  return parseJsonRows(r.stdout, `PR #${pr} file list`).map((row) => ({
+    filename: String(row.filename ?? ''),
+    status: String(row.status ?? ''),
+    ...(typeof row.previous_filename === 'string' ? { previous_filename: row.previous_filename } : {}),
+  }));
+}
+
 /**
  * Every OTHER open PR's files, in batched GraphQL pages (#3077). Unfiltered, so one walk
  * answers both the DR half and the spec half (#1327).
@@ -301,21 +375,43 @@ interface OtherPrFiles {
  * exhausted the installation rate limit. 50 PRs x their first 100 files per query is a
  * handful of calls. A PR with more than 100 files (`hasNextPage`) falls back to the
  * paginated REST listing for that one PR, so no claim is ever read from a truncated list.
+ *
+ * #3791: the batched query makes GitHub render every PR's diff, so ONE PR whose diff it
+ * cannot render (HTTP 500) failed the whole page, and with it every PR's check. A page
+ * that fails for a reason other than a rate limit is re-read as bare PR numbers and each
+ * PR's files fetched individually, so only the PR GitHub cannot render is `unreadable`.
+ * The caller reports those; they are never silently dropped.
  */
-function otherPrFiles(repo: string, subjectPr: number): OtherPrFiles[] {
+function otherPrFiles(repo: string, subjectPr: number): OtherPrListing {
   const [owner, name] = repo.split('/');
   if (!owner || !name) throw new GateError(`--repo must be OWNER/NAME, got "${repo}"`);
-  const query =
-    'query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){' +
-    'pullRequests(states:OPEN,first:50,after:$cursor){pageInfo{hasNextPage endCursor}' +
-    'nodes{number files(first:100){pageInfo{hasNextPage} nodes{path changeType}}}}}}';
+  const head = 'query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){' +
+    'pullRequests(states:OPEN,first:50,after:$cursor){pageInfo{hasNextPage endCursor}';
+  const query = head + 'nodes{number files(first:100){pageInfo{hasNextPage} nodes{path changeType}}}}}}';
+  const numbersQuery = head + 'nodes{number}}}}';
   const others: OtherPrFiles[] = [];
-  let cursor: string | undefined;
-  for (let page = 0; ; page++) {
-    if (page > 200) throw new GateError('the open-PR GraphQL listing did not terminate after 200 pages.');
-    const args = ['api', 'graphql', '-f', `query=${query}`, '-f', `owner=${owner}`, '-f', `name=${name}`];
+  const unreadable: { pr: number; reason: string }[] = [];
+
+  const readOne = (number: number): void => {
+    const got = tolerantPrFileEntries(repo, number);
+    if (Array.isArray(got)) others.push({ pr: number, entries: got });
+    else unreadable.push({ pr: number, reason: got.unreadable });
+  };
+
+  const run = (q: string, cursor: string | undefined, what: string): { out: string } | { failure: GhResult } => {
+    const args = ['api', 'graphql', '-f', `query=${q}`, '-f', `owner=${owner}`, '-f', `name=${name}`];
     if (cursor) args.push('-f', `cursor=${cursor}`);
-    const out = ghOrFail(args, 'list the open pull requests and their files');
+    const r = gh(args);
+    if (r.failed) {
+      if (RATE_LIMIT_RE.test(`${r.stderr}\n${r.stdout}`) || !UNRENDERABLE_DIFF_RE.test(`${r.stderr}\n${r.stdout}`)) {
+        throw ghFailure(`could not ${what} — \`${GH_BIN} api graphql\` failed`, r);
+      }
+      return { failure: r };
+    }
+    return { out: r.stdout };
+  };
+
+  const parsePage = (out: string): any => {
     let parsed: any;
     try {
       parsed = JSON.parse(out);
@@ -332,27 +428,71 @@ function otherPrFiles(repo: string, subjectPr: number): OtherPrFiles[] {
     if (!prs || !Array.isArray(prs.nodes) || typeof prs.pageInfo?.hasNextPage !== 'boolean') {
       throw new GateError('the open-PR GraphQL response was not the expected shape.');
     }
-    for (const node of prs.nodes) {
-      const number = Number(node?.number);
-      if (!Number.isFinite(number) || number <= 0 || !node.files || !Array.isArray(node.files.nodes)) {
-        throw new GateError('the open-PR GraphQL response contained a malformed pull request node.');
+    return prs;
+  };
+
+  let cursor: string | undefined;
+  for (let page = 0; ; page++) {
+    if (page > 200) throw new GateError('the open-PR GraphQL listing did not terminate after 200 pages.');
+    const first = run(query, cursor, 'list the open pull requests and their files');
+    let prs: any;
+    let batchFailed = false;
+    if ('failure' in first) {
+      batchFailed = true;
+    } else {
+      try {
+        prs = parsePage(first.out);
+      } catch (e) {
+        // Rate limits stay red; only a GraphQL `errors` entry naming the unrenderable diff is retried
+        // per PR below; any other GraphQL error fails closed.
+        if (
+          e instanceof RateLimitError ||
+          !(e instanceof GateError) ||
+          !/returned errors/.test(e.message) ||
+          !UNRENDERABLE_DIFF_RE.test(e.message)
+        ) {
+          throw e;
+        }
+        batchFailed = true;
       }
-      if (number === subjectPr) continue;
-      if (node.files.pageInfo?.hasNextPage !== false) {
-        others.push({ pr: number, entries: prFileEntries(repo, number) });
-        continue;
+    }
+    if (batchFailed) {
+      console.error(
+        `::warning title=DR id check: batched file listing failed::re-reading page ${page + 1} one PR at a time (#3791)`,
+      );
+      const nums = run(numbersQuery, cursor, 'list the open pull requests');
+      if ('failure' in nums) throw ghFailure('could not list the open pull requests — `gh api graphql` failed', nums.failure);
+      prs = parsePage(nums.out);
+      for (const node of prs.nodes) {
+        const number = Number(node?.number);
+        if (!Number.isFinite(number) || number <= 0) {
+          throw new GateError('the open-PR GraphQL response contained a malformed pull request node.');
+        }
+        if (number !== subjectPr) readOne(number);
       }
-      const entries: PrFileEntry[] = node.files.nodes.map((f: { path?: unknown; changeType?: unknown }) => ({
-        filename: String(f.path ?? ''),
-        status: String(f.changeType ?? '').toLowerCase(),
-      }));
-      others.push({ pr: number, entries });
+    } else {
+      for (const node of prs.nodes) {
+        const number = Number(node?.number);
+        if (!Number.isFinite(number) || number <= 0 || !node.files || !Array.isArray(node.files.nodes)) {
+          throw new GateError('the open-PR GraphQL response contained a malformed pull request node.');
+        }
+        if (number === subjectPr) continue;
+        if (node.files.pageInfo?.hasNextPage !== false) {
+          readOne(number);
+          continue;
+        }
+        const entries: PrFileEntry[] = node.files.nodes.map((f: { path?: unknown; changeType?: unknown }) => ({
+          filename: String(f.path ?? ''),
+          status: String(f.changeType ?? '').toLowerCase(),
+        }));
+        others.push({ pr: number, entries });
+      }
     }
     if (!prs.pageInfo.hasNextPage) break;
     cursor = String(prs.pageInfo.endCursor ?? '');
     if (!cursor) throw new GateError('the open-PR GraphQL listing said there was another page but gave no cursor.');
   }
-  return others;
+  return { others, unreadable };
 }
 
 /**
@@ -516,7 +656,23 @@ function main(): void {
   const base = basePaths(args.repo, args.base, decisionsDir);
   assertBaseListingPlausible(args.base, decisionsDir, base, subject);
 
-  const otherFiles = otherPrFiles(args.repo, args.pr);
+  const { others: otherFiles, unreadable } = otherPrFiles(args.repo, args.pr);
+  const totalOthers = otherFiles.length + unreadable.length;
+  if (unreadable.length > 0 && (unreadable.length === totalOthers || unreadable.length > MAX_UNREADABLE_OTHER_PRS)) {
+    throw new GateError(
+      `${unreadable.length} of ${totalOthers} other open PRs are unreadable ` +
+        `(${unreadable.map((u) => `#${u.pr}`).join(', ')}); the gate skips at most ${MAX_UNREADABLE_OTHER_PRS} and never ` +
+        'all of them, so it cannot vouch that no other PR claims the same DR id.',
+    );
+  }
+  for (const u of unreadable) {
+    // Loud, never silent: the PR under test is still checked in full against main and
+    // every readable PR; only a claim held by THIS unreadable PR cannot be compared (#3791).
+    console.log(`NOTE: open PR #${u.pr} is unreadable (${u.reason}) - skipped, its claims were not compared.`);
+    if (process.env.GITHUB_ACTIONS) {
+      console.error(`::warning title=DR id check skipped an unreadable PR::#${u.pr} - ${u.reason}`);
+    }
+  }
   const others: PrClaims[] = otherFiles.map((o) => ({
     pr: o.pr,
     paths: claimedPathsFromPrFiles(o.entries, decisionsDir),

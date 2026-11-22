@@ -2,11 +2,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from './config';
-import { slugify } from './spec-manager';
+import { slugify } from './slug';
 import { epicRefValue } from './epic-manager';
 import { inspectAllStatusClaims, claimParagraphText } from './status-parity';
 import { ensureDirectory } from './opt-in';
 import { prepareText, readDocument, readDocumentText, restoreLineEndings } from './text-io';
+import { applyDrIndexDelta } from './dr-index-splice';
 export { slugify };
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -631,15 +632,62 @@ export const ADR_STATUS_VALUES: readonly AdrStatus[] = [
   'superseded',
 ];
 
-/** True if the ADR file already has a leading YAML frontmatter block. */
+/** What {@link adrFrontmatterState} found at the head of a decision record. */
+export type AdrFrontmatterState = 'present' | 'absent' | 'unreadable';
+
+/**
+ * Whether a decision record's frontmatter can be written to (SPEC-095 FR-6).
+ *
+ * - `present` - a leading block the frontmatter pattern reads.
+ * - `absent` - the first non-blank line is not `---`: a hand-written record with no
+ *   frontmatter, the case the synthesize branch of {@link setAdrStatus} exists for (#201).
+ * - `unreadable` - the first non-blank line IS `---` but no block can be read (a blank
+ *   line before it, a missing closing fence, a leading byte order mark). Synthesizing here
+ *   put a second block in front of the first, so the record asserted two statuses (#2467,
+ *   DQ-5); every writer refuses instead.
+ *
+ * Decided by the first non-blank line with one leading U+FEFF ignored, never by "the
+ * pattern did not match": a failed match is "could not read", not "has none".
+ * `content` is expected prepared (LF, `readDocument`). Pure, no fs.
+ */
+export function adrFrontmatterState(content: string): AdrFrontmatterState {
+  if (FRONTMATTER_RE.test(content)) return 'present';
+  const firstNonBlank = content
+    .replace(/^\uFEFF/, '')
+    .split('\n')
+    .find((line) => line.trim() !== '');
+  return firstNonBlank?.trim() === '---' ? 'unreadable' : 'absent';
+}
+
+/** The refusal FR-6 requires: names the file, says nothing was written. */
+function unreadableFrontmatterError(filePath: string): Error {
+  return new Error(
+    `${path.basename(filePath)} opens with a frontmatter fence (---), but no frontmatter ` +
+      `block can be read from it (a blank line before the block, a missing closing ---, or a ` +
+      `leading byte order mark). Nothing was written. Repair the block by hand, then retry.`,
+  );
+}
+
+/**
+ * True if the ADR file already has a leading YAML frontmatter block; false if it has none
+ * or cannot be read.
+ *
+ * THROWS (SPEC-095 FR-6) when the record opens with `---` but no block can be read, so a
+ * caller can never mistake "could not read" for "has none" and offer to add a second
+ * block: the Accept / Set Decision Status path surfaces the error before any write.
+ */
 export function adrHasFrontmatter(filePath: string): boolean {
+  let text: string;
   try {
     // Prepared (SPEC-095): a CRLF record has its frontmatter too. Reading it as "none" is
     // what sent Accept Decision to its "predates MinSpec" prompt and a second block (#2397).
-    return FRONTMATTER_RE.test(readDocumentText(filePath));
+    text = readDocumentText(filePath);
   } catch {
     return false;
   }
+  const state = adrFrontmatterState(text);
+  if (state === 'unreadable') throw unreadableFrontmatterError(filePath);
+  return state === 'present';
 }
 
 /**
@@ -754,7 +802,52 @@ export function statusProseWouldInvert(
  * `unparseable` lines are returned untouched, because silently rewording a hand-authored
  * rationale is a worse failure than a caught parity error.
  */
-export function reconcileBodyStatus(content: string, status: AdrStatus): string {
+export interface ReconcileBodyStatusOptions {
+  /**
+   * ISO date (`YYYY-MM-DD`) to stamp on every claim whose status actually CHANGES (#943).
+   * Omitted → the token is swapped and nothing else on the line moves.
+   */
+  readonly stampDate?: string;
+}
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Stamp the transition date onto a claim whose token was just rewritten (#943).
+ *
+ * Swapping the token alone turns `Proposed (2026-06-01).` into `Accepted (2026-06-01).` —
+ * the PROPOSAL date now reads as the acceptance date, a false signpost the parity gate
+ * cannot see (it compares tokens, not dates). The old date is kept, labelled with the old
+ * status, in the shape the corpus already uses by hand (DR-040: `Accepted (2026-07-26;
+ * proposed 2026-06-23)`):
+ *
+ *   `Proposed (2026-06-01).`  → `Accepted (TODAY; proposed 2026-06-01).`
+ *   `**Proposed** 2026-08-24` → `**Accepted** TODAY (proposed 2026-08-24)`
+ *   `**Proposed.** Body.`     → `**Accepted (TODAY).** Body.`
+ *
+ * `rest` is the text that followed the old token on its line; the return value replaces it.
+ */
+function stampTransition(rest: string, oldToken: string, date: string): string {
+  const paren = rest.match(/^([*_]*\s*\(\s*)(\d{4}-\d{2}-\d{2})/);
+  if (paren) {
+    return `${paren[1]}${date}; ${oldToken} ${paren[2]}${rest.slice(paren[0].length)}`;
+  }
+  const bare = rest.match(/^([*_]*)(\s+)(\d{4}-\d{2}-\d{2})/);
+  if (bare) {
+    return `${bare[1]}${bare[2]}${date} (${oldToken} ${bare[3]})${rest.slice(bare[0].length)}`;
+  }
+  return ` (${date})${rest}`;
+}
+
+export function reconcileBodyStatus(
+  content: string,
+  status: AdrStatus,
+  options: ReconcileBodyStatusOptions = {},
+): string {
+  const { stampDate } = options;
+  if (stampDate !== undefined && !ISO_DATE_RE.test(stampDate)) {
+    throw new Error(`reconcileBodyStatus: stampDate must be YYYY-MM-DD, got "${stampDate}"`);
+  }
   const claims = inspectAllStatusClaims(content, 'dr');
   const targets = claims.filter((c): c is { kind: 'comparable'; token: string; line: number } =>
     c.kind === 'comparable',
@@ -779,10 +872,38 @@ export function reconcileBodyStatus(content: string, status: AdrStatus): string 
     const replacement = wasCapitalised
       ? status.charAt(0).toUpperCase() + status.slice(1)
       : status;
-    lines[idx] =
-      lines[idx].slice(0, m.index) + replacement + lines[idx].slice(m.index + m[1].length);
+    const oldToken = m[1].toLowerCase();
+    let rest = lines[idx].slice(m.index + m[1].length);
+    // Stamp only a real transition — re-setting the same status must stay a no-op.
+    if (stampDate !== undefined && oldToken !== status) {
+      rest = stampTransition(rest, oldToken, stampDate);
+    }
+    lines[idx] = lines[idx].slice(0, m.index) + replacement + rest;
   }
   return lines.join('\n');
+}
+
+/**
+ * The #626 parity check, run INSIDE the write path (#943): throw when any comparable body
+ * claim in `content` disagrees with `status`. The gate at commit/CI time catches a split
+ * only after the ext has already written it; this refuses to write it in the first place.
+ * Uses the same reader as the gate (`inspectAllStatusClaims`), so it can never pass a file
+ * the gate would fail.
+ */
+export function assertBodyStatusParity(filePath: string, content: string, status: AdrStatus): void {
+  for (const c of inspectAllStatusClaims(content, 'dr')) {
+    if (c.kind === 'comparable' && c.token !== status) {
+      throw new Error(
+        `Refusing to set ${path.basename(filePath)} to "${status}": its body status line ` +
+          `(line ${c.line}) would still read "${c.token}", leaving the file asserting two ` +
+          `statuses. Edit that line to read "${status}" and retry. Nothing was written.`,
+      );
+    }
+  }
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 /**
@@ -798,24 +919,30 @@ export function reconcileBodyStatus(content: string, status: AdrStatus): string 
  * SPEC-095: the record is read through `text-io` and written back in the line endings it
  * had. A CRLF record used to fail the frontmatter pattern and take the synthesize branch,
  * which put an LF block in front of a block that still said `proposed` (#2397).
+ *
+ * SPEC-095 FR-6: the synthesize branch is taken only when the first non-blank line is not
+ * `---` ({@link adrFrontmatterState}). A record that opens with `---` but whose block cannot
+ * be read throws, naming the file, and nothing is written.
+ *
+ * #943: on both branches the body status claims are rewritten too, a changed claim is
+ * stamped with today's date (`Accepted (TODAY; proposed 2026-06-01)`), and the #626
+ * parity check runs on the result before anything is written — a split state throws
+ * instead of landing on disk.
  */
 export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   if (!ADR_STATUSES.has(status)) {
     throw new Error(`Invalid ADR status: ${status}`);
   }
   const { text: content, original } = readDocument(filePath);
+  // SPEC-095 FR-6: decide by the first non-blank line, not by whether the pattern matched.
+  // A record that opens with `---` and has no readable block is refused, file untouched.
+  const state = adrFrontmatterState(content);
+  if (state === 'unreadable') throw unreadableFrontmatterError(filePath);
   const fmMatch = content.match(FRONTMATTER_RE);
-  if (!fmMatch) {
-    // No frontmatter — synthesize one and prepend it, preserving the body
-    // verbatim (only collapsing leading blank lines before the heading).
-    const block = `---\n${synthesizeAdrFrontmatter(filePath, content, status)}\n---`;
-    fs.writeFileSync(filePath, restoreLineEndings(`${block}\n\n${content.replace(/^\s*\n+/, '')}`, original), 'utf-8');
-    return status;
-  }
 
-  // #1833 — check BEFORE writing anything. Refusing after the frontmatter write would
-  // leave the file asserting two statuses, which is the state this whole mechanism
-  // exists to prevent.
+  // #1833 — check BEFORE writing anything, on BOTH branches. Refusing after the
+  // frontmatter write would leave the file asserting two statuses, which is the state
+  // this whole mechanism exists to prevent.
   const inverts = statusProseWouldInvert(content, status);
   if (inverts) {
     throw new Error(
@@ -830,6 +957,25 @@ export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
         `the corpus DR that first triggered this rule has since been corrected and no ` +
         `longer illustrates it — see #2074.)`,
     );
+  }
+
+  // #943 — the body is reconciled (and the transition dated) on BOTH branches, then the
+  // #626 parity check runs on the exact bytes about to be written. The synthesize branch
+  // used to skip the body entirely: a pre-MinSpec DR whose `## Status` read `Proposed`
+  // came out with frontmatter `accepted` over it — the split this issue reported.
+  const stamp = { stampDate: todayIso() };
+
+  if (!fmMatch) {
+    // No frontmatter — synthesize one and prepend it, preserving the body
+    // verbatim apart from its status claims (only collapsing leading blank lines
+    // before the heading). The date is derived from the ORIGINAL body, before the
+    // stamp adds today's date to it.
+    const block = `---\n${synthesizeAdrFrontmatter(filePath, content, status)}\n---`;
+    const body = reconcileBodyStatus(content.replace(/^\s*\n+/, ''), status, stamp);
+    const next = `${block}\n\n${body}`;
+    assertBodyStatusParity(filePath, next, status);
+    fs.writeFileSync(filePath, restoreLineEndings(next, original), 'utf-8');
+    return status;
   }
 
   const yaml = fmMatch[1];
@@ -854,7 +1000,9 @@ export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   const updated = content.replace(FRONTMATTER_RE, () => block);
   // #1624 — the body's `## Status` section is the third place this status lives.
   // Writing only the frontmatter here is what broke parity on every acceptance.
-  fs.writeFileSync(filePath, restoreLineEndings(reconcileBodyStatus(updated, status), original), 'utf-8');
+  const next = reconcileBodyStatus(updated, status, stamp);
+  assertBodyStatusParity(filePath, next, status);
+  fs.writeFileSync(filePath, restoreLineEndings(next, original), 'utf-8');
   return status;
 }
 
@@ -1195,6 +1343,62 @@ export function regenerateDrIndex(
   fs.writeFileSync(indexPath, prior ? restoreLineEndings(merged, prior.original) : merged, 'utf-8');
 
   return { filePath: indexPath, count };
+}
+
+/**
+ * Update <decisionsDir>/INDEX.md for the listed decisions only (#896).
+ *
+ * The file watcher used to call {@link regenerateDrIndex} on every DR create, change and
+ * delete. A full rebuild rewrites every entry, so creating DR-099 also "fixed" any other
+ * entry that had drifted from its file, and deleting DR-099 again (Source Control
+ * Discard Changes on the untracked file) rebuilt from disk instead of undoing the
+ * create. The drift fixes stayed, and INDEX.md stayed modified after the discard.
+ *
+ * Here the INDEX is changed only in the entries for `drIds`. Each one is taken from a
+ * full in-memory regeneration (so the rendering is identical to regenerateDrIndex), or
+ * removed when that regeneration has no entry for it. A create and a discard of the
+ * same file therefore cancel out byte for byte.
+ *
+ * Falls back to a full {@link regenerateDrIndex} when there is no INDEX yet, or when
+ * the INDEX is not a managed register a per-entry edit can handle (see
+ * `applyDrIndexDelta`). The file is written only when its content changes.
+ */
+export function regenerateDrIndexEntries(
+  rootDir: string,
+  drIds: readonly string[],
+  vscodeOverrides?: { decisionsDir?: string },
+  options: DrIndexOptions = {},
+): DrIndexResult {
+  const decisionsDir = resolveDecisionsDir(rootDir, vscodeOverrides);
+  const indexPath = path.join(decisionsDir, 'INDEX.md');
+  if (!fs.existsSync(indexPath)) return regenerateDrIndex(rootDir, vscodeOverrides, options);
+
+  const prior = readDocument(indexPath);
+  const { content, count } = buildDrIndexContent(rootDir, vscodeOverrides, options, prior.text);
+  const fresh = mergeDrIndex(prior.text, content);
+  const next = applyDrIndexDelta(prior.original, fresh, drIds)
+    ?? restoreLineEndings(fresh, prior.original);
+  if (next !== prior.original) fs.writeFileSync(indexPath, next, 'utf-8');
+  return { filePath: indexPath, count };
+}
+
+/**
+ * The decision id a DR file contributes to the INDEX: its frontmatter `id:` when the
+ * file exists and declares one, else the `DR-NNN` prefix of its file name (what
+ * {@link listAdrs} uses for a record without one). Null for a file that is not a DR
+ * file at all (INDEX.md, a README). A deleted file can only be named by its file name.
+ */
+export function drIdForFile(filePath: string): string | null {
+  const base = path.basename(filePath);
+  if (!ADR_FILE_RE.test(base)) return null;
+  const fromName = base.match(ADR_ID_RE)?.[0] ?? null;
+  try {
+    const fm = readDocumentText(filePath).match(FRONTMATTER_RE);
+    const id = fm ? parseFrontmatterYaml(fm[1]).id : undefined;
+    return typeof id === 'string' && id !== '' ? id : fromName;
+  } catch {
+    return fromName;
+  }
 }
 
 // ─── INDEX Status-Drift Validation (issue #220) ───────────────────────────────

@@ -1,7 +1,7 @@
 ---
 id: SPEC-307
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-010  # Reviewer Across All Approvables (same epic as SPEC-031, which owns the awaiting-approval signal this decouples from)
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   Specify phase only. Which files this spec owns is decided at Plan, after Decisions D1 to D3.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
 ---
 
@@ -88,8 +88,26 @@ The `awaiting-approval` applier (SPEC-031 FR-9a). Changing the remediation cap o
 - **D1 — Rename `needs-human-review` to `needs-human-fix`?**
   - (a) **Keep the name** *(rec)*: ~68 files reference it, including dispatch gating and fixtures. With eager application gone the name is no longer misleading; a rename buys disambiguation from `awaiting-approval` that the polarity change already delivers. Cost: the word "review" still reads like an approval prompt to a new reader.
   - (b) Rename: unambiguous. Cost: a large cross-file change on gate machinery, a transition window with two names, and breakage risk in consumers' dashboards and saved searches.
+
+  **Recorded selection: the recommended option,** (a), keep the name `needs-human-review`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D2 — Fail-closed backstop (workflow errored, no verdict).**
   - (a) **Keep eager** *(rec)*: with no verdict nothing can remediate, so a human genuinely is next. Cost: contradicts the issue's literal item 1; a flaky workflow (token mint, install) summons the human for infra noise.
   - (b) Drop the label, rely on the red status and `ai-review-retry`: queue stays clean. Cost: an errored run sits silently red with no human signal if retry also fails, which edges toward a silent gate.
   - (c) Apply only after one automatic re-run also errors: best of both, but adds state and a new workflow path.
+
+  **Recorded selection: the recommended option,** (a), keep the fail-closed backstop eager. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D3 — Is item 1 closed by what already shipped?** If D1(a) and D2(a) are chosen, the remaining work is FR-6 plus tidying the issue's stale description; the issue could close after the wiring test lands. Alternatively keep it open for D1(b)/D2(b).
+
+  **Answer (fact, agent, 2026-11-17):** half of item 1 has shipped; whether the other half closes it
+  is D2's call, not a further fact. Shipped: a normal `ai-review:changes` no longer summons a
+  human at t=0 - `.github/workflows/ai-review.yml:1548` routes it through
+  `shouldSummonHumanReview` (`.github/scripts/ai-review-guard.js:2086`). Not shipped: the
+  fail-closed backstop still adds `needs-human-review` unconditionally, under a comment saying
+  it is kept eager on purpose (`.github/workflows/ai-review.yml:1607-1617`). Under D2 option (a),
+  the recommended option, that backstop stays by design, so item 1 is closed by what shipped and
+  #816 (still open) can close once the FR-6 wiring test lands. Under D2 (b) or (c) it is not.
+  **Recommended (agent, 2026-11-17):** item 1 is closed by what shipped, given D2 option (a); close
+  #816 when the FR-6 wiring test lands - cost: if sign-off picks D2 (b) or (c) instead, this
+  answer flips and item 1 stays open.
+  **Recorded selection: the recommended option,** item 1 is closed by what shipped, given D2
+  option (a); #816 closes when the FR-6 wiring test lands. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
