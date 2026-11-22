@@ -233,14 +233,15 @@ Reviewers do not block `clarify: done` because the picks are agent-recorded or b
 says the approver may change them. They still block it when a question has no recorded
 selection, names no recommended option, or the spec's own text keeps it open on purpose
 (SPEC-225 for the founder, SPEC-255 until a new DR). Which phase field records a closed
-Clarify, and in which phase pair, is SPEC-320's open question (#3414); this rule settles only
-who closes it. This decision covers T3 only; it is not a delegation (#3411).
+Clarify is SPEC-320's open question (#3414); its validator will refuse the `specify: in-progress`
+pair (see below). This rule settles only who closes it. This decision covers T3 only; it is not a delegation (#3411).
 
 **Interim tolerance for the `specify: in-progress, clarify: done` pair.** SPEC-320 (Clarify-done
 freeze) records that its validator rule will refuse this pair once built. Until that rule ships,
-reviewers do not block a spec pull request for carrying the pair. #3399 (Clarify settled on 23
-specs) already put it on main, and SPEC-320's FR5 (pre-blocking survey) lists every spec that
-would fail the rule so its Plan fixes or grandfathers each one. The tolerance ends when
+reviewers do not block a spec pull request for carrying the pair. No spec on main carries it
+today; spec pull requests drafted before the rule ships may. The current cases are #3800
+(SPEC-311, accept amendment in accepted DR) and #3801 (SPEC-305, symmetric prose-link linter).
+The tolerance ends when
 SPEC-320's validator rule merges, not when SPEC-320 is approved. Nothing here approves a spec
 or changes what approval sets.
 
