@@ -7,6 +7,10 @@ product: minspec
 epic: EPIC-002  # Signpost Integrity - an approval that cannot land is a false signpost
 aspects: [approval, validator, preflight, ownership, silent-gate, tier-0]
 relates_to: ["#1179", "#1177", "#1064", "#1115", "#137", "#1806", SPEC-038, SPEC-051, SPEC-022, SPEC-045, SPEC-371, DR-003]
+implements:
+  - packages/minspec/src/lib/ownership-advance-guard.ts
+  - packages/minspec/src/commands/approve.ts
+  - packages/minspec/tests/approve-command-ownership-guard.test.ts
 ---
 
 # SPEC-377: Approve Spec past-Clarify ownership pre-flight - residual gaps after the shipped guard (Requirements)
