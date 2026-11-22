@@ -273,6 +273,7 @@ until the human invokes it.
   is the same posture `tidyPrimary` already shipped. Trade-off: more clicks when several
   worktrees are prunable at once. A bulk "remove all green" can be added later behind its
   own explicit multi-item confirmation if the per-item flow proves tedious in practice.
+  **Recorded selection: the recommended option,** per-item removal only in v1. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 
 - **OQ-2 (does the issue's "passive count badge" ship at all?).** A badge that shows
   "N merged worktrees prunable" without the user having invoked the command would need to
@@ -284,6 +285,7 @@ until the human invokes it.
   would make the badge misleading about its own feature. Revisit as a separate, explicitly
   scoped follow-up if wanted (trade-off: either no badge, or a badge that is known to
   undercount).
+  **Recorded selection: the recommended option,** do not ship the badge in this spec. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 
 - **OQ-3 (surface: QuickPick list, or a dedicated webview/tree view?).** A QuickPick is the
   smallest surface and matches `tidyPrimary`'s own UI choice; a tree view (like the Backlog
@@ -292,6 +294,7 @@ until the human invokes it.
   always-registered view for a rarely-opened feature. Trade-off: no persistent "N
   prunable" visibility between runs (ties into OQ-2 — a persistent view is what a badge
   would live on).
+  **Recorded selection: the recommended option,** QuickPick for v1. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 
 - **OQ-4 (what identifies "the branch" when a worktree is on a detached HEAD or a branch
   name that collides with another remote's?).** `git worktree list --porcelain` reports
@@ -301,6 +304,7 @@ until the human invokes it.
   clean/presence (gates 1 and 4), offering worktree removal alone, never a branch
   deletion. Needs confirmation because it is a narrower contract than the issue's three
   numbered conditions describe (they assume every worktree has a branch).
+  **Recorded selection: the recommended option,** list a detached-HEAD worktree with merged-how "n/a (detached)", gated only on clean/presence (gates 1 and 4), offering worktree removal alone, never a branch deletion. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 
 ## Out of scope
 
