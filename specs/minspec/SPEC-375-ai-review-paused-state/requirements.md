@@ -100,14 +100,18 @@ repo-side contract the local side writes to.
   shape the parser and local writer must agree on, and an unknown pause has no expiry so a forgotten one pauses
   reviews until a human clears it (mitigated by FR-4 visible comment on every PR).
   (b) a second variable `AI_REVIEW_PAUSED` boolean plus the timestamp variable; cost: two writes can diverge.
+  **Recorded selection: the recommended option,** (a), a literal value `unknown` alongside ISO timestamps. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 - **D2 Check conclusion while paused.** (a) **(rec)** `failure`-class like `blocked`, so the required check is
   plainly red and reads as unmet; cost: red CI noise on every open PR during a pause. (b) `neutral`/pending;
   cost: some branch-protection setups treat neutral as passing, the exact silent-green this must avoid, and it
   would need verifying against the repo's ruleset first.
+  **Recorded selection: the recommended option,** (a), `failure`-class like `blocked`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 - **D3 Unreadable variable.** If the variable API call fails (permission, outage): (a) **(rec)** proceed as not
   paused and review normally; cost: a pause can be silently ignored for that run and quota spent, though no
   unreviewed code lands. (b) fail closed to `blocked`; cost: an outage of the variables API halts all reviews.
   Note the token needs `actions: read`/variables read; confirm the reviewer App has it.
+  **Recorded selection: the recommended option,** (a), proceed as not paused and review normally. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 - **D4 Who clears the variable.** (a) **(rec)** the retry workflow after the first successful post-reset run
   (as the issue states); cost: it needs variable-write permission, which the App token may lack (to verify at plan
   time). (b) never clear; rely on timestamp expiry only; cost: unknown-reset pauses (D1a) never self-clear.
+  **Recorded selection: the recommended option,** (a), the retry workflow clears the variable after the first successful post-reset run. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.

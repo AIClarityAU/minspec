@@ -109,14 +109,14 @@ Shared rules for every task:
 
 ## 7 - `validate`, corpus rules (FR-3, first half)
 
-- [ ] **7.1** Re-read each row of design.md's *corpus rules* table against
+- [x] **7.1** Re-read each row of design.md's *corpus rules* table against
   `scripts/validate-frontmatter.ts`; fill in rule 21's row. If a row is wrong, correct the
   table in `specs/minspec/SPEC-136-headless-core/design.md` in this pull request.
-- [ ] **7.2** `scripts/lib/domain-doc-rules.ts` (new) and `scripts/validate-frontmatter.ts`
+- [x] **7.2** `scripts/lib/domain-doc-rules.ts` (new) and `scripts/validate-frontmatter.ts`
   - move the inline rule 1+3+4 body into an exported function the script then calls, with
   no change in its messages or exit behaviour. Do the same for spec `id:` if 7.1 finds
   `validateSpec` does not check it.
-- [ ] **7.3** `packages/core/src/operations.ts` - call every "Yes" row's function after the
+- [x] **7.3** `packages/core/src/operations.ts` - call every "Yes" row's function after the
   per-spec pass, at the script's severity.
 - [ ] **7.4** `packages/core/tests/operations-parity.test.ts` - one fixture per "Yes" row
   that trips it; the core reports it at the script's severity.

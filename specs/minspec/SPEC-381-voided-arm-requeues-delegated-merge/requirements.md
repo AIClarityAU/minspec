@@ -113,3 +113,5 @@ void (hands the PR to the founder for a state the lane can resolve itself, again
 **D2 - Re-queue on every void, or cap it?** A PR whose head keeps moving could be re-judged
 each cycle. Recommend relying on FR-6's cap and cursor with no extra counter (rec); cost: a
 churning PR spends judge runs until its author stops pushing.
+
+**Recorded selection: the recommended option,** rely on FR-6's cap and cursor with no extra counter. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
