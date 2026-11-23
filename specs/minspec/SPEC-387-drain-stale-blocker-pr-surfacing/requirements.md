@@ -183,11 +183,17 @@ that is the defect. This spec never weakens the hold. It only makes a long hold 
   - (c) Time since the last head push, or time BEHIND. Cost: GitHub reports neither in
     `pr list`. It needs a per-PR commits read (more calls, against FR1) or state kept
     between cycles (new persistence).
+
+  **Recorded selection: the recommended option,** (a), age is the time since `createdAt`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 - **D2. Default threshold.**
   - (a) **(rec)** 3 days. #3800 had been open 5 days when #3932 was filed, so 3 days would
     have surfaced it two days earlier. Cost: a spec PR legitimately waiting on a weekend
     human read gets flagged on day 3.
   - (b) 7 days. Cost: a real hold sits silent for a week before anything shows.
+
+  **Recorded selection: the recommended option,** (a), a default threshold of 3 days. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 - **D3. Where the stale blocker is surfaced, beyond the report row.**
   - (a) **(rec)** The FR5 WARNING line on the drain's stderr, every cycle. Cost: it is
     still log-only. If nothing reads the drain log, the hold stays unseen, just more
@@ -197,6 +203,9 @@ that is the defect. This spec never weakens the hold. It only makes a long hold 
     comment noise on human-held PRs.
   - (c) (a) plus one tracking issue per stale blocker. Cost: issue churn, and a dedup rule
     to build and keep right.
+
+  **Recorded selection: the recommended option,** (a), the FR5 WARNING line on the drain's stderr, every cycle. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 - **D4. Auto-update a BEHIND blocker (issue option 2).**
   - (a) **(rec)** No. Not taken here. `remediate-pr.sh` already owns BEHIND refreshes
     (`rebase-only`, and `skip-awaiting-merge-turn` under strict, #3069/#3748). A second
@@ -205,6 +214,9 @@ that is the defect. This spec never weakens the hold. It only makes a long hold 
     needs a rebase still waits for remediate-pr's own turn.
   - (b) Yes, the caller updates BEHIND blockers. Cost: as above, plus a new write verb from
     the approval caller.
+
+  **Recorded selection: the recommended option,** (a), no: the caller does not auto-update a BEHIND blocker. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 - **D5. The upstream producer (issue option 3).**
   - (a) **(rec)** Track it as its own issue: the Clarify-recording producer should set
     `phases.clarify` itself, so no close-out PR is spawned. Cost: it needs one more issue,
@@ -214,6 +226,9 @@ that is the defect. This spec never weakens the hold. It only makes a long hold 
   - (b) Fold it into this spec. Cost: it widens a two-file reporting change into a
     second producer with its own phase-field semantics, and that question is still open
     in SPEC-320 (#3414).
+
+  **Recorded selection: the recommended option,** (a), track the upstream producer as its own issue. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 - **D6. Should a stale blocker ever escalate past a log line on its own (auto-close after
   M days)?**
   - (a) **(rec)** No. Closing someone else's spec PR is outward-facing and throws away
@@ -221,6 +236,8 @@ that is the defect. This spec never weakens the hold. It only makes a long hold 
     deadline. Only its visibility grows.
   - (b) Auto-close after M days. Cost: it is irreversible in effect for a human-reviewed
     spec PR, and needs a DR.
+
+  **Recorded selection: the recommended option,** (a), no: a stale blocker never escalates past a log line on its own. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
 
 ## Follow-ups (tracked)
 

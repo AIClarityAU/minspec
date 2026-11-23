@@ -1,7 +1,7 @@
 ---
 id: SPEC-377
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - an approval that cannot land is a false signpost
@@ -11,6 +11,12 @@ implements:
   - packages/minspec/src/lib/ownership-advance-guard.ts
   - packages/minspec/src/commands/approve.ts
   - packages/minspec/tests/approve-command-ownership-guard.test.ts
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-377: Approve Spec past-Clarify ownership pre-flight - residual gaps after the shipped guard (Requirements)
