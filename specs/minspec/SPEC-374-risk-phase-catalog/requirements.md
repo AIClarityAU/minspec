@@ -244,6 +244,8 @@ upward-only ratchet, which this catalog keeps.
   `phaseMappings` consumer, the lifecycle state machine and the sidebar. That is a contract
   change of the kind the DR-359 ADR filter flags, and it would need its own DR.
 
+**Recorded selection: the recommended option,** (a), an obligation is a required section inside an existing phase, via SPEC-013's section registry. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 ### DQ-3: Confirm the v1 mapping in FR-2.
 
 The judgement calls, each with the recommended option first:
@@ -260,6 +262,8 @@ The judgement calls, each with the recommended option first:
   plan phase, which is exactly the "tiny but consequential" case DR-022 §2 wants to express,
   but it is still a heavier result than "add one section to the spec". The alternative is
   to land T1/T2 obligations in `specify`.
+
+**Recorded selection: the recommended option,** the FR-2 v1 mapping as written, with each judgement call's recommended option: `manifest_changed` trips contract + consumer review, `concurrency` is a catalog entry, and every obligation lands in `plan`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
 
 ## Out of scope
 

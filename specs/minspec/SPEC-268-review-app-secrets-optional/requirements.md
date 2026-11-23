@@ -221,6 +221,8 @@ with the identity consequence.
 - (c) `ai-review.yml` posts `ready-to-merge` itself in the Actions arm. Rejected: breaks the
   single-writer invariant and moves the security decision onto PR-head code.
 
+**Recorded selection: the recommended option,** (a), a `workflow_run` trigger on `ai-review` `completed`, added to `ready-to-merge.yml`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 **D2 — In the App arm, does the new trigger also re-evaluate the gate?**
 - **(a) The trigger fires in both arms but exits early, posting nothing, when the App secrets
   are present (rec).** Keeps the App arm's writes identical to today (acceptance "identical to
@@ -228,12 +230,16 @@ with the identity consequence.
 - (b) It re-evaluates in both arms. A redundant second evaluation could rescue a missed
   `labeled` event, but it changes App-arm behaviour, which the issue asked to keep identical.
 
+**Recorded selection: the recommended option,** (a), the trigger fires in both arms but exits early, posting nothing, when the App secrets are present. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 **D3 — Record the trust change as a new DR or as an amendment to DR-054?**
 - **(a) New DR-115, `proposed`, citing DR-054 as amended (rec; drafted in this PR).** A
   standalone record is acceptable on its own and readable in one place. Cost: one more record in
   the register; the reviewer-identity story now spans two DRs.
 - (b) Append an amendment to accepted DR-054. Keeps one record, but an amendment inside an
   accepted record is the state #2613 / SPEC-266 shows readers cannot see as pending.
+
+**Recorded selection: the recommended option,** (a), a new decision record, `proposed`, citing DR-054 as amended. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
 
 ## Rejected alternatives (recorded per DR-086 §4)
 
