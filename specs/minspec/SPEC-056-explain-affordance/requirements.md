@@ -124,7 +124,7 @@ The [DR-057](../../../docs/decisions/DR-057.md) `.minspec/queue` producer is bui
 
 ### Both host surfaces are specified-but-not-built — Explain cannot ship before them
 
-SPEC-014 (`status: implementing`, requirements.md:5) has requirements only — no action-bar code; SPEC-018 (`status: implementing`) has 0/53 tasks and no custom-editor / hover-toolbar code. There is **no toolbar and no hover group** in code today to host a `?`. Explain **rides on** both, plus the DR-057 consumer; it is a small addition once they land and cannot precede them. This spec records that dependency; it does not attempt to unblock it.
+SPEC-014 (`status: implementing`, requirements.md:4) has requirements only — no action-bar code; SPEC-018 (`status: implementing`) has 0/53 tasks and no custom-editor / hover-toolbar code. There is **no toolbar and no hover group** in code today to host a `?`. Explain **rides on** both, plus the DR-057 consumer; it is a small addition once they land and cannot precede them. This spec records that dependency; it does not attempt to unblock it.
 
 ## Functional Requirements
 
