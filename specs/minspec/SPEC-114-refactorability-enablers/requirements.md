@@ -451,6 +451,8 @@ Each question names a recommended option and what that recommendation costs.
   `packages/shared`.** No authoring burden. *Cost:* a heuristic about paths, wrong for a
   single-package adopter, and it ignores the seam list the human actually ranked.
 
+**Recorded selection: the recommended option,** Option A, any FR cited in the Costly to Refactor section is a seam; one finding per spec, answered by a contract or by `contracts: none` plus a reason. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 ### DQ-2 - This spec leans on an unapproved field. How is that sequenced?
 
 `contracts:` and `invariant_tests:` exist only in the contract-frontmatter spec for #23,
@@ -472,6 +474,8 @@ needs a row there or it is warned about as unknown on every spec that uses it.
   *Cost:* two fields naming contract files - the second implementation this issue is
   against.
 
+**Recorded selection: the recommended option,** Option A, keep the specs separate; amend the #23 spec to admit `contracts: none` plus `contracts_reason:`, register `contracts_reason:` in SPEC-109's table, and the seam-contract slice waits for both. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 ### DQ-3 - Who owns invariant-to-test matching?
 
 - **Option A - the test-completeness spec for #52 owns it; this spec adds the three inputs
@@ -491,6 +495,8 @@ cite at least one numbered `INV-N` id and 5 more cite only a worded form such as
 `INV-single-predicate`; a worded or unnumbered invariant can only be matched if the
 matcher accepts those ids.
 
+**Recorded selection: the recommended option,** Option A, the test-completeness spec for #52 owns invariant-to-test matching; this spec adds the FR-9 inputs and reports "not checked" until they exist. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 ### DQ-4 - How wide is the duplicate-contract scan?
 
 - **Option A - only the declaring spec's `implements:` and `affects:` files (rec).** Cheap,
@@ -500,6 +506,8 @@ matcher accepts those ids.
 - **Option B - every source file in the repository.** Finds more. *Cost:* common type names
   (`Options`, `Config`, `Result`) collide across unrelated modules, so the first run is
   mostly noise, and scan time grows with the repository.
+
+**Recorded selection: the recommended option,** Option A, the duplicate-contract scan covers only the declaring spec's `implements:` and `affects:` files. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
 
 ### DQ-5 - What does the budget count, and what are the numbers?
 
@@ -521,6 +529,8 @@ Whichever is chosen: if the #125 spec is approved, its `dependency-budget` rule 
 a number in the constitution while this checker reads one from config. Two places for one
 number will drift; the follow-up below asks for one to cite the other.
 
+**Recorded selection: the recommended option,** Option A, the budget counts distinct new package names across all four manifest fields, workspace packages excluded; budget 1 for T1/T2 and 3 for T3/T4; configurable. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 ### DQ-6 - Advisory, or blocking?
 
 The issue's title says "enforce"; constitution principle 8 says "Don't hope an LLM will
@@ -541,6 +551,8 @@ follow rules - enforce it via code"; principle 4 says "Avoid nagging".
 
 Choosing B or C makes a merge-gating check and needs a decision record first (see below).
 
+**Recorded selection: the recommended option,** Option A, every finding is a warning, with one opt-in ratchet to `error` for `seam-without-contract` only. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 ### DQ-7 - Should MinSpec name third-party tools at all?
 
 - **Option A - detect a closed list; when nothing is found in a multi-package project show
@@ -552,6 +564,8 @@ Choosing B or C makes a merge-gating check and needs a decision record first (se
   it.
 - **Option C - drop detection from this spec.** Smallest. *Cost:* the issue's fifth bullet
   is not delivered.
+
+**Recorded selection: the recommended option,** Option A, detect a closed list; when none is found in a multi-package project, show one dismissible line naming the three as examples. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
 
 ## Why no new DR
 

@@ -153,7 +153,12 @@ Claims below cite code. What is NOT knowable from code is stated as such.
   per-checkout, so the container cannot see the founder host's primary unless it is mounted.
   (b) also open a GitHub issue automatically; cost: a new network act needing consent, and it
   fails exactly when the network is the problem.
+
+  **Recorded selection: the recommended option,** (a), a git-ignored file under `.minspec/`, for example `.minspec/recovery-failures.json`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 - **D-3: Landing order with SPEC-208 and SPEC-140.** (a) **(rec)** land this first because it is
   small and fixes a live leak; cost: SPEC-208's transport rewrite must absorb the cleanup logic
   and may need a merge. (b) fold into SPEC-208; cost: the leak persists until a larger spec is
   planned and built.
+
+  **Recorded selection: the recommended option,** (a), land this spec first, ahead of SPEC-208 and SPEC-140. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
