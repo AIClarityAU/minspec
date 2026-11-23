@@ -45,6 +45,8 @@ import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold'
 // The corpus walkers, under their former local names. `safeGlob` now tolerates ONLY an
 // absent root; every other read failure reaches the rule's own catch instead of being
 // turned into an empty corpus (#1999).
+import { scanRetiredPathCorpus, splitByBaseline } from '../packages/minspec/src/lib/retired-paths';
+import { TEMPLATES } from '../packages/minspec/src/lib/template-registry';
 import { walkFilesByExt as glob, walkOptionalRoot as safeGlob } from './lib/corpus-walk';
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
 import { checkDeclaredSpecIds } from './lib/spec-id-collision';
@@ -883,6 +885,34 @@ try {
     `claim-word check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
       'Rule 19 validated NOTHING this run; do not read the green as a clean corpus.',
   );
+}
+
+// Rule 24 (FATAL, #1253, SPEC-202): a retired store path (`.minspec/approvals.json`) or a
+// never-built one (`approval-ledger.jsonl`) must not be cited as a live source in specs,
+// decision records or harness templates. The denylist is data (`RETIRED_PATHS`); occurrences
+// that predate the rule in hash-locked artifacts are grandfathered by per-file count
+// (`RETIRED_PATH_BASELINE`) and warn, anything beyond fails. An unreadable file or a failed
+// scan FAILS (SPEC-202 FR-8, constitution invariant 2) — never an empty finding list.
+try {
+  const files = ['specs', resolveDecisionsDir()].flatMap((d) =>
+    safeGlob(d.startsWith(ROOT) ? d : join(ROOT, d), '.md'),
+  ).map((f) => relative(ROOT, f).split(sep).join('/'));
+  const templateText = new Map(
+    Object.entries(TEMPLATES).map(([name, body]) => [`template:${name}`, body as string]),
+  );
+  const scan = scanRetiredPathCorpus({
+    files: [...files, ...templateText.keys()],
+    read: (f) => templateText.get(f) ?? readFileSync(join(ROOT, f), 'utf-8'),
+  });
+  for (const u of scan.unreadable) fail(join(ROOT, u.file), `retired-path scan could not read this file (${u.cause}) — SPEC-202 FR-8.`);
+  if (scan.scanned === 0) fail(ROOT, 'Rule 24 scanned 0 files; the roots moved or the walk failed — not a clean corpus.');
+  const { errors: over, grandfathered } = splitByBaseline(scan.findings);
+  for (const f of over) fail(join(ROOT, f.file), f.message);
+  if (grandfathered.length > 0) {
+    warn(`Rule 24: ${grandfathered.length} grandfathered retired-path citation(s) in hash-locked artifacts (SPEC-202 FR-9); fix when the artifact is next re-approved, then lower RETIRED_PATH_BASELINE.`);
+  }
+} catch (err) {
+  fail(ROOT, `retired-path check could not run (${err instanceof Error ? err.message : String(err)}) — Rule 24 validated NOTHING; failing closed (SPEC-202 FR-8).`);
 }
 
 // Rule 20 (non-fatal, #2467): a decision or epic record carrying TWO
