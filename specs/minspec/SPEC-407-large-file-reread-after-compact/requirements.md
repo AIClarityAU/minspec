@@ -4,7 +4,7 @@ type: requirements
 status: specifying
 tier: T3
 product: minspec
-epic: EPIC-003  # SDD Core Methodology (placeholder: dev-time dispatch economics); no epic for dispatch exists, see Decision D4
+epic: EPIC-003  # SDD Core Methodology (kept per Decision D4: no better-fitting epic for dev-time dispatch economics)
 aspects: [dispatch, context-budget, autocompact, dev-time, offline, no-silent-gate, blast-radius]
 relates_to: [SPEC-062, "#1240", "#1203", "#912", "#1218", "#1200", "#1231", "#1187"]
 implements: none
@@ -117,17 +117,22 @@ secondary.
   (b) Refuse and label the issue "split needed": cheapest and safest, but stalls a task
   the founder may want built as-is.
   (c) Warn only: no stall, but then the gate is advisory and the thrash recurs.
+  **Recorded selection: the recommended option,** (a), raise the window for that run. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 - **D2 - behaviour when size is unknown.** Proceed with a logged warning **(rec)** (does
   not wedge dispatch on an odd issue body; costs one possibly-thrashing run) versus refuse
   (never thrashes; blocks on parse quirks).
+  **Recorded selection: the recommended option,** proceed with a logged warning. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 - **D3 - the 30 KB threshold.** Issue proposes ~30 KB, but 42 KB is the only measured case.
   Keep 30 KB **(rec)** (matches the issue; unvalidated against other files) or derive from
   the configured window (principled; more moving parts).
+  **Recorded selection: the recommended option,** keep 30 KB. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 - **D4 - epic placement.** EPIC-003 is a placeholder; no dispatch-economics epic was
   found. Confirm or name the right one.
+  **Recorded selection: keep EPIC-003 (SDD Core Methodology).** Of the ten epics in `docs/epics/INDEX.md`, none covers dev-time dispatch/drain token economics: EPIC-007 is the shipped Execute extension (this spec is the dev-time path, not that product) and EPIC-008 is the shelved ScroogeLLM proxy. Recorded by agent 2026-11-23 under founder decision, queue item clarsel (2026-11-17), DR-123; sign-off ratifies it.
 - **D5 - scope of hook trimming (FR-2).** Trim only passing-gate output **(rec)** (safe;
   leaves some chatter) versus also trimming informational non-failure output (bigger
   saving; risks hiding a signal the model needed).
+  **Recorded selection: the recommended option,** trim only passing-gate output. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 
 ## Traceability
 

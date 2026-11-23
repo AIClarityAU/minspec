@@ -6,6 +6,9 @@ tier: T3
 product: minspec
 epic: EPIC-005  # Auto Structure Repair — the corrupt-artifact half that SPEC-005 parked
 relates_to: [SPEC-005, SPEC-218]  # SPEC-005: parent, additive/missing-only repair, this spec is its "Out of scope" corrupt-artifact item. SPEC-218: owns config-corruption detection/visibility; this spec consumes it
+implements: none
+implements_reason: >-
+  Specify phase only. Which files this spec will own is decided at Plan. Expected surface: a new pure corruption classifier and repair path beside `packages/minspec/src/lib/auto-bootstrap.ts`, reading `config.ts` and `constitution.ts` (both owned elsewhere).
 ---
 
 # MinSpec — Corrupt-artifact repair (Requirements)
