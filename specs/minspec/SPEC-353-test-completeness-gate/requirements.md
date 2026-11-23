@@ -6,7 +6,7 @@ type: requirements
 status: specifying
 tier: T3
 product: minspec
-relates_to: [SPEC-006, DR-012, DR-003, DR-004, "#52"]
+relates_to: [SPEC-006, SPEC-114, DR-012, DR-003, DR-004, DR-123, "#52", "#4019"]
 implements: []
 ---
 
@@ -15,6 +15,11 @@ implements: []
 **Date:** 2026-10-02
 **Status:** Specifying (SDD Specify phase)
 **Triggered by:** [#52](https://github.com/AIClarityAU/minspec/issues/52)
+**Amended:** 2026-11-24 for #4019 - takes the three inputs from SPEC-114 (refactorability
+enablers) FR-9: a spec's own `## Invariants` ids join the required set (FR-9 here), files
+under `invariant_tests:` join the scan scope (FR-5), and a stub or hollow test cannot cover
+an invariant row (FR-10). SPEC-114's Clarify DQ-3 (recorded selection Option A) made this
+spec the one owner of invariant-to-test matching.
 
 ---
 
@@ -95,18 +100,36 @@ RD-3 was written to prevent).
   FR-6 there). No AI inference of "this test probably covers FR-3" — only an
   explicit, greppable citation counts. This keeps the gate Tier 0 and avoids the
   false-positive class SPEC-006 FR-6 exists to exclude.
+  **Which invariant a citation names (DQ-4):** a bare `INV-<id>` citation maps
+  to the spec's *own* invariant row (FR-9) of that id. A constitution invariant
+  row (FR-2) is cited in the qualified form `constitution INV-N` (the word
+  `constitution`, case-insensitive, then whitespace, then the id); a bare
+  `INV-N` never satisfies a constitution row, and a qualified one never
+  satisfies an own row. Ids match whole: `INV-1` does not satisfy `INV-10`, and
+  `INV-A` does not satisfy `INV-A2`.
 - **FR-5 (scope = traced files, reusing SPEC-006's model).** Test discovery
   scans only test files mapped to the active spec via
-  `.minspec/traceability.json` (same scope source SPEC-006 FR-2 uses) **plus**
-  any test file whose path the spec's `implements:` list names directly. A test
-  file absent from both is not scanned (same traceability-staleness caveat
-  SPEC-006 recorded as its R4 — see Risks).
+  `.minspec/traceability.json` (same scope source SPEC-006 FR-2 uses), **plus**
+  any test file whose path the spec's `implements:` list names directly,
+  **plus** any test file whose path the spec's `invariant_tests:` frontmatter
+  list names (SPEC-114 FR-9 input (a)). A test file absent from all three is
+  not scanned (same traceability-staleness caveat SPEC-006 recorded as its R4 —
+  see Risks). `invariant_tests:` is defined by the contract-frontmatter spec
+  for #23 and is not yet registered in SPEC-109's (canonical frontmatter
+  schema) field table; until it is, the key is read when present and an absent
+  key adds nothing to scope. Files it names widen scope for every row kind,
+  not only invariant rows: scope is one set, so a file is either scanned or
+  not. A path under `invariant_tests:` that does not exist on disk is named in
+  a warning diagnostic rather than dropped silently (constitution invariant 2).
 - **FR-6 (gate point: `tasks` → `implement` phase transition, T3/T4 only).**
   The check runs when a spec's `tasks` phase is marked done / approved (the
   action in `packages/minspec/src/commands/approve.ts` that can trigger
-  `advancePhaseOnApprove` into `implement`). If any `FR-N` or in-scope
-  invariant has zero mapped tests, the transition is refused with a naming
-  reason, listing exactly which ids are unmapped. T1/T2 specs are unaffected
+  `advancePhaseOnApprove` into `implement`). If any `FR-N`, any in-scope
+  constitution invariant, or any of the spec's own invariant ids (FR-9) has
+  zero mapped tests, the transition is refused with a naming reason, listing
+  exactly which ids are unmapped. An invariant row cited only by stub or
+  hollow tests (FR-10) is listed separately, as "cited only by stub/hollow
+  tests", naming those tests, so the fix is clear. T1/T2 specs are unaffected
   (mirrors SPEC-006 FR-3's tier gate — `phaseMappings` for T1/T2 has no `tasks`
   phase at all, so the hook point does not fire).
 - **FR-7 (traceability-matrix surface).** A `requirement/invariant → test id →
@@ -116,9 +139,50 @@ RD-3 was written to prevent).
   `requirements.md` file for each unmapped row. The matrix itself is **not**
   persisted as a new on-disk artifact (see Decisions needed — Zone A below
   explains why `.minspec/traceability.json` is reused rather than duplicated).
+  Rows cover all four kinds — `FR-N`, constitution invariant, own invariant
+  (FR-9), public export — and the status column has four values: `mapped`,
+  `unmapped`, `stub/hollow only` (FR-10), and `not checked — no id` (FR-9's
+  id-less items). The last two are never rendered as mapped; this is the
+  surface SPEC-114 FR-10 reads instead of reporting invariant coverage as
+  "not checked".
 - **FR-8 (override).** A setting (e.g. `minspec.testGate.enabled`, default
   `true`) disables FR-6's block entirely, mirroring SPEC-006 FR-5's master
-  toggle. **No per-row inline suppression exists for any row kind** (`FR-N`, invariant, or public-API) — unlike SPEC-006's `minspec-stub-ok`, a missing test is not something a single line comment should wave through silently; the master toggle is the only override and it applies equally to every row kind (turning it off also stops blocking invariant rows).
+  toggle. **No per-row inline suppression exists for any row kind** (`FR-N`, constitution invariant, own invariant, or public-API) — unlike SPEC-006's `minspec-stub-ok`, a missing test is not something a single line comment should wave through silently; the master toggle is the only override and it applies equally to every row kind (turning it off also stops blocking invariant rows).
+- **FR-9 (derive required-test set from the spec's own `## Invariants` ids —
+  SPEC-114 FR-9 input (0)).** For a T3/T4 spec, every invariant id the spec
+  declares in its own invariants section requires at least one mapped test
+  (FR-4), on the same footing as an `FR-N` row. This is derived from the
+  artifact, not declared in frontmatter (Zone A #2), so it needs neither
+  DQ-1's constitution ids nor DQ-2's `invariants:` field. Parse rules, all
+  pure text (Tier 0):
+  - **Section.** A level-2 heading whose text starts with the word
+    `Invariants` (`## Invariants`, `## Invariants (must not break)`,
+    `## Invariants this change must not break`, ...), up to the next heading
+    of level 2 or higher. Files read: `requirements.md` and, for a
+    split-layout spec, its sibling `tasks.md` (the same files FR-1 reads).
+  - **Id.** In each top-level list item of that section, the first
+    `INV-<id>` literal, where `<id>` is one or more letters or digits,
+    optionally joined by single hyphens (`INV-2`, `INV-A`, `INV-R3`,
+    `INV-single-predicate`). Worded ids count: on `main` at `7931142f`, 5
+    requirement files cite only a worded form (SPEC-114 DQ-3). An id appearing
+    twice in the section is one row. `INV-N` mentions outside the section add
+    no rows.
+  - **Item with no id.** A top-level item with no `INV-<id>` literal (such as
+    this spec's own `INV —` bullets) cannot be matched, so it is not a
+    required row. It is never passed silently either: the matrix (FR-7)
+    lists it as "not checked — no id", and a non-blocking warning diagnostic
+    on the item names the count. Treating it as blocking would refuse every
+    spec written before this rule over a naming convention, not a missing test.
+- **FR-10 (a stub or hollow test does not cover an invariant row — SPEC-114
+  FR-9 input (b)).** For a constitution-invariant row (FR-2) or an own-invariant
+  row (FR-9), a citation counts only if the test it attaches to is not reported
+  by `scanTestSource()` (`packages/minspec/src/lib/test-scanner.ts:504`) as
+  `stub` or `hollow`. A citation attaches to the test whose title carries it or
+  whose declaration line is adjacent to it (FR-4); a citation on a `describe`
+  block counts when at least one test inside that block is not reported. The
+  check reuses `scanTestSource()` — no second stub/hollow detector (SPEC-006
+  RD-3). `FR-N` and public-export rows keep FR-4's citation-only rule for v1
+  (see Alternatives Considered and Follow-ups).
 
 ## Costly to Refactor (Zone A)
 
@@ -130,7 +194,7 @@ RD-3 was written to prevent).
    layer up (two *traceability* stores instead of two *completeness* checks).
    Any implementation that adds a new file format here is a sign the wrong
    design was picked.
-2. **The derive-from-artifacts direction (FR-1 FR-2, FR-3).** Required tests are
+2. **The derive-from-artifacts direction (FR-1, FR-2, FR-3, FR-9).** Required tests are
    computed *from* `requirements.md`/constitution/shared exports, never
    hand-declared in a separate "test plan" document. Flipping this (a
    human-authored test-plan file the gate merely checks exists) reintroduces
@@ -166,6 +230,23 @@ RD-3 was written to prevent).
 - [ ] A constitution invariant the spec cites (or that its `implements:` files
       overlap — pending the Decisions-needed resolution below) with zero
       mapped TT0 tests blocks the transition the same way — **FR-2, FR-6**.
+- [ ] A T3/T4 spec whose own `## Invariants (must not break)` section declares
+      `INV-1` and `INV-single-predicate`, with a traced test citing only
+      `INV-1`, blocks the transition naming `INV-single-predicate`; a test
+      citing `INV-10` does not satisfy `INV-1` — **FR-9, FR-4, FR-6**.
+- [ ] An own-invariant section item with no `INV-<id>` literal is not a
+      required row, is listed in the matrix as "not checked — no id", and
+      raises a non-blocking warning — **FR-9**.
+- [ ] A bare `INV-2` citation satisfies the spec's own `INV-2` row but not a
+      constitution `INV-2` row; `constitution INV-2` satisfies the
+      constitution row but not the own row — **FR-4, DQ-4**.
+- [ ] A test file named only under the spec's `invariant_tests:` frontmatter
+      is scanned and can satisfy a mapping; a path there that does not exist
+      raises a warning naming it — **FR-5**.
+- [ ] An invariant row whose only citing tests are reported `stub` or
+      `hollow` by `scanTestSource()` blocks the transition, listed as "cited
+      only by stub/hollow tests" with those tests named; the same citation
+      from a real test passes — **FR-10, FR-6**.
 - [ ] An exported `packages/shared/src/**` function added/modified by the
       spec's `implements:` list, with zero TT1 test citing it, blocks the
       transition — **FR-3, FR-6**.
@@ -248,6 +329,29 @@ RD-3 was written to prevent).
   scope; the alternative (scope it in from day one) risks the exact noisy,
   trained-to-ignore outcome SPEC-006's R1 risk names for its own heuristic.
   **Recorded selection: the recommended option,** stay `packages/shared` only for v1. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
+- **DQ-4 — A bare `INV-N` could name the spec's own invariant or a
+  constitution invariant (added 2026-11-24, #4019).** FR-9 makes a spec's own
+  `INV-N` ids required rows; DQ-1 Option A mints constitution `INV-N` ids too.
+  Both namespaces start at `INV-1`, so a test citing `INV-2` is ambiguous.
+  Today's tests already use the bare form for own invariants: a grep over
+  `packages/*/tests` on 2026-11-24 found 60 files citing an `INV-<digit>` id,
+  14 of them carrying at least one `SPEC-NNN INV-N` prefixed citation (the
+  rest cite only the bare form); no constitution `INV-N` id
+  exists yet to cite.
+  - **(rec) Option A — bare `INV-N` means the spec's own invariant; a
+    constitution row needs `constitution INV-N`.** Matches what existing
+    tests already write, so no own-invariant test needs re-citing. *Cost:*
+    constitution citations need a qualifier word that FR-4's original
+    examples did not use, and an author who writes a bare `INV-2` meaning the
+    constitution gets an "unmapped" block on the constitution row (visible,
+    not silent, but a false block until re-cited).
+  - **Option B — own invariants need `SPEC-NNN INV-N`; bare `INV-N` means
+    the constitution.** *Cost:* every existing test citing a bare own id
+    (most of the 60 files) reads as unmapped until migrated.
+  - **Option C — one bare citation satisfies both rows.** *Cost:* a test
+    written for the spec's `INV-2` marks constitution `INV-2` covered — a
+    false green, which constitution invariant 2 (no silent gate) forbids.
+  **Recorded selection: the recommended option,** Option A, bare `INV-N` names the spec's own invariant and a constitution row needs `constitution INV-N`. Agent pick of the recommended option, no human chose it; DR-123, recorded 2026-11-24; sign-off ratifies it.
 
 ## Risks & Mitigations
 
@@ -256,6 +360,8 @@ RD-3 was written to prevent).
 | R1 | `.minspec/traceability.json` is stale/empty (today it is populated only via a manual codelens click), so FR-5's scope is empty and every row reads unmapped, so the gate blocks every T3/T4 transition (consistent with Failure-Modes #1) until traceability is populated | Med · High | The block is visible, not silent, but it is a false block on a healthy spec: FR-6's refusal reason must name "zero traced tests found" distinctly from "tests found but unmapped" so the cause is obvious, and FR-8's master toggle is the escape hatch while traceability is populated (same staleness caveat SPEC-006 recorded as its R4) |
 | R2 | DQ-1/DQ-2 (invariant ids + touch-detection) ship unresolved, so FR-2 is implemented against a moving target | Med · High | FR-2's acceptance criterion is explicitly gated on the Decisions-needed resolution above; Plan phase must not proceed on FR-2 until DQ-1 is answered |
 | R3 | FR-4's literal-reference matching misses a test that *does* cover an `FR-N` but doesn't cite it by id, producing a false "unmapped" block on an already-tested requirement | Med · Med | Same trade-off SPEC-006 accepted for its own marker convention: authors adopt the citation convention going forward; a migration pass over existing tests is a follow-up, not a blocker for new specs |
+| R5 | FR-10 inherits `scanTestSource()`'s false-`hollow` cases (it blanks template-literal `${...}` interpolations, so an assertion written inside one looks absent, `test-scanner.ts:144-147`), so a genuinely tested invariant reads "cited only by stub/hollow tests" | Low · Med | The refusal names the test and the reason `scanTestSource()` gave, so a false hollow is visible and fixable in the scanner (one engine, SPEC-006 RD-3) rather than worked around here; FR-8's toggle is the escape hatch meanwhile |
+| R6 | FR-9 adds own-invariant rows to every T3/T4 spec at once: most already carry `INV-N` sections (SPEC-114 DQ-3 counted 124 of 224 requirement files on `main` at `7931142f` citing one), so enabling FR-6 blocks many specs whose invariant tests exist but are uncited | Med · High | Same adoption path as R3 — the backlogged migration pass (re-cite existing tests) runs before FR-6 is enabled project-wide; DQ-4's recorded option keeps today's bare citations valid, shrinking that pass |
 | R4 | FR-3's shared-package scope misses a public-API change that lives in `packages/minspec/src` but is still externally consumed (e.g. by `packages/extension-pack`) | Low · Med | Named explicitly in Out of scope / DQ-3; not silently dropped |
 
 ## Assumptions
@@ -291,6 +397,10 @@ set without needing a transition attempt.
 | Gate point: `tasks` → `implement`, T3/T4 only | FR-6 |
 | On-demand traceability matrix, no new persisted store | FR-7 |
 | Master-toggle override, no per-row suppression | FR-8 |
+| Required-test derivation from the spec's own `## Invariants` ids | FR-9 |
+| `invariant_tests:` files join scan scope | FR-5 |
+| Stub/hollow citing test does not cover an invariant row | FR-10 |
+| Own vs constitution `INV-N` citation namespace | FR-4 (DQ-4) |
 
 ## Consequences
 
@@ -299,6 +409,10 @@ set without needing a transition attempt.
   (FR-6) while an `FR-N`, a declared invariant, or a `packages/shared` public
   export it touches has zero mapped test — the test-side mirror of SPEC-006's
   code-side completeness gate.
+- A spec's own invariants — the refactor safety net SPEC-114 (refactorability
+  enablers) relies on — become checked rows (FR-9), and a stub or hollow test
+  can no longer stand in for one (FR-10). FR-9 does not wait on DQ-1/DQ-2, so
+  own-invariant coverage can ship before constitution-invariant coverage.
 - Reuses `traceability.ts`'s existing schema and `validateSpec()`'s existing
   engine — no new storage format, no second completeness checker to drift.
 - Stays Tier 0 (constitution invariant 1 / DR-004): pure text scan, no AI, no
@@ -329,6 +443,13 @@ set without needing a transition attempt.
    a split-layout spec, not `requirements.md` alone.
 4. **T1/T2 spec with uncited tests** — gate inert; no diagnostics, no block
    (tier-gate invariant).
+5. **A spec with no invariants section at all** (FR-9) — zero own-invariant
+   rows; nothing to block and nothing to warn about, since the absence is the
+   author's statement, not an omission the gate can detect (that
+   missing-direction check is DQ-2's validator rule, not this one).
+6. **The same id under two invariants headings** (e.g. one in
+   `requirements.md`, one in a split-layout `tasks.md`) — one row, satisfied by
+   one citation.
 
 ## Test / Verification Strategy
 
@@ -344,6 +465,9 @@ Test tiers (TT) are a vocabulary distinct from the T1-T4 spec ceremony tiers: **
 | FR-6 | TT0 | Fixture with all ids mapped: `tasks`→`implement` transition succeeds; any one id unmapped: transition refused, naming it; T1/T2 fixture: never blocked |
 | FR-7 | TT1 | Matrix command output matches `validateSpec()`'s own unmapped-id list for the same fixture (single source of truth) |
 | FR-8 | TT0 | `minspec.testGate.enabled = false` → transition never blocked regardless of unmapped ids |
+| FR-9 | TT0 | Section parser over each heading variant in FR-9 returns exactly the first `INV-<id>` per top-level item (`INV-1`, `INV-A`, `INV-single-predicate`), ignores `INV-N` mentions in other sections, and returns id-less items as a separate "no id" list; TT2: `validateSpec()` reports an uncited own id unmapped |
+| FR-10 | TT2 | Own `INV-1` cited only by an `it('INV-1 ...', () => {})` (stub) and an `expect(true).toBe(true)` test (hollow) → reported "cited only by stub/hollow tests" naming both; adding one real asserting test citing `INV-1` → mapped |
+| FR-4 (DQ-4) | TT0 | Bare `INV-2` satisfies own `INV-2` only; `constitution INV-2` satisfies the constitution row only |
 
 ## Alternatives Considered
 
@@ -362,6 +486,21 @@ Test tiers (TT) are a vocabulary distinct from the T1-T4 spec ceremony tiers: **
 - **Widen FR-3 to all of `packages/minspec/src` immediately.** Rejected for
   v1 (DQ-3): noise risk outweighs the coverage gain until the narrower scope
   is proven.
+- **SPEC-114 builds its own invariant-to-test matcher.** Rejected by SPEC-114
+  DQ-3 (recorded selection Option A): two literal-citation matchers would be
+  the duplicate implementation SPEC-114 exists to flag. This spec takes its
+  three inputs instead (FR-5, FR-9, FR-10).
+- **Declare own invariants in frontmatter (extend DQ-2's `invariants:` field
+  to the spec's own ids) instead of parsing the section (FR-9).** Rejected:
+  the section already exists in most specs, and a second hand-kept list of the
+  same ids is the drift-prone enumeration Zone A #2 rules out.
+- **Apply FR-10's stub/hollow rule to `FR-N` and public-export rows too.**
+  Deferred, not rejected: one rule for all rows is simpler, but it would make
+  every `FR-N` row depend on `scanTestSource()`'s precision (R5) beyond what
+  #4019 asks for. Backlogged below.
+- **Make an id-less invariant item a blocking row (FR-9).** Rejected: it would
+  refuse specs over an id convention rather than a missing test; the item is
+  surfaced as "not checked — no id" instead of being passed silently.
 
 ## Follow-ups (tracked)
 
@@ -374,9 +513,12 @@ one dated line in `docs/backlog.md`, cited here by its leading text.
 - backlog: `2026-11-16: SPEC-353 migration - re-cite existing tests` (before FR-6 is enabled project-wide)
 - backlog: `2026-11-16: SPEC-353 cross-boundary payload/schema contract tests` (out of scope for v1 until "payload" is scoped)
 - backlog: `2026-11-16: SPEC-353 DQ-3 - widen FR-3 public-API scope` (only if shared-only scope misses real gaps)
+- backlog: `2026-11-24: SPEC-353 FR-10 - extend the stub/hollow rule to FR-N and public-export rows` (only after FR-10 has run on invariant rows without false-hollow trouble)
+- `invariant_tests:` registration in SPEC-109's field table — not a new follow-up: SPEC-109 (canonical frontmatter schema) already records that whichever of it and the #23 contract-frontmatter spec lands second adds the `contracts`/`invariant_tests`/`file_allowlist` rows. FR-5 reads the key when present and needs nothing more from this spec.
 
 ## Open questions
 
-- See Decisions needed (Clarify) above — DQ-1, DQ-2, and DQ-3 are the blocking
-  and non-blocking open questions respectively; none of the other FRs have
+- See Decisions needed (Clarify) above — DQ-1 and DQ-2 are the blocking
+  questions, DQ-3 and DQ-4 the non-blocking ones, and each carries a recorded
+  selection; none of the other FRs have
   open questions beyond what Risks & Mitigations already names.
