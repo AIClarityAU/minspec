@@ -276,6 +276,8 @@ repo's ADR filter (reversibility-in-under-a-day), that rules out a new Decision 
   genuinely important ad hoc heading (e.g. one risky paragraph in a DR) gets no signal, and
   extending the list later means editing this spec again.
 
+**Recorded selection: the recommended option,** a, author discretion, with named anchor-cases. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
+
 ### DQ-2 — Hard replace, or soft-prefer?
 
 - **a — hard replace (rec, FR-2 as written).** New headings use `👁`, never the literal
@@ -285,6 +287,8 @@ repo's ADR filter (reversibility-in-under-a-day), that rules out a new Decision 
 - **b — soft-prefer, no sunset.** `👁` is recommended but the literal text stays tolerated
   indefinitely. *Cost:* two competing conventions coexist with no end date, which is the drift
   the issue was filed to stop.
+
+**Recorded selection: the recommended option,** a, hard replace (FR-2 as written). Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
 
 ### DQ-3 — Where does the lint live, and is it built now?
 
@@ -304,6 +308,8 @@ repo's ADR filter (reversibility-in-under-a-day), that rules out a new Decision 
   notices, and this dispatch has no network access to file that follow-up issue itself — a
   human would need to.
 
+**Recorded selection: the recommended option,** a, build now, inside `spec-validator.ts`'s existing warning channel, `specs/**` only (FR-5 as written). Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
+
 ### DQ-4 — How does SPEC-018 actually pick this up, given it is approved and unbuilt?
 
 - **a — non-binding now; a human amends SPEC-018 (or files a tracked follow-up) once SPEC-018
@@ -314,6 +320,8 @@ repo's ADR filter (reversibility-in-under-a-day), that rules out a new Decision 
   recorded approval hash, and this dispatch's own scope is issue #185's spec only — editing
   another approved spec's body is out of its file allowlist regardless of merit. Recorded here
   only so the reason it is not taken is on the record.
+
+**Recorded selection: the recommended option,** a, non-binding now; SPEC-018 is amended, or a tracked follow-up filed, once SPEC-018 enters its own Plan/Implement. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
 
 ## Out of Scope
 

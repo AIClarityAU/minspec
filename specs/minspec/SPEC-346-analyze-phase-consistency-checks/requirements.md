@@ -7,6 +7,9 @@ product: minspec
 epic: EPIC-002  # Signpost Integrity — see Decisions needed D5 (epic fit unverified)
 aspects: [lifecycle, analyze, tier-0, static-check, diagnostics]
 relates_to: [SPEC-012, SPEC-054, SPEC-041, DR-004, DR-001]
+implements: none
+implements_reason: >-
+  Specify phase only. Which files this spec will own is decided at Plan. Expected surface: a new analyzer module under `packages/minspec/src/lib/` (Decision D3) and an `analyze` member of the phase enum in `config.ts` (owned elsewhere).
 ---
 
 # MinSpec — `/analyze` phase: static cross-artifact consistency checks (Requirements)
@@ -102,3 +105,4 @@ Add a deterministic, offline **analyze** phase between `tasks` and `implement` t
   frontmatter, so this changes a cross-boundary contract - cost: T4 makes Clarify required
   (`config.ts:176`) and takes the spec out of the T3 lane where an agent pick closes Clarify. The
   tier decides the approval class, so it is the founder's.
+  **Recorded selection: the recommended option,** T4. Decided by the runner on 2026-11-17 in the conservative direction (it keeps founder sign-off); recorded by an agent 2026-11-24, no human chose it; sign-off ratifies it. The `tier:` frontmatter still reads T3 and is not changed by this record.

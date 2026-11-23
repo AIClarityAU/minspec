@@ -58,4 +58,6 @@ So the production wiring is done; #620's stated work is already delivered. The r
 ## Decisions needed (Clarify)
 
 1. **Scope of #620.** Options: (a) **(rec)** this tests-only spec, close #620 as delivered by #796 - costs a small test PR for something that already works, but closes the exact proof gap; (b) close #620 as already done with no further work - zero cost, but leaves the positive path unproven end-to-end, so a probe regression would ship silently; (c) re-open design of the wiring - not supported by the evidence above.
+
+   **Recorded selection: the recommended option,** (a), this tests-only spec; close #620 as delivered by #796. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123 (written for T3; a T2 spec has no required Clarify phase, so the same recorded form is used), recorded 2026-11-24; sign-off ratifies it.
 2. **Verify the premise before building.** I believe the wiring is complete from reading `init.ts` and the test fixtures; I did not run the suite on this dispatch (specify only). The implementer should run FR-1 first: if it passes unmodified, the work is tests only.

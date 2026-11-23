@@ -89,6 +89,8 @@ Also: the gate must not hash-stale any approved spec (it edits none).
      (machinery PR).
    - Advisory (non-required). No merge friction; cost: it is the same single-witness hole in
      practice, since nobody is forced to read it.
+
+   **Recorded selection: the recommended option,** required. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
 2. **Trigger granularity.** The issue's own recommendation is to trigger on *rendered* output,
    not source files.
    - **(rec) Keep the file list, add `scaffold.ts`, and add a drift test.** Cheap, offline,
@@ -97,10 +99,14 @@ Also: the gate must not hash-stale any approved spec (it edits none).
    - Render the scaffold corpus at base and head and compare bytes. Exact, no false positives.
      Cost: a scaffold-render harness must be built and kept deterministic, which is a
      materially bigger change and a new drift surface of its own.
+
+   **Recorded selection: the recommended option,** keep the file list, add `scaffold.ts`, and add a drift test. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
 3. **Exemption mechanism for a justified no-bump.**
    - **(rec) A `no-version-bump` PR label that the check reads and prints loudly.** Visible and
      auditable. Cost: a label is an agent-writable bypass; a reviewer must read it.
    - No exemption. Cost: forces needless bumps on pure refactors.
+
+   **Recorded selection: the recommended option,** a `no-version-bump` PR label that the check reads and prints loudly. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
 4. **Where does the timestamp/About surface of part 1 live?** Recorded selection pending: it is
    SPEC-060 FR-2/DQ-1, so this spec defers to it and will not duplicate it. Confirm that split.
 

@@ -127,23 +127,32 @@ issues from the preview.
      interaction.
    - (b) Webview with per-row links. Richer; cost: more code, and a UI surface to keep
      fail-visible.
+
+   **Recorded selection: the recommended option,** (a), a generated markdown file at `.minspec/held-preview.md` (gitignored), opened by a palette command. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
 2. **Source for tier and hold reason: depend on #1002 or fall back.**
    - (a) **(rec)** Block until #1002's verdict block ships; rows without it show
      `unknown`. Honest and simple; cost: the preview is useless on un-backfilled issues.
    - (b) Fall back to re-running `triage-decide.sh` per issue at preview time. Works
      sooner; cost: reintroduces the run-to-run tier flap DR-070 §1 warns about and a
      second source of truth.
+
+   **Recorded selection: the recommended option,** (a), block until #1002's verdict block ships; rows without it show `unknown`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
 3. **Path prediction method.**
    - (a) **(rec)** Only explicit sources (owning spec's `implements`, paths named in the
      issue body). Never wrong-by-inference; cost: many rows show `none`.
    - (b) Heuristic from title/keywords. More coverage; cost: plausible-but-wrong paths,
      which the evidence rules forbid presenting as fact.
+
+   **Recorded selection: the recommended option,** (a), only explicit sources (the owning spec's `implements`, paths named in the issue body). Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
 4. **Where the producer runs.** (a) **(rec)** On demand from the palette/script, plus a
    refresh each drain cycle that already lists issues; cost: slightly stale between
    cycles (age shown per FR-10). (b) Drain-only; cost: no way to refresh when the human
    sits down.
-5. **Recorded selection** is deliberately absent: these are T3 questions awaiting a human
-   or the DR-123 recorded-pick path; none has been recorded here.
+
+   **Recorded selection: the recommended option,** (a), on demand from the palette/script, plus a refresh each drain cycle. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
+
+Items 1 to 4 each carry an agent-recorded selection on the DR-123 recorded-pick path (recorded
+2026-11-24); no human chose any of them.
 
 ## Follow-ups (tracked)
 
