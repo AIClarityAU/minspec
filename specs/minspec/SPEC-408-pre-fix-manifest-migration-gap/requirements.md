@@ -9,6 +9,9 @@ aspects: [managed-files, refresh, manifest, migration, no-silent-gate, tier-0]
 depends_on: []
 relates_to: ["#1718", "#1697", DR-089, SPEC-043, SPEC-224, SPEC-263]
 affects: [packages/minspec/src/lib/merge-refresh.ts, packages/minspec/src/lib/scaffold.ts]  # both already carry the code; scaffold.ts is OWNED by SPEC-043
+implements: none
+implements_reason: >-
+  Specify phase only. The behaviour lives in the `affects:` files, which already carry the code (`scaffold.ts` is owned by SPEC-043); any file this spec comes to own is decided at Plan.
 phases:
   specify: in-progress
   clarify: pending

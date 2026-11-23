@@ -7,13 +7,16 @@ status: specifying
 tier: T3
 product: minspec
 relates_to: [SPEC-006, DR-012, DR-003, DR-004, "#52"]
-implements: []
+implements: none
+implements_reason: >-
+  Specify phase only. Which files this spec will own is decided at Plan. Expected surface:
+  a coverage check beside `packages/minspec/src/lib/spec-validator.ts` and `traceability.ts`, read at the
+  approve path in `packages/minspec/src/commands/approve.ts` (all owned elsewhere).
 ---
 
 # MinSpec — Test-Completeness Gate (Requirements)
 
 **Date:** 2026-10-02
-**Status:** Specifying (SDD Specify phase)
 **Triggered by:** [#52](https://github.com/AIClarityAU/minspec/issues/52)
 
 ---
