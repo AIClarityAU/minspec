@@ -73,14 +73,14 @@ extend*: a dirty tree does not silently reuse a stamp that would misdescribe the
 mutates the stamp to say so (`-dirty` suffix). A `git rev-parse` failure gets no equivalent
 treatment; it is simply absorbed.
 
-### The runtime surface stops at one verdict kind: `packages/minspec/src/extension.ts:736`
+### The runtime surface stops at one verdict kind: `packages/minspec/src/extension.ts:745`
 
 ```ts
 const verdict = detectBuildSkew(folder, isMinspecRepo);
 if (verdict.kind !== 'stale') return;
 ```
 
-(Line 736 in this worktree — the issue body cited `:690`; the file has grown since #1517 was
+(Line 745 in this worktree — the issue body cited `:690`; the file has grown since #1517 was
 filed.) `detectBuildSkew` (`packages/minspec/src/lib/build-provenance.ts:99-145`) returns four
 verdict kinds — `not-applicable`, `current`, `stale`, `unknown` — and `surfaceBuildSkewAdvisory`
 acts on exactly one of them. A build stamped `unknown` (whether from this bug, a shallow clone,
@@ -89,7 +89,30 @@ outcome as a build that is perfectly current. The two are not distinguishable to
 looking at the editor, which is the exact false-signpost class SPEC-060 and this repo's
 evidence-discipline convention (CLAUDE.md, "Evidence Discipline") both exist to remove.
 
-### The gate-signal linter this bug should have tripped does not exist yet
+### A shell-script swallow linter now exists — and it still cannot see this bug (refreshed 2026-11-23)
+
+Since this spec was first written, `scripts/check-swallowed-gate-signal.ts` (pure logic in
+`scripts/lib/swallowed-gate-signal.ts`, #1859; enforced by
+`packages/minspec/tests/swallowed-gate-signal.test.ts`) landed and scans `scripts/**.sh` for
+DR-066 clause 1. Running it on this worktree reports clean (45 scripts scanned). It misses
+`build-extension.sh:29` for two independent, code-verified reasons:
+
+1. **The swallow pattern is `|| true` / `|| :` only** (`scripts/lib/swallowed-gate-signal.ts`,
+   `SWALLOW = /\|\|\s*(?:true|:)(?:[\s;&)]|$)/`). `|| echo unknown` is a swallow with a
+   *substituted default*, which the regex does not match.
+2. **A finding requires the captured variable to later drive control flow** (`CONTROL_FLOW`
+   regex: `if`/`elif`/`while`/`case`/`[[`/`[`). Here `sha` is consumed by string interpolation
+   into `--define:__MINSPEC_BUILD_SHA__=...` and a `${sha}-dirty` concatenation — never
+   branched on — so even a widened swallow pattern would not fire without a second rule
+   ("flows into a build artifact").
+
+The file the original draft of this spec called the natural home, SPEC-054's
+`scripts/check-gate-signals.ts`, is still absent (`ls scripts/check-gate-signals*` → no such
+file). So FR-3 no longer has to choose between "wait for SPEC-054" and "build a new linter":
+an existing, shipped, shell-scoped, annotation-aware (`# swallow-ok:` / `# swallow-known: #N`),
+fail-closed check is the extension point. DQ-1 is revised accordingly (Option D).
+
+### (Superseded framing, kept for the record) The SPEC-054 linter does not exist yet
 
 [SPEC-054](../SPEC-054-gate-signal-linter/requirements.md) (`status: planning`, `plan:
 in-progress`, `implement: pending`) specifies `scripts/check-gate-signals.ts` — verified absent
@@ -109,14 +132,14 @@ one-line addition to an existing rule (see FR-3 and DQ-1).
 
 ### The `unknown` verdict already fires in every workspace, not only the dogfood one — a live blast-radius risk for FR-2
 
-`surfaceBuildSkewAdvisory`'s dogfood gate (`extension.ts:734`) is
+`surfaceBuildSkewAdvisory`'s dogfood gate (`extension.ts:743`) is
 `fs.existsSync(path.join(folder, '.minspec', 'constitution.md'))`. Every repo that has run
 **MinSpec: Init** has that file (`scaffold.ts` writes it into every adopter, not only this
 repo), so the predicate is true in every consumer workspace today — a defect already recorded
 and normatively resolved at [SPEC-060 DQ-4](../SPEC-060-build-provenance-stamp/requirements.md#decisions-needed-clarify),
-but **not yet implemented** (verified: `extension.ts:734` still reads exactly the
+but **not yet implemented** (verified: `extension.ts:743` still reads exactly the
 `existsSync` check DQ-4 describes as the bug). Today that predicate bug is harmless in practice
-only because line 736 discards every verdict except `stale`, and a consumer's installed build
+only because line 745 discards every verdict except `stale`, and a consumer's installed build
 can almost never appear `stale` against a repo it was never built from (it is normally
 `unknown`, silently dropped). **If FR-2 below ships before SPEC-060 DQ-4's predicate fix
 lands, that silence is exactly what stops being silent** — every consumer workspace that ran
@@ -153,7 +176,8 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
   baked into a build artifact via `--define`, written to a signpost file, or otherwise read by
   a consumer that cannot tell "real value" from "the fallback string") — unless the line carries
   an explicit allow-annotation naming why the fallback is safe. **Where this check lives is a
-  Clarify decision (DQ-1), not assumed here**: SPEC-054 already claims
+  Clarify decision (DQ-1), not assumed here** (the shipped `check-swallowed-gate-signal.ts` is the
+  leading candidate — see Context): SPEC-054 already claims
   `scripts/check-gate-signals.ts` under `implements:` and is unimplemented, so this spec must not
   silently fork a second, competing owner of that file. *Rationale: issue's fix (3) — "the next
   `|| echo <default>` on a load-bearing signal reddens instead of shipping."*
@@ -235,7 +259,21 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
     `|| echo <default>` on a provenance variable) stays unenforced for longer, exactly the
     "fixes the instance, not the property" gap the issue's own recommendation warned against
     when it said lead with (3).
-  - *Recommendation to confirm:* **Option C (rec)** — split FR-3 out now as a filed follow-up
+  - **Option D — extend the existing `scripts/check-swallowed-gate-signal.ts` / 
+    `scripts/lib/swallowed-gate-signal.ts` (#1859) with (i) `|| echo|printf <default>` as a
+    swallow form and (ii) a "value reaches a build artifact" consumer rule (variable interpolated
+    into a `--define`, written to a file, or exported) alongside the existing control-flow rule.**
+    Reuses the shipped annotation grammar, fail-closed scan, and T0 enforcement test; needs no
+    SPEC-054 dependency and creates no second matcher. Costs: widening `SWALLOW` raises the
+    false-positive surface across all 45 scripts (a Plan task must enumerate existing `|| echo`
+    hits and annotate or fix each, as #1859 did for `|| true`), and the "reaches a build
+    artifact" rule is fuzzier than the control-flow rule (R3).
+  - *Recommendation to confirm:* **Option D (rec)** — supersedes the earlier Option C
+    recommendation because the premise of C ("SPEC-054's linter does not exist, so wait") is
+    now answered by a different, shipped linter. Cost: the false-positive sweep above, and it
+    leaves SPEC-054's own `check-gate-signals.ts` as a separate, not-yet-built checker, so the
+    "two matchers" drift risk (SPEC-054 R1/R3) is real and Plan must cross-reference both.
+  - *Prior recommendation, retained for comparison:* **Option C** — split FR-3 out now as a filed follow-up
     (dependent on SPEC-054), and let this spec ship the concrete instance fix (FR-1/FR-2/FR-4)
     without waiting on an unimplemented sibling spec's Plan/Tasks/Implement cycle. Cost of this
     recommendation, stated: it is the issue's own second-choice ordering (pair (1) with (3) was
@@ -261,7 +299,7 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
     Costs: FR-2 ships whenever SPEC-060 gets there, which may be much later than FR-1/FR-4, and
     this issue's fix (2) stays open for that whole window.
   - *Recommendation to confirm:* **Option A (rec)** — the predicate fix is a two-line change
-    (`extension.ts:734`) already fully specified by SPEC-060 DQ-4's three normative steps, so
+    (`extension.ts:743`) already fully specified by SPEC-060 DQ-4's three normative steps, so
     bundling it removes the sequencing risk directly rather than trusting two independently
     dispatched PRs to land in the right order. Cost: the ownership note above, which Plan must
     write explicitly rather than skip.
