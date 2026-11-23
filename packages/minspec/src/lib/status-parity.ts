@@ -154,7 +154,7 @@ export function inspectStatusLine(content: string, kind: ArtifactKind): BodyStat
   if (kind === 'spec') {
     for (let i = 0; i < lines.length; i++) {
       if (!/^\*\*Status:\*\*/.test(lines[i])) continue;
-      // NB: the spec token is deliberately NOT emphasis-stripped. `setBodyStatusToken`
+      // NB: the spec token is deliberately NOT emphasis-stripped. `bodyStatusTokenText`
       // (spec.ts) rewrites this line with /^(\*\*Status:\*\*[ \t]*)[A-Za-z]+/, so reading a
       // shape the writer cannot rewrite would reintroduce the read/write asymmetry this
       // module exists to prevent. No spec in the corpus emphasises its token; if one ever
@@ -208,7 +208,7 @@ export function inspectStatusLine(content: string, kind: ArtifactKind): BodyStat
  * free.
  *
  * Thin wrapper over {@link inspectStatusLine}, kept for callers that only need the token
- * (notably `setBodyStatusToken` in spec.ts, the write-path half of this gate).
+ * (notably `bodyStatusTokenText` in spec.ts, the write-path half of this gate).
  */
 export function bodyStatusToken(content: string, kind: ArtifactKind): BodyStatus | null {
   const r = inspectStatusLine(content, kind);
