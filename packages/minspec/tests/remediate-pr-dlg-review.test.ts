@@ -304,7 +304,7 @@ describe('dlg-rerun end to end: at most once, and failed reads go to a human', (
   });
   it('while the rerun is in flight the stale verdict is not read as "still red"', () => {
     const r = drive({
-      rollup: [runnerCheck({ status: 'IN_PROGRESS', conclusion: null }), aiReviewCheck('FAILURE'), aiReviewPass('FAILURE')],
+      rollup: [runnerCheck({ status: 'IN_PROGRESS', conclusion: null, startedAt: new Date().toISOString() }), aiReviewCheck('FAILURE'), aiReviewPass('FAILURE')],
       comments: spent,
     });
     expect(r.out).toMatch(/in flight/);
@@ -378,13 +378,23 @@ describe('red dlg-approve PR that is BEHIND: a bounded mechanical update', () =>
     const g = gitFixture();
     const before = g.branchTip();
     const r = drive({
-      rollup: [runnerCheck({ status: 'IN_PROGRESS', conclusion: null }), aiReviewCheck('NEUTRAL')],
+      rollup: [runnerCheck({ status: 'IN_PROGRESS', conclusion: null, startedAt: new Date().toISOString() }), aiReviewCheck('NEUTRAL')],
       labels: ['ai-review:changes'],
       mergeState: 'BEHIND',
       cwd: g.work,
     });
     expect(g.branchTip()).toBe(before);
     expect(r.humanLabel).toBe(false);
+  });
+  it('a check stuck in_progress past the bound is not waited on forever (#3949)', () => {
+    const g = gitFixture();
+    const before = g.branchTip();
+    drive({
+      rollup: [runnerCheck({ status: 'IN_PROGRESS', conclusion: null, startedAt: '2026-11-13T00:00:00Z' }), aiReviewCheck('NEUTRAL')],
+      mergeState: 'BEHIND',
+      cwd: g.work,
+    });
+    expect(g.branchTip()).not.toBe(before);
   });
   it('a green BEHIND delegated PR updates as before, charging no budget', () => {
     const g = gitFixture();

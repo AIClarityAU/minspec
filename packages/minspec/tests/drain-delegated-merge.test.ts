@@ -295,28 +295,12 @@ describe('the cap rotates, so held PRs cannot starve the ones behind them', () =
   });
 });
 
-describe('#3825: delegated approval PRs are judged before the rest', () => {
-  const judged = (r: { seamCalls: string[] }) => r.seamCalls.map((c) => Number(c.split(' ')[1]));
-  const plan = (n: number) => `specs/minspec/SPEC-${n}-x/design.md`;
-
-  it('a dlg-approve PR is judged ahead of an older plan PR, under a cap that fits one', () => {
+describe('#3949: approval PRs are not this arm\'s lane', () => {
+  it('a real dlg-approve PR (spec + approval sidecar) is never judged', () => {
     const rows = [
-      { number: 1, files: [plan(1)] },
-      { number: 2, files: [plan(2)] },
-      { number: 9, head: 'dlg-approve/spec-9-x', files: [spec(9)] },
+      { number: 9, head: 'dlg-approve/spec-9-x', files: [spec(9), '.minspec/approvals/specs/minspec/SPEC-9-x/spec.md.json'] },
     ];
-    expect(judged(run(rows, { env: { MINSPEC_DRAIN_DELEGATED_MERGE_MAX: '1' } }))).toEqual([9]);
-  });
-
-  it('each group keeps its cursor rotation', () => {
-    const rows = [
-      { number: 1, files: [spec(1)] },
-      { number: 7, head: 'dlg-approve/spec-7-x', files: [spec(7)] },
-      { number: 8, head: 'dlg-approve/spec-8-x', files: [spec(8)] },
-      { number: 3, files: [spec(3)] },
-    ];
-    fs.writeFileSync(path.join(tmp, 'cursor'), '7\n');
-    expect(judged(run(rows, { env: { MINSPEC_DRAIN_DELEGATED_MERGE_MAX: '10' } }))).toEqual([8, 7, 1, 3]);
+    expect(run(rows).seamCalls).toEqual([]);
   });
 });
 

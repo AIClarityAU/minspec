@@ -1,7 +1,7 @@
 ---
 id: SPEC-298
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - the status signpost must not lie (RCDD / DR-003)
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan, after Decisions D1-D3.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -111,13 +111,16 @@ Line numbers rot; Plan re-reads them. Figures below are the issue's, except wher
   (b) Leave them as they are. Cost: the tally keeps overstating work in progress and any real
   gap stays invisible. (c) Bulk-set all 16 to `planning` with no code reading. Cost: cheap, but
   a built spec is then mis-reported as unbuilt and nothing is learned.
+  **Recorded selection: the recommended option,** (a), one read-only audit job on a capable model, 16 specs, one PR. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D2 - Severity of the standing check.** (a) **(rec)** warning, per the issue. Cost: a
   warning can be ignored. (b) error once the audit has landed. Cost: any legitimately
   `implementing` spec whose tasks live elsewhere breaks `npm run validate` until migrated.
+  **Recorded selection: the recommended option,** (a), warning. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D3 - Where the check lives.** (a) **(rec)** in `validateSpec`, beside the other spec
   warnings. Cost: it needs the spec's directory, which `validateSpec` may only see as text -
   Plan must confirm. (b) a separate `scripts/` validator run from `npm run validate`. Cost: a
   second predicate that can drift from the lifecycle rules.
+  **Recorded selection: the recommended option,** (a), in `validateSpec`, beside the other spec warnings. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 - **D4 - Specs with a `phases:` block but no `tasks.md`** (e.g. SPEC-025). The warning should
   fire on status alone; confirm that is wanted rather than only on map-less specs.
   **Recommended (agent, 2026-11-17):** fire on status alone, map or no map. On this base 19 specs sit
@@ -127,3 +130,4 @@ Line numbers rot; Plan re-reads them. Figures below are the issue's, except wher
   whose tier requires no `tasks` phase, `packages/minspec/src/lib/config.ts:174`) and any other
   legitimate T1/T2 spec at `implementing` would warn too, unless FR5 is limited to tiers whose
   required phases include `tasks`.
+  **Recorded selection: the recommended option,** fire on status alone, map or no map. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
