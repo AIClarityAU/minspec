@@ -572,9 +572,57 @@ async function effectivePushOnApproveMode(rootDir: string): Promise<PushOnApprov
     // Unreadable preferences file → fall through to the VS Code setting. Not a
     // failure worth surfacing: the setting still answers, and its default prompts.
   }
+  warnIfUserConsentOverridden();
   return pushOnApproveMode();
 }
 
+/** Shape of `WorkspaceConfiguration.inspect()` that this check reads. */
+export interface PushSettingInspection {
+  globalValue?: unknown;
+  workspaceValue?: unknown;
+  workspaceFolderValue?: unknown;
+}
+
+/**
+ * #1462 — VS Code resolves workspace settings ABOVE user settings, so a committed
+ * `minspec.pushOnApprove` silently discards a personal value. Returns the message to
+ * surface when a user-scope value differs from the workspace/folder value that wins,
+ * else undefined. Pure: no vscode access, no side effects.
+ */
+export function pushConsentOverrideMessage(
+  inspected: PushSettingInspection | undefined,
+): string | undefined {
+  if (!inspected) return undefined;
+  const user = inspected.globalValue;
+  const winner = inspected.workspaceFolderValue ?? inspected.workspaceValue;
+  if (user === undefined || winner === undefined || user === winner) return undefined;
+  return (
+    `MinSpec: your user setting minspec.pushOnApprove="${String(user)}" is overridden by this ` +
+    `workspace's value "${String(winner)}" (workspace settings outrank user settings). ` +
+    `To set standing consent for this project, choose "Always" on the push prompt, or set ` +
+    `"pushOnApprove" in .minspec/preferences.json.`
+  );
+}
+
+let overrideWarned = false;
+
+function warnIfUserConsentOverridden(): void {
+  if (overrideWarned) return;
+  try {
+    const cfg = vscode.workspace.getConfiguration('minspec') as {
+      inspect?: (k: string) => PushSettingInspection | undefined;
+    };
+    const msg = pushConsentOverrideMessage(cfg.inspect?.('pushOnApprove'));
+    if (!msg) return;
+    overrideWarned = true;
+    console.warn(msg);
+    void vscode.window.showWarningMessage?.(msg);
+  } catch {
+    // Diagnostic only — never let it affect the approval or the push decision.
+  }
+}
+
+/**
 /**
  * Branches the REMOTE will reject a direct push to — used only by the push step.
  *

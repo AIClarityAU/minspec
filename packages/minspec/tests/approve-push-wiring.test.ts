@@ -172,3 +172,30 @@ describe('pushApprovalIfEnabled: outcomes are reported honestly', () => {
     expect(suffix).toContain('local only');
   });
 });
+
+describe('pushConsentOverrideMessage (#1462): overridden user consent is surfaced', async () => {
+  const { pushConsentOverrideMessage } = await import('../src/commands/commit-on-approve');
+
+  it('reports a user "always" overridden by a workspace "prompt"', () => {
+    const m = pushConsentOverrideMessage({ globalValue: 'always', workspaceValue: 'prompt' });
+    expect(m).toMatch(/overridden/);
+    expect(m).toMatch(/preferences\.json/);
+  });
+  it('folder value outranks workspace value', () => {
+    expect(
+      pushConsentOverrideMessage({
+        globalValue: 'always',
+        workspaceValue: 'always',
+        workspaceFolderValue: 'never',
+      }),
+    ).toMatch(/"never"/);
+  });
+  it('silent when no user value, no workspace value, or they agree', () => {
+    expect(pushConsentOverrideMessage(undefined)).toBeUndefined();
+    expect(pushConsentOverrideMessage({ workspaceValue: 'prompt' })).toBeUndefined();
+    expect(pushConsentOverrideMessage({ globalValue: 'always' })).toBeUndefined();
+    expect(
+      pushConsentOverrideMessage({ globalValue: 'always', workspaceValue: 'always' }),
+    ).toBeUndefined();
+  });
+});
