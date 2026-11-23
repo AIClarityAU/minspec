@@ -638,7 +638,7 @@ third-party tool (INV-8).
 
 Each is outside this spec's scope. Under DR-023's 30-day rule, items 1, 2, 3 and 5 bear on
 this spec's Clarify answers, so they are filed as issues, numbers written in below
-(filed 2026-11-24, before approval). Items 4 and 6 would not change a decision within 30 days
+(filed 2026-11-23, before approval). Items 4 and 6 would not change a decision within 30 days
 and are recorded in `docs/backlog.md` instead.
 
 1. #4018 - Amend the contract-frontmatter spec for #23 to admit `contracts: none` plus
