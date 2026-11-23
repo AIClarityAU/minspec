@@ -509,6 +509,10 @@ _DISPATCH_RC_STARTED=76
 # The dispatcher's own first `gh` call got a 401, before any claim (#3176). Told by status
 # alone, never by the dispatcher's output, which carries the build agent's prose (#2233).
 _DISPATCH_RC_AUTH_FAILED=78
+# The dispatcher's build was killed at its time bound while the quota meter said the window
+# was closed (#1713). A quota pause, never a failure: a build that waits out a usage limit
+# prints no notice for the text classifier, so the dispatcher answers by status.
+_DISPATCH_RC_QUOTA_PAUSED=79
 
 # _dispatch_own_status <dispatcher's status> [<status of each later stage>...]
 # Prints the one status to judge a dispatch by, from the PIPESTATUS of
@@ -546,6 +550,7 @@ _dispatch_outcome() {
   case "${1-}" in
     "$_DISPATCH_RC_DECLINED") printf 'declined' ;;
     "$_DISPATCH_RC_STARTED")  printf 'started' ;;
+    "$_DISPATCH_RC_QUOTA_PAUSED") printf 'quota' ;;
     0)                        printf 'unanswered' ;;
     *)                        printf 'failed' ;;
   esac
@@ -2822,6 +2827,11 @@ run_cycle() {
     case "$what" in
       started) started_count=$(( started_count + 1 )) ;;
       failed)  dispatch_failures=$(( dispatch_failures + 1 )) ;;
+      quota)
+        # Killed at its bound with the window closed (#1713): neither work done nor a
+        # failure, so it is in neither count. The slot is spent; the caller pauses.
+        echo "[drain] dispatch of #$n was killed at its time bound with the quota window closed — a quota pause, not a failure (#1713)." >&2
+        ;;
       *)
         # No answer, or an outcome this function was never taught: both are "unknown".
         # Said here, by number, the moment it happens. The cycle's own summary is hours
@@ -2898,6 +2908,9 @@ run_cycle() {
       done
       book_dispatch "$n" "$outcome" "${verdict:0:1}"
       [[ "${verdict:1:1}" == "1" ]] && saw_quota=1
+      # A dispatch that said, by status, that the window closed under it (#1713). The meter
+      # was the witness, so no text signal may shorten the rest.
+      if [[ "$outcome" == "quota" ]]; then saw_quota=1; QUOTA_PAUSE_CAUSE="gate"; fi
       if (( saw_quota )); then
         echo "[drain] Claude usage-limit signal while dispatching #$n — pausing this cycle (will back off, not fail)."
         QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
@@ -3019,6 +3032,7 @@ run_cycle() {
         saw_quota=1
         QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
       fi
+      if [[ "$outcome" == "quota" ]]; then saw_quota=1; QUOTA_PAUSE_CAUSE="gate"; fi
 
       # A quota signal or a tripped breaker stops us LAUNCHING more, but never
       # abandons work already in flight — an orphaned build would hold its claim
