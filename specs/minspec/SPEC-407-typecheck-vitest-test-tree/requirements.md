@@ -4,7 +4,7 @@ type: requirements
 status: specifying
 tier: T3
 product: minspec
-epic: EPIC-007  # dev-time verification gates; this closes a gate that appears to cover tests/ and structurally cannot
+epic: EPIC-002  # Signpost Integrity - a green typecheck signposts coverage of tests/ that it does not have
 aspects: [typecheck, tests, silent-gate, ci]
 depends_on: []
 relates_to: ["#1660", "#1659", "#1399", "#957", "SPEC-061"]
