@@ -110,6 +110,8 @@ Also: the gate must not hash-stale any approved spec (it edits none).
 4. **Where does the timestamp/About surface of part 1 live?** Recorded selection pending: it is
    SPEC-060 FR-2/DQ-1, so this spec defers to it and will not duplicate it. Confirm that split.
 
+   **Recorded selection: confirmed - it lives in SPEC-060 (FR-2/DQ-1) and this spec does not duplicate it. Recorded by agent 2026-11-23 under founder decision, queue item clarsel (2026-11-17), DR-123; sign-off ratifies it.**
+
 ## Follow-ups (tracked)
 
 - Part 1 remainder (UTC build timestamp, `MinSpec: About MinSpec`): SPEC-060 FR-2 / #1549.

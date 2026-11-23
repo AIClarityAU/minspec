@@ -4,7 +4,7 @@ type: requirements
 status: specifying
 tier: T3
 product: minspec
-epic: EPIC-003  # SDD Core Methodology (placeholder: dev-time dispatch economics); no epic for dispatch exists, see Decision D4
+epic: EPIC-003  # SDD Core Methodology (kept per Decision D4: no better-fitting epic for dev-time dispatch economics)
 aspects: [dispatch, context-budget, autocompact, dev-time, offline, no-silent-gate, blast-radius]
 relates_to: [SPEC-062, "#1240", "#1203", "#912", "#1218", "#1200", "#1231", "#1187"]
 implements: none
@@ -128,6 +128,7 @@ secondary.
   **Recorded selection: the recommended option,** keep 30 KB. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
 - **D4 - epic placement.** EPIC-003 is a placeholder; no dispatch-economics epic was
   found. Confirm or name the right one.
+  **Recorded selection: keep EPIC-003 (SDD Core Methodology).** Of the ten epics in `docs/epics/INDEX.md`, none covers dev-time dispatch/drain token economics: EPIC-007 is the shipped Execute extension (this spec is the dev-time path, not that product) and EPIC-008 is the shelved ScroogeLLM proxy. Recorded by agent 2026-11-23 under founder decision, queue item clarsel (2026-11-17), DR-123; sign-off ratifies it.
 - **D5 - scope of hook trimming (FR-2).** Trim only passing-gate output **(rec)** (safe;
   leaves some chatter) versus also trimming informational non-failure output (bigger
   saving; risks hiding a signal the model needed).

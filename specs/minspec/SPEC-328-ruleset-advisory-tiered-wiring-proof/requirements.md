@@ -61,3 +61,5 @@ So the production wiring is done; #620's stated work is already delivered. The r
 
    **Recorded selection: the recommended option,** (a), this tests-only spec; close #620 as delivered by #796. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123 (written for T3; a T2 spec has no required Clarify phase, so the same recorded form is used), recorded 2026-11-24; sign-off ratifies it.
 2. **Verify the premise before building.** I believe the wiring is complete from reading `init.ts` and the test fixtures; I did not run the suite on this dispatch (specify only). The implementer should run FR-1 first: if it passes unmodified, the work is tests only.
+
+   **Recorded selection: no choice to make - this is an implementation step: FR-1 runs first, and if it passes unmodified the work is tests only. Recorded by agent 2026-11-23 under founder decision, queue item clarsel (2026-11-17), DR-123; sign-off ratifies it.**
