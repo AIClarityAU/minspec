@@ -1,5 +1,5 @@
 ---
-id: SPEC-080
+id: SPEC-402
 type: requirements
 status: specifying
 tier: T4
@@ -26,7 +26,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-080: A gate cross-validates every pinned `integration_id` against the App that actually posts the check — and a context nothing has ever posted fails closed
+# SPEC-402: A gate cross-validates every pinned `integration_id` against the App that actually posts the check — and a context nothing has ever posted fails closed
 
 > **This is a SPECIFICATION ONLY.** No code, workflow, or test is created by this document.
 > It is the Specify-phase artifact for
