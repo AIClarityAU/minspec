@@ -59,10 +59,10 @@ most authoritative first:
 4. the directory's basename — last resort only, used when neither of the above exists
    (`template-engine.ts:113, 125-129`).
 
-`refreshHarnessFiles` (`packages/minspec/src/lib/scaffold.ts:1497-1523`) also surfaces a
+`refreshHarnessFiles` (`packages/minspec/src/lib/scaffold.ts:1881`) also surfaces a
 non-silent `'project-name-mismatch'` notice whenever the recorded name wins over the
-basename (`scaffold.ts:1510-1523`, message built by `projectNameMismatchMessage` at
-`scaffold.ts:521-528`), naming both the kept name and the losing directory name so the
+basename (`scaffold.ts:1927-1937`, message built by `projectNameMismatchMessage` at
+`scaffold.ts:721-728`), naming both the kept name and the losing directory name so the
 human never has to go find which one applied.
 
 This is not a coincidental adjacent fix — it is the literal mechanism #1496 describes, already
@@ -159,7 +159,7 @@ No functional gap is introduced by the different choice of fallback source.
 ## Invariants (must not break)
 
 - **INV-1 — No silent gate (constitution invariant 2).** Already satisfied by the shipped
-  `'project-name-mismatch'` notice (`scaffold.ts:1510-1523`); nothing in this spec proposes
+  `'project-name-mismatch'` notice (`scaffold.ts:1927-1937`); nothing in this spec proposes
   touching it.
 - **INV-2 — Offline core (constitution invariant 1).** The shipped fix's fallback chain
   (config → package.json → recorded harness name → basename) makes zero network calls;
@@ -247,7 +247,7 @@ Recorded because the session ran under autonomy `act`, where nobody sees the rej
 options live (DR-086 §4).
 
 - **Specifying FR/AC content to "fix" the worktree-rename defect as the issue describes
-  it.** Rejected on evidence — `template-engine.ts:109-130`, `scaffold.ts:1497-1523`, and
+  it.** Rejected on evidence — `template-engine.ts:109-130`, `scaffold.ts:1881`, and
   `project-name-1529.test.ts` all show the fix already shipped, commit-dated before the
   issue's own reproduction build. Writing new requirements for already-built behavior
   would be exactly the "artifact/plausible-inference treated as ground truth" failure
@@ -273,8 +273,8 @@ options live (DR-086 §4).
   outrank the directory it is refreshed from (#1536)`, 2026-08-15.
 - **Regression coverage:** `packages/minspec/tests/project-name-1529.test.ts`.
 - **Implementation:** `packages/minspec/src/lib/template-engine.ts:109-130`
-  (`resolveProjectName`), `packages/minspec/src/lib/scaffold.ts:1497-1523`
-  (`refreshHarnessFiles`'s mismatch notice), `scaffold.ts:521-528`
+  (`resolveProjectName`), `packages/minspec/src/lib/scaffold.ts:1881`
+  (`refreshHarnessFiles`'s mismatch notice), `scaffold.ts:721-728`
   (`projectNameMismatchMessage`).
 - **Why the report and the fix didn't line up:** #1496's build was `d1a285b`
   (2026-08-13), confirmed an ancestor of and older than `c25c9961` (2026-08-15); cross-
