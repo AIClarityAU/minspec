@@ -500,15 +500,52 @@ describe('E — both merge actors are wired to the gate', () => {
     expect(populatorBody![1]).not.toMatch(/\|\s*paths_have_approvable_doc/);
   });
 
+  it('SITE B: OTHER_GATES_GREEN names the four non-autonomy merge terms exactly once (#1779)', () => {
+    // #1779 perf hoist: the ELIGIBLE/PR_NUM/AUTOMERGE_MODE/READY_STATE conjunction
+    // must be spelled ONCE, not once to gate the (expensive) verdict computation
+    // and again to gate the merge — two half-copies of one predicate is this
+    // repo's recurring drift failure (#1401, #1758).
+    const setIdx = DISPATCH_SRC.indexOf('OTHER_GATES_GREEN="no"');
+    expect(setIdx).toBeGreaterThan(-1);
+    const condIdx = DISPATCH_SRC.indexOf('if [[ "$ELIGIBLE" == "true"', setIdx);
+    expect(condIdx).toBeGreaterThan(-1);
+    const closeIdx = DISPATCH_SRC.indexOf('OTHER_GATES_GREEN="yes"', condIdx);
+    expect(closeIdx).toBeGreaterThan(-1);
+    const cond = DISPATCH_SRC.slice(condIdx, closeIdx);
+    expect(cond).toMatch(/"\$ELIGIBLE" == "true"/);
+    expect(cond).toMatch(/-n "\$PR_NUM"/);
+    expect(cond).toMatch(/"\$AUTOMERGE_MODE" == "consequence-hybrid"/);
+    expect(cond).toMatch(/"\$READY_STATE" == "success"/);
+    const allOccurrences = DISPATCH_SRC.match(/if \[\[ "\$ELIGIBLE" == "true"/g) ?? [];
+    expect(allOccurrences.length).toBe(1);
+  });
+
+  it('SITE B: the autonomy verdict is computed only when OTHER_GATES_GREEN already holds (perf, #1779)', () => {
+    // Before #1779, this arm ran `gh pr diff` + the `autonomy_may_merge` tsx
+    // subprocess unconditionally, even though the merge conjunction it feeds
+    // could never pass without OTHER_GATES_GREEN. Pin that the (expensive)
+    // verdict computation is itself behind an OTHER_GATES_GREEN guard.
+    const verdictCallIdx = DISPATCH_SRC.indexOf('if AUTONOMY_VERDICT=$(autonomy_may_merge');
+    expect(verdictCallIdx).toBeGreaterThan(-1);
+    const guardIdx = DISPATCH_SRC.lastIndexOf('if [[ "$OTHER_GATES_GREEN" == "yes" ]]; then', verdictCallIdx);
+    expect(guardIdx).toBeGreaterThan(-1);
+    const between = DISPATCH_SRC.slice(guardIdx, verdictCallIdx);
+    // the guard must not have closed before the verdict call sits inside it
+    expect(between).not.toMatch(/^\s*fi\s*$/m);
+    // SPEC024_CHANGED (the `gh pr diff` call) is inside the same guard
+    expect(between).toMatch(/SPEC024_CHANGED=\$\(gh pr diff/);
+  });
+
   it('SITE B: the SPEC-024 consequence-hybrid merge requires the verdict in its conjunction', () => {
     const mergeIdx = DISPATCH_SRC.indexOf('gh pr merge "$PR_NUM" --repo "$REPO" --squash 2>>"$LOG"');
     expect(mergeIdx).toBeGreaterThan(-1);
-    const condIdx = DISPATCH_SRC.lastIndexOf('if [[ "$ELIGIBLE" == "true"', mergeIdx);
+    const condIdx = DISPATCH_SRC.lastIndexOf('if [[ "$OTHER_GATES_GREEN" == "yes"', mergeIdx);
     expect(condIdx).toBeGreaterThan(-1);
     const cond = DISPATCH_SRC.slice(condIdx, mergeIdx);
     expect(cond).toMatch(/&&\s*"\$AUTONOMY_PROCEED" == "yes"/);
     // AUTONOMY_PROCEED starts at "no" and is only ever raised by a successful
-    // verdict — so every failure path (no PR, unenumerable diff, unrunnable gate)
+    // verdict — so every failure path (no PR, unenumerable diff, unrunnable gate,
+    // or OTHER_GATES_GREEN never holding so the verdict is never even computed)
     // leaves it denying.
     const setup = DISPATCH_SRC.slice(DISPATCH_SRC.lastIndexOf('AUTONOMY_PROCEED="no"', condIdx), condIdx);
     expect(setup).toMatch(/if AUTONOMY_VERDICT=\$\(autonomy_may_merge/);

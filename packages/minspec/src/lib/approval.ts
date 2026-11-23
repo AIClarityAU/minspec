@@ -27,6 +27,7 @@ import type { Tier } from './config';
 // creates no runtime cycle. Verified by scripts/check-import-cycles.ts.
 import { parseSpec } from './spec';
 import { assertOwnershipDeclaredForAdvance } from './ownership-advance-guard';
+import { assertOptedIn, ensureDirectory } from './opt-in';
 import {
   readRecord,
   writeRecord,
@@ -35,38 +36,11 @@ import {
   toPosixRel,
 } from './approval-store';
 
-export type ApprovalStatus = 'approved' | 'stale' | 'unapproved';
-
-/**
- * The FR-2 attributed approval record — the on-disk sidecar shape.
- *
- * `migrated` is `true` only for FR-5 backfilled records (an approval the human
- * never performed, flagged so the gate treats it valid-but-flagged — "re-approve
- * to clear"). A `migrated:true` record still resolves to `approved` for the
- * derive (non-blocking, warn-first), but carries its honest provenance.
- *
- * SPEC-017 adds two fields:
- *   `baselineBlob`  — FR-1 baseline pointer. One of THREE closed forms, frozen
- *                     forever (committed): a 40-hex git blob SHA | the literal
- *                     string 'gzip:fallback' (GZIP_MARKER) | '' (both mint paths
- *                     failed → no M1 datapoint). On-disk back-compat: absent in
- *                     legacy records (pre-SPEC-017) — `readRecord` normalizes
- *                     absent → '' so this required-string always holds in memory.
- *                     NEVER use a required-string validator or every legacy
- *                     approval silently drops (Costly #1, AC-1 back-compat).
- *   `reviewStart`   — RESERVED for M3 (FR-7, time-to-approve). NOT populated in
- *                     M1. Optional so M3 can backfill without a second migration.
- */
-export interface ApprovalRecord {
-  readonly specPath: string;       // repo-relative, POSIX, e.g. specs/minspec/SPEC-007-foo/requirements.md
-  readonly specHash: string;       // canonical hash (FR-3), hex
-  readonly approvedAt: string;     // ISO-8601 UTC
-  readonly approvedBy: string;     // git config user.email at approval time
-  readonly tier: Tier;
-  readonly migrated: boolean;
-  readonly baselineBlob: string;   // FR-1: 40-hex SHA | 'gzip:fallback' | '' (see above)
-  readonly reviewStart?: string;   // RESERVED for M3 (FR-7) — absent in M1; ISO-8601 UTC when set
-}
+// ApprovalStatus / ApprovalRecord live in ./approval-types (SPEC-040 FR-6 / #988) so
+// approval-store and lifecycle can name them without importing this module. Re-exported
+// so every existing `from './approval'` site is unchanged.
+export type { ApprovalStatus, ApprovalRecord } from './approval-types';
+import type { ApprovalStatus, ApprovalRecord } from './approval-types';
 
 /** Repo-relative POSIX path for a spec file, the approval store's key. */
 export function specRelPath(rootDir: string, specFilePath: string): string {
@@ -98,11 +72,16 @@ export function refKey(specPath: string): string {
  * Write a gzip-compressed body snapshot to `.minspec/snapshots/<refKey>.json.gz`
  * as the DR-043 per-machine fallback when git blob pinning is unavailable.
  * Returns true on success, false on any error (so mintBaseline can degrade to '').
+ *
+ * `snapshots/` is created below an existing `.minspec/`, never together with it.
+ * In a folder that has not opted in that refusal lands in the `catch` below and
+ * reads as `false`, which is why this function cannot be the one that refuses:
+ * `approveSpec` does it, before anything here runs (SPEC-096 FR-5).
  */
 function writeGzipFallback(rootDir: string, specPath: string, bodyBuf: Buffer): boolean {
   try {
     const dir = path.join(rootDir, '.minspec', 'snapshots');
-    fs.mkdirSync(dir, { recursive: true });
+    ensureDirectory(dir);
     const gz = zlib.gzipSync(bodyBuf);
     fs.writeFileSync(path.join(dir, `${refKey(specPath)}.json.gz`), gz);
     return true;
@@ -527,6 +506,15 @@ export function approveSpec(
   // just the UI; the command layer pre-checks too for a friendlier message.
   assertHumanApprover(email);
 
+  // SPEC-096 FR-5: the opt-in gate, in the same place and for the same reason. An
+  // approval is recorded under `.minspec/`, the opt-in marker, and a folder that
+  // has not opted in has nowhere to hold one. Refuse BEFORE the first side effect:
+  // that is the git blob and ref `mintBaseline` writes below, not a file under
+  // `.minspec/`, so the store's own refusal (`writeRecord`) would arrive after a
+  // ref had been left in a repository that never asked for it. And the gzip
+  // fallback cannot refuse at all (it returns `false` on any error).
+  assertOptedIn(rootDir);
+
   // 0. Single read — hash and baseline both derive from THESE bytes (no double-read,
   //    no TOCTOU skew between specHash and baselineBlob).
   let raw: string;
@@ -539,18 +527,17 @@ export function approveSpec(
   // SPEC-051: ownership pre-check, at the LIB boundary for the same reason DR-056's
   // approver gate is here — approval ADVANCES the phase map, and some rules are gated on
   // that map, so a spec can be complete now and violate an error the instant it is
-  // advanced. #1317 closed the UI path (`commands/approve.ts`); this closes every other
-  // caller OF THIS FUNCTION — a script, a test, a future command, an agent driving
-  // `approveSpec`. Four red mains came through that gap.
+  // advanced. This closes every caller OF THIS FUNCTION — a script, a test, a future
+  // command, an agent driving `approveSpec` — independent of whatever the UI does.
+  // Four red mains came through that gap (#1317).
   //
-  // NOT closed here, stated plainly rather than implied: `advanceSpecToImplementing`
-  // (`spec.ts`) is the function that actually WRITES `phases.plan: in-progress`, and it
-  // remains unguarded. Guarding it needs `spec.ts` to import the validator, but
-  // `spec-validator.ts` value-imports `./spec` (`SPEC_STATUSES`, `SPEC_TYPES`,
-  // `stripInlineComment`) — a real runtime cycle, and dodging the cycle checker with a
-  // lazy `require` would hide it rather than remove it. Its ONLY production caller today
-  // is `commands/approve.ts:315`, which #1317 already refuses before reaching. So the
-  // exposure is a future direct caller, not a live hole. Tracked as tasks.md T4.2.
+  // `advanceSpecToImplementing` (`spec.ts`) — the function that actually WRITES
+  // `phases.plan: in-progress` — carries the SAME guard call at its own top, before its
+  // own write (#1446, once the `./spec-vocabulary` extraction removed the cycle that
+  // used to block it). `commands/approve.ts` — the UI a human actually drives — calls it
+  // too, before `advanceSpecToImplementing` (#1806; before that it inlined
+  // `violationsIntroducedByApproval` as an independent second implementation that could
+  // drift from this one). All three call sites now run the one function below.
   //
   // Reuses `violationsIntroducedByApproval` rather than a fresh predicate, which buys two
   // deliberate properties for free:
@@ -572,6 +559,25 @@ export function approveSpec(
   //    frontmatter-minus-lifecycle; see §Why two boundaries in design.md).
   const bodyOnly = getSpecBodyOnly(raw);
   const specPath = specRelPath(rootDir, specFilePath);
+
+  // #1371: a live, hash-matching approval by this same approver already exists —
+  // return it untouched. Re-stamping `approvedAt` would write a byte-different but
+  // semantically identical sidecar, minting a duplicate approval PR and a second
+  // "when was this approved" answer. A changed hash (legit re-approve) or a
+  // different approver (or a migrated record, which a human re-approval upgrades)
+  // falls through to the normal write. A record whose baseline is absent OR
+  // unrecoverable (dangling ref, gc-pruned blob, #404) also falls through so
+  // re-approving re-mints it and restores diffing.
+  const existing = readRecord(rootDir, specPath);
+  if (
+    existing &&
+    !existing.migrated &&
+    existing.specHash === hash &&
+    existing.approvedBy === email &&
+    classifyBaseline(rootDir, existing) === 'recovered'
+  ) {
+    return existing;
+  }
 
   // 2. Mint + pin the baseline (git blob → sanitized ref), gzip fallback if non-git
   //    OR if the ref pin fails — never leave a blob unpinned (gc would prune it).

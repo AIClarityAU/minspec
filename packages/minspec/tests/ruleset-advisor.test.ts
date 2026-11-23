@@ -54,6 +54,7 @@ import {
   createRequiredChecksRuleset,
   hasRequiredChecksRuleset,
   isGhReady,
+  probeGhAvailability,
   resolveCheckContexts,
   detectCodeChecks,
   resolveTieredRequiredChecks,
@@ -153,6 +154,34 @@ describe('isGhReady()', () => {
   });
 });
 
+describe('probeGhAvailability() — split installed/authenticated (#1889)', () => {
+  it('{ installed: false, authenticated: false } when gh cannot spawn, short-circuiting before auth status', async () => {
+    const { run, calls } = makeRunner((_c, a) =>
+      a[0] === '--version' ? { throws: 'ENOENT' } : ok(''),
+    );
+    expect(await probeGhAvailability(run)).toEqual({ installed: false, authenticated: false });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('{ installed: true, authenticated: false } when gh is installed but has no usable token', async () => {
+    const { run } = makeRunner((_c, a) => {
+      if (a[0] === '--version') return ok('gh version 2.50.0');
+      if (a[0] === 'auth') return fail(1, 'not logged in');
+      return undefined;
+    });
+    expect(await probeGhAvailability(run)).toEqual({ installed: true, authenticated: false });
+  });
+
+  it('{ installed: true, authenticated: true } when both probes succeed', async () => {
+    const { run } = makeRunner((_c, a) => {
+      if (a[0] === '--version') return ok('gh version 2.50.0');
+      if (a[0] === 'auth') return ok('Logged in to github.com');
+      return undefined;
+    });
+    expect(await probeGhAvailability(run)).toEqual({ installed: true, authenticated: true });
+  });
+});
+
 // =============================================================================
 // Pure library: ruleset detection
 // =============================================================================
@@ -222,6 +251,51 @@ describe('hasRequiredChecksRuleset()', () => {
         return ok(JSON.stringify([{ id: 9, target: 'branch', enforcement: 'disabled' }]));
       }
       return undefined; // detail must never be fetched for a disabled ruleset
+    });
+    expect(await hasRequiredChecksRuleset('o', 'r', run)).toBe(false);
+  });
+
+  it('ignores evaluate-mode (dry-run) rulesets even when the detail is fully configured (#369)', async () => {
+    const { run } = makeRunner((_c, args) => {
+      const p = apiPath(args);
+      if (p === 'repos/o/r/rulesets') {
+        return ok(JSON.stringify([{ id: 9, target: 'branch', enforcement: 'evaluate' }]));
+      }
+      // Identical to the detail that yields `true` for an active ruleset, so
+      // only the enforcement check can make this false.
+      if (p === 'repos/o/r/rulesets/9') {
+        return ok(
+          JSON.stringify({
+            conditions: { ref_name: { include: ['~DEFAULT_BRANCH'] } },
+            rules: [
+              {
+                type: 'required_status_checks',
+                parameters: { required_status_checks: [{ context: 'lint' }, { context: 'test' }] },
+              },
+            ],
+          }),
+        );
+      }
+      return undefined;
+    });
+    expect(await hasRequiredChecksRuleset('o', 'r', run)).toBe(false);
+  });
+
+  it('ignores an active ruleset that targets only a non-default branch (#369)', async () => {
+    const { run } = makeRunner((_c, args) => {
+      const p = apiPath(args);
+      if (p === 'repos/o/r/rulesets') {
+        return ok(JSON.stringify([{ id: 5, target: 'branch', enforcement: 'active' }]));
+      }
+      if (p === 'repos/o/r/rulesets/5') {
+        return ok(
+          JSON.stringify({
+            conditions: { ref_name: { include: ['refs/heads/release'] } },
+            rules: [{ type: 'required_status_checks' }],
+          }),
+        );
+      }
+      return undefined;
     });
     expect(await hasRequiredChecksRuleset('o', 'r', run)).toBe(false);
   });
@@ -561,6 +635,37 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
 
     expect(calls).toHaveLength(1);
     expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('CASE 1c (#1889): gh ABSENT → the toast reports the LIMIT ("could not check"), never an imperative claim about the repo', async () => {
+    const { run } = makeRunner((_c, a) => (a[0] === '--version' ? { throws: 'ENOENT' } : ok('')));
+    showInfo.mockResolvedValueOnce(undefined);
+
+    await offerRulesetAdvisory('/ws', deps(run));
+
+    const [message] = showInfo.mock.calls[0] as [string, ...unknown[]];
+    expect(message).toContain('could not check');
+    expect(message).not.toMatch(/^MinSpec: protect your default branch/);
+  });
+
+  it('CASE 1d (#1889): gh installed but NOT authenticated → "could not check" toast, never an imperative claim, zero `gh api`, no POST/create prompt', async () => {
+    const { run, calls } = makeRunner((_c, a) => {
+      if (a[0] === '--version') return ok('gh 2');
+      if (a[0] === 'auth') return fail(1, 'not logged in');
+      return undefined;
+    });
+    showInfo.mockResolvedValueOnce(undefined);
+
+    await offerRulesetAdvisory('/ws', deps(run));
+
+    expect(calls.some((c) => c.args[0] === 'api')).toBe(false);
+    const [message] = showInfo.mock.calls[0] as [string, ...unknown[]];
+    expect(message).toContain('could not check');
+    expect(message).toContain('not authenticated');
+    expect(message).not.toMatch(/^MinSpec: protect your default branch/);
+    // Never the create-offer toast (which carries "Create ruleset" as an action,
+    // not asserted here directly, but there must be exactly one toast total).
+    expect(showInfo).toHaveBeenCalledTimes(1);
   });
 
   it('AUTO-PROBE: the read-only rulesets GET fires on init WITHOUT any consent toast', async () => {
@@ -1191,8 +1296,12 @@ describe('ENFORCE: check-name constants bound to producers (#820)', () => {
     ].map((m) => m[1]);
     // The script's purpose depends on singling out the reviewer's own check, so it
     // MUST contain at least one such filter; every one must name AI_REVIEW_CHECK.
-    expect(nameFilterLiterals.length).toBeGreaterThan(0);
-    for (const lit of new Set(nameFilterLiterals)) expect(lit).toBe(AI_REVIEW_CHECK);
+    expect(nameFilterLiterals).toContain(AI_REVIEW_CHECK);
+    // #3023: the failing-check derivation also excludes the `ready-to-merge` merge gate
+    // (no commit can turn it green), so that name is the one other legitimate literal.
+    for (const lit of new Set(nameFilterLiterals)) {
+      expect([AI_REVIEW_CHECK, READY_TO_MERGE_CHECK]).toContain(lit);
+    }
   });
 });
 

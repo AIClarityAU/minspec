@@ -367,6 +367,21 @@ describe('the credential probe reads the push credential, not the machine', () =
     expect(r.stdout.trim(), r.stderr).toBe('app');
   });
 
+  it.each(['SSH_ASKPASS', 'GIT_ASKPASS'])(
+    'never invokes an ambient %s askpass program (#1926)',
+    (name) => {
+      const dir = probeRepo({}); // no helper can answer -> git would prompt
+      const marker = path.join(dir, 'askpass-called');
+      const stub = path.join(dir, 'askpass.sh');
+      fs.writeFileSync(stub, `#!/bin/sh\necho called >> "${marker}"\necho x-access-token\n`, {
+        mode: 0o755,
+      });
+      const r = probe(dir, { [name]: stub });
+      expect(fs.existsSync(marker), 'askpass program was launched').toBe(false);
+      expect(r.stdout.trim(), r.stderr).toBe('not-app');
+    },
+  );
+
   it('classifies a human credential as NOT App (never a new obstacle)', () => {
     const r = probe(probeRepo({ user: 'a-human' }));
     expect(r.stdout.trim(), r.stderr).toBe('not-app');
@@ -610,10 +625,14 @@ describe('the credential probe reads the push credential, not the machine', () =
         'push_credential_is_app_token && echo app || echo not-app\n',
     );
 
+    // Explicit env (#1926): this case used to inherit process.env raw, so an ambient
+    // SSH_ASKPASS/GIT_ASKPASS decided it silently. Pin them empty; the askpass
+    // regression tests below prove the probe itself ignores them when set.
     const r = spawnSync('script', ['-qec', `bash ${snippet}`, '/dev/null'], {
       cwd: dir,
       encoding: 'utf8',
       timeout: 15_000,
+      env: { ...ISOLATED_ENV, GIT_ASKPASS: '', SSH_ASKPASS: '' },
     });
     const seen = `${r.stdout ?? ''}${r.stderr ?? ''}`;
     // Fail loudly if the harness itself broke, rather than letting a shell error

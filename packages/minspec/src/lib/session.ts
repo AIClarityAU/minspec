@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { ensureDirectory } from './opt-in';
 
 /** Session types matching SDD methodology */
 export type SessionType = 'bug' | 'feat' | 'explore' | 'plan';
@@ -61,13 +62,13 @@ export function loadSession(rootDir: string): SessionState | null {
 
 /**
  * Save session state to .minspec/session.json.
- * Creates .minspec/ if it doesn't exist.
+ *
+ * Never creates `.minspec/`: that directory is the opt-in marker (constitution
+ * invariant 3). In a folder that has not opted in this throws `NotOptedInError`
+ * and writes nothing (SPEC-096 FR-5).
  */
 export function saveSession(rootDir: string, session: SessionState): void {
-  const minspecDir = path.join(rootDir, '.minspec');
-  if (!fs.existsSync(minspecDir)) {
-    fs.mkdirSync(minspecDir, { recursive: true });
-  }
+  ensureDirectory(path.join(rootDir, '.minspec'));
   const sessionPath = getSessionPath(rootDir);
   fs.writeFileSync(sessionPath, JSON.stringify(session, null, 2) + '\n', 'utf-8');
 }

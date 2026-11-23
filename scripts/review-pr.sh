@@ -69,10 +69,22 @@ fi
 # would put a merge-gating label on a PR using the very channel #1157/#1165 showed a
 # reviewer's prose can forge. Refusing leaves the PR unlabeled for a human instead.
 #
-# ANTHROPIC_API_KEY is scrubbed for the probe (#1402): the PAYG failover must be
-# reachable only through an explicit decision, never ambient environment, and a
-# capability probe is a child like any other. `--help` makes no API call.
-if [[ -z "$VERDICT_SCHEMA_JSON" ]] || ! ANTHROPIC_API_KEY='' claude -p --help 2>/dev/null | grep -q -- '--json-schema'; then
+# ── What the reviewer is started with ─────────────────────────────────────────
+# Both starts of the CLI below go through "$AGENT_LAUNCH_ENV": lib/agent-context.sh,
+# sourced above, run as a program. It builds the child's environment from a list of
+# names. This script WRITES to GitHub (the comment and the label), so it holds a token,
+# exported into this very shell on its first write (lib/gh-bot.sh); the reviewer reads
+# a stranger's diff, so that token must not be in its process. That file assigns the
+# variable itself, to its own absolute path, so a value from the environment never
+# survives to a launch.
+#
+# No `--model-login`: this is the LOCAL runner, and on an operator's machine the CLI's
+# login is a file under HOME. That also keeps the rule #1402 set for the probe (the
+# PAYG key is reachable only through an explicit decision, never ambient environment)
+# true of the review itself, which it was not while the review inherited everything.
+#
+# A capability probe is a child like any other, and `--help` makes no API call.
+if [[ -z "$VERDICT_SCHEMA_JSON" ]] || ! bash "$AGENT_LAUNCH_ENV" claude -p --help 2>/dev/null | grep -q -- '--json-schema'; then
   echo "review-pr.sh: CLI lacks --json-schema (or the guard schema is unreadable) — refusing to review; PR left unlabeled for a human (DR-079)" >&2
   exit 0
 fi
@@ -183,7 +195,7 @@ printf '%s' "$USER_CONTENT" >"$REVIEW_PROMPT_FILE"
 # stdout and stderr are captured SEPARATELY (#1131). Once stdout must parse as a JSON
 # envelope, the old `2>&1` is actively harmful: one line of CLI chatter on stderr lands
 # inside the JSON and a finished review is discarded as "no verdict".
-AGENT_OUT=$("${AGENT_ENV_SCRUB[@]}" claude -p \
+AGENT_OUT=$(bash "$AGENT_LAUNCH_ENV" claude -p \
   --system-prompt-file "${ROLES_DIR}/reviewer.md" \
   "${AGENT_CONTEXT_ARGS[@]}" \
   --tools "" \

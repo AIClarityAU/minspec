@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-279-drain-push-rejection-diagnosed/requirements.md",
+  "specHash": "0ebbe9154df4a37424dd651293a5ee844091756207e089a44a1f5b63f814dd45",
+  "approvedAt": "2026-11-02T12:28:54.279Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:fix/3390-clarify-wording",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3391#issuecomment-6571380443"
+}

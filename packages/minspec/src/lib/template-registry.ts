@@ -232,6 +232,7 @@ Anything waiting on the human — a decision, a credential, a manual step, a mer
   integration. Say the state you already observed alongside it, so the reader can
   decide without opening anything at all.
 - **Give each item a reply key.** One or two characters, restated on the line every turn so the human never scrolls back to find one: \`m\` merge · \`c\` close · \`d\` diff/details · \`r\` re-review · \`s\` skip.
+- **A key names what the agent does on receipt.** Agent-performed actions keep the existing form (\`m\` merge, \`r\` re-review, \`d\` diff). When only the human can act (closing a tab or session, a purchase, a command in their own terminal, an \`--admin\` merge keystroke, a click in an editor UI), state the step plainly and make the key a done-signal that names what the agent does when it arrives, e.g. \`tell me x once you have closed it - I will drop it from the queue and stop re-asking\`. A done-signal must state the consequence; without it the reader cannot tell why they are typing a letter.
 - **Every choice carries a recommendation and its cost.** When an item asks the human to *decide*, name the option you recommend and, in the same breath, the primary downside or risk of the option you are recommending. A menu with no recommendation hands the analysis back to the human; a recommendation with no stated cost is advocacy, not advice. Mark it \`(rec)\` on the option and follow with one clause naming what it costs. This applies wherever a decision is put to a human — the \`**Your turn**\` block **and** the body of any issue, PR, or DR that asks them to choose.
 
 The same block lists every pull request this session opened that is still unmerged — its number, the gate state already observed this turn, and its keys:
@@ -458,6 +459,8 @@ Two notes about clones, because an inert gate is worse than no gate — it looks
 | Author identity gate (opt-in) | \`pre-commit\` | A commit author email not in a configured allowlist |
 | Secret scan | \`pre-commit\` | Staged changes containing a detected secret |
 | Spec frontmatter | \`pre-commit\` | A staged spec missing \`id: SPEC-NNN\` |
+| Decision frontmatter | \`pre-commit\` | A staged decision record under \`docs/decisions/\` missing \`id: DR-NNN\` |
+| Code-quality checks | \`pre-commit\` | A staged shell script, workflow or TypeScript change that shellcheck, actionlint or tsc rejects |
 | Deferred-work gate | \`commit-msg\` | A message that defers work without saying where it went |
 | Root-cause gate | \`commit-msg\` | A \`fix:\` commit whose body has no \`Root cause:\` line |
 
@@ -545,18 +548,70 @@ month of dangling references.
 The check runs through the best validator actually present: a Node validator if one is
 already installed, else the bundled \`python3\` script, else a pure-shell fallback. Each tier
 is used only if it can run and falls through otherwise, so a missing runtime degrades the
-check instead of bricking the commit. Know the limit of the lower tiers: the \`python3\` and
-shell tiers match paths under \`specs/\` literally, so if \`{{specsDir}}/\` differs from that,
-only the Node tier sees your specs and a clean commit is not evidence the frontmatter is
-valid.
+check instead of bricking the commit. Know the limit of what's actually shipped: the
+\`python3\` and shell tiers match paths under \`specs/\` literally, and the Node validator
+(\`@aiclarity/minspec-validator\`) is not yet published, so it is never the one that runs. If
+\`{{specsDir}}/\` differs from \`specs/\`, no tier that exists today sees your specs, and a
+clean commit is not evidence the frontmatter is valid (#2684).
+
+### Decision frontmatter
+
+Every staged markdown file under \`docs/decisions/\` must carry an \`id: DR-NNN\` frontmatter line,
+mirroring the spec-frontmatter gate above one artifact class over. The gate is keyed on the
+directory, not on a \`DR-NNN.md\` file name, so a record kept under any other name is checked
+too; only \`INDEX.md\` and \`README.md\` are exempt. A DR created through
+*MinSpec: Create Architecture Decision Record* always has one; a hand-written DR can silently
+lack it, and without this gate nothing notices — the register then holds records of which only
+some are machine-readable, and every cross-reference into that DR from a commit, spec, or
+another DR resolves against an id that was never there to begin with.
+
+Enforced by the same shell case inside the pre-commit hook's SDD-validation stage that checks
+spec frontmatter, and by \`validate.py\`'s \`DR_ID_RE\` tier. The path is matched literally
+against \`docs/decisions/\`, so a project that has relocated \`{{decisionsDir}}/\` is not covered
+by the lower tiers — the same known limit the spec-frontmatter gate carries (#2684).
+
+### Code-quality checks
+
+After the SDD validation, the pre-commit hook runs up to three blocking checks on the
+**staged** content - what the commit will actually contain, never your working copy:
+
+| Check | Applies when the commit stages | Install |
+|---|---|---|
+| \`shellcheck\` | a \`*.sh\` file | https://github.com/koalaman/shellcheck#installing |
+| \`actionlint\` | a workflow directly in \`.github/workflows/\` (\`*.yml\`) | https://github.com/rhysd/actionlint/blob/main/docs/install.md |
+| \`tsc\` | a \`*.ts\`, \`*.tsx\`, \`*.mts\` or \`*.cts\` file, and the index holds a root \`tsconfig.json\` | \`npm i -D typescript\` |
+
+A check that does not apply prints nothing. One that applies prints exactly one line starting
+\`MinSpec quality:\` - \`passed\`, \`BLOCKED\` (after the tool's own findings), or \`SKIPPED\` when the
+tool is not installed, with the install pointer on that line. A skip lets the commit through,
+so read it as what it is: that check is **not** protecting you until the tool is installed.
+The project's own TypeScript (\`npx --no-install tsc\`) is used before a \`tsc\` on PATH, and
+nothing is ever installed or fetched.
+
+Each check blocks at **error** severity only. A shellcheck warning or style note is neither
+printed nor blocking, so the gate never trains you to scroll past it. A tool that is installed
+but fails to run blocks too: a check that could not run has certified nothing.
+
+\`tsc\` typechecks the whole staged tree against the root \`tsconfig.json\`, because a type error
+can live in a file you did not touch. Its pass line says how many of your staged TypeScript
+files the program actually contained ("typechecked 2 of 2"); a solution-style or excluding
+\`tsconfig.json\` reads "0 of N", which is a pass with nothing checked. Know the cost of a root
+\`tsconfig.json\` that is only a base config (\`compilerOptions\` and no \`include\`): \`tsc\` then
+compiles every \`.ts\` file in the repo under the base settings, and a monorepo laid out that
+way can block every TypeScript commit.
+
+There is no per-check switch and no \`.minspec/config.json\` setting. The only bypass is
+\`MINSPEC_GATE_OFF=1 git commit ...\`, which also skips the secret scan and every other gate
+above - so use it for the one commit the check is wrong about, not as a standing setting.
 
 ### Deferred-work gate
 
 A commit message that defers work — "follow-up", "out of scope", "held back", "separate
-PR", "deferred" — must say where the deferred work went. Any of a tracked reference
-(\`#123\`), a \`Follow-ups: none\` line, or a note that nothing was deferred satisfies it. The
-check reads only the message text, so it needs no tracker and no network; \`Follow-ups: none\`
-is a complete answer for a project that keeps no issues at all.
+PR", "deferred" — must say where the deferred work went. Any of a \`Follow-ups: #123\` trailer
+(a dedicated trailer line; comma-separate several), a \`Follow-ups: none\` line, or a note that
+nothing was deferred satisfies it. A bare \`#123\` mentioned in the subject or in prose does not
+count (#1918). The check reads only the message text, so it needs no tracker and no network;
+\`Follow-ups: none\` is a complete answer for a project that keeps no issues at all.
 
 Work named in prose and nowhere else is lost the moment the commit scrolls out of view. The
 gate costs one line and turns a vanishing intention into either a tracked item or an
@@ -670,6 +725,7 @@ Anything waiting on the human — a decision, a credential, a manual step, a mer
   integration. Say the state you already observed alongside it, so the reader can
   decide without opening anything at all.
 - **Give each item a reply key.** One or two characters, restated on the line every turn so the human never scrolls back to find one: \`m\` merge · \`c\` close · \`d\` diff/details · \`r\` re-review · \`s\` skip.
+- **A key names what the agent does on receipt.** Agent-performed actions keep the existing form (\`m\` merge, \`r\` re-review, \`d\` diff). When only the human can act (closing a tab or session, a purchase, a command in their own terminal, an \`--admin\` merge keystroke, a click in an editor UI), state the step plainly and make the key a done-signal that names what the agent does when it arrives, e.g. \`tell me x once you have closed it - I will drop it from the queue and stop re-asking\`. A done-signal must state the consequence; without it the reader cannot tell why they are typing a letter.
 - **Every choice carries a recommendation and its cost.** When an item asks the human to *decide*, name the option you recommend and, in the same breath, the primary downside or risk of the option you are recommending. A menu with no recommendation hands the analysis back to the human; a recommendation with no stated cost is advocacy, not advice. Mark it \`(rec)\` on the option and follow with one clause naming what it costs. This applies wherever a decision is put to a human — the \`**Your turn**\` block **and** the body of any issue, PR, or DR that asks them to choose.
 
 The same block lists every pull request this session opened that is still unmerged — its number, the gate state already observed this turn, and its keys:
@@ -749,6 +805,7 @@ Anything waiting on the human — a decision, a credential, a manual step, a mer
   integration. Say the state you already observed alongside it, so the reader can
   decide without opening anything at all.
 - **Give each item a reply key.** One or two characters, restated on the line every turn so the human never scrolls back to find one: \`m\` merge · \`c\` close · \`d\` diff/details · \`r\` re-review · \`s\` skip.
+- **A key names what the agent does on receipt.** Agent-performed actions keep the existing form (\`m\` merge, \`r\` re-review, \`d\` diff). When only the human can act (closing a tab or session, a purchase, a command in their own terminal, an \`--admin\` merge keystroke, a click in an editor UI), state the step plainly and make the key a done-signal that names what the agent does when it arrives, e.g. \`tell me x once you have closed it - I will drop it from the queue and stop re-asking\`. A done-signal must state the consequence; without it the reader cannot tell why they are typing a letter.
 - **Every choice carries a recommendation and its cost.** When an item asks the human to *decide*, name the option you recommend and, in the same breath, the primary downside or risk of the option you are recommending. A menu with no recommendation hands the analysis back to the human; a recommendation with no stated cost is advocacy, not advice. Mark it \`(rec)\` on the option and follow with one clause naming what it costs. This applies wherever a decision is put to a human — the \`**Your turn**\` block **and** the body of any issue, PR, or DR that asks them to choose.
 
 The same block lists every pull request this session opened that is still unmerged — its number, the gate state already observed this turn, and its keys:
@@ -1034,10 +1091,13 @@ export function renderManagedFile(tpl: ManagedRegionTemplate): string {
  * must have a reachable red path and must NEVER conclude success without actually
  * validating. The step runs the highest-fidelity validator that is genuinely
  * present, letting its exit code gate the job:
- *   1. `npm run validate` — the full Node validator, when the repo defines it
- *      (minspec's own tree, and any JS repo that wires it up);
- *   2. `python3 .minspec/hooks/validate.py` — the portable DR-037 validator,
- *      scaffolded into every MinSpec-inited repo (stock python3, no install);
+ *   1. `python3 .minspec/hooks/validate.py` — the portable DR-037 validator,
+ *      scaffolded into every MinSpec-inited repo (stock python3, no install). It
+ *      ALWAYS runs when present: an npm `validate` script is a generic name that may
+ *      not be MinSpec's, so it never replaces this one (#2263);
+ *   2. `npm run validate` — the full Node validator, when the repo defines it
+ *      (minspec's own tree, and any JS repo that wires it up). Runs IN ADDITION to
+ *      (1), and alone when there is no validate.py;
  *   3. `@aiclarity/minspec-validator` — the published portable validator, once it
  *      exists and is resolvable (`--no-install` NEVER network-fetches, so an
  *      unclaimed scope can't be dependency-confusion-hijacked into CI).
@@ -1086,13 +1146,29 @@ jobs:
           # Run the highest-fidelity validator that is actually present and let its
           # exit code gate the job. Do NOT add a branch that exits 0 without a
           # validator having run — that was the AIClarityAU/minspec#811 always-green bug.
+          # An npm 'validate' script never replaces the portable validator: when
+          # .minspec/hooks/validate.py is present it always runs, and npm runs in addition.
+          # With no validate.py, an npm 'validate' script runs ALONE and its exit code gates
+          # the job (generic name, may belong to something else: see AIClarityAU/minspec#2263).
+          ran=0
+          if [ -f .minspec/hooks/validate.py ]; then
+            if ! command -v python3 >/dev/null 2>&1; then
+              echo "MinSpec SDD validation: .minspec/hooks/validate.py is present but python3 is not available." >&2
+              echo "A required check must fail closed (DR-066); it may never pass without validating." >&2
+              exit 1
+            fi
+            echo "MinSpec SDD validation: running 'python3 .minspec/hooks/validate.py' (portable validator)."
+            python3 .minspec/hooks/validate.py
+            ran=1
+          fi
           if [ -f package.json ] && node -e "process.exit((require('./package.json').scripts||{}).validate?0:1)" 2>/dev/null; then
             echo "MinSpec SDD validation: running 'npm run validate' (Node validator)."
             npm ci
             npm run validate
-          elif [ -f .minspec/hooks/validate.py ] && command -v python3 >/dev/null 2>&1; then
-            echo "MinSpec SDD validation: running 'python3 .minspec/hooks/validate.py' (portable validator)."
-            python3 .minspec/hooks/validate.py
+            ran=1
+          fi
+          if [ "$ran" = 1 ]; then
+            :
           elif npx --no-install @aiclarity/minspec-validator --version >/dev/null 2>&1; then
             echo "MinSpec SDD validation: running '@aiclarity/minspec-validator'."
             npx --no-install @aiclarity/minspec-validator
@@ -1167,6 +1243,8 @@ export const MINSPEC_HOOKS_DIR = '.minspec/hooks';
  *  2. Secret scan (#244): if `gitleaks` is on PATH, run it on the staged changes and
  *     BLOCK on a finding. If gitleaks is absent, emit a one-line advisory and
  *     CONTINUE — graceful degradation, never a hard fail for a missing optional tool.
+ *  2b. Committed-symlink gate (#922): refuse a staged symlink named `node_modules`, with an
+ *     absolute target, or whose target escapes the repo. Bypass: SYMLINK_GATE_OFF=1.
  *  3. SDD validation (DR-037 detection chain): run the highest-fidelity validator
  *     that is ACTUALLY available — every tier is opportunistic and falls through if
  *     it cannot run, so an unreachable tier never bricks a commit (never-wrong):
@@ -1177,14 +1255,22 @@ export const MINSPEC_HOOKS_DIR = '.minspec/hooks';
  *       - shell — the always-present `minspec_shell_gate`: the two pattern-matchable
  *         gates (spec `id:` frontmatter present; no MinSpec-internal ref leaking out
  *         per DR-032).
+ *  4. Code-quality checks (SPEC-080): `minspec_quality_gate`, after Stage 3 and run even
+ *     when Stage 3 failed, so one attempt reports both. shellcheck on staged `*.sh`,
+ *     actionlint on staged top-level workflows, tsc when the index holds a root
+ *     `tsconfig.json` and a staged TypeScript file - all on the STAGED content, at error
+ *     severity, each printing one `MinSpec quality:` roster line. A missing tool is a
+ *     one-line SKIPPED; a tool that fails to run BLOCKS. Reads no config, adds no switch.
  *
  * Bypass (rare, explicit): MINSPEC_GATE_OFF=1 git commit ...
  * Fail direction, and it differs by CONDITION. A missing prerequisite fails OPEN — an
  * unreachable validator tier falls through (above), gitleaks is skipped when not installed,
  * the branch guard stands aside when the default branch cannot be determined. A hook-internal
- * ERROR fails CLOSED: \`set -u\` plus the propagated \`exit $?\` below, and no top-level
- * handler around validate.py's \`main()\`, so a tooling bug refuses the commit rather than
- * waving it through. Do not collapse the two — a gate that certifies while broken is the
+ * ERROR fails CLOSED: \`set -u\`, plus Stage 3 capturing the tier's exit code in
+ * \`minspec_stage3_rc\` and the hook exiting with it when non-zero, else with Stage 4's
+ * verdict (SPEC-080 FR-6),
+ * and no top-level handler around validate.py's \`main()\`, so a tooling bug refuses the
+ * commit rather than waving it through. Do not collapse the two — a gate that certifies while broken is the
  * invariant-2 violation, and this comment claimed exactly that until #1905.
  */
 const PRE_COMMIT_HOOK = `# MinSpec pre-commit gate (DR-037) — editor-independent SDD + secret gates.
@@ -1364,6 +1450,21 @@ if [ "\${EMAIL_GATE_OFF:-0}" != "1" ]; then
     echo "  Bypass (rare): EMAIL_GATE_OFF=1 git commit ..." >&2
     exit 1
   fi
+  # rc 0 means the key IS set, even when \`git config minspec.allowedCommitEmails ""\`
+  # (a bootstrap script that forgot to fill in its \$EMAILS var produces exactly this
+  # shape) left it empty. That must not fold back into rc 1's "never configured" —
+  # it is opted in with a witness that can admit nothing, so like the unreadable
+  # config above it refuses visibly rather than silently no-op'ing (constitution
+  # invariant 2: no silent gate).
+  if [ "$minspec_allowed_rc" -eq 0 ] && [ -z "\${minspec_allowed_emails:-}" ]; then
+    echo "✗ MinSpec gate: minspec.allowedCommitEmails is set but names no address." >&2
+    echo "  An allowlist that admits nothing would refuse every commit, so this is" >&2
+    echo "  treated as a misconfiguration rather than opted out." >&2
+    echo "  Fix:  git config minspec.allowedCommitEmails <address> [<address> ...]" >&2
+    echo "        or turn this gate off: git config --unset-all minspec.allowedCommitEmails" >&2
+    echo "  Bypass (rare): EMAIL_GATE_OFF=1 git commit ..." >&2
+    exit 1
+  fi
   if [ -n "\${minspec_allowed_emails:-}" ]; then
     if ! minspec_author_ident=$(git var GIT_AUTHOR_IDENT); then
       echo "✗ MinSpec gate: cannot determine the author identity git will record (git var GIT_AUTHOR_IDENT failed)." >&2
@@ -1413,8 +1514,23 @@ if [ "\${EMAIL_GATE_OFF:-0}" != "1" ]; then
       echo "" >&2
       minspec_fix="git config $minspec_cfg_key <one of the allowed addresses above>"
       if [ -z "\${minspec_cfg_email:-}" ]; then
-        echo "  No author.email or user.email is configured, so git fell back to the" >&2
-        echo "  EMAIL environment variable (or <user>@<hostname>)." >&2
+        # Neither author.email nor user.email is set, so there is nothing here to
+        # compare the recorded author against — unlike the elif below. That does NOT
+        # mean the EMAIL fallback is the cause: git exports whichever source it used
+        # (GIT_AUTHOR_EMAIL, --author, an --amend / -C that kept an earlier commit's
+        # author) into THIS hook's environment as GIT_AUTHOR_EMAIL before running it
+        # (determine_author_info()), so \`git var GIT_AUTHOR_IDENT\` reports the same
+        # value regardless of which source produced it and this hook cannot tell them
+        # apart by reading its own environment. Those overrides outrank the EMAIL
+        # fallback and <user>@<hostname>, so they are the likelier explanation — and
+        # are the exact "ambient email shadowing the real one" case from the header
+        # above — not just a possible one, so the Fix leads with undoing them.
+        echo "  Neither author.email nor user.email is configured. The recorded address" >&2
+        echo "  most likely came from GIT_AUTHOR_EMAIL in the environment, git commit" >&2
+        echo "  --author, or an --amend / -C that kept an earlier commit's author —" >&2
+        echo "  those all outrank the EMAIL environment variable and <user>@<hostname>," >&2
+        echo "  which apply only if none of them do." >&2
+        minspec_fix="unset GIT_AUTHOR_EMAIL, drop --author, or add --reset-author; if none of those apply: git config $minspec_cfg_key <one of the allowed addresses above>"
       elif [ "$minspec_cfg_email" != "$minspec_author_email" ]; then
         echo "  git config $minspec_cfg_key is '$minspec_cfg_email', but this commit's author overrides it:" >&2
         echo "  GIT_AUTHOR_EMAIL in the environment, git commit --author, or an --amend / -C" >&2
@@ -1456,6 +1572,73 @@ else
   echo "  Install gitleaks (https://github.com/gitleaks/gitleaks) to gate committed secrets." >&2
 fi
 
+# ── Stage 2b: committed-symlink gate (#922, mirrors the harness's own #913) ──
+# A \`node_modules/\` ignore pattern matches a DIRECTORY, not a symlink FILE named
+# \`node_modules\`, so \`git add\` accepts one. Worktrees routinely symlink a shared
+# hoisted node_modules; committing it bakes a dev-machine path into history that
+# breaks every other checkout and CI. Refuse a staged symlink (git mode 120000)
+# when ANY of:
+#   - its own name is \`node_modules\` (at any depth) - machine-local whatever the target;
+#   - its target is an ABSOLUTE path (non-portable);
+#   - its target lexically ESCAPES the repository root (\`../\` climbs out).
+# Reads only the index (offline). Bypass (rare, intentional in-repo relative link
+# this heuristic cannot tell apart): SYMLINK_GATE_OFF=1 git commit ...
+minspec_symlink_escapes() {
+  # Lexical, POSIX sh, no globbing: does resolving $2 from directory $1 climb
+  # above the repo root?
+  minspec_sl_rest="$1/$2"
+  minspec_sl_depth=0
+  while [ -n "$minspec_sl_rest" ]; do
+    minspec_sl_comp=\${minspec_sl_rest%%/*}
+    case "$minspec_sl_rest" in
+      */*) minspec_sl_rest=\${minspec_sl_rest#*/} ;;
+      *) minspec_sl_rest="" ;;
+    esac
+    case "$minspec_sl_comp" in
+      '' | .) : ;;
+      ..)
+        minspec_sl_depth=$((minspec_sl_depth - 1))
+        [ "$minspec_sl_depth" -lt 0 ] && return 0
+        ;;
+      *) minspec_sl_depth=$((minspec_sl_depth + 1)) ;;
+    esac
+  done
+  return 1
+}
+
+if [ "\${SYMLINK_GATE_OFF:-}" != "1" ]; then
+  # -z: NUL-delimited, so git never C-quotes a non-ASCII path (core.quotepath).
+  # R/C records carry TWO paths (source then destination): take the destination,
+  # which is where the symlink now lives. NULs become newlines for the awk state
+  # machine (a path containing a literal newline is not supported).
+  minspec_sl_list=$(git diff --cached --raw -z -M --diff-filter=AMTRC | tr '\\0' '\\n' | awk '
+    want == 0 { n = split(substr($0, 2), a, " "); st = substr(a[5], 1, 1); mode = a[2]; want = (st == "R" || st == "C") ? 2 : 1; next }
+    { want--; if (want == 0 && mode == "120000") print }
+  ')
+  minspec_sl_fail=0
+  while IFS= read -r minspec_sl_path; do
+    [ -n "$minspec_sl_path" ] || continue
+    minspec_sl_target=$(git show ":$minspec_sl_path" 2>/dev/null || true)
+    minspec_sl_reason=""
+    if [ "$(basename -- "$minspec_sl_path")" = "node_modules" ]; then
+      minspec_sl_reason="a 'node_modules' symlink must never be committed (shared hoisted deps are machine-local)"
+    elif [ "\${minspec_sl_target#/}" != "$minspec_sl_target" ]; then
+      minspec_sl_reason="its target '$minspec_sl_target' is an absolute path (non-portable / dev-machine-specific)"
+    elif minspec_symlink_escapes "$(dirname -- "$minspec_sl_path")" "$minspec_sl_target"; then
+      minspec_sl_reason="its target '$minspec_sl_target' escapes the repository root"
+    fi
+    if [ -n "$minspec_sl_reason" ]; then
+      echo "✗ MinSpec gate: refusing staged symlink '$minspec_sl_path' — $minspec_sl_reason." >&2
+      echo "  Unstage it (git rm --cached '$minspec_sl_path'); use a real in-repo relative link if you need one." >&2
+      echo "  Override (rare): SYMLINK_GATE_OFF=1 git commit ..." >&2
+      minspec_sl_fail=1
+    fi
+  done <<MINSPEC_SL_EOF
+$minspec_sl_list
+MINSPEC_SL_EOF
+  [ "$minspec_sl_fail" -eq 0 ] || exit 1
+fi
+
 # ── Stage 3: SDD validation (DR-037 detection chain) ─────────────────────────
 # Highest-fidelity validator AVAILABLE wins, but every tier is OPPORTUNISTIC: a
 # tier is used only when it can actually run, otherwise the chain falls through to
@@ -1464,7 +1647,8 @@ fi
 # it degrades to the always-present shell gate below. Tiers:
 #   Node   — only if @aiclarity/minspec-validator is ALREADY resolvable
 #            (\`npx --no-install\`, never a network fetch that could E404-block).
-#   python — only if python3 is on PATH and validate.py exists.
+#   python — only if a python3/python/\`py -3\` candidate actually RUNS (not
+#            merely resolves on PATH, #2400) and validate.py exists.
 #   shell  — always present; the two pattern-matchable gates, inline below.
 
 # minspec_shell_gate: the always-correct baseline. (1) every staged specs/**/ md
@@ -1477,16 +1661,21 @@ minspec_shell_gate() {
   for f in $staged; do
     case "$f" in
       specs/*.md)
-        # Frontmatter is the block between the first two \`---\` fences.
+        # Frontmatter is the block between the first two \`---\` fences. The
+        # optional \\042/\\047 (octal for " and ') before the id lets a quoted
+        # value through — \`id: "SPEC-001"\` is well-formed YAML for the string
+        # \`SPEC-001\`, and the bare pattern used to refuse it (#1908). Octal, not a
+        # literal quote char, because this awk program is itself inside a
+        # single-quoted shell string, where a literal ' would end it early.
         if ! git show ":$f" 2>/dev/null | awk '
           /^---[[:space:]]*$/ { fence++; next }
-          fence==1 && /^id:[[:space:]]*SPEC-[0-9]+/ { found=1 }
+          fence==1 && /^id:[[:space:]]*[\\042\\047]?SPEC-[0-9]+/ { found=1 }
           END { exit(found?0:1) }'; then
           echo "✗ MinSpec gate: $f missing \\\`id: SPEC-NNN\\\` frontmatter." >&2
           gate_fail=1
         fi
         ;;
-      docs/decisions/DR-*.md)
+      docs/decisions/*.md)
         # Decision records are approvables too, and were ungated until now: a DR
         # created by the MinSpec command carried frontmatter, one written by hand
         # carried none, and nothing noticed. Observed in a real project where
@@ -1498,17 +1687,29 @@ minspec_shell_gate() {
         # over: the tooling validated what it created and never asserted the
         # class as a whole.
         #
+        # Keyed on the DIRECTORY, not a \\\`DR-*.md\\\` filename match: a record kept
+        # under any other name (docs/decisions/0024-some-name.md, say) used to be
+        # skipped, silently, by this same asymmetry one level up (#1908). INDEX.md
+        # (the register listing) and README.md (prose) are the only exemptions,
+        # since neither carries an id of its own.
+        #
         # The path is literal, matching the \\\`specs/\\\` case above — this hook is a
         # managed region rendered without template context, so a project that has
         # relocated its decisions directory is not covered. That is a known limit
-        # of both gates, not a new one.
-        if ! git show ":$f" 2>/dev/null | awk '
-          /^---[[:space:]]*$/ { fence++; next }
-          fence==1 && /^id:[[:space:]]*DR-[0-9]+/ { found=1 }
-          END { exit(found?0:1) }'; then
-          echo "✗ MinSpec gate: $f missing \\\`id: DR-NNN\\\` frontmatter." >&2
-          gate_fail=1
-        fi
+        # of both gates, not a new one (#2684).
+        case "$(basename -- "$f")" in
+          INDEX.md|README.md) ;;
+          *)
+            # Same optional-quote allowance as the SPEC- case above (#1908).
+            if ! git show ":$f" 2>/dev/null | awk '
+              /^---[[:space:]]*$/ { fence++; next }
+              fence==1 && /^id:[[:space:]]*[\\042\\047]?DR-[0-9]+/ { found=1 }
+              END { exit(found?0:1) }'; then
+              echo "✗ MinSpec gate: $f missing \\\`id: DR-NNN\\\` frontmatter." >&2
+              gate_fail=1
+            fi
+            ;;
+        esac
         ;;
     esac
   done
@@ -1529,22 +1730,280 @@ minspec_shell_gate() {
   return 0
 }
 
+# minspec_quality_gate: the code-quality checks (SPEC-080), called after Stage 3.
+# Three blocking checks on the STAGED content, never the working copy: shellcheck
+# on staged *.sh files, actionlint on staged top-level .github/workflows/*.yml
+# files, and tsc when the index holds a root tsconfig.json and a staged
+# TypeScript file. A check that does not apply prints nothing. A check that
+# applies prints exactly one roster line on stderr, prefixed "MinSpec quality:":
+# passed, BLOCKED (after the tool's own output), or SKIPPED when the tool is not
+# installed (with an install pointer). Tools are probed, never installed or
+# fetched, and run at error severity only, so a warning neither prints nor
+# blocks. A tool that is present but fails to run blocks: a check that could not
+# run has certified nothing. Nothing here reads .minspec/config.json, and no
+# switch but MINSPEC_GATE_OFF turns it off. Returns 1 if any check blocked.
+minspec_q_tmp=""
+
+# One throwaway directory per hook run, removed on every exit path.
+minspec_q_mktemp() {
+  [ -n "$minspec_q_tmp" ] && return 0
+  minspec_q_tmp=$(mktemp -d 2>/dev/null) || { minspec_q_tmp=""; return 1; }
+  trap 'rm -rf "$minspec_q_tmp"' EXIT
+  return 0
+}
+
+# Count NUL-terminated records on stdin (paths from "git ... -z").
+minspec_q_count() {
+  tr -cd '\\000' | wc -c | tr -d ' '
+}
+
+minspec_q_files() {
+  if [ "$1" -eq 1 ]; then echo "1 staged file"; else echo "$1 staged files"; fi
+}
+
+minspec_q_blocked() {
+  echo "✗ MinSpec quality: $1 BLOCKED the commit - $2." >&2
+  echo "  Bypass (rare): MINSPEC_GATE_OFF=1 git commit ..." >&2
+}
+
+minspec_q_skipped() {
+  echo "⚠ MinSpec quality: $1 SKIPPED - not installed ($2)." >&2
+}
+
+# The staged tree reaches its dependencies through a symlink to each working-copy
+# node_modules beside an indexed package.json; copying them would cost seconds to
+# minutes per commit. Where ln -s cannot make a real link (Git for Windows without
+# native symlinks copies instead), the typecheck cannot be built, and that BLOCKS
+# with the cause named rather than passing unchecked.
+minspec_q_link_deps() {
+  minspec_q_tree="$minspec_q_tmp/minspec-staged-tree"
+  minspec_q_need=$(git -c core.quotePath=false ls-files -- 'package.json' '*/package.json' \\
+    | while IFS= read -r minspec_q_p; do
+        minspec_q_d=$(dirname -- "$minspec_q_p")
+        if [ -d "$repo_root/$minspec_q_d/node_modules" ] && [ ! -e "$minspec_q_tree/$minspec_q_d/node_modules" ]; then
+          printf '%s\\n' "$minspec_q_d"
+        fi
+      done)
+  [ -z "$minspec_q_need" ] && return 0
+  : > "$minspec_q_tmp/ln-target"
+  if ! ln -s "$minspec_q_tmp/ln-target" "$minspec_q_tmp/ln-probe" 2>/dev/null \\
+     || [ ! -L "$minspec_q_tmp/ln-probe" ]; then
+    minspec_q_blocked tsc "this shell cannot create symbolic links (ln -s did not make a link), so the staged tree cannot reach node_modules"
+    return 1
+  fi
+  if ! printf '%s\\n' "$minspec_q_need" | while IFS= read -r minspec_q_d; do
+      ln -s "$repo_root/$minspec_q_d/node_modules" "$minspec_q_tree/$minspec_q_d/node_modules" || exit 1
+    done; then
+    minspec_q_blocked tsc "node_modules could not be linked into the staged tree"
+    return 1
+  fi
+  return 0
+}
+
+minspec_quality_gate() {
+  minspec_q_rc=0
+  minspec_q_n_sh=$(git diff --cached --name-only -z --diff-filter=ACMR -- '*.sh' | minspec_q_count)
+  # GitHub reads workflows from the top level of .github/workflows only, and a
+  # plain pathspec * also matches /, so glob magic keeps nested files out.
+  minspec_q_n_wf=$(git diff --cached --name-only -z --diff-filter=ACMR -- ':(glob).github/workflows/*.yml' | minspec_q_count)
+  minspec_q_n_ts=0
+  if git cat-file -e :tsconfig.json 2>/dev/null; then
+    minspec_q_n_ts=$(git diff --cached --name-only -z --diff-filter=ACMR -- '*.ts' '*.tsx' '*.mts' '*.cts' | minspec_q_count)
+  fi
+
+  # The shellcheck check: the staged scripts plus every indexed .shellcheckrc, copied out
+  # of the index at their own paths so a finding names the repo-relative file.
+  if [ "$minspec_q_n_sh" -gt 0 ]; then
+    if ! command -v shellcheck >/dev/null 2>&1; then
+      minspec_q_skipped shellcheck "https://github.com/koalaman/shellcheck#installing"
+    elif ! minspec_q_mktemp || ! mkdir "$minspec_q_tmp/sh" \\
+       || ! git diff --cached --name-only -z --diff-filter=ACMR -- '*.sh' \\
+            | git checkout-index -z --stdin --prefix="$minspec_q_tmp/sh/" \\
+       || ! git ls-files -z -- '.shellcheckrc' '*/.shellcheckrc' \\
+            | git checkout-index -z --stdin --prefix="$minspec_q_tmp/sh/"; then
+      minspec_q_blocked shellcheck "the staged scripts could not be copied out of the index"
+      minspec_q_rc=1
+    elif minspec_q_out=$(cd "$minspec_q_tmp/sh" \\
+         && find . -type f -name '*.sh' -exec shellcheck --severity=error --color=never {} + 2>&1); then
+      echo "✓ MinSpec quality: shellcheck passed ($(minspec_q_files "$minspec_q_n_sh"))." >&2
+    else
+      minspec_q_trc=$?
+      if [ -n "$minspec_q_out" ]; then
+        printf '%s\\n' "$minspec_q_out" >&2
+        minspec_q_blocked shellcheck "its findings are above"
+      else
+        minspec_q_blocked shellcheck "it exited $minspec_q_trc and printed nothing"
+      fi
+      minspec_q_rc=1
+    fi
+  fi
+
+  # The actionlint check: run with no .git directory, it does not discover its config, so a
+  # staged .github/actionlint.yaml (or .yml) is passed explicitly. The flags are
+  # the ones this harness's own CI uses: no nested shellcheck or pyflakes run.
+  if [ "$minspec_q_n_wf" -gt 0 ]; then
+    minspec_q_cfg=""
+    minspec_q_ok=1
+    if ! command -v actionlint >/dev/null 2>&1; then
+      minspec_q_skipped actionlint "https://github.com/rhysd/actionlint/blob/main/docs/install.md"
+      minspec_q_ok=0
+    elif ! minspec_q_mktemp || ! mkdir "$minspec_q_tmp/wf" \\
+       || ! git diff --cached --name-only -z --diff-filter=ACMR -- ':(glob).github/workflows/*.yml' \\
+            | git checkout-index -z --stdin --prefix="$minspec_q_tmp/wf/"; then
+      minspec_q_blocked actionlint "the staged workflows could not be copied out of the index"
+      minspec_q_rc=1
+      minspec_q_ok=0
+    else
+      for minspec_q_c in .github/actionlint.yaml .github/actionlint.yml; do
+        if git cat-file -e ":$minspec_q_c" 2>/dev/null; then
+          if git checkout-index --prefix="$minspec_q_tmp/wf/" -- "$minspec_q_c"; then
+            minspec_q_cfg="$minspec_q_c"
+          else
+            minspec_q_blocked actionlint "the staged $minspec_q_c could not be copied out of the index"
+            minspec_q_rc=1
+            minspec_q_ok=0
+          fi
+          break
+        fi
+      done
+    fi
+    if [ "$minspec_q_ok" -eq 1 ]; then
+      if [ -n "$minspec_q_cfg" ]; then
+        minspec_q_out=$(cd "$minspec_q_tmp/wf" \\
+          && actionlint -shellcheck= -pyflakes= -no-color -config-file "$minspec_q_cfg" .github/workflows/*.yml 2>&1)
+      else
+        minspec_q_out=$(cd "$minspec_q_tmp/wf" \\
+          && actionlint -shellcheck= -pyflakes= -no-color .github/workflows/*.yml 2>&1)
+      fi
+      minspec_q_trc=$?
+      if [ "$minspec_q_trc" -eq 0 ]; then
+        echo "✓ MinSpec quality: actionlint passed ($(minspec_q_files "$minspec_q_n_wf"))." >&2
+      elif [ -n "$minspec_q_out" ]; then
+        printf '%s\\n' "$minspec_q_out" >&2
+        minspec_q_blocked actionlint "its findings are above"
+        minspec_q_rc=1
+      else
+        minspec_q_blocked actionlint "it exited $minspec_q_trc and printed nothing"
+        minspec_q_rc=1
+      fi
+    fi
+  fi
+
+  # The tsc check: tsc resolves a project, not a file, so the whole staged tree is copied
+  # out of the index and typechecked against the root tsconfig.json. The
+  # project's own TypeScript wins (npx --no-install, offline, from the repo
+  # root), then a tsc on PATH. --listFiles is the non-vacuity witness: the pass
+  # line says how many staged TypeScript files the program actually contained,
+  # so a tsconfig that compiles none of them reads "0 of N", not a silent pass.
+  if [ "$minspec_q_n_ts" -gt 0 ]; then
+    minspec_q_tsc=""
+    if command -v npx >/dev/null 2>&1 \\
+       && (cd "$repo_root" && npm_config_offline=true npx --no-install --prefix "$repo_root" tsc --version) >/dev/null 2>&1; then
+      minspec_q_tsc=npx
+    elif command -v tsc >/dev/null 2>&1; then
+      minspec_q_tsc=path
+    fi
+    if [ -z "$minspec_q_tsc" ]; then
+      minspec_q_skipped tsc "npm i -D typescript, https://www.typescriptlang.org/download"
+    elif ! minspec_q_mktemp || ! mkdir "$minspec_q_tmp/minspec-staged-tree" \\
+       || ! git checkout-index --all --prefix="$minspec_q_tmp/minspec-staged-tree/"; then
+      minspec_q_blocked tsc "the staged tree could not be copied out of the index"
+      minspec_q_rc=1
+    elif ! minspec_q_link_deps; then
+      minspec_q_rc=1
+    else
+      if [ "$minspec_q_tsc" = npx ]; then
+        minspec_q_out=$(cd "$minspec_q_tmp/minspec-staged-tree" \\
+          && npm_config_offline=true npx --no-install --prefix "$repo_root" tsc --noEmit --pretty false --listFiles -p tsconfig.json 2>&1)
+      else
+        minspec_q_out=$(cd "$minspec_q_tmp/minspec-staged-tree" \\
+          && tsc --noEmit --pretty false --listFiles -p tsconfig.json 2>&1)
+      fi
+      minspec_q_trc=$?
+      # --listFiles prints absolute paths; diagnostics are relative to the tree.
+      minspec_q_diag=$(printf '%s\\n' "$minspec_q_out" | grep -v -e '^/' -e '^[A-Za-z]:[/\\]')
+      if [ "$minspec_q_trc" -eq 0 ]; then
+        printf '%s\\n' "$minspec_q_out" > "$minspec_q_tmp/tsc.out"
+        git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR -- '*.ts' '*.tsx' '*.mts' '*.cts' \\
+          > "$minspec_q_tmp/ts.list"
+        # A staged file counts when a --listFiles line ends in its path under the
+        # copied tree. Matching the suffix sidesteps how the absolute prefix is
+        # spelled (/private/var on macOS, C:/ on Windows).
+        minspec_q_hit=$(awk '
+          NR == FNR { want["/minspec-staged-tree/" $0] = 1; next }
+          { for (w in want) if (length($0) >= length(w) && substr($0, length($0) - length(w) + 1) == w) got[w] = 1 }
+          END { n = 0; for (w in got) n++; print n }' "$minspec_q_tmp/ts.list" "$minspec_q_tmp/tsc.out")
+        echo "✓ MinSpec quality: tsc passed (typechecked $minspec_q_hit of $minspec_q_n_ts staged TypeScript files)." >&2
+      elif [ -n "$minspec_q_diag" ]; then
+        printf '%s\\n' "$minspec_q_diag" >&2
+        minspec_q_blocked tsc "its findings are above"
+        minspec_q_rc=1
+      else
+        minspec_q_blocked tsc "it exited $minspec_q_trc and printed no diagnostic"
+        minspec_q_rc=1
+      fi
+    fi
+  fi
+
+  return "$minspec_q_rc"
+}
+
+# Stage 3's verdict is CAPTURED, never exited on (SPEC-080 FR-6): the first tier
+# that runs records its exit code in minspec_stage3_rc, later tiers run only while
+# it is still empty, and the hook exits with it at the end. Tier order, probes and
+# messages are unchanged; only the control flow moved, so a stage can follow.
+minspec_stage3_rc=""
+
 # Node tier — ONLY when the validator is already resolvable (no network fetch).
 if command -v npx >/dev/null 2>&1 \\
    && npx --no-install @aiclarity/minspec-validator --version >/dev/null 2>&1; then
   npx --no-install @aiclarity/minspec-validator --pre-commit
-  exit $?
+  minspec_stage3_rc=$?
 fi
 
-# Python tier — ONLY when python3 + validate.py are present.
-if command -v python3 >/dev/null 2>&1 && [ -f "$hook_dir/validate.py" ]; then
-  python3 "$hook_dir/validate.py" --pre-commit
-  exit $?
+# Python tier — ONLY when a candidate interpreter actually RUNS (#2400). A name
+# being on PATH is not proof it can run the script: Windows ships python.exe /
+# python3.exe "app execution aliases" under
+# %LOCALAPPDATA%\\Microsoft\\WindowsApps that \`command -v\` resolves on every
+# machine, Python installed or not — with no Microsoft Store Python, invoking
+# the alias prints a Store-install prompt and exits non-zero. \`command -v
+# python3\` proved a NAME exists, never that it RUNS; only invoking it can tell
+# those apart, so probe each candidate by executing it. Order covers the
+# spellings that matter across platforms: python3 (POSIX / most installs),
+# python (the python.org Windows installer ships python.exe, not python3.exe),
+# then the py launcher's -3 switch (bundled with python.org Windows installs).
+if [ -z "$minspec_stage3_rc" ] && [ -f "$hook_dir/validate.py" ]; then
+  minspec_py=""
+  for minspec_py_candidate in python3 python "py -3"; do
+    # shellcheck disable=SC2086  # intentional word-split: "py -3" is launcher + flag.
+    if $minspec_py_candidate -c 'import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)' >/dev/null 2>&1; then
+      minspec_py="$minspec_py_candidate"
+      break
+    fi
+  done
+  if [ -n "$minspec_py" ]; then
+    # A real interpreter started: let its verdict (pass OR fail) stand — only
+    # "no candidate could start at all" falls through to the shell tier below.
+    # shellcheck disable=SC2086
+    $minspec_py "$hook_dir/validate.py" --pre-commit
+    minspec_stage3_rc=$?
+  fi
 fi
 
-# Shell tier — always present.
-minspec_shell_gate
-exit $?`;
+# Shell tier — always present; runs when no higher tier did.
+if [ -z "$minspec_stage3_rc" ]; then
+  minspec_shell_gate
+  minspec_stage3_rc=$?
+fi
+
+# ── Stage 4: code-quality checks (SPEC-080) ──────────────────────────────────
+# Runs even when Stage 3 failed, so one commit attempt reports both stages'
+# findings. Stage 3's own non-zero code wins; otherwise Stage 4's verdict stands.
+minspec_quality_gate
+minspec_stage4_rc=$?
+
+[ "$minspec_stage3_rc" -ne 0 ] && exit "$minspec_stage3_rc"
+exit "$minspec_stage4_rc"`;
 
 /**
  * Shell `commit-msg` hook (DR-037 / #247) — the RCDD root-cause gate (DR-003).
@@ -1677,7 +2136,10 @@ exit 1`;
  *
  * Frontmatter is parsed with the SAME lightweight \`key: value\` split the Node
  * \`validate-frontmatter.ts\` uses (first \`---\` … \`---\` block, split on the first
- * colon, trim) — no PyYAML dependency, so it runs on a stock python3. Scopes to the
+ * colon, trim) — no PyYAML dependency, so it runs on a stock python3. It is not an
+ * exact re-implementation, though: since #1908 the checked values are unquoted and
+ * comment-stripped first (\`clean_frontmatter_value\`), and it gates DR \`id:\`
+ * frontmatter. The Node validator does neither yet (#2297). Scopes to the
  * STAGED tree (\`git diff --cached\`) when invoked as a pre-commit hook, else scans
  * the whole repo. Tier-0: deterministic, offline, no network, no third-party deps.
  *
@@ -1686,20 +2148,32 @@ exit 1`;
  */
 const VALIDATE_PY = `"""MinSpec mid-tier validator (DR-037 / #246).
 
-Language-agnostic twin of the Node validate-frontmatter core FATAL checks:
+FATAL checks, modelled on MinSpec's Node validate-frontmatter:
   - specs/**/*.md must have \`id: SPEC-NNN\` frontmatter
-  - docs/decisions/DR-*.md must have \`id: DR-NNN\` frontmatter
+  - every docs/decisions/*.md (except INDEX.md / README.md) must have
+    \`id: DR-NNN\` frontmatter — keyed on the DIRECTORY, not the filename, so a
+    record not named DR-NNN.md is still checked, never silently skipped (#1908)
   - docs/domain/*.md must have \`type: domain\` frontmatter
   - a T3/T4 spec past Clarify must declare the code it owns (SPEC-038):
     \`implements:\` listing repo-relative source paths, or \`implements: none\`
     with an \`implements_reason:\`. FAIL when .minspec/config.json sets
     "ownershipDeclaration": "error", otherwise WARN. An \`implements:\` or
     \`affects:\` path that escapes the repo always FAILs.
+  - a spec/DR/domain file that cannot be read at all (decode error, permission
+    error, a pre-commit \`git show\` failure) FAILs as \`unreadable (<reason>)\`;
+    it is counted and reported, never skipped in silence (invariant 2, #2630).
+    The same applies one level up: if the pre-commit git call that LISTS staged
+    files itself errors, that is also a FAIL, not an empty — and therefore
+    passing — run.
 
-The id/type checks parse frontmatter the way the Node validator does (first
+The id/type checks split frontmatter the way the Node validator does (first
 --- ... --- block, split each line on the first colon, trim); the ownership rule
 ports the MinSpec extension's own readers. No PyYAML, so it runs on a stock
-python3. Deterministic + offline (Tier-0, DR-004)."""
+python3. The id/type checks are not an exact twin of the Node validator: values
+checked here go through clean_frontmatter_value (one layer of quotes, a trailing
+comment), which the Node side does not do yet, and the Node side has no rule
+that a decision record must carry an id. #2297 tracks bringing them level.
+Deterministic + offline (Tier-0, DR-004)."""
 
 import json
 import os
@@ -1710,6 +2184,28 @@ import sys
 FM_RE = re.compile(r"^---\\n(.*?)\\n---", re.DOTALL)
 SPEC_ID_RE = re.compile(r"^SPEC-\\d+$")
 DR_ID_RE = re.compile(r"^DR-\\d+$")
+# A DR is any .md under the decisions dir except the register's own listing
+# (no id: of its own) and a conventional README (prose, not a record) — #1908.
+DR_EXEMPT_FILENAMES = {"INDEX.md", "README.md"}
+# The section the founder reads to accept a DR. A hand-written DR skipped it because
+# only the generator template carried it (#2921). WARN until the corpus is backfilled.
+DR_PLAIN_TERMS_RE = re.compile(r"^#{1,6}[ \\t]+In plain terms\\b", re.IGNORECASE | re.MULTILINE)
+
+
+def clean_frontmatter_value(raw):
+    """Strip a trailing inline comment, then one layer of matching quotes.
+
+    \`id: "DR-024"  # note\` is well-formed YAML for the string \`DR-024\`, but the
+    naive key:value split above leaves the quotes and comment in \`raw\` verbatim.
+    Comment-stripping runs FIRST so the quoted value's closing quote is still the
+    last character when the quote check runs — a quote-then-comment strip order
+    would leave the trailing comment sitting where the closing quote is expected
+    and the quotes would never come off (#1908).
+    """
+    value = raw.split("#", 1)[0].strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+        value = value[1:-1]
+    return value
 
 # Spec-to-code ownership (SPEC-038). The owned-path rules below are generated from
 # the MinSpec extension's own definitions, so the two cannot disagree about what a
@@ -1763,27 +2259,33 @@ def parse_frontmatter(content):
 
 
 def staged_files(root):
-    """Staged added/copied/modified files (pre-commit scope). [] on any git error."""
+    """Staged added/copied/modified files (pre-commit scope). Returns the
+    Exception itself on any git error — never \`[]\` — so a git failure cannot
+    be read as "nothing staged" and validate zero files while still exiting 0
+    (invariant 2: an errored witness fails the gate closed, visibly, never by
+    going quiet)."""
     try:
         out = subprocess.run(
             ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
             cwd=root, capture_output=True, text=True, check=True,
         )
         return [f for f in out.stdout.splitlines() if f.strip()]
-    except Exception:
-        return []
+    except Exception as exc:
+        return exc
 
 
 def staged_content(root, rel):
-    """Content of the staged blob (what is ACTUALLY being committed)."""
+    """Content of the staged blob (what is ACTUALLY being committed). Returns
+    the Exception itself on failure — never \`None\` — so the caller can tell
+    "nothing to read" apart from "could not read it" (invariant 2)."""
     try:
         out = subprocess.run(
             ["git", "show", ":" + rel],
             cwd=root, capture_output=True, text=True, check=True,
         )
         return out.stdout
-    except Exception:
-        return None
+    except Exception as exc:
+        return exc
 
 
 def all_md(root, rel_dir):
@@ -2003,6 +2505,12 @@ def main():
 
     if pre_commit:
         targets = staged_files(root)
+        if isinstance(targets, Exception):
+            sys.stderr.write(
+                "FAIL pre-commit: could not list staged files (" + str(targets) + "). "
+                "Refusing to treat an unknown staged set as an empty one.\\n"
+            )
+            return 1
         reader = lambda rel: staged_content(root, rel)
     else:
         targets = (
@@ -2014,8 +2522,8 @@ def main():
             try:
                 with open(os.path.join(root, rel), "r", encoding="utf-8") as fh:
                     return fh.read()
-            except Exception:
-                return None
+            except Exception as exc:
+                return exc
 
     errors = 0
     # Read on the first spec, not up front: a commit that stages no spec never
@@ -2026,27 +2534,45 @@ def main():
         norm = rel.replace(os.sep, "/")
         is_spec = norm.startswith("specs/") and norm.endswith(".md")
         is_domain = norm.startswith("docs/domain/") and norm.endswith(".md")
-        # A decision record, not the register's INDEX.md (a listing with no id).
+        # ANY decision record, not just one named DR-NNN.md — a record kept under a
+        # different name (docs/decisions/0024-some-name.md, say) was previously
+        # unchecked and unreported as skipped (#1908). The register's own INDEX.md
+        # and a conventional README are the only exemptions, since neither carries
+        # an id of its own.
         is_dr = (
             norm.startswith("docs/decisions/")
             and norm.endswith(".md")
-            and os.path.basename(norm).startswith("DR-")
+            and os.path.basename(norm) not in DR_EXEMPT_FILENAMES
         )
         if not (is_spec or is_dr or is_domain):
             continue
 
         content = reader(rel)
-        if content is None:
+        if isinstance(content, Exception):
+            sys.stderr.write(
+                "FAIL " + norm + ": unreadable (" + str(content) + ")\\n"
+            )
+            errors += 1
             continue
         fm = parse_frontmatter(content)
 
         if is_spec:
-            spec_id = fm.get("id", "")
-            # Strip an inline comment (\`id: SPEC-001  # note\`) before matching.
-            spec_id = spec_id.split("#", 1)[0].strip()
-            if not SPEC_ID_RE.match(spec_id):
+            spec_id = clean_frontmatter_value(fm.get("id", ""))
+            if not spec_id and content.startswith("---") and not FM_RE.match(content):
+                # Opened but never closed: an id line may be present yet
+                # unreadable, so "missing" alone would misdescribe it (#3595).
                 sys.stderr.write(
-                    "FAIL " + norm + ": missing or invalid \`id: SPEC-NNN\` frontmatter\\n"
+                    "FAIL " + norm + ": missing or invalid \`id: SPEC-NNN\` frontmatter (block not terminated)\\n"
+                )
+                errors += 1
+            elif not spec_id:
+                sys.stderr.write(
+                    "FAIL " + norm + ": missing \`id: SPEC-NNN\` frontmatter\\n"
+                )
+                errors += 1
+            elif not SPEC_ID_RE.match(spec_id):
+                sys.stderr.write(
+                    "FAIL " + norm + ": invalid \`id: SPEC-NNN\` frontmatter (got \`" + spec_id + "\`)\\n"
                 )
                 errors += 1
 
@@ -2065,15 +2591,25 @@ def main():
                     )
 
         if is_dr:
-            dr_id = fm.get("id", "").split("#", 1)[0].strip()
-            if not DR_ID_RE.match(dr_id):
+            dr_id = clean_frontmatter_value(fm.get("id", ""))
+            if not dr_id:
                 sys.stderr.write(
-                    "FAIL " + norm + ": missing or invalid \`id: DR-NNN\` frontmatter\\n"
+                    "FAIL " + norm + ": missing \`id: DR-NNN\` frontmatter\\n"
+                )
+                errors += 1
+            elif not DR_ID_RE.match(dr_id):
+                sys.stderr.write(
+                    "FAIL " + norm + ": invalid \`id: DR-NNN\` frontmatter (got \`" + dr_id + "\`)\\n"
                 )
                 errors += 1
 
+            if not DR_PLAIN_TERMS_RE.search(FM_RE.sub("", content, count=1)):
+                sys.stderr.write(
+                    "WARN " + norm + ": decision record lacks a \`## In plain terms\` section (#2921)\\n"
+                )
+
         if is_domain:
-            if fm.get("type", "").split("#", 1)[0].strip() != "domain":
+            if clean_frontmatter_value(fm.get("type", "")) != "domain":
                 sys.stderr.write(
                     "FAIL " + norm + ": missing \`type: domain\` frontmatter\\n"
                 )
@@ -2571,8 +3107,10 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
     // the same machinery that syncs the guard, so they cannot drift apart again.
     //
     // Its own runtime dependencies — ai-review.yml and docs-lane.yml, which it reads to
-    // pin the shipped `run:` block and the hold pattern — are already managed templates,
-    // so the scaffolded set stays dependency-closed (managed-script-dependencies.test.ts).
+    // pin the shipped `run:` block and the hold pattern, and scripts/review-decide.sh and
+    // scripts/review-branch.sh, which it reads to pin the review protocol tokens (SPEC-211)
+    // — are already managed templates, so the scaffolded set stays dependency-closed
+    // (managed-script-dependencies.test.ts).
     name: 'ai-review-guard-test',
     outputPath: '.github/scripts/ai-review-guard.test.js',
     commentStyle: 'slash',

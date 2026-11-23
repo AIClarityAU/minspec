@@ -4,7 +4,7 @@
 # Scans the repo with perplexityai/bumblebee and fails the build if any
 # bundled package matches an entry in the local exposure catalog.
 #
-# Wired into packages/<ext>/package.json as a "prepackage" / "prepublish" hook.
+# Wired into packages/<ext>/package.json as the "prepackage" lifecycle script; the gate runs via `npm run package` — not through `vsce package`/`vsce publish` directly, nor via `prepublish` (vsce runs only `vscode:prepublish`).
 # Bypass with SKIP_SUPPLY_CHAIN_CHECK=1 (use only for known-good emergency cuts).
 #
 # Catalogs live in ~/.cache/bumblebee/catalogs/*.json. Empty catalog dir =
@@ -126,11 +126,89 @@ resolve_go_bin() {
   done
   return 1
 }
+# Minimum Go toolchain version this script's own header advertises ("Set GO_BIN or
+# install Go 1.25+."). Checked below so an old-but-resolvable toolchain fails here, with
+# a message naming both versions and the path, instead of one step later at `go install`
+# with a generic, unattributed failure (#1746 — filed off three non-blocking #1740
+# reviews; resolve_go_bin() itself never checked the resolved toolchain's version).
+GO_VERSION_MIN_MAJOR=1
+GO_VERSION_MIN_MINOR=25
+
+# Parse `"$1" version` (expected shape: "go version go1.21.0 linux/amd64") and compare
+# against the floor above.
+#   - New enough, or version string unparseable → return 0 (proceed). An unparseable
+#     `go version` is not evidence of an unusable toolchain — refusing on it would
+#     reintroduce the exact misfire class #1506 fixed: a gate that fails closed on a
+#     correctly provisioned machine and trains operators toward
+#     SKIP_SUPPLY_CHAIN_CHECK=1. See resolve_go_bin()'s header comment.
+#   - Too old → print the found/required versions and the resolved path, exit 2
+#     directly (not `return`): the caller has nothing left to do but stop.
+check_go_version() {
+  _go="$1"
+  _ver_out="$("$_go" version 2>/dev/null)" || return 0
+  _ver="$(printf '%s\n' "$_ver_out" | sed -n 's/.*go\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2/p')"
+  [ -n "$_ver" ] || return 0
+  _major="${_ver%% *}"
+  _minor="${_ver##* }"
+  case "$_major" in ''|*[!0-9]*) return 0 ;; esac
+  case "$_minor" in ''|*[!0-9]*) return 0 ;; esac
+  if [ "$_major" -gt "$GO_VERSION_MIN_MAJOR" ]; then
+    return 0
+  fi
+  if [ "$_major" -eq "$GO_VERSION_MIN_MAJOR" ] && [ "$_minor" -ge "$GO_VERSION_MIN_MINOR" ]; then
+    return 0
+  fi
+  echo "check-supply-chain: Go toolchain too old — found go${_major}.${_minor}, need go${GO_VERSION_MIN_MAJOR}.${GO_VERSION_MIN_MINOR}+ (resolved: $_go)" >&2
+  echo "  required for bumblebee install. Set GO_BIN to a newer toolchain or install Go ${GO_VERSION_MIN_MAJOR}.${GO_VERSION_MIN_MINOR}+." >&2
+  echo "  (exit 2: could not run — not a threat finding)" >&2
+  exit 2
+}
 # ----------------------------------------------------------------------------
 
-# Self-install bumblebee on first run. A missing toolchain or a failed install is a
+# Does the binary already at $BUMBLEBEE_BIN match the pin (#582)? A machine whose binary
+# predates the pin (installed @latest) would otherwise be used forever, so the pin would
+# only hold for fresh installs. Reads the module version from the binary's embedded build
+# info (`go version -m`). A SHA pin is a pseudo-version ending in the first 12 hex chars
+# of the SHA (v0.0.0-<date>-<sha12>); a tag pin compares equal.
+#   0 = installed version matches the pin
+#   1 = installed version is known and DIFFERENT (stale / unpinned) → reinstall
+#   2 = cannot tell (no Go toolchain, or no readable build info, e.g. a non-Go stand-in
+#       binary) → proceed with the existing binary, with a warning; never fail on it
+installed_matches_pin() {
+  _g="$(resolve_go_bin || true)"  # swallow-ok: empty is handled on the next line as "cannot tell"
+  [ -n "$_g" ] || return 2
+  _mod="$("$_g" version -m "$BUMBLEBEE_BIN" 2>/dev/null | sed -n 's/^[[:space:]]*mod[[:space:]][[:space:]]*github.com\/perplexityai\/bumblebee[[:space:]][[:space:]]*\([^[:space:]]*\).*/\1/p' | head -n 1)" || return 2
+  [ -n "$_mod" ] || return 2
+  case "$BUMBLEBEE_VERSION" in
+    *[!0-9a-f]*|"") _want="$BUMBLEBEE_VERSION" ;;
+    *) _want="$(printf '%s' "$BUMBLEBEE_VERSION" | cut -c1-12)" ;;
+  esac
+  case "$_want" in
+    v*) [ "$_mod" = "$_want" ] && return 0 || return 1 ;;
+    *) case "$_mod" in *-"$_want") return 0 ;; *) return 1 ;; esac ;;
+  esac
+}
+
+# Self-install bumblebee on first run, and reinstall when an existing binary is not the
+# pinned version (#582). A missing toolchain or a failed install is a
 # scan-COULD-NOT-RUN condition (exit 2), never a finding — the scan never happened.
+NEED_INSTALL=0
 if [ ! -x "$BUMBLEBEE_BIN" ]; then
+  NEED_INSTALL=1
+else
+  _rc=0
+  installed_matches_pin || _rc=$?
+  case "$_rc" in
+    1)
+      echo "check-supply-chain: existing $BUMBLEBEE_BIN is not bumblebee $BUMBLEBEE_VERSION — reinstalling the pinned version" >&2
+      NEED_INSTALL=1
+      ;;
+    2)
+      echo "check-supply-chain: warning — could not verify $BUMBLEBEE_BIN against pin $BUMBLEBEE_VERSION (no Go toolchain or build info); using it as-is" >&2
+      ;;
+  esac
+fi
+if [ "$NEED_INSTALL" = "1" ]; then
   # Not `if ! GO_RESOLVED=$(...)` — under `set -e` that form is fine, but keeping the
   # assignment separate makes the failure branch explicit and the exit code readable.
   GO_RESOLVED="$(resolve_go_bin || true)"  # swallow-ok: the next line branches on empty explicitly and takes the unresolved path
@@ -143,12 +221,48 @@ if [ ! -x "$BUMBLEBEE_BIN" ]; then
     echo "  (exit 2: could not run — not a threat finding)" >&2
     exit 2
   fi
+  check_go_version "$GO_RESOLVED"
+  # bumblebee's module graph needs cgo, so a C compiler is as hard a prerequisite as Go
+  # itself (#1913). Probe it up front so its absence is named, not misreported later as
+  # an unreachable install target. Skipped when the caller disabled cgo explicitly.
+  if [ "${CGO_ENABLED:-}" != "0" ]; then
+    _cc_want="${CC:-}"
+    _cc_found=""
+    for _cc in ${_cc_want:+"$_cc_want"} cc gcc; do
+      if command -v "$_cc" >/dev/null 2>&1; then
+        _cc_found="$_cc"
+        break
+      fi
+    done
+    if [ -z "$_cc_found" ]; then
+      echo "check-supply-chain: no C compiler found. Tried, in order:" >&2
+      echo "    1. \$CC                          ${CC:-(unset)}" >&2
+      echo "    2. cc on \$PATH                  $(command -v cc 2>/dev/null || echo '(not found)')" >&2
+      echo "    3. gcc on \$PATH                 $(command -v gcc 2>/dev/null || echo '(not found)')" >&2
+      echo "  required for bumblebee install (cgo). Install a C compiler (gcc or clang)." >&2
+      echo "  (exit 2: could not run — not a threat finding)" >&2
+      exit 2
+    fi
+  fi
   echo "check-supply-chain: installing bumblebee $BUMBLEBEE_VERSION using $GO_RESOLVED..." >&2
-  if ! GOBIN="$HOME/go/bin" "$GO_RESOLVED" install "github.com/perplexityai/bumblebee/cmd/bumblebee@$BUMBLEBEE_VERSION"; then
+  # Capture go's stderr (still shown live via the file replay below) so the failure
+  # summary can quote the real cause instead of guessing "target unreachable" (#1913).
+  _install_err="$(mktemp)"
+  if ! GOBIN="$HOME/go/bin" "$GO_RESOLVED" install "github.com/perplexityai/bumblebee/cmd/bumblebee@$BUMBLEBEE_VERSION" 2>"$_install_err"; then
+    cat "$_install_err" >&2
+    # Last non-blank line that is not a progress ("go: downloading ...") line; fall back to
+    # the last non-blank line, then to a generic note if go printed nothing at all.
+    _cause="$(grep -v '^[[:space:]]*$' "$_install_err" | grep -v '^go: downloading ' | tail -n 1 || true)"  # swallow-ok: diagnostics only; empty falls through to the fallbacks below
+    [ -n "$_cause" ] || _cause="$(grep -v '^[[:space:]]*$' "$_install_err" | tail -n 1 || true)"  # swallow-ok: diagnostics only
+    [ -n "$_cause" ] || _cause="go install printed no error output"
+    rm -f "$_install_err"
     echo "check-supply-chain: bumblebee@$BUMBLEBEE_VERSION install failed" >&2
-    echo "  (exit 2: could not run — not a threat finding; the pinned install target may be unreachable)" >&2
+    echo "  cause: $_cause" >&2
+    echo "  (exit 2: could not run — not a threat finding)" >&2
     exit 2
   fi
+  cat "$_install_err" >&2
+  rm -f "$_install_err"
 fi
 
 mkdir -p "$OUT_DIR" "$CATALOG_DIR"

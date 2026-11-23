@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { readSpecFile, writeSpec } from '../lib/spec';
+import { restoreLineEndings } from '../lib/text-io';
 import type { Phase } from '../lib/config';
 import { getHtml, getErrorHtml, toggleTask } from './spec-panel-html';
 import type { ClassificationSummary } from './spec-panel-html';
@@ -163,7 +164,13 @@ export class SpecPanel {
       const spec = readSpecFile(this.specFilePath);
       const updatedSpec = toggleTask(spec, phase, taskIndex, done);
       if (updatedSpec) {
-        fs.writeFileSync(this.specFilePath, writeSpec(updatedSpec), 'utf-8');
+        // In the line endings the spec was read in (SPEC-095): a CRLF spec used to come
+        // back LF after ticking one box.
+        fs.writeFileSync(
+          this.specFilePath,
+          restoreLineEndings(writeSpec(updatedSpec), updatedSpec.source ?? ''),
+          'utf-8',
+        );
         // The file watcher will pick up this change and refresh tree view.
         // Refresh our own panel to reflect the change immediately.
         this.refresh();

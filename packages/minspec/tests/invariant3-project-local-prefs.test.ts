@@ -33,6 +33,49 @@ function sourceFiles(dir: string, acc: string[] = []): string[] {
   return acc;
 }
 
+/** Strip line comments and doc-comment lines, keeping line count stable. */
+function stripProse(text: string): string {
+  return text
+    .split('\n')
+    .map(line => line.replace(/\/\/.*$/, '').replace(/^\s*\*.*$/, ''))
+    .join('\n');
+}
+
+/**
+ * Offsets of every `.update(a, b, true ...)` call: `WorkspaceConfiguration.update`
+ * takes `configurationTarget?: ConfigurationTarget | boolean | null`, and a literal
+ * `true` means Global (@types/vscode: "If `true` updates Global settings"), so it is
+ * the same machine-wide write as `ConfigurationTarget.Global` in another spelling
+ * (#1944). Arguments are split at depth 0 so object/array/call values do not
+ * confuse the third-argument position.
+ */
+function booleanGlobalUpdates(text: string): number[] {
+  const hits: number[] = [];
+  const re = /\.\s*update\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    let depth = 0;
+    let argStart = re.lastIndex;
+    const args: string[] = [];
+    for (let i = re.lastIndex; i < text.length; i++) {
+      const c = text[i];
+      if (c === '(' || c === '[' || c === '{') depth++;
+      else if (c === ')' || c === ']' || c === '}') {
+        if (depth === 0) {
+          args.push(text.slice(argStart, i));
+          break;
+        }
+        depth--;
+      } else if (c === ',' && depth === 0) {
+        args.push(text.slice(argStart, i));
+        argStart = i + 1;
+      }
+    }
+    if (args.length >= 3 && args[2].trim() === 'true') hits.push(m.index);
+  }
+  return hits;
+}
+
 describe('INVARIANT 3 — MinSpec never writes machine-wide config', () => {
   /**
    * The gate. DR-078 §3: "What this DR governs is what MinSpec itself may write,
@@ -64,6 +107,32 @@ describe('INVARIANT 3 — MinSpec never writes machine-wide config', () => {
         `Persist to .minspec/preferences.json via savePreferences() instead.\n` +
         `Offending sites:\n  ${offenders.join('\n  ')}`,
     ).toEqual([]);
+  });
+
+  it('T0: no boolean `true` (Global) configuration target exists anywhere in src/', () => {
+    const offenders: string[] = [];
+    for (const file of sourceFiles(SRC_DIR)) {
+      const text = stripProse(fs.readFileSync(file, 'utf-8'));
+      for (const offset of booleanGlobalUpdates(text)) {
+        const line = text.slice(0, offset).split('\n').length;
+        offenders.push(`${path.relative(SRC_DIR, file)}:${line}`);
+      }
+    }
+    expect(
+      offenders,
+      `A literal \`true\` configuration target is a Global write (constitution invariant 3 / DR-078 §3).\n` +
+        `Persist to .minspec/preferences.json via savePreferences() instead.\n` +
+        `Offending sites:\n  ${offenders.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('T0 meta: the boolean scan detects `true` and ignores other targets', () => {
+    expect(booleanGlobalUpdates(`cfg.update('x', v, true);`)).toHaveLength(1);
+    expect(booleanGlobalUpdates(`cfg.update('x', { a: 1, b: [2, 3] }, true, false);`)).toHaveLength(1);
+    expect(booleanGlobalUpdates(`cfg\n  .update('x', fn(a, b),\n    true)`)).toHaveLength(1);
+    expect(booleanGlobalUpdates(`cfg.update('x', v, vscode.ConfigurationTarget.Workspace);`)).toHaveLength(0);
+    expect(booleanGlobalUpdates(`cfg.update('x', true);`)).toHaveLength(0);
+    expect(booleanGlobalUpdates(`cfg.update('x', true, false);`)).toHaveLength(0);
   });
 
   /** The scan must be able to fail — a gate that cannot fire is not a gate. */
@@ -134,4 +203,49 @@ describe('the project-local store carries the two migrated preferences', () => {
     expect(p.startsWith(tmp)).toBe(true);
     expect(p).toContain(path.join('.minspec', 'preferences.json'));
   });
+});
+
+describe('INVARIANT 3 — the manifest describes an "Always" choice as it is stored (#2457)', () => {
+  /**
+   * Two settings describe an "Always" button on a prompt. #1319 moved what that button writes
+   * from the user's global settings to this project's `.minspec/preferences.json` (the
+   * suite above pins the write). The two setting descriptions went on saying "Set globally
+   * ... a personal preference that follows you across projects", because nothing read
+   * them. They are shown in the Settings editor and on the Marketplace listing, so they
+   * are a published statement about where MinSpec writes.
+   *
+   * A text check: it pins that the description names the project-local store and does not
+   * claim a global one. It cannot prove the sentence around those words is right.
+   */
+  const MANIFEST = path.resolve(__dirname, '../package.json');
+  const properties = (
+    JSON.parse(fs.readFileSync(MANIFEST, 'utf-8')) as {
+      contributes: { configuration: { properties: Record<string, { description?: string; markdownDescription?: string }> } };
+    }
+  ).contributes.configuration.properties;
+  const descriptionOf = (key: string): string =>
+    properties[key]?.description ?? properties[key]?.markdownDescription ?? '';
+
+  // The two settings whose description says what the "Always" button on their prompt does.
+  // (`minspec.pushOnApprove` has such a button too; its description does not mention it.)
+  // `minspec.approverEmail` also says "follows you across projects", and for it that is
+  // true: it is an application-scope setting that only the user writes, so it is not here.
+  const SETTINGS_THAT_DESCRIBE_ALWAYS = ['minspec.autoBackfillUseAi', 'minspec.advancePhaseOnApprove'];
+
+  it.each(SETTINGS_THAT_DESCRIBE_ALWAYS)(
+    'T0: %s says "Always" is kept for this project, in .minspec/preferences.json',
+    key => {
+      const text = descriptionOf(key);
+      expect(text).toContain("'Always'");
+      expect(text).toContain('for this project only');
+      expect(text).toContain('.minspec/preferences.json');
+    },
+  );
+
+  it.each(SETTINGS_THAT_DESCRIBE_ALWAYS)(
+    'T0: %s does not say the choice is set globally or follows you across projects',
+    key => {
+      expect(descriptionOf(key)).not.toMatch(/set globally|across projects/i);
+    },
+  );
 });

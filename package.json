@@ -7,19 +7,25 @@
     "packages/*"
   ],
   "scripts": {
-    "prepare": "git config core.hooksPath .githooks || true && npm run build --workspace=@aiclarity/shared",
+    "preinstall": "node scripts/check-npm-toolchain.mjs",
+    "prepare": "node scripts/prepare.mjs",
     "pretest": "node scripts/check-node-modules-integrity.mjs && npm run check:swallowed-gate && npm run build --workspace=@aiclarity/shared",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
     "build": "npm run build --workspaces --if-present",
     "package": "npm run package --workspaces --if-present",
-    "validate": "npx tsx scripts/validate-frontmatter.ts",
+    "validate": "npx tsx scripts/validate-frontmatter.ts && npx tsx scripts/check-issue-template-labels.ts",
+    "check:baseline-integrity": "npx tsx scripts/check-baseline-integrity.ts",
     "check:cycles": "npx tsx scripts/check-import-cycles.ts",
     "check:swallowed-gate": "npx tsx scripts/check-swallowed-gate-signal.ts",
+    "check:gate-signals": "npx tsx scripts/check-gate-signals.ts",
+    "audit:gate-witnesses": "npx tsx scripts/audit-gate-witnesses.ts",
+    "check:script-binaries": "npx tsx scripts/check-script-binaries.ts",
     "check:orphaned-docstring": "npx tsx scripts/check-orphaned-docstring.ts",
+    "check:template-version": "npx tsx scripts/check-template-version-bump.ts",
     "pretypecheck": "npm run build --workspace=@aiclarity/shared",
-    "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/minspec/tsconfig.json",
+    "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/minspec/tsconfig.json && tsc --noEmit -p packages/core/tsconfig.json",
     "check:gh-bot": "bash scripts/check-gh-bot-attribution.sh",
     "facts": "npx tsx scripts/facts.ts",
     "next-task": "npx tsx scripts/next-task.ts",
@@ -30,7 +36,7 @@
     "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
-    "@vitest/coverage-v8": "^4.1.7",
+    "@vitest/coverage-v8": "^4.1.11",
     "@vscode/test-cli": "0.0.11",
     "esbuild": "^0.28.0",
     "eslint": "^9.0.0",
@@ -38,10 +44,10 @@
     "picomatch": "^4.0.4",
     "tsx": "4.23.1",
     "typescript": "^5.5.0",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.11"
   },
   "engines": {
     "node": ">=22.0.0",
-    "npm": ">=10.0.0"
+    "npm": ">=11.0.0"
   }
 }

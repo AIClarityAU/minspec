@@ -3448,6 +3448,9 @@ Fresh template log.
       // 4. The behavioural half: whatever it is handed, what lands is stamped, and
       //    a caller cannot smuggle in a different stamp.
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-newa2-writer-'));
+      // SPEC-096: the manifest lives in `.minspec/`, which `saveHashes` no longer
+      // creates. Its callers run after Initialize has; so does this fixture.
+      fs.mkdirSync(path.join(dir, '.minspec'));
       try {
         saveHashes(dir, { 'CLAUDE.md': { Overview: 'abc123' } });
         const raw = JSON.parse(
@@ -3729,9 +3732,10 @@ Fresh template log.
       // `persistedHashes` above is only trustworthy if it is the product's own rule
       // rather than a test-local reimplementation of it — a reimplementation is how
       // a test tier drifts away from the product a second time. Both call the same
-      // exported function, and this pins that against a REAL refresh: a project with
-      // a user-added section (recorded not at all) and a held section (recorded as
-      // the withheld template body) exercises both corrections at once.
+      // exported function, and this pins that against a REAL refresh. THIS case
+      // drives the user-added correction only (a section recorded not at all); the
+      // withheld correction (a held section recorded as the withheld template body)
+      // is pinned end to end by the next test, AC-63b.
       const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-1697-a3-'));
       try {
         generateHarnessFiles(tmp);
@@ -3753,6 +3757,58 @@ Fresh template log.
         expect(applyAuthorshipCorrections(sectionHashesFromMarkdown(disk), undefined, ['Ops runbook'])).toEqual(
           filed,
         );
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+
+    it('AC-63b (SPEC-043 AC-9, #1785): a held section is persisted as the WITHHELD template hash, ≠ its disk hash, and the refresh still persists', () => {
+      // The withheld half of AC-9, end to end through the persisted manifest. A
+      // self-check run over the corrected map instead of the disk-derived one would
+      // abort every refresh that preserved anything — so this also pins that the
+      // refresh completes and rewrites the manifest while a section is held.
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-1785-ac9-'));
+      try {
+        generateHarnessFiles(tmp);
+        refreshHarnessFiles(tmp);
+        refreshHarnessFiles(tmp);
+
+        // Edit a section the template ALSO carries, so the merge holds it.
+        const claude = path.join(tmp, 'CLAUDE.md');
+        const settled = fs.readFileSync(claude, 'utf-8');
+        const anchor = '## SDD Methodology';
+        expect(settled).toContain(anchor);
+        fs.writeFileSync(
+          claude,
+          settled.replace(
+            anchor,
+            `Ratified 2026-03-11: the on-call SMS owner is paged first.\n\n${anchor}`,
+          ),
+        );
+        // …and a user-added section the template does not carry.
+        fs.appendFileSync(claude, '\n## Ops runbook\n\nRestart the consumer first, THEN drain.\n');
+
+        const manifest = path.join(tmp, '.minspec', 'generated-hashes.json');
+        const baseline = JSON.parse(fs.readFileSync(manifest, 'utf-8'))['CLAUDE.md']['Invariants'];
+
+        // Must not throw: the self-check runs over the disk-derived map.
+        expect(() => refreshHarnessFiles(tmp)).not.toThrow();
+
+        const disk = fs.readFileSync(claude, 'utf-8');
+        expect(disk).toContain('the on-call SMS owner is paged first');
+        const diskHashes = sectionHashesFromMarkdown(disk);
+        const persisted = JSON.parse(fs.readFileSync(manifest, 'utf-8'))['CLAUDE.md'];
+
+        // The manifest was persisted (readable, entry present) and the held section
+        // carries the TEMPLATE hash MinSpec declined to write — the settled baseline.
+        expect(persisted['Invariants']).toBe(baseline);
+
+        // Held: the hash is on file, and deliberately ≠ the body on disk.
+        expect(persisted).toHaveProperty('Invariants');
+        expect(persisted['Invariants']).not.toBe(diskHashes['Invariants']);
+        // User-added: not recorded at all.
+        expect(diskHashes).toHaveProperty('Ops runbook');
+        expect(persisted).not.toHaveProperty('Ops runbook');
       } finally {
         fs.rmSync(tmp, { recursive: true, force: true });
       }

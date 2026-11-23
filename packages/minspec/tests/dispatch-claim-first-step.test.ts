@@ -11,6 +11,11 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite's own `run()` wrapper around execFileSync is called per-case; the
+// literal call-site count alone understates it.
+useShellTimeout();
 
 const DISPATCH = path.resolve(__dirname, '../../../scripts/dispatch-issue.sh');
 const LEASE = path.resolve(__dirname, '../../../scripts/lib/issue-lease.sh');
@@ -32,9 +37,11 @@ describe('dispatch-issue.sh: sources the claim lease lib (held in-parent for the
 describe('dispatch-issue.sh: check-then-claim is the FIRST step, BEFORE the worktree (FR-1)', () => {
   it('the claim (lease_acquire) precedes `git worktree add`', () => {
     const acquireIdx = src.indexOf('lease_acquire "$ISSUE"');
-    // Anchor on the real command (`git worktree add -b "$BRANCH"`), not the earlier
-    // freshness-guard COMMENT that also mentions `git worktree add ... origin/main`.
-    const worktreeAddIdx = src.indexOf('git worktree add -b "$BRANCH"');
+    // Anchor on the real command (`git -C "$REPO_ROOT" worktree add -b "$BRANCH"`,
+    // pinned to the script's own repo root rather than the caller's cwd — #1896),
+    // not the earlier freshness-guard COMMENT that also mentions
+    // `git worktree add ... origin/main`.
+    const worktreeAddIdx = src.indexOf('git -C "$REPO_ROOT" worktree add -b "$BRANCH"');
     expect(acquireIdx).toBeGreaterThan(-1);
     expect(worktreeAddIdx).toBeGreaterThan(-1);
     expect(acquireIdx, 'claim must come before worktree creation').toBeLessThan(worktreeAddIdx);
@@ -51,10 +58,19 @@ describe('dispatch-issue.sh: check-then-claim is the FIRST step, BEFORE the work
   });
 
   it('a failed flock / gate / claim STANDS DOWN cleanly (exit 0), never proceeds to build', () => {
-    // Three guarded early-exits: each `if ! lease_… ; then … exit 0 ; fi`.
-    expect(src).toMatch(/if ! lease_flock "\$ISSUE"; then[\s\S]*?exit 0/);
-    expect(src).toMatch(/if ! lease_gate_open_unshipped "\$ISSUE"; then[\s\S]*?exit 0/);
-    expect(src).toMatch(/if ! lease_acquire "\$ISSUE"; then[\s\S]*?exit 0/);
+    // Three guarded early-exits: each `if ! lease_… ; then <one line saying so> ;
+    // exit_declined ; fi`. exit_declined IS the clean exit 0 for every caller that does
+    // not ask how the run ended, and the "refused before starting" status for the one
+    // that does (#2641). dispatch-outcome-status.test.ts runs all three both ways; this
+    // pins that nothing else has crept in between the refusal and the exit.
+    const standsDown = (check: string) =>
+      new RegExp(`if ! ${check} "\\$ISSUE"; then\\n\\s+echo "[^\\n]+\\n\\s+exit_declined\\n\\s+fi\\n`);
+    expect(src).toMatch(standsDown('lease_flock'));
+    expect(src).toMatch(standsDown('lease_gate_open_unshipped'));
+    expect(src).toMatch(standsDown('lease_acquire'));
+    // And exit_declined is exit 0 unless asked: the line that makes it so.
+    const fn = src.match(/^exit_declined\(\) \{[\s\S]*?^\}/m)?.[0] ?? '';
+    expect(fn).toMatch(/^\s+\(\( DISPATCH_STATUS_ASKED \)\) \|\| exit 0$/m);
   });
 });
 
@@ -63,6 +79,20 @@ describe('dispatch-issue.sh: agent-running is a cosmetic MIRROR applied AFTER th
     const acquireIdx = src.indexOf('lease_acquire "$ISSUE"');
     const runningIdx = src.indexOf('--add-label "agent-running"');
     expect(acquireIdx).toBeLessThan(runningIdx);
+  });
+  it('the label flip comes AFTER every worktree provisioning command (#1652)', () => {
+    const runningIdx = src.indexOf('--add-label "agent-running"');
+    const readyIdx = src.indexOf('--remove-label "agent-ready"');
+    const pinIdx = src.indexOf('agent_worktree_pin "$WORKTREE"\n');
+    const adds = [...src.matchAll(/launcher_git -C "\$REPO_ROOT" worktree add/g)].map((m) => m.index ?? -1);
+    expect(adds.length).toBeGreaterThan(0);
+    for (const i of adds) expect(i).toBeLessThan(runningIdx);
+    expect(pinIdx).toBeLessThan(runningIdx);
+    // dropping agent-ready rides in the same edit as the add, so it moves with it
+    expect(readyIdx).toBeGreaterThan(pinIdx);
+    // negative: a normal dispatch still sets agent-running and clears agent-ready in ONE edit
+    const call = src.slice(readyIdx - 80, runningIdx + 40);
+    expect(call).toContain('--remove-label "agent-ready-specify"');
   });
   it('a MINSPEC_CLAIM_OFF kill-switch restores the pre-SPEC-044 behaviour', () => {
     expect(src).toMatch(/MINSPEC_CLAIM_OFF/);

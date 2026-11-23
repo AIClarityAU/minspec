@@ -17,10 +17,14 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
+import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
 
 // #1285: spawns real child processes per assertion — 5s default is a load metric,
 // not a hang signal. Enforced by shell-timeout-coverage.test.ts.
 useShellTimeout();
+// Module scope: nothing in this file may depend on drain or quota knobs in the surrounding
+// environment, so it runs with hostile ones planted there (#2574, helpers/drain-env.ts; #2583).
+useHostileAmbientDrainKnobs();
 
 const DRAIN = path.resolve(__dirname, '../../../scripts/drain-inbox.sh');
 const DISPATCH = path.resolve(__dirname, '../../../scripts/dispatch-issue.sh');
@@ -70,7 +74,7 @@ describe('drain-inbox.sh: run dir self-heals past a STALE primary (#773 function
 
       const out = execFileSync('bash', [path.join(primary, 'scripts', 'drain-inbox.sh'), '--refresh-run-dir'], {
         encoding: 'utf-8',
-        env: { ...process.env, MINSPEC_DRAIN_RUN_DIR: runDir },
+        env: { ...drainBaseEnv(), MINSPEC_DRAIN_RUN_DIR: runDir },
       }).trim();
 
       // The run dir is synced to origin/main (C2) — the self-heal.
@@ -88,9 +92,33 @@ describe('drain-inbox.sh: run dir self-heals past a STALE primary (#773 function
   it('MINSPEC_DRAIN_SELF_REFRESH=0 opts out (runs in place, no run dir)', () => {
     const out = execFileSync('bash', [DRAIN, '--refresh-run-dir'], {
       encoding: 'utf-8',
-      env: { ...process.env, MINSPEC_DRAIN_SELF_REFRESH: '0', MINSPEC_DRAIN_RUN_DIR: path.join(os.tmpdir(), 'nope-should-not-exist') },
+      env: { ...drainBaseEnv(), MINSPEC_DRAIN_SELF_REFRESH: '0', MINSPEC_DRAIN_RUN_DIR: path.join(os.tmpdir(), 'nope-should-not-exist') },
     }).trim();
     expect(out).toBe('in-place');
+  });
+
+  it('MINSPEC_DRAIN_RUN_DIR="" (explicitly empty) is honoured, not silently defaulted (#2238)', () => {
+    // Regression for #2238: `${MINSPEC_DRAIN_RUN_DIR:-/tmp/minspec-drain-run}` treats
+    // an EMPTY value the same as an UNSET one, so a caller that sets
+    // MINSPEC_DRAIN_RUN_DIR="" (drain-concurrency.test.ts did, to mean "no run dir")
+    // silently fell back to /tmp/minspec-drain-run — which, on a machine running a
+    // real drain, IS that live drain's run dir. ensure_fresh_run_dir would then
+    // `git reset --hard origin/main` it out from under the live process.
+    //
+    // Deliberately does NOT reproduce the pre-fix failure for real: with the bug
+    // present this exact env would resolve to /tmp/minspec-drain-run and, on any
+    // machine where that path is a live drain's worktree (the founder's machine most
+    // of the day, and this repo's own dev containers), `git reset --hard` it — i.e.
+    // proving "base red" here would BE the incident. Only the fixed, safe behaviour
+    // is asserted: DRAIN_RUN_DIR stays empty, self-refresh disables itself, and the
+    // WARNING line's claim ("self-refresh disabled") is actually true.
+    const res = spawnSync('bash', [DRAIN, '--refresh-run-dir'], {
+      encoding: 'utf-8',
+      env: { ...drainBaseEnv(), MINSPEC_DRAIN_RUN_DIR: '' },
+    });
+    expect(res.status).toBe(0);
+    expect(res.stdout.trim()).toBe('in-place');
+    expect(res.stderr).toContain('MINSPEC_DRAIN_RUN_DIR is empty — self-refresh disabled, running in place.');
   });
 });
 
@@ -100,11 +128,44 @@ describe('drain-inbox.sh: the terminal "die on stale" path is gone (#773)', () =
     expect(DRAIN_SRC).not.toMatch(/^\s*43\)/m); // the run_loop case
   });
 
+  // #3594: assert the ORDER of real calls, not a character window. A comment that merely
+  // names the function used to satisfy a 400-char slice (passing with the call deleted)
+  // and an unrelated added line pushed it out (failing with the call intact).
+  const runCycleBody = (src: string): string[] => {
+    const start = src.indexOf('\nrun_cycle() {');
+    const end = src.indexOf('\n}\n', start);
+    return src
+      .slice(start + 1, end)
+      .split('\n')
+      .filter((l) => !/^\s*#/.test(l));
+  };
+  // Index of the ensure_fresh_run_dir CALL and of the first triage/dispatch call.
+  const callOrder = (lines: string[]): { refresh: number; dispatch: number } => ({
+    refresh: lines.findIndex((l) => /^\s*ensure_fresh_run_dir\s*(\|\|.*)?$/.test(l)),
+    dispatch: lines.findIndex((l) => /"\$(TRIAGE|DISPATCH)"/.test(l)),
+  });
+  const refreshPrecedesDispatch = (src: string): boolean => {
+    const { refresh, dispatch } = callOrder(runCycleBody(src));
+    return refresh >= 0 && dispatch >= 0 && refresh < dispatch;
+  };
+
   it('run_cycle refreshes the run dir before dispatching', () => {
-    expect(DRAIN_SRC).toContain('ensure_fresh_run_dir');
-    // Called inside run_cycle (before Step 1 triage).
-    const cycle = DRAIN_SRC.slice(DRAIN_SRC.indexOf('run_cycle() {'));
-    expect(cycle.slice(0, 400)).toContain('ensure_fresh_run_dir');
+    expect(refreshPrecedesDispatch(DRAIN_SRC)).toBe(true);
+  });
+
+  it('mutant: deleting the ensure_fresh_run_dir call from run_cycle fails the order check', () => {
+    const lines = runCycleBody(DRAIN_SRC);
+    const { refresh } = callOrder(lines);
+    expect(refresh).toBeGreaterThanOrEqual(0);
+    // Rebuild a source whose run_cycle has the call line removed but its comments kept.
+    const start = DRAIN_SRC.indexOf('\nrun_cycle() {');
+    const end = DRAIN_SRC.indexOf('\n}\n', start);
+    const mutated =
+      DRAIN_SRC.slice(0, start) +
+      DRAIN_SRC.slice(start, end).replace(/^\s*ensure_fresh_run_dir\s*$/m, '') +
+      DRAIN_SRC.slice(end);
+    expect(mutated).not.toBe(DRAIN_SRC);
+    expect(refreshPrecedesDispatch(mutated)).toBe(false);
   });
 });
 
@@ -197,7 +258,7 @@ describe('drain-inbox.sh: containment guard blocks a run dir that resolves into 
   function runRefresh(scriptCwd: string, runDir: string): { code: number; err: string } {
     // spawnSync captures stderr regardless of exit code — the guard fires but exits 0.
     const r = spawnSync('bash', [path.join(scriptCwd, 'scripts', 'drain-inbox.sh'), '--refresh-run-dir'], {
-      encoding: 'utf-8', env: { ...process.env, MINSPEC_DRAIN_RUN_DIR: runDir },
+      encoding: 'utf-8', env: { ...drainBaseEnv(), MINSPEC_DRAIN_RUN_DIR: runDir },
     });
     return { code: r.status ?? 1, err: String(r.stderr ?? '') };
   }
@@ -239,7 +300,7 @@ describe('dispatch-issue.sh: native auto-merge deny-by-default (behavioral seam)
     const script = scriptDir ? path.join(scriptDir, 'scripts', 'dispatch-issue.sh') : DISPATCH;
     try {
       const out = execFileSync('bash', [script, '--check-native-automerge'], {
-        encoding: 'utf-8', env: { ...process.env, MINSPEC_AUTOMERGE_NATIVE: '', MINSPEC_AUTOMERGE_MODE: '', ...env }, stdio: 'pipe',
+        encoding: 'utf-8', env: { ...drainBaseEnv(), MINSPEC_AUTOMERGE_NATIVE: '', MINSPEC_AUTOMERGE_MODE: '', ...env }, stdio: 'pipe',
       });
       return { code: 0, out: out.trim() };
     } catch (e: any) {
@@ -293,6 +354,12 @@ describe('dispatch-issue.sh: native auto-merge deny-by-default (behavioral seam)
       // same reason again. Sourcing it spawns nothing; only an arm actually asking
       // `autonomy_may_merge` runs the TypeScript, and this seam asks nothing.
       fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/autonomy.sh'), path.join(root, 'scripts', 'lib', 'autonomy.sh'));
+      // lib/issue-lease.sh sources lib/dispatch-author-gate.sh (#3161 trust filter) — same
+      // reason once more.
+      fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/dispatch-author-gate.sh'), path.join(root, 'scripts', 'lib', 'dispatch-author-gate.sh'));
+      // dispatch-issue.sh sources lib/issue-branch.sh (#3452 existing-branch handling) at
+      // startup — same reason: a missing lib aborts the source before the seam runs.
+      fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/issue-branch.sh'), path.join(root, 'scripts', 'lib', 'issue-branch.sh'));
       fs.writeFileSync(path.join(root, '.minspec', 'config.json'), JSON.stringify({ version: 1 })); // no autoMerge
       expect(check({}, root)).toEqual({ code: 1, out: 'off' });
     } finally {

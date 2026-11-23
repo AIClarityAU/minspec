@@ -213,6 +213,9 @@ describe('Feature: Traceability', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-feat-trace-'));
+    // SPEC-096: traceability.json lives in `.minspec/`, so it is written only in a folder
+    // that has opted in. The store used to create that directory itself.
+    fs.mkdirSync(path.join(tmpDir, '.minspec'));
   });
 
   afterEach(() => {
@@ -255,6 +258,9 @@ describe('Feature: Session scope', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-feat-session-'));
+    // SPEC-096: the session file lives in `.minspec/`, so it is written only in a folder
+    // that has opted in. The store used to create that directory itself.
+    fs.mkdirSync(path.join(tmpDir, '.minspec'));
   });
 
   afterEach(() => {

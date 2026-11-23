@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-242-identity-check-unknown-is-not-fail/requirements.md",
+  "specHash": "4b7f9aec57cd6eb2209a06ff700d32b75ba1c82b260b349b4a89a84156154225",
+  "approvedAt": "2026-10-30T05:54:42.646Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-c",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3182#issuecomment-6515774347"
+}

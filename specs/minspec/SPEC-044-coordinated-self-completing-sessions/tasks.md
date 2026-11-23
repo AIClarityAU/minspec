@@ -126,12 +126,92 @@ Covers FR-1, FR-2, FR-3(seam), FR-3b, FR-7, FR-8, FR-9, FR-11, INV-1, INV-2, INV
       wedged owner's claim stops being live and the drain adopts it as an orphan. Recorded
       explicitly because this bullet reads as unbuilt otherwise.
 
-## Slice 3b — the two-phase grace reaper (D3) — PENDING (#1015)
-- [ ] `scripts/lib/issue-lease.sh` — `lease_reclaim_q` currently reclaims a STALE claim
-      immediately. D3 requires the post → wait one renew interval → re-read → back-off
-      handshake, because the liveness predicate can misjudge a suspended-but-alive owner
-      (laptop sleep, stalled renew, `SIGSTOP` — none bounded by any TTL).
-- [ ] `scripts/drain-inbox.sh` — consume it in the dispatch loop / PR sweep.
+## Slice 3b — the two-phase grace reaper (D3, FR-8, AC-3b) — PENDING (#1015)
+
+Today `lease_reclaim_q` (`scripts/lib/issue-lease.sh:428`) calls `reclaim_decision` and
+returns reclaimable (exit 0) the instant `classify_claim` reports no live claim — no
+grace wait, no re-read. The doc comment immediately above it
+(`issue-lease.sh:395-398`) already *describes* the two-phase handshake ("the drain
+wiring lands in Slice 3") — the code does not implement it yet. That gap is this slice.
+
+### Decisions needed (Clarify)
+
+- **Q1 — how is the grace wait represented across the two call sites?**
+  `lease_reclaim_q`/`reclaim?` is invoked synchronously, once per item, from loops that
+  each process many items per pass: `remediate-pr.sh`'s PR sweep
+  (`remediate-pr.sh:523`, one call per open PR) and `drain-inbox.sh`'s dispatch loop
+  (one call per `agent-ready` issue). A literal `sleep "$LEASE_RENEW_SECS"` (60s —
+  `issue-lease.sh:55`) inside the handshake blocks that loop for 60s **per
+  stale-but-present claim met in a single pass** — free on the common path (no claim
+  at all → no wait, per the issue's "Note on scale"), but additive if a pass meets
+  several stale claims at once.
+  - **Option A — blocking sleep in-process (rec).** The literal D3 reading: one
+    process owns the whole handshake, no state to persist or garbage-collect across
+    invocations, touches only `issue-lease.sh`. Cost: worst case N stale-but-present
+    claims in one pass costs N × `LEASE_RENEW_SECS` added latency to that pass.
+  - **Option B — stateful grace marker, no blocking.** PATCH the claim comment
+    in place (reusing the existing `lease_renew` write path, `issue-lease.sh:294`) to
+    add a `graceNoticeAt` field the first time a claim is found stale; return
+    hands-off that call. A LATER call (next pass) reclaims only if `graceNoticeAt` is
+    set, `now - graceNoticeAt >= LEASE_RENEW_SECS`, and the claim hasn't renewed
+    since; a renew in between clears the marker. No blocking, but widens the claim
+    comment schema, makes `classify_claim` a 3-state machine (live / grace-pending /
+    reclaimable) every reader must agree on (including the `presence.ts` parity
+    surface, FR-10), and requires both callers to run at least twice,
+    `LEASE_RENEW_SECS` apart, before a stale claim is ever reclaimed — a scheduling
+    assumption neither currently guarantees.
+  - **Recommendation: Option A.** Matches the ratified D3 text, smallest diff, costs
+    nothing on the stated-scale common path. DR-067 already lists the grace-interval
+    length (and, implicitly, its mechanism) as "cheaper to reverse" — not a decision
+    that needs its own DR. Revisit Option B only if a production sweep is observed
+    regularly meeting multiple stale-but-present claims per pass.
+- **Q2 — does "the reaper posts the notice" require a human-visible write, or does a
+  log line satisfy it?** The owner finds out it was nearly reclaimed via
+  `verify-holds` failing on its next credentialed op (Slice 2, shipped), not by
+  reading a GitHub comment — same-machine suspension is the motivating case.
+  **Recommendation:** a structured `stderr` log line is sufficient for Option A; skip
+  an additional `gh` comment post (and the cleanup it would need) unless a human
+  asks for durable visibility into near-misses.
+
+### T0 — Invariants (first)
+- [ ] `tests/issue-lease-reclaim.test.ts` (extend) — **AC-3b**: a claim whose
+      heartbeat reads stale (past `LEASE_TTL_SECS`) but whose pid is still alive does
+      **not** reclaim on the first call; the handshake waits, re-reads, and backs off
+      if a renew lands inside the window. **Must fail red against today's one-phase
+      `lease_reclaim_q`** — the issue's own acceptance bar. Drive the wait through an
+      **injected clock/sleep seam** (parallel to how `classify_claim`/`is_claim_live`
+      already take `now` as a parameter instead of calling `date` themselves) so the
+      test asserts call count/ordering, never a real `sleep 60`.
+  - [ ] still-dead-after-grace: no renew lands in the window → reclaims after exactly
+        one `LEASE_RENEW_SECS`-length wait.
+  - [ ] renew-during-grace: a renew lands inside the window → backs off (exit 1),
+        even though the first read looked stale.
+  - [ ] no-claim-at-all (regression guard on the existing fast path): zero
+        sleep/re-read calls, immediate reclaim — locks in the "Note on scale"
+        guarantee so a future edit can't silently add a wait to the common case.
+
+### Implementation
+- [ ] `scripts/lib/issue-lease.sh` — extend `lease_reclaim_q` with the grace
+      handshake chosen at Q1 (Option A pending human sign-off): on `reclaim_decision`
+      reporting reclaimable, sleep `LEASE_RENEW_SECS`, re-read claims via
+      `lease_read_claims`, re-run `reclaim_decision`, and reclaim only if still
+      reclaimable on the re-read. `reclaim_decision` (the pure classifier) stays
+      unchanged — the handshake wraps it rather than replacing it, so the existing
+      `--classify-claim`/`--is-live`/`--reclaim-decision` seams and their current unit
+      tests are unaffected.
+- [ ] `scripts/drain-inbox.sh` — confirm the dispatch loop's per-issue reclaim check
+      and the PR-sweep's per-PR `live_nonself_claim` derivation (via
+      `remediate-pr.sh:523`) both route through the one extended entry point, rather
+      than a liveness check that bypasses the grace wait.
+- [ ] Refresh the doc comment at `issue-lease.sh:395-398` ("the drain wiring lands in
+      Slice 3") once this slice actually ships it — it currently describes behaviour
+      that doesn't exist yet.
+
+### Verify
+- [ ] Full suite green; `bash -n` clean on `issue-lease.sh` + `drain-inbox.sh`.
+- [ ] `tests/issue-lease-reclaim.test.ts`'s new AC-3b cases are red on a checkout of
+      this slice's `issue-lease.sh` reverted to its pre-slice state (proves the "must
+      fail on one-phase reclaim" bar), green on the slice's head.
 
 ## Slice 4 — auto-wrapup on exit (FR-5) — PENDING
 - [ ] `scripts/drain-inbox.sh` + `scripts/dispatch-issue.sh` — parent `EXIT` trap:

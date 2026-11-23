@@ -121,6 +121,11 @@ describe('SPEC-051 — approveSpec refuses to advance a spec into a state it fai
     // refusal. This is deliberate (matches the shipped #1317 gate), and it means a fresh
     // user repo is still reachable by the trap until SPEC-038's ratchet flips. Pinned so
     // the trade-off is visible rather than discovered.
+    //
+    // SPEC-096: an approval is recorded only in a folder that has opted in, so the
+    // marker is present here. What is absent is `config.json`, which is the
+    // default this test is about.
+    fs.mkdirSync(path.join(tmp, '.minspec'));
     const p = writeSpec(UNDECLARED_T4);
     expect(() => approveSpec(tmp, p, 'T4', 'paul@harvest316.com')).not.toThrow();
     expect(readRecord(tmp, rel(p))).toBeDefined();

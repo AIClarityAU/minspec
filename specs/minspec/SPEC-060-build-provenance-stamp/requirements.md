@@ -509,6 +509,128 @@ surface this spec touches, so none is guessed here.
 - **Consumer-workspace build-freshness checks** — out of scope by construction
   (INV-3); only this repo's dogfood case is addressed.
 
+## Amendment A (2026-10-09) - PROPOSED, not accepted
+
+**Narrows FR-3's trigger, and AC-4's fixture, to the commits that change what the build
+packs. A docs-only commit stops raising the stale-build warning.** Triggered by
+[minspec #2616] (the warning counts every commit). Written alongside SPEC-135
+(self-installing build), which decides when to build, install and pull with the same
+question, so the warning and the automation cannot disagree about what "behind" means.
+
+**How this block becomes accepted.** It follows the form of SPEC-044 Amendment A: the
+label is in the heading and there is no body status line, so the status-parity gate (#626)
+still reads one status for this file. The heading sits inside the bytes the approval
+signs, so it is not edited on acceptance; editing it would void the approval that accepts
+it. This amendment is proposed while this spec's approval record does not match this file,
+and accepted once the founder re-approves the spec and the record matches. Read the
+record, not the heading. [minspec #2613] tracks that no status reader does this yet.
+
+### What is wrong with the trigger as approved
+
+FR-3 fires when the workspace's `HEAD` is "ahead of the running build's stamped SHA". The
+code that implements it counts every commit after the stamp
+(`packages/minspec/src/lib/build-provenance.ts:141`, a `git rev-list --count` with no
+path), so a commit that changes nothing the build packs still reports a current bundle as
+stale. Recounted on 2026-10-09:
+
+| Range | All commits | Commits that change a packed path |
+|---|---|---|
+| `350c6fa..901fea36` (the warning the founder saw, "19 commits behind") | 19 | 9 |
+| `6cbd15f5..901fea36` (the last move of his checkout before that warning) | 1 | 0 |
+| `901fea36..1bc9e484` (the day after) | 6 | 3 |
+
+The second row is the defect in one line: a move that carried nothing the build packs was
+reported as stale. This spec already drew the same line for the dirty marker, which is
+limited to what ships so that nobody later turns it "into a whole-tree check" (DQ-2,
+scope note). FR-3 is brought into step with that.
+
+### The change
+
+- **Packed path (new term).** A path whose content reaches the packaged artifact, or
+  decides how it is built. It is defined once, as one exported list beside
+  `detectBuildSkew`, and today it is: everything under `packages/minspec` except its
+  `tests` and `test-fixtures` directories; everything under `packages/shared` except its
+  `tests` directory; `scripts/build-extension.sh`; and the root `tsconfig.json`,
+  `package.json` and `package-lock.json`. The list is inclusive on purpose. A path
+  listed wrongly costs one unnecessary rebuild; a path left out turns a stale build into
+  silence, which is the failure this spec exists to remove.
+- **FR-3 (amended).** The trigger "that workspace's `HEAD` is ahead of the running
+  build's stamped SHA" becomes: at least one commit that is after the stamped SHA and
+  reachable from `HEAD` changes a packed path. When `HEAD` is ahead only by commits that
+  change no packed path, the running bundle is what a rebuild would produce, and MinSpec
+  MUST NOT surface the notification. The number the notification names MUST be the count
+  of commits that change a packed path, not of all commits. The rest of FR-3 stands: the
+  dogfood workspace only, non-blocking, and never in a consumer workspace.
+- **Fail closed (amended FR-3, under INV-1).** A path filter that matches nothing
+  answers zero and exits successfully (measured: `git rev-list --count <range> --
+  no/such/dir` prints `0`, exit 0, git 2.43.0), which is indistinguishable from "no
+  packed commit". So when none of the listed paths exists at `HEAD`, or the filtered
+  count cannot be computed, the count MUST fall back to every commit, which is the
+  behaviour approved before this amendment. A filtered count that failed MUST never
+  produce a `current` verdict.
+- **AC-4 (amended).** With a workspace whose root matches the extension's own
+  repository and a fixture `HEAD` several commits ahead of a fixture build stamp, at
+  least one of which changes a packed path, activation surfaces the stale-build
+  notification exactly once per session, and the number it names is the count of commits
+  that change a packed path. With one packed and two unpacked commits it names 1, where
+  it names 3 today.
+- **AC-4b (new, the silent case).** With `HEAD` ahead of the stamp only by commits that
+  change no packed path, activation surfaces no notification and the verdict is not
+  `stale`.
+- **AC-4c (new, fail closed).** When the listed paths are absent from the fixture, or
+  the filtered query is made to fail, the verdict is not `current`.
+- **AC-4d (new, the list cannot drift from the build).** A test fails when a file the
+  bundler reads, or a file the package contains, lies outside the packed-path list. It
+  takes both file lists from the build tooling's own output, not from a second
+  hand-written list.
+
+Fixtures use real commits in a temporary repository, with no stubbed refs. The tests that
+exist today commit only root-level files into a repository that has none of the packed
+paths (`packages/minspec/tests/build-provenance.test.ts:33-37`, asserted at `:50-54`).
+Under this amendment that fixture exercises the fall-back of AC-4c, not the trigger, so
+AC-4 and AC-4b each need a fixture that contains the packed paths.
+
+### What this does not change
+
+The handling of an `unknown` stamp or a `-dirty` one (DQ-2 and its amendment), the
+per-build "Don't warn for this build" dismissal, the consumer-workspace silence of AC-5,
+FR-1, FR-2, FR-4, FR-5 and FR-6, and every invariant. In an adopter's repository the
+build's commit is not in the history, so the verdict is `unknown` before any count is
+taken, exactly as now.
+
+The Out of Scope entry "Auto-rebuild or auto-reinstall of a stale build" stays true of
+this spec: it still only notifies. That work is now specified in SPEC-135, so the entry
+is a boundary between two specs and no longer a statement that the project does not do
+it.
+
+### What it costs
+
+- A packed-path list that misses a real input makes a stale build silent. AC-4d and the
+  fall-back to every commit are the two guards; neither is a proof.
+- Re-approval is a second founder sign-off on this spec. From the moment this text
+  reaches `main` until then, the approval is stale: the spec derives `specifying` while
+  its `status:` line still reads `planning`, and the spec gate
+  (`scripts/hooks/spec-gate.py`) denies agent edits to all six files this spec declares.
+  Measured 2026-10-09 by running the gate against this file before and after the
+  amendment: `allow` for all six before, `deny` for all six after, with an undeclared
+  file as the control (`allow` both times). The six are the three under `implements:`
+  and the three under `affects:`, which are `packages/minspec/src/lib/spec.ts`,
+  `packages/minspec/src/lib/lifecycle.ts` and `scripts/dispatch-issue.sh`. So the code
+  change for [minspec #2616] cannot start before the re-approval, and neither can any
+  other agent edit to those three shared files. [minspec #1079] tracks that an edit
+  and its re-approval cannot land together.
+- The count in the warning gets smaller and stays honest about what it counts. It no
+  longer says how far the checkout has moved in total.
+
+### Rejected alternatives
+
+- **Keep the approved trigger and make only the message true** (still warn on every
+  commit, but say how many touch packed code). Rejected: the notification still appears
+  on a docs-only move, and its appearing at all is what the founder treats as a failure.
+- **Leave it.** Rejected: under SPEC-135 the checkout follows `main` automatically, and
+  most commits on `main` are not extension code, so the false warning would become the
+  common case.
+
 ## Traceability
 
 - **Issue:** [#1019](https://github.com/AIClarityAU/minspec/issues/1019) — installed
