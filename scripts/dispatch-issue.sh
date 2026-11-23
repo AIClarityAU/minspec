@@ -762,9 +762,11 @@ delegated_merge_human_claims() {
   fi
   # #4016: a handoff on an `agent-stuck` PR (no `hold:*` label) is an automation failure,
   # not a founder decision (#3835 split the label off at the producer). It is not a human
-  # claim, so the PR returns to the agent path. Unreadable or absent labels keep the hold.
+  # claim, so the PR returns to the agent path. Unreadable or absent labels keep the hold, and so
+  # does `needs-human-review`: remediate-pr.sh adds it at its retry cap without removing
+  # `agent-stuck`, and that escalation is a request for a human, so the handoff stays live.
   local stuck=""
-  stuck=$(printf '%s' "$view" | jq -r '(.labels // []) | if type == "array" then ([.[] | .name // ""] | (any(. == "agent-stuck") and (any(startswith("hold:")) | not))) else false end' 2>/dev/null) || stuck=false  # swallow-ok: unreadable labels leave the handoff live (fail closed)
+  stuck=$(printf '%s' "$view" | jq -r '(.labels // []) | if type == "array" then ([.[] | .name // ""] | (any(. == "agent-stuck") and (any(startswith("hold:")) | not) and (any(. == "needs-human-review") | not))) else false end' 2>/dev/null) || stuck=false  # swallow-ok: unreadable labels leave the handoff live (fail closed)
   if [[ "$handoffs" != "0" && "$stuck" != "true" ]] && ! delegated_merge_handoffs_spent "$pr" "$marker"; then
     printf 'handed-to-human\tPR #%s was handed to the founder by its creator (shepherd handoff comment); a bot merge would take his decision\n' "$pr"
     return 1
