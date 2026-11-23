@@ -42,6 +42,12 @@ ROLES_DIR="${SCRIPT_DIR}/roles"
 #                          may re-mint its credential and ask again (#3176). Said by status
 #                          only: the caller never reads this script's output for it, because
 #                          the build agent's prose travels on that output (#2233).
+#   DISPATCH_RC_QUOTA_PAUSED  the claim was won and the build agent was killed at its time bound
+#                          (exit 124/137) while the quota meter says the window is closed
+#                          (`drain-inbox.sh --quota-cap`). The kill is evidence of the quota
+#                          wall, not of bad code: a waiting `claude -p` emits no limit text
+#                          for the caller to read, so the meter is the witness (#1713).
+#                          The issue keeps `agent-ready` and gets no crash stamp.
 #   0                      NO ANSWER. An exit neither function below was called for. The
 #                          caller must read it as neither of the two.
 #   anything else          a failure, as before.
@@ -74,6 +80,7 @@ ROLES_DIR="${SCRIPT_DIR}/roles"
 DISPATCH_RC_DECLINED=75
 DISPATCH_RC_STARTED=76
 DISPATCH_RC_AUTH_FAILED=78
+DISPATCH_RC_QUOTA_PAUSED=79
 
 DISPATCH_STATUS_ASKED=0
 case "${MINSPEC_DISPATCH_OUTCOME_STATUS:-}" in
@@ -127,6 +134,15 @@ exit_auth_failed() {
   exit "$DISPATCH_RC_AUTH_FAILED"
 }
 
+# exit_quota_paused: leave, having won the claim, because the build timed out while the quota
+# window was closed (#1713). A caller that did not ask gets exit 0, as for every other end of a
+# run that won its claim.
+exit_quota_paused() {
+  (( DISPATCH_STATUS_ASKED && DISPATCH_CLAIMED )) || exit 0
+  DISPATCH_EXIT_AS="$DISPATCH_RC_QUOTA_PAUSED"
+  exit "$DISPATCH_RC_QUOTA_PAUSED"
+}
+
 # _dispatch_on_exit: the ONE exit trap of this script. It has two jobs.
 #
 # It gives the claim back (D6/D10). That used to be a trap of its own, set where the
@@ -154,7 +170,7 @@ _dispatch_on_exit() {
     lease_stop_renew_ticker; lease_release_all >/dev/null 2>&1 || true
   fi
   if (( DISPATCH_STATUS_ASKED )) \
-    && [[ "$rc" == "$DISPATCH_RC_DECLINED" || "$rc" == "$DISPATCH_RC_STARTED" || "$rc" == "$DISPATCH_RC_AUTH_FAILED" ]] \
+    && [[ "$rc" == "$DISPATCH_RC_DECLINED" || "$rc" == "$DISPATCH_RC_STARTED" || "$rc" == "$DISPATCH_RC_AUTH_FAILED" || "$rc" == "$DISPATCH_RC_QUOTA_PAUSED" ]] \
     && [[ "$rc" != "$DISPATCH_EXIT_AS" ]]; then
     echo "WARNING: #$ISSUE was ending on status $rc, which this script keeps for its own 'started' and 'refused' answers and did not choose here. Reported as a plain failure instead (#2641)." >&2
     exit 1
@@ -1445,24 +1461,6 @@ DISPATCH_CLAIMED=1
 # outlive and therefore nothing for ABS_MAX to protect.
 BUILD_DEADLINE="${BUILD_DEADLINE:-0}"
 
-# Label as running — a COSMETIC MIRROR of the claim only, applied AFTER a won claim,
-# never the authority (D8/FR-9/DR-066: a label is a single, overwritable, non-atomic
-# producer). No ownership decision ever reads it.
-# Both ready labels are cleared (#1169), not just the one this dispatch came in on: a
-# leftover `agent-ready-specify` beside a later plain `agent-ready` would leave the
-# issue wearing two ready classes that disagree about what is authorised.
-#
-# The label is CREATED first because `gh issue edit --remove-label` fails the WHOLE
-# request on a name the repo does not have — so on a repo that has never triaged a
-# T3/T4, removing it would also drop the `agent-running` add riding in the same call.
-gh label create "agent-ready-specify" --repo "$REPO" --color 0e8a16 \
-  --description "Auto-buildable T3/T4 — dispatch the SPECIFY phase only; the human approves the spec before any implementation (DR-076 / #1169)" \
-  2>/dev/null || true
-gh issue edit "$ISSUE" --repo "$REPO" \
-  --remove-label "agent-ready" \
-  --remove-label "agent-ready-specify" \
-  --add-label "agent-running" 2>/dev/null || true
-
 # Create worktree — CLAIM-UNIQUE path (D11/INV-7): ${BASE}/issue-N-<sessionId>, so two
 # same-host racers never share a directory and the cleanup below only ever touches THIS
 # session's own stale dir (pre-SPEC-044 used the shared ${BASE}/issue-N, where racer B
@@ -1519,6 +1517,28 @@ echo "Branch $BRANCH: $BRANCH_MODE (new = from origin/main, existing/track = ear
 # later git operation on the worktree names that directory (lib/agent-worktree.sh). A
 # worktree that cannot be pinned is not one to start an agent in, so this stops the run.
 agent_worktree_pin "$WORKTREE"
+
+# Label as running — a COSMETIC MIRROR of the claim only, applied AFTER a won claim AND after the worktree exists (#1652),
+# never the authority (D8/FR-9/DR-066: a label is a single, overwritable, non-atomic
+# producer). No ownership decision ever reads it.
+# Both ready labels are cleared (#1169), not just the one this dispatch came in on: a
+# leftover `agent-ready-specify` beside a later plain `agent-ready` would leave the
+# issue wearing two ready classes that disagree about what is authorised.
+#
+# The label is CREATED first because `gh issue edit --remove-label` fails the WHOLE
+# request on a name the repo does not have — so on a repo that has never triaged a
+# T3/T4, removing it would also drop the `agent-running` add riding in the same call.
+gh label create "agent-ready-specify" --repo "$REPO" --color 0e8a16 \
+  --description "Auto-buildable T3/T4 — dispatch the SPECIFY phase only; the human approves the spec before any implementation (DR-076 / #1169)" \
+  2>/dev/null || true
+gh issue edit "$ISSUE" --repo "$REPO" \
+  --remove-label "agent-ready" \
+  --remove-label "agent-ready-specify" \
+  --add-label "agent-running" 2>/dev/null || true
+# Placed here, not before provisioning (#1652): `set -e` aborts at `worktree add`, and the EXIT
+# trap releases the lease but never the label, so an earlier flip left `agent-running` set with
+# `agent-ready` already removed - nothing retried it.
+
 
 echo "Launching $ROLE agent for: $ISSUE_TITLE"
 
@@ -3175,6 +3195,33 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude
     fi  # end egress guard: clean-publish branch (quarantine handled above)
   fi
 else
+  # The build's own status: in an `else` branch `$?` is the condition's, and under `pipefail`
+  # that is `timeout`'s 124 (SIGTERM at the ceiling) or 137 (SIGKILL from --kill-after) when
+  # the ceiling killed it. Read FIRST, before anything below changes it.
+  AGENT_RC=$?
+  # #1713 — a build killed at its ceiling is not evidence of a code failure. A `claude -p`
+  # that WAITS out a usage limit (rather than erroring at it) prints no limit notice, so the
+  # drain's text classifier cannot see it, and this path used to stamp it `agent-crashed` +
+  # `needs-human-review`: a quota condition filed as a harness crash. Ask the meter. A closed
+  # window is the witness that the kill was quota. `--quota-cap` fails CLOSED when it cannot
+  # read the meter (`closed unknown | defer:stale|no-reading|no-scratch|no-verdict|bad-config`,
+  # exit 42): that is a BLIND meter, not an observed closed window, so it is not a witness and
+  # the crash path below keeps it. Anything else (open, blind) leaves the crash path exactly as
+  # it was, so this can only RECLASSIFY a timeout on an observed closed window, never hide one.
+  QUOTA_TIMEOUT_VERDICT=""
+  if [[ "$AGENT_RC" == "124" || "$AGENT_RC" == "137" ]] \
+     && ! QUOTA_TIMEOUT_VERDICT=$(bash "${SCRIPT_DIR}/drain-inbox.sh" --quota-cap 2>/dev/null) \
+     && [[ "$QUOTA_TIMEOUT_VERDICT" == closed* ]] \
+     && [[ "$QUOTA_TIMEOUT_VERDICT" != "closed unknown"* ]] \
+     && [[ "$QUOTA_TIMEOUT_VERDICT" != *"defer:stale"* && "$QUOTA_TIMEOUT_VERDICT" != *"defer:no-"* \
+           && "$QUOTA_TIMEOUT_VERDICT" != *"defer:bad-config"* ]]; then
+    # Readiness is KEPT (no needs-human-review, no agent-crashed): the issue is retried once the
+    # window reopens. Only the running stamp comes off.
+    gh issue edit "$ISSUE" --repo "$REPO" --remove-label "agent-running" 2>/dev/null || true  # swallow-ok: the claim release on exit is the load-bearing step; a stale agent-running label is cleared by the next claim
+    echo "Build for #$ISSUE was killed at its time bound (exit $AGENT_RC) while the quota window is closed: $QUOTA_TIMEOUT_VERDICT"
+    echo "Classified as a QUOTA PAUSE, not a code failure — #$ISSUE stays agent-ready and will be retried when the window reopens (#1713). Log: $LOG"
+    exit_quota_paused
+  fi
   # #1307 — a CRASH raises the human gate, exactly as a deliberate escalation does.
   #
   # This path stamped `agent-escalated` alone while the DR-355 escalation path above
