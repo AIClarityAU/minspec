@@ -1,5 +1,5 @@
 ---
-id: SPEC-137
+id: SPEC-410
 type: requirements
 status: specifying
 tier: T3
@@ -18,7 +18,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-137: Dispatch thrash oracle (`npm run thrash`) and a rate-keyed breaker
+# SPEC-410: Dispatch thrash oracle (`npm run thrash`) and a rate-keyed breaker
 
 Issue: #1238 (harden(detect): no thrash metric). Related: #912, #1203 (the breaker's origin), #1202, #1050 (`npm run facts`, the model for this tool).
 
@@ -70,4 +70,4 @@ Fixing any particular cause of thrash (#912, #1203, #1202); a dashboard or persi
 
 1. **Breaker default threshold.** Options: (a) rate > 25% over the last 20 completions, min 10 **(rec)** since it would have caught the 32% baseline; cost: a bad streak of three thrashes in ten completions is already 30% and could halt a drain over normal noise, wasting a cycle. (b) 40% over 20, fewer false halts but the issue's own 32% baseline would still hide. (c) report-only, no breaker change; cheapest, but leaves the blind spot that motivated the issue.
 2. **How the oracle knows "roster bytes" and "compact count".** Transcript format is not a stable contract. Options: (a) parse best-effort and show `n/a` for fields not found, listing the count of runs lacking them **(rec)**, resilient but a format change degrades the detail quietly (the rate itself stays correct, as it keys only on the signature); (b) fail on unknown format, loud but brittle.
-3. **Spec number.** SPEC-137 was the next unused id on this branch's base; open PRs are not visible offline, so confirm it does not collide.
+3. **Spec number.** SPEC-410 replaces an initial SPEC-137, which collided with the existing error-log-diagnostics spec; the highest id across main and remote branches was 409. Open PRs added later are not visible offline, so confirm it does not collide.
