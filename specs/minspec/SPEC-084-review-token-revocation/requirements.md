@@ -24,8 +24,9 @@ phases:
 
 Materializes **[#2335](https://github.com/AIClarityAU/minspec/issues/2335)** — the
 follow-up that [DR-094](../../../docs/decisions/DR-094.md) (one-hour review broker tokens)
-promised under `## Follow-ups (tracked)` and never linked (`DR-094.md:122-123`), flagged as
-a DR-023 (decisions materialize their follow-ups) leak by the Architect voter on #2314.
+records under `## Follow-ups (tracked)` and links there to #2335 (`DR-094.md:122-123`), so
+DR-023 (decisions materialize their follow-ups) is already satisfied at the issue level; this
+spec is what that issue becomes.
 It builds on [SPEC-034](../SPEC-034-oidc-review-broker/requirements.md) (the OIDC review
 token-broker) and changes none of that spec's approved requirements.
 
@@ -35,9 +36,9 @@ handles a live bearer credential inside the workflow that gates every merge, and
 workflow is scaffolded verbatim into adopter repos
 (`packages/minspec/src/lib/ci-review-templates.ts:1-21`).
 
-**Id note.** `SPEC-080` through `SPEC-083` are claimed by other branches in this
-checkout's refs (`SPEC-080` by seventeen of them), so this takes `SPEC-084`, the first id
-no visible ref uses. Open pull requests are not visible from here; if the id collides at
+**Id note.** `SPEC-084` is unused by any other spec on main (`specs/minspec/` holds
+SPEC-080 to SPEC-082 and SPEC-085 to SPEC-087 around it, so 084 is a gap, not the end of
+the sequence). Open pull requests are not visible from a checkout; if the id collides at
 review time, renumber.
 
 ## One-Sentence Scope
@@ -52,43 +53,45 @@ is cut to the run's duration without ever reading as mitigated when it is not.
 ### What DR-094 accepted, and what it deferred
 
 SPEC-034's broker returns a GitHub App installation token that GitHub keeps valid for one
-hour; no shorter lifetime can be requested (`packages/broker/src/mint.ts:33-51`). DR-094
+hour; no shorter lifetime can be requested (`packages/broker/src/mint.ts:33-52`). DR-094
 therefore accepts that *"a broker-minted token is usable for up to an hour after the
 workflow that requested it finishes"* (`DR-094.md:78-79`) and names revocation at run end
 as *"the option most likely to be right later"*, rejected for slice 1 (happy-path seam)
 only as out of scope, with one named trap: *"a revocation that silently fails would leave
 the full-hour exposure while reading as mitigated"* (`DR-094.md:104-109`).
 
-### State of the code this spec lands on (read from the checkout, not inferred)
+### State of the code this spec lands on (read from main at 696dd202, 2026-11-23, not inferred)
+
+Line anchors below are to that commit and will drift; the Plan re-grounds them.
 
 - **The broker path has no consuming workflow yet.** SPEC-034 task 1.4b (workflow broker
   path plus end-to-end observation) is unticked and blocked on a human `wrangler login`
   (#1869) and on a repo that does not hold the App key
-  (`specs/minspec/SPEC-034-oidc-review-broker/tasks.md:32`). There is no step today that
+  (`specs/minspec/SPEC-034-oidc-review-broker/tasks.md:35`). There is no step today that
   requests an OIDC token or calls the broker.
-- **This repo mints natively, never through the broker.** `ai-review.yml:189-195` uses
+- **This repo mints natively, never through the broker.** `ai-review.yml:221-224` uses
   `actions/create-github-app-token` (pinned at v1.9.0) with the repo's own App secrets.
-  `tasks.md:32` states the consequence: *"This repo cannot exercise the broker path at
+  `tasks.md:35` states the consequence: *"This repo cannot exercise the broker path at
   all."* A revocation step that only runs on the broker path would therefore be unexercised
   in this repo's own CI. DQ-3 turns on this.
 - **The token is minted first and used last.** The mint is the second step of the `runner`
-  job (`ai-review.yml:189`), before the base checkout (`:244`) and before the reviewer
+  job (`ai-review.yml:221`), before the base checkout (`:282`) and before the reviewer
   runs. Its last consumer is the fail-closed backstop, an `if: failure()` step that posts
-  `ai-review:changes` as the bot (`:1207-1256`). Two other consumers run under
-  `if: always()` (`:828`, `:937`).
+  `ai-review:changes` as the bot (`:1568`, the job's last step). Two other consumers run under
+  `if: always()` (`:1090`, `:1241`).
 - **Runs are cancelled routinely.** `concurrency.cancel-in-progress: true`
-  (`ai-review.yml:156-158`) cancels the in-flight review on every new push to the PR, so
+  (`ai-review.yml:188-190`) cancels the in-flight review on every new push to the PR, so
   "the run ends" includes cancellation as an ordinary path, not an edge case.
 - **The workflow's own token is read-only.** `permissions: contents: read`
-  (`ai-review.yml:152-153`). Nothing in the job can post to the PR except the App token.
+  (`ai-review.yml:184-185`). Nothing in the job can post to the PR except the App token.
 - **Token freshness in the broker is incidental today.** `createAppAuth` is constructed
   inside `makeInstallationTokenFactory` (`packages/broker/src/app-auth.ts:52`), which the
-  handler calls once per request (`packages/broker/src/index.ts:175`). No test asserts that
+  handler calls once per request (`packages/broker/src/index.ts:189`). No test asserts that
   two exchanges receive two different tokens. FR-11 explains why revocation makes that
   load-bearing.
 - **The workflow file ships to adopters byte-exact.** `ci-review-templates.ts` embeds
   `.github/workflows/ai-review.yml` verbatim and `npm run validate` fails if the embedded
-  copy drifts (`ci-review-templates.ts:17-20`).
+  copy drifts (`ci-review-templates.ts:17-21`).
 
 ### Platform facts this spec rests on — and which are not yet observed
 
@@ -165,10 +168,10 @@ token only.
   budget the Plan sets (a suggested ceiling is 60 seconds). An `always()` step that can
   hang holds the concurrency group and delays the next review.
 - **FR-10 — Independent of the checkout.** The token is minted before the base checkout
-  (`ai-review.yml:189` against `:244`). The revocation MUST be attempted whenever a token
+  (`ai-review.yml:221` against `:282`). The revocation MUST be attempted whenever a token
   exists, including when the checkout failed, so its logic MUST NOT depend on a file from
   the workspace. The Plan chooses how to keep that testable; the existing
-  `# >>> backstop-verdict-clear` region markers (`ai-review.yml:1234-1241`) are the
+  `# >>> backstop-verdict-clear` region markers (`ai-review.yml:1595-1602`) are the
   in-repo precedent for testing inline workflow logic.
 - **FR-11 — One exchange, one token (broker).** Each successful broker exchange MUST
   return a token minted for that exchange alone; the Worker MUST NOT serve a token it has
@@ -191,8 +194,9 @@ token only.
 - **FR-14 — Shipped copy stays in step.** The scaffolded `ai-review.yml` adopters receive
   MUST carry the same step; the embedded template is regenerated and the existing
   byte-equality check stays green.
-- **FR-15 — Close the traceability leak the issue reports.** The implementing change MUST
-  link #2335 and this spec from DR-094's `## Follow-ups (tracked)` entry. DR-094's
+- **FR-15 — Link this spec from DR-094.** DR-094's `## Follow-ups (tracked)` entry already
+  links #2335 (`DR-094.md:122-123`); the implementing change MUST add a link to this spec
+  beside it. DR-094's
   "Accepted risk" wording is narrowed only **after** AC-9's live observation exists, never
   before, and keeps the residual stated in [Residual risk](#residual-risk-stated-plainly).
 
@@ -227,7 +231,7 @@ token only.
   label's sender is still the bot and `ready-to-merge` is unchanged by the revocation
   (SPEC-034 AC-8 not regressed). The recorded observations for P-1 to P-5 are attached to
   the implementing pull request.
-- **AC-10 (FR-8, FR-15)** — DR-094's follow-up entry links #2335; a search of the tree
+- **AC-10 (FR-8, FR-15)** — DR-094's follow-up entry links this spec as well as #2335; a search of the tree
   finds no unqualified claim that review tokens are revoked.
 
 ## Invariants (must not break)
@@ -262,7 +266,7 @@ Revocation at run end narrows DR-094's accepted risk; it does not remove it.
   failed job is visible; an explicit "token may still be valid" line is not (DQ-5).
 - **A same-repo author with write access can edit the workflow in their own pull
   request**, including removing this step for that run. That is the existing trust
-  boundary the workflow header already scopes (`ai-review.yml:30-32`): such an author can
+  boundary the workflow header already scopes (`ai-review.yml:28-33`): such an author can
   already read the token, so this is not a new exposure.
 - **Revocation undoes nothing.** Writes made with a leaked token before revocation stand.
 
@@ -308,7 +312,7 @@ installation token came from.
 - **Option A — both mint sources, one explicit step (rec).** The native action's own
   post-job revocation is switched off so there is exactly one revocation with one
   classification. This repo's CI then exercises the step on every pull request; under
-  Option B it never would (`tasks.md:32`). *Cost:* this widens the issue as filed, which
+  Option B it never would (`tasks.md:35`). *Cost:* this widens the issue as filed, which
   is why it is put here and not assumed; it replaces an upstream-maintained behaviour
   with one this repo owns; and it changes this repo's live merge gate before the broker
   path exists, in a machinery pull request that needs a human `--admin` merge.
