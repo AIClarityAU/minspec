@@ -740,7 +740,7 @@ export interface ValidateSpecOptions {
  * (`key:` alone, then `  - item` lines). Quotes/whitespace stripped. Empty when
  * the key is absent. Purely a tokenizer — path validity is `isValidOwnedPath`.
  */
-function fmListField(raw: string, key: string): string[] {
+export function fmListField(raw: string, key: string): string[] {
   const block = raw.match(FRONTMATTER_BLOCK_RE);
   if (!block) return [];
   // Strip an inline `# comment` (rawFrontmatterField) — a comment is prose, not a

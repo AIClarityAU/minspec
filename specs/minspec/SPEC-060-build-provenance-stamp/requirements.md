@@ -49,9 +49,9 @@ affects:
 phases:
   specify: done
   clarify: done
-  plan: in-progress
-  tasks: pending
-  implement: pending
+  plan: in-progress   # no plan.md: FR-1/FR-3/FR-6 shipped directly in #1477; FR-2/FR-4/FR-5 still need one (#1504)
+  tasks: pending      # no tasks.md written; remaining work is tracked as #1504
+  implement: in-progress  # PARTIAL: build-provenance.ts + build-extension.sh on main (#1477); FR-2/4/5 unbuilt (#1518)
 ---
 
 # MinSpec — Stamp and surface build provenance, so a stale installed build can't be mistaken for a forged approval (Requirements)

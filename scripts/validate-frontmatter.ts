@@ -16,12 +16,14 @@
  */
 
 import { readdirSync, readFileSync, statSync, existsSync } from 'fs';
+import { execFileSync } from 'child_process';
 import { join, relative, dirname, sep } from 'path';
 import { validateDrSequence, validateDrIndexStatus, validateDrAmendments } from '../packages/minspec/src/lib/adr-manager';
 import {
   validateSplitLayoutCoverage,
   checkAcceptanceCriteria,
   validateOwnership,
+  fmListField,
   type SplitLayoutFile,
 } from '../packages/minspec/src/lib/spec-validator';
 import { parseSpec } from '../packages/minspec/src/lib/spec';
@@ -36,6 +38,7 @@ import { checkStatusParity, inspectStatusLine, inspectAllStatusClaims } from '..
 import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold';
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
 import { checkDeclaredSpecIds } from './lib/spec-id-collision';
+import { checkPhaseClaimDrift, type PhaseClaimSpec } from './lib/phase-claim-drift';
 import { SELF_HOSTED_TEMPLATE_NAMES } from '../packages/minspec/src/lib/template-registry';
 import { detectTools } from '../packages/minspec/src/lib/tool-detector';
 
@@ -766,6 +769,68 @@ try {
   warn(
     `claim-word check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
       'Rule 19 validated NOTHING this run; do not read the green as a clean corpus.',
+  );
+}
+
+// Rule 20 (WARN-first, #1518, SPEC-080 DQ-1 Option B): a spec whose `phases.implement` is `pending`
+// must not own (`implements:`) a path that already exists on the default branch —
+// its lifecycle block would be a false signpost about merged code. Declared-vs-
+// observed, the #137 asymmetry axis the other rules never compared. Offline: local
+// `git cat-file` only (invariant 1). Default branch = `origin/main`, else local
+// `main`; if neither resolves the rule says it validated NOTHING (invariant 2),
+// never a quiet pass. Only `implements:` arms it, never `affects:`.
+try {
+  const gitIn = (args: string[]): string =>
+    execFileSync('git', args, { cwd: ROOT, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+  let defaultRef: string | undefined;
+  for (const ref of ['origin/main', 'main']) {
+    try {
+      gitIn(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+      defaultRef = ref;
+      break;
+    } catch {
+      // try next candidate ref
+    }
+  }
+  const claimSpecs: PhaseClaimSpec[] = [];
+  for (const file of safeGlob(specsDir, '.md')) {
+    if (!file.endsWith(`${sep}requirements.md`)) continue;
+    const parsed = parseSpec(readFileSync(file, 'utf-8'));
+    claimSpecs.push({
+      file: relative(ROOT, file),
+      implement: parsed.frontmatter.phases.implement,
+      implementsTokens: fmListField(parsed.raw, 'implements'),
+    });
+  }
+  const probe = (p: string): boolean | undefined => {
+    if (defaultRef === undefined) return undefined;
+    try {
+      gitIn(['cat-file', '-e', `${defaultRef}:${p}`]);
+      return true;
+    } catch (e) {
+      // exit 128 = path absent from the tree (a real answer); anything else is a probe failure.
+      return (e as { status?: number }).status === 128 ? false : undefined;
+    }
+  };
+  const drift = checkPhaseClaimDrift(claimSpecs, probe);
+  for (const f of drift.flagged) {
+    // WARN-first: the first real run flagged 16 specs (R2), beyond SPEC-060. Ratchet to
+    // fail() once the corpus is audited — tracked in the PR body, not silently deferred.
+    warn(
+      `${f.file}: phases.implement is \`pending\` but implements: path(s) already exist on ${defaultRef}: ${f.paths.join(', ')}. ` +
+        'Advance the phases: block (lifecycle keys are hash-neutral — no re-approval) and record why.',
+    );
+  }
+  if (drift.unchecked.length > 0) {
+    warn(
+      `phase-claim drift check could not resolve a default-branch ref (tried origin/main, main) — Rule 20 validated NOTHING for ${drift.unchecked.length} spec(s); do not read the green as drift-free.`,
+    );
+  }
+  console.log(`Rule 20: ${drift.flagged.length} spec(s) flagged, ${drift.unchecked.length} unchecked.`);
+} catch (err) {
+  warn(
+    `phase-claim drift check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
+      'Rule 20 validated NOTHING this run; do not read the green as drift-free.',
   );
 }
 
