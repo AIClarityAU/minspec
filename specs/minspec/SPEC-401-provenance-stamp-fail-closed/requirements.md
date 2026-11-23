@@ -35,8 +35,9 @@ phases:
 > 2026-08-14T04:33:21Z). Related: [#1504](https://github.com/AIClarityAU/minspec/issues/1504).
 > Builds on [SPEC-060](../SPEC-060-build-provenance-stamp/requirements.md) (stamp-and-surface
 > build provenance) and depends on the linter [SPEC-054](../SPEC-054-gate-signal-linter/requirements.md)
-> names (see DQ-1 — SPEC-054 is not yet implemented; `scripts/check-gate-signals.ts` does not
-> exist in this worktree).
+> names (see DQ-1 — SPEC-054's own `status:` is still `planning`, but `scripts/check-gate-signals.ts`
+> already exists in this worktree as a gate-signal write linter; its header names SPEC-054
+> FR-1/FR-2).
 
 ## One-Sentence Scope
 
@@ -73,14 +74,14 @@ extend*: a dirty tree does not silently reuse a stamp that would misdescribe the
 mutates the stamp to say so (`-dirty` suffix). A `git rev-parse` failure gets no equivalent
 treatment; it is simply absorbed.
 
-### The runtime surface stops at one verdict kind: `packages/minspec/src/extension.ts:745`
+### The runtime surface stops at one verdict kind: `packages/minspec/src/extension.ts:856`
 
 ```ts
 const verdict = detectBuildSkew(folder, isMinspecRepo);
 if (verdict.kind !== 'stale') return;
 ```
 
-(Line 745 in this worktree — the issue body cited `:690`; the file has grown since #1517 was
+(Lines 855-856 in this worktree — the issue body cited `:690`; the file has grown since #1517 was
 filed.) `detectBuildSkew` (`packages/minspec/src/lib/build-provenance.ts:99-145`) returns four
 verdict kinds — `not-applicable`, `current`, `stale`, `unknown` — and `surfaceBuildSkewAdvisory`
 acts on exactly one of them. A build stamped `unknown` (whether from this bug, a shallow clone,
@@ -106,40 +107,33 @@ DR-066 clause 1. Running it on this worktree reports clean (45 scripts scanned).
    branched on — so even a widened swallow pattern would not fire without a second rule
    ("flows into a build artifact").
 
-The file the original draft of this spec called the natural home, SPEC-054's
-`scripts/check-gate-signals.ts`, is still absent (`ls scripts/check-gate-signals*` → no such
-file). So FR-3 no longer has to choose between "wait for SPEC-054" and "build a new linter":
+`scripts/check-gate-signals.ts` (SPEC-054 FR-1/FR-2) exists in this worktree, but it classifies
+only gate-signal WRITES (commit status, check-run, gate label) — not a local provenance-fallback
+assignment like `sha="$(cmd || echo unknown)"`. So FR-3 no longer has to choose between "wait for SPEC-054" and "build a new linter":
 an existing, shipped, shell-scoped, annotation-aware (`# swallow-ok:` / `# swallow-known: #N`),
 fail-closed check is the extension point. DQ-1 is revised accordingly (Option D).
 
-### (Superseded framing, kept for the record) The SPEC-054 linter does not exist yet
+### SPEC-054's linter exists but does not cover this pattern
 
-[SPEC-054](../SPEC-054-gate-signal-linter/requirements.md) (`status: planning`, `plan:
-in-progress`, `implement: pending`) specifies `scripts/check-gate-signals.ts` — verified absent
-from this worktree (`ls scripts/check-gate-signals*` → no such file). So the issue's claim that
-"nothing enforces [invariant #2] on shell scripts" is doubly true right now: not only does
-SPEC-054's linter not cover shell scripts for *this* pattern, SPEC-054's linter does not exist
-in any form yet. FR-3 below is scoped against SPEC-054's **eventual** shape, not against
-present code, and DQ-1 asks Plan to resolve the sequencing rather than let two specs each half-own
-the same future file.
-
-Separately: SPEC-054 FR-1, as specified, only classifies a write as gate-relevant when it POSTs a
-*commit status, check-run, or gate-relevant label*. A shell variable assignment like
+[SPEC-054](../SPEC-054-gate-signal-linter/requirements.md) (`status: planning`) specifies
+`scripts/check-gate-signals.ts`, and that file exists in this worktree as a working linter
+(verified by `ls scripts/check-gate-signals.ts`). Earlier drafts of this spec wrongly called it
+absent; that claim is retracted. SPEC-054 FR-1 only classifies a write as gate-relevant when it
+POSTs a *commit status, check-run, or gate-relevant label*. A shell variable assignment like
 `sha="$(cmd || echo unknown)"` is none of those three — it is a **local provenance value**, not
-a network-visible gate signal. SPEC-054's existing FR-1 predicate would not catch this bug even
-once implemented, exactly as filed. Widening it to catch this shape is new scope, not a
-one-line addition to an existing rule (see FR-3 and DQ-1).
+a network-visible gate signal — so that linter would not catch this bug exactly as filed.
+Widening it is new scope, not a one-line addition to an existing rule (see FR-3 and DQ-1).
 
 ### The `unknown` verdict already fires in every workspace, not only the dogfood one — a live blast-radius risk for FR-2
 
-`surfaceBuildSkewAdvisory`'s dogfood gate (`extension.ts:743`) is
+`surfaceBuildSkewAdvisory`'s dogfood gate (`extension.ts:854`) is
 `fs.existsSync(path.join(folder, '.minspec', 'constitution.md'))`. Every repo that has run
 **MinSpec: Init** has that file (`scaffold.ts` writes it into every adopter, not only this
 repo), so the predicate is true in every consumer workspace today — a defect already recorded
 and normatively resolved at [SPEC-060 DQ-4](../SPEC-060-build-provenance-stamp/requirements.md#decisions-needed-clarify),
-but **not yet implemented** (verified: `extension.ts:743` still reads exactly the
+but **not yet implemented** (verified: `extension.ts:854` still reads exactly the
 `existsSync` check DQ-4 describes as the bug). Today that predicate bug is harmless in practice
-only because line 745 discards every verdict except `stale`, and a consumer's installed build
+only because line 856 discards every verdict except `stale`, and a consumer's installed build
 can almost never appear `stale` against a repo it was never built from (it is normally
 `unknown`, silently dropped). **If FR-2 below ships before SPEC-060 DQ-4's predicate fix
 lands, that silence is exactly what stops being silent** — every consumer workspace that ran
@@ -178,7 +172,7 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
   an explicit allow-annotation naming why the fallback is safe. **Where this check lives is a
   Clarify decision (DQ-1), not assumed here** (the shipped `check-swallowed-gate-signal.ts` is the
   leading candidate — see Context): SPEC-054 already claims
-  `scripts/check-gate-signals.ts` under `implements:` and is unimplemented, so this spec must not
+  `scripts/check-gate-signals.ts` under `implements:`, so this spec must not
   silently fork a second, competing owner of that file. *Rationale: issue's fix (3) — "the next
   `|| echo <default>` on a load-bearing signal reddens instead of shipping."*
 - **FR-4 (escape hatch is opt-in, not inherited).** If a non-git build path is ever wanted (e.g.
@@ -237,8 +231,8 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
   scope folded into SPEC-054 before it ships, as a standalone addition this spec owns once
   SPEC-054 exists, or as its own follow-up issue deferred behind SPEC-054's implementation?**
 
-  SPEC-054 already declares `implements: [scripts/check-gate-signals.ts, ...]` and is
-  unimplemented (`plan: in-progress`). This spec's FR-3 describes a **different predicate**
+  SPEC-054 already declares `implements: [scripts/check-gate-signals.ts, ...]` and that file
+  already exists (`status: planning` is the spec's lifecycle state, not a statement about the file). This spec's FR-3 describes a **different predicate**
   (a local-variable fallback assignment, not a network-visible status/check-run/label POST) that
   SPEC-054's own FR-1 text, as written, would not catch. Three real options:
   - **Option A — fold FR-3 into SPEC-054 as a new FR before SPEC-054 implements.** Keeps one
@@ -270,7 +264,7 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
   - *Recommendation to confirm:* **Option D (rec)** — supersedes the earlier Option C
     recommendation because the premise of C ("SPEC-054's linter does not exist, so wait") is
     now answered by a different, shipped linter. Cost: the false-positive sweep above, and it
-    leaves SPEC-054's own `check-gate-signals.ts` as a separate, not-yet-built checker, so the
+    leaves SPEC-054's own `check-gate-signals.ts` as a separate checker, so the
     "two matchers" drift risk (SPEC-054 R1/R3) is real and Plan must cross-reference both.
   - *Prior recommendation, retained for comparison:* **Option C** — split FR-3 out now as a filed follow-up
     (dependent on SPEC-054), and let this spec ship the concrete instance fix (FR-1/FR-2/FR-4)
@@ -298,7 +292,7 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
     Costs: FR-2 ships whenever SPEC-060 gets there, which may be much later than FR-1/FR-4, and
     this issue's fix (2) stays open for that whole window.
   - *Recommendation to confirm:* **Option A (rec)** — the predicate fix is a two-line change
-    (`extension.ts:743`) already fully specified by SPEC-060 DQ-4's three normative steps, so
+    (`extension.ts:854`) already fully specified by SPEC-060 DQ-4's three normative steps, so
     bundling it removes the sequencing risk directly rather than trusting two independently
     dispatched PRs to land in the right order. Cost: the ownership note above, which Plan must
     write explicitly rather than skip.
