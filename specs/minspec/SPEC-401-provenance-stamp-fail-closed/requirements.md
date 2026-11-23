@@ -1,5 +1,5 @@
 ---
-id: SPEC-080
+id: SPEC-401
 type: requirements
 status: specifying
 tier: T3
@@ -59,7 +59,7 @@ the code, not trusting a prior citation).
 sha="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 ```
 
-The comment eight lines above it (`:26-28`) already names the hazard for the *dirty-tree* case
+The comment directly above it (`:26-28`) already names the hazard for the *dirty-tree* case
 ("silently stamping the last commit would misreport what is actually running") but the very
 next statement commits the sibling failure for the *no-commit-at-all* case: when `git rev-parse`
 fails — no `.git`, a detached worktree missing its object store, `git` absent from `PATH` — the
@@ -68,7 +68,7 @@ downstream consumer from a real (if unresolvable) SHA. This is constitution inva
 first clause by name: *"no load-bearing gate signal is written with a swallowed error
 (`|| true`)"* — `|| echo unknown` is the same shape with a friendlier spelling.
 
-The script already contains, four lines later (`:30-32`), the *pattern this spec asks it to
+The script already contains, on the very next lines (`:30-32`), the *pattern this spec asks it to
 extend*: a dirty tree does not silently reuse a stamp that would misdescribe the build — it
 mutates the stamp to say so (`-dirty` suffix). A `git rev-parse` failure gets no equivalent
 treatment; it is simply absorbed.
@@ -160,7 +160,7 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
   `surfaceBuildSkewAdvisory` MUST act on `verdict.kind === 'unknown'` as well as `'stale'`,
   informationally distinguishing the two (an `unknown` build is not necessarily behind — it may
   be a shallow clone or a different repo entirely — so the copy must not claim staleness it
-  cannot prove; see `detectBuildSkew`'s own doc comment at `build-provenance.ts:113-118` on why
+  cannot prove; see `detectBuildSkew`'s own doc comment at `build-provenance.ts:99-102` on why
   `unknown` must never be reworded as `stale`). **FR-2 MUST NOT ship ahead of, or independently
   of, the `isMinspecRepo` predicate fix that [SPEC-060 DQ-4](../SPEC-060-build-provenance-stamp/requirements.md#decisions-needed-clarify)
   already specifies** — shipping FR-2 first turns that pre-existing, currently-silent predicate
@@ -171,7 +171,7 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
   blast-radius gap FR-2 would otherwise open.*
 - **FR-3 (extend gate-signal-style detection to shell-script provenance fallbacks).** A
   deterministic, offline check MUST flag a shell assignment of the shape
-  `<var>="$(<cmd> ... || echo <default>)"` (or the `|| printf`/`|| :`-suffixed equivalents) in
+  `<var>="$(<cmd> ... || echo <default>)"` (or the `|| printf` equivalent; `|| :` is already matched by the existing `SWALLOW` regex, `scripts/lib/swallowed-gate-signal.ts:109`, so the new gaps are the substituted-default shapes and the value-reaches-an-artifact rule) in
   `scripts/**.sh` when `<var>` is subsequently used as a provenance or gate-relevant value (e.g.
   baked into a build artifact via `--define`, written to a signpost file, or otherwise read by
   a consumer that cannot tell "real value" from "the fallback string") — unless the line carries
@@ -207,8 +207,7 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
   `sha="$(git rev-parse HEAD 2>/dev/null || echo unknown)"` (i.e. this exact bug, reproduced as a
   fixture) is flagged by the check with no allow-annotation present.
 - **AC-6 (FR-3, negative — the annotated escape hatch).** The same fixture line, carrying a valid
-  allow-annotation with a reason, produces zero findings — mirroring SPEC-054 FR-2's
-  already-specified annotation shape, reused rather than reinvented (DQ-1).
+  allow-annotation with a reason, produces zero findings — using the annotation grammar of whichever checker DQ-1 selects (SPEC-054 FR-2's shape under Options A-C; the shipped `# swallow-ok:` grammar under Option D), reused rather than reinvented.
 - **AC-7 (FR-4).** A build invoked with the explicit opt-in flag, under an unresolvable `git`,
   produces an artifact stamped with an unambiguous "unstamped" marker (not the string `unknown`,
   which this spec's own AC-5 fixture now treats as a *finding* string) and does not exit non-zero;
@@ -228,7 +227,7 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
   invariant #3 that DQ-2's sequencing exists to protect, not a restatement of SPEC-060's INV-3
   in isolation.
 - **INV-4 (single owner per implementing file — SPEC-038 FR-3).** Whichever spec ends up
-  claiming `scripts/check-gate-signals.ts` (or wherever FR-3's checker lands per DQ-1) is
+  claiming `scripts/check-gate-signals.ts` (or `scripts/lib/swallowed-gate-signal.ts` under DQ-1 Option D, or wherever FR-3's checker lands) is
   declared `implements:` by exactly one spec at a time; this spec does not declare it until
   DQ-1 is resolved.
 
@@ -254,7 +253,7 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
     pattern this repo's own conventions warn against (SPEC-051 INV-5, cited inside SPEC-054
     itself) — a future contributor has to know both exist.
   - **Option C — defer FR-3 to its own follow-up issue, filed now, scoped explicitly to run
-    after SPEC-054 ships**, and this spec (SPEC-080) ships only FR-1/FR-2/FR-4 (the
+    after SPEC-054 ships**, and this spec (SPEC-401) ships only FR-1/FR-2/FR-4 (the
     build-extension.sh and runtime-surface halves). Costs: the class-level fix (any future
     `|| echo <default>` on a provenance variable) stays unenforced for longer, exactly the
     "fixes the instance, not the property" gap the issue's own recommendation warned against
@@ -321,7 +320,7 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
   only as a *prerequisite* for FR-2's safety, under SPEC-060's own `implements:` ownership — this
   spec does not claim authorship of `isMinspecRepo` beyond what DQ-2's Option A requires.
   Reflected in `implements:`/`affects:` staying empty in this frontmatter until Plan settles DQ-2.
-- **Implementing SPEC-054 itself.** FR-3 depends on SPEC-054 existing (DQ-1); this spec does not
+- **Implementing SPEC-054 itself.** Under DQ-1 Options A-C, FR-3 depends on SPEC-054 existing (Option D, the recommendation, has no such dependency); this spec does not
   build SPEC-054's own seven FRs.
 - **Any non-git packaging path beyond the explicit FR-4 opt-in.** No new supported build
   provenance sources (e.g. reading a CI-injected SHA from an env var) are introduced here.
@@ -334,7 +333,7 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
 - **Builds on:** [SPEC-060](../SPEC-060-build-provenance-stamp/requirements.md) — stamp-and-surface
   build provenance; this spec is the fail-closed/unknown-surfacing half SPEC-060's own FR-1/FR-3
   did not cover.
-- **Depends on (DQ-1):** [SPEC-054](../SPEC-054-gate-signal-linter/requirements.md) — gate-signal
+- **Depends on (only if DQ-1 resolves to Options A-C; none under recommended Option D):** [SPEC-054](../SPEC-054-gate-signal-linter/requirements.md) — gate-signal
   linter, not yet implemented in this worktree.
 - **Related:** [#1504](https://github.com/AIClarityAU/minspec/issues/1504).
 - **Method:** RCDD (mechanism + missing gate) — root cause named in the issue itself: *"a
