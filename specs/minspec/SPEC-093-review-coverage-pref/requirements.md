@@ -14,7 +14,7 @@ implements: [scripts/lib/review-coverage.sh, packages/minspec/tests/review-cover
 # Modified, not owned. review-pr.sh is owned by SPEC-031 (reviewer across all approvables) and
 # dispatch-issue.sh by SPEC-044 (coordinated self-completing sessions) via their `implements:`
 # lines. ci-review-templates.ts is regenerated because review-pr.sh is a drift-gated source
-# (scripts/gen-ci-templates.mjs:96). The #600 label test is touched only under DQ-3 option a.
+# (scripts/gen-ci-templates.mjs:97). The #600 label test is touched only under DQ-3 option a.
 # .github/workflows/ai-review.yml is deliberately ABSENT - see INV-6.
 affects: [scripts/review-pr.sh, scripts/dispatch-issue.sh, .gitignore, packages/minspec/src/lib/ci-review-templates.ts, packages/minspec/tests/dispatch-no-local-ai-review-label.test.ts]
 phases:
@@ -36,26 +36,32 @@ coverage pref plus the adversarial panel), the follow-up that
 [DR-047](../../../docs/decisions/DR-047.md) (independent AI review across every approvable)
 Decision 6 names at `DR-047.md:369-370`.
 
-> **On the number.** `main` holds specs up to SPEC-086. Local branches in this checkout
-> already carry directories numbered 087 to 092 (092 three times over), so highest-on-main
-> plus one would collide. 093 is the lowest number that neither `main` nor any locally
-> visible branch claims. Open pull requests on the forge were **not** checked - this dispatch
-> has no network - so 093 is inferred free, not verified free. The spec-id collision gate
-> (`scripts/lib/spec-id-collision.ts`) is the authority once this is pushed.
+> **On the number.** Read against the merge base `bcf26b36`, `specs/minspec/` holds
+> directories up to SPEC-387, with a gap between SPEC-090 and SPEC-095 (no 091 to 094), so
+> 093 is free on disk there. A highest-plus-one rule would not give 093; it is taken
+> because it sits in that gap, which is also why no existing directory is displaced. Open
+> pull requests on the forge were **not** checked - this dispatch has no network - so 093
+> is inferred free, not verified free. The spec-id collision gate
+> (`scripts/lib/spec-id-collision.ts`) is the authority once this is pushed, not this
+> paragraph.
 
 ## Read this first - most of #453 already shipped
 
 The issue was written on 2026-07-04. Two of its commits landed shortly after
 (`3b2e64df` the skeptic role, `8d653f99` the panel wiring, merged as `9763f1df`), and the
-issue stayed open. Read against `main` at `8bfc5cc5`, its five work items stand like this:
+issue stayed open. Every `file:line` citation in this spec was re-read against the merge
+base `bcf26b36` (the base this pull request merges into); an earlier draft cited
+`8bfc5cc5`, an ancestor, and its numbers had drifted by 150 to 1800 lines. Line numbers
+still rot, so treat each as "as of `bcf26b36`" and re-resolve it by the symbol named beside
+it at Clarify and Plan. Its five work items stand like this:
 
 | Issue item | State on `main` | Evidence |
 |---|---|---|
-| 1. Per-dev pref `none / single / panel` in a gitignored file | **Not built.** | No file, script or ignore rule mentions `review-coverage`; the only hits for the string are prose. CI has a *repo-level* variable instead, with two levels and no `none`: `.github/workflows/ai-review.yml:299-300`. |
-| 2. Panel voters reviewer + security + architect + skeptic | **Built, in CI only.** | Voters required at `ai-review.yml:422-436`, launched at `:475-486`; `scripts/review-branch.sh:55-58` accepts all four roles. |
-| 3. New `scripts/roles/skeptic.md` | **Built.** | The file exists (67 lines) and is scaffolded to adopters (`scripts/gen-ci-templates.mjs:161`). |
-| 4. Fail-closed merge rule across N verdicts | **Built, in CI only, and stricter than the issue asked.** | `ai-review.yml:583-610`. It has three outcomes, not two - see "The combine rule moved on" below. |
-| 5. Wire `review-pr.sh` to the pref and dispatch 1 or 4 voters | **Not built.** | `scripts/review-pr.sh:186-190` runs one voter, always `reviewer.md`. The dispatch-time stage runs at most two (`scripts/dispatch-issue.sh:949`, `:957`). |
+| 1. Per-dev pref `none / single / panel` in a gitignored file | **Not built.** | No file, script or ignore rule mentions the proposed `.minspec/review-coverage` path; the substring `review-coverage` also appears in the unrelated token `ai-review-coverage-disclosure` (`.github/workflows/ai-review.yml:1010`, `packages/minspec/tests/ai-review-verdict-label-coherence.test.ts:13`), which is CI's disclosure block and not this preference. CI has a *repo-level* variable instead, with two levels and no `none`: `.github/workflows/ai-review.yml:473-478`. |
+| 2. Panel voters reviewer + security + architect + skeptic | **Built, in CI only.** | Voters required at `ai-review.yml:672-699`, launched at `:739-750`; `scripts/review-branch.sh:74-75` accepts all four roles. |
+| 3. New `scripts/roles/skeptic.md` | **Built.** | The file exists (67 lines) and is scaffolded to adopters (`scripts/gen-ci-templates.mjs:162`). |
+| 4. Fail-closed merge rule across N verdicts | **Built, in CI only, and stricter than the issue asked.** | `ai-review.yml:816-875`. It has three outcomes, not two - see "The combine rule moved on" below. |
+| 5. Wire `review-pr.sh` to the pref and dispatch 1 or 4 voters | **Not built.** | `scripts/review-pr.sh:199` runs one voter, always `reviewer.md`. The dispatch-time stage runs at most two (`scripts/dispatch-issue.sh:1801`, `:1809`). |
 
 So this spec covers the remainder: the preference itself (item 1) and the two **local**
 runners that should obey it (item 5). It does not re-specify the skeptic role or the CI
@@ -75,28 +81,28 @@ already uses, and saying in every output which level ran and why.
 
 | Surface | Who runs | Voters today | Writes the gating label? |
 |---|---|---|---|
-| **CI** - `.github/workflows/ai-review.yml` | every pull request | reviewer always; security when any changed file is not Markdown (`:422-424`); architect and skeptic when coverage is `panel` (`:431-436`) | Yes - the only authorized writer |
-| **Dispatch stage** - `run_reviewer_stage`, `scripts/dispatch-issue.sh:941` | every agent dispatch, after the push | reviewer always (`:949`); security only when the diff touches `packages/` (`:956-957`) | No - comment only, pinned by a test (`dispatch-no-local-ai-review-label.test.ts`, the #600 no-local-label rule) |
-| **Manual runner** - `scripts/review-pr.sh` | a developer, by hand; no script or workflow calls it | reviewer only (`:186-190`), with no tools, over a diff truncated at 180000 bytes (`:113-124`) | **Yes** (`:246-248`) |
+| **CI** - `.github/workflows/ai-review.yml` | every pull request | reviewer always; security when any changed file is not Markdown (`:685-688`); architect and skeptic when coverage is `panel` (`:694-699`) | Yes - the only authorized writer |
+| **Dispatch stage** - `run_reviewer_stage`, `scripts/dispatch-issue.sh:1789` | every agent dispatch, after the push | reviewer always (`:1801`); security only when the diff touches `packages/` (`:1807`) | No - comment only, pinned by a test (`dispatch-no-local-ai-review-label.test.ts`, the #600 no-local-label rule) |
+| **Manual runner** - `scripts/review-pr.sh` | a developer, by hand; no script or workflow calls it | reviewer only (`:199`), with no tools, over a diff truncated at 180000 bytes (`:127-135`) | **Yes** (`:258-260`) |
 
 Three things in that table are defects this spec has to deal with, because a preference
 layered on top would otherwise mean something different on each surface:
 
 1. **The security predicate drifted.** CI widened it from "touches `packages/`" to "any
    non-Markdown file" in commit `a43b825e`. The dispatch stage still uses the old one
-   (`dispatch-issue.sh:956`), so a dispatch that changes only `scripts/` or `.github/` gets
+   (`dispatch-issue.sh:1807`), so a dispatch that changes only `scripts/` or `.github/` gets
    no local security read, while CI gives it one.
 2. **The dispatch stage has no "could not run" outcome.** Its combine is "pass only if every
-   voter passed, otherwise changes" (`dispatch-issue.sh:966-970`). A voter that died on a
-   quota limit therefore posts `--request-changes` on the pull request (`:1123-1129`) - an
+   voter passed, otherwise changes" (`dispatch-issue.sh:1816-1821`). A voter that died on a
+   quota limit therefore posts `--request-changes` on the pull request (`:2031-2036`) - an
    objection nobody made. CI fixed exactly this as #1234 (absent voter read as an objection).
    With up to four local voters instead of two, the local copy of the defect gets more
    likely, not less.
 3. **The manual runner writes the merge-gating label.** #600 established that only CI
    applies `ai-review:*`, because two writers raced on one label and produced a
-   pass-revert-pass churn (`dispatch-issue.sh:1106-1114`). The test that pins it scans only
+   pass-revert-pass churn (`dispatch-issue.sh:1747-1751`, `:2000-2021`). The test that pins it scans only
    `dispatch-issue.sh`. `review-pr.sh` still removes `ai-review:changes` and adds its own
-   verdict (`:246-248`). Reading `decideStatus` (`.github/scripts/ai-review-guard.js:1047-1064`),
+   verdict (`:258-260`). Reading `decideStatus` (`.github/scripts/ai-review-guard.js:1823-1888`),
    I believe a locally applied `pass` cannot turn the merge gate green on its own, because the
    gate also needs a head-bound witness that only CI posts, while a locally applied `changes`
    **can** turn it red. That is read from the code, not exercised.
@@ -104,7 +110,7 @@ layered on top would otherwise mean something different on each surface:
 ### The combine rule moved on since the issue was written
 
 The issue asks for "fail-closed OR - any voter's `blocking > 0` gives `ai-review:changes`".
-CI now implements a three-outcome rule with a fixed precedence (`ai-review.yml:583-610`):
+CI now implements a three-outcome rule with a fixed precedence (`ai-review.yml:816-875`):
 
 - any required voter said **changes** - result `ai-review:changes`;
 - otherwise any required voter was **blocked** (could not run) or **did not report** -
@@ -118,7 +124,7 @@ adds only that an outage is not reported as an objection. This spec adopts the s
 
 `.minspec/review-coverage` is to be gitignored, so a CI runner never sees it. CI's depth is
 the repository variable `AI_REVIEW_COVERAGE`, and it accepts only `single` and `panel`; any
-other value, `none` included, resolves to `panel` (`ai-review.yml:300`). That is the correct
+other value, `none` included, resolves to `panel` (`ai-review.yml:478`). That is the correct
 behaviour under constitution invariant 2 (no silent gate): `ai-review` is a required,
 merge-gating check, and a per-developer file must not be able to switch it off.
 
@@ -128,17 +134,17 @@ review". It does not mean, and cannot mean, "this pull request is not AI-reviewe
 
 ### The preference file has to be found from a linked worktree
 
-The precedent is `.minspec/auto-drain`: gitignored (`.gitignore:119`), one word of content,
-written by a script flag (`scripts/drain-inbox.sh:1922`) and read by comparing the whole file
-to a literal (`:1935`). That script finds the file relative to its own location (`:123`).
+The precedent is `.minspec/auto-drain`: gitignored (`.gitignore:122`), one word of content,
+written by a script flag (`scripts/drain-inbox.sh:4418-4420`) and read by comparing the whole file
+to a literal (`:4433`). That script resolves the file beside the repository's common git directory, that is the primary checkout root, and falls back to its own checkout root only outside a git repo (`:234-240`, #2715).
 
-That is not enough here. An ignored file exists only in the working tree where it was
+The common-git-directory lookup is the part to copy; a naive script-relative path is not enough here. An ignored file exists only in the working tree where it was
 written. A dispatch runs from a linked worktree, and the drain can run `dispatch-issue.sh`
-from its self-synced run directory (`drain-inbox.sh:644-646`, default
+from its self-synced run directory (`drain-inbox.sh:259-266`, default
 `/tmp/minspec-drain-run`). Resolved relative to the script, the preference would be absent in
 both, and every dispatch would silently fall back to the default whatever the developer set.
 The auto-drain file already had a silent path-drift bug of this family
-(`drain-inbox.sh:1830-1833`).
+(`drain-inbox.sh:4294-4297`).
 
 ### Why no new DR
 
@@ -175,7 +181,7 @@ coverage, and DQ-2 recommends a local default of `single`.
 - **FR-5 - Absent means the default; invalid never means `none`.** With no file, the level
   is the default chosen in DQ-2. With an invalid file, the level is `panel` and the resolver
   prints a warning to stderr naming the file and the rejected content - the same
-  "unknown value fails toward coverage" rule CI applies at `ai-review.yml:300`. A typo must
+  "unknown value fails toward coverage" rule CI applies at `ai-review.yml:478`. A typo must
   never reduce review.
 - **FR-6 - Set and show.** There is a documented way to set the level that refuses anything
   other than the three values, so a typo is caught when written rather than when read, and a
@@ -194,7 +200,7 @@ coverage, and DQ-2 recommends a local default of `single`.
   be determined, `security` is required at `single` and `panel`. The local roster must not
   drop a voter because an enumeration failed.
 - **FR-9 - Equivalence with CI is tested, not asserted.** A test runs the CI roster block
-  (`ai-review.yml:422-436`) and the local roster over one shared table of (coverage, changed
+  (`ai-review.yml:672-699`) and the local roster over one shared table of (coverage, changed
   files) rows and fails on any difference at `single` and `panel`. This is the same
   executed-verbatim technique `ai-review-verdict-combine.test.ts` already uses on the combine
   block, and it is what stops the security predicate drifting a second time.
@@ -207,7 +213,7 @@ coverage, and DQ-2 recommends a local default of `single`.
   and never as changes. Each voter's label still comes from `scripts/review-decide.sh`,
   unchanged.
 - **FR-11 - Equivalence with CI is tested.** A test runs the CI combine block
-  (`ai-review.yml:583-610`) and the local combine over one shared table and fails on any
+  (`ai-review.yml:816-875`) and the local combine over one shared table and fails on any
   difference.
 - **FR-12 - An empty roster is not a pass.** Combining zero voters yields no verdict at all.
   The `none` level never produces `ai-review:pass`; it produces a statement that no review
@@ -217,19 +223,19 @@ coverage, and DQ-2 recommends a local default of `single`.
 
 - **FR-13 - `none` skips the voters and nothing else.** `run_reviewer_stage` also ensures the
   labels exist, ensures the pull request exists, and applies the native auto-merge policy
-  (`dispatch-issue.sh:1010-1090`). Under `none` all of that still runs; only the voter calls
+  (`dispatch-issue.sh:1868-1994`). Under `none` all of that still runs; only the voter calls
   and the advisory post are skipped, and the stage prints one line saying the local advisory
   review was skipped by preference, with the file path.
 - **FR-14 - `single` and `panel` run the roster.** The stage runs every voter FR-7 requires,
   through `scripts/review-branch.sh --role <role>` as today. Voters run concurrently with
-  staggered starts, as CI does (`ai-review.yml:467-486`), so wall-clock is the slowest voter
+  staggered starts, as CI does (`ai-review.yml:725-750`), so wall-clock is the slowest voter
   and not the sum.
 - **FR-15 - `blocked` is posted as what it is.** When the combined result is `blocked`, the
   stage posts a plain comment saying the local review could not run and that CI's review is
   unaffected. It does not post `--request-changes`. `pass` and `changes` post as today.
 - **FR-16 - The advisory body names every required voter.** One section per voter that was
   required, in a fixed order, each showing that voter's rendered verdict block or the reason
-  it has none. The existing pre-publish egress scan (`dispatch-issue.sh:983-1003`) covers the
+  it has none. The existing pre-publish egress scan (`dispatch-issue.sh:1843-1860`) covers the
   whole body, all voters included, and still withholds on any hit or scan failure.
 
 ### The manual runner
@@ -247,7 +253,7 @@ coverage, and DQ-2 recommends a local default of `single`.
   file-reading tools over whatever branch the developer happens to have checked out: the
   skeptic would then "verify" a claim against a different tree from the one under review.
 - **FR-20 - Truncation still wins.** The deterministic truncation backstop
-  (`review-pr.sh:33-40`, `:215`) applies to the combined result: a truncated diff yields
+  (`review-pr.sh:33-40`, `:227`) applies to the combined result: a truncated diff yields
   `ai-review:changes` whatever the voters said, at every level above `none`.
 - **FR-21 - One comment, every voter.** The runner posts a single findings comment carrying
   each required voter's block. Whether it also writes the label is DQ-3.
@@ -259,7 +265,7 @@ coverage, and DQ-2 recommends a local default of `single`.
   `invalid`); the voters that ran; and each voter that did not run with the reason
   (docs-only change, or reduced coverage). When the level is below `panel`, the comment says
   in words that this is reduced coverage and that CI's review is the one that gates the
-  merge. This mirrors CI's disclosure block (`ai-review.yml:747-781`).
+  merge. This mirrors CI's disclosure block (`ai-review.yml:997-1044`).
 - **FR-23 - A comment never overstates its roster.** Fixed footer text that describes the
   reviewer as a single agent, or as a panel, is replaced by text generated from the roster
   that actually ran.
@@ -327,7 +333,7 @@ invoked, counted by the test, not that a real model was called.
   shipped behaviour so a later edit cannot quietly add a `none` arm to CI.)
 - **AC-20 (INV-5, under DQ-3 option a)** - The #600 no-local-label test covers
   `scripts/review-pr.sh` as well as `scripts/dispatch-issue.sh`, and fails on `main`'s
-  current `review-pr.sh:246-248`.
+  current `review-pr.sh:258-260`.
 
 ## Invariants (must not break)
 
@@ -358,7 +364,7 @@ invoked, counted by the test, not that a real model was called.
 - **INV-8 - The dispatch stage never throws.** Any failure in resolving the level, building
   the roster, or running a voter degrades to a warning and a fail-closed result, and never
   blocks the labelling and issue-comment steps that follow (the existing never-throw rule at
-  `dispatch-issue.sh:897-898`).
+  `dispatch-issue.sh:1745-1746`).
 - **INV-9 - The generated template mirror stays in step.** `review-pr.sh` is a drift-gated
   source; the same change regenerates `packages/minspec/src/lib/ci-review-templates.ts`.
 
@@ -396,7 +402,7 @@ CI, and CI's review is a required merge gate.
 
 ### DQ-3 - Does `review-pr.sh` keep writing the `ai-review:*` label?
 
-Today it does (`review-pr.sh:246-248`), which the #600 rule forbids for the dispatch path.
+Today it does (`review-pr.sh:258-260`), which the #600 rule forbids for the dispatch path.
 Once a preference exists, a `single`-level local run could put its label on a pull request
 that CI reviewed at `panel`.
 
@@ -445,7 +451,7 @@ SPEC-031 (reviewer across all approvables) FR-7 describes a per-dev depth slider
   SHA; local runs have no such record and reuse nothing.
 - **A per-invocation override** (a flag or environment variable that beats the file) - not
   asked for; the file is the single source so that "show" is always the truth.
-- **Per-project code-surface detection.** `ai-review.yml:420-421` and SPEC-069 (approval
+- **Per-project code-surface detection.** `ai-review.yml:682-684` and SPEC-069 (approval
   record deterministic witness) both attribute "durable code-surface detection" to #453. The
   issue body contains no such item; the nearest owner is SPEC-033 (repo governance
   provisioning) decision D-4. This spec does not build it, and the two citations are left as
@@ -454,7 +460,7 @@ SPEC-031 (reviewer across all approvables) FR-7 describes a per-dev depth slider
   dispatch summary for a human to file.
 - **Scaffolding the preference into adopter repositories** - `dispatch-issue.sh` is not
   scaffolded (SPEC-033 FR-6 is the open work) and `review-pr.sh` is drift-gated but not
-  scaffolded (`gen-ci-templates.mjs:90-97`), so no adopter runs a consumer of this file.
+  scaffolded (`gen-ci-templates.mjs:97`), so no adopter runs a consumer of this file.
 
 ## Alternatives considered and rejected
 
@@ -470,11 +476,11 @@ SPEC-031 (reviewer across all approvables) FR-7 describes a per-dev depth slider
   Rejected for this spec: it edits a scaffolded workflow and adds a scaffolded dependency,
   spreading a local-preference change into every adopter repository. Tested equivalence gets
   the same guarantee with the workflow untouched. The repository already uses pinned
-  hand-copies where a workflow cannot import a module (`ai-review.yml:395-403`).
+  hand-copies where a workflow cannot import a module (`ai-review.yml:627-632`).
 - **Give `review-pr.sh` voters file tools by pointing them at the current checkout.**
   Rejected: the checkout is not the reviewed tree (FR-19).
 - **Run local panel voters one after another.** Rejected: CI measured ten minutes for a
-  three-line change that way (`ai-review.yml:438-446`).
+  three-line change that way (`ai-review.yml:702-704`).
 - **The issue's two-outcome merge rule.** Superseded by the shipped three-outcome rule, which
   blocks in every case the issue's rule blocks and additionally keeps an outage retry-able.
 
