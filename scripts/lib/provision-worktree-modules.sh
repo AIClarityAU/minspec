@@ -66,6 +66,12 @@ provision_worktree_modules() {
   # An unset launcher makes this `bash ""`, which fails: no scrubbed environment, no install.
   if ! (cd "$wt" && bash "$AGENT_LAUNCH_ENV" npm ci --offline --ignore-scripts --git=false --no-audit --no-fund >&2); then
     echo "  node_modules: 'npm ci --offline' failed in ${wt}." >&2
+    # #3972: a container restart empties an overlay-resident npm cache, so every offline
+    # install then fails ENOTCACHED. Name that cause instead of leaving a bare npm error.
+    local cache="${npm_config_cache:-${NPM_CONFIG_CACHE:-${HOME:-}/.npm}}"
+    if [[ -z "$(ls -A "${cache}/_cacache" 2>/dev/null)" ]]; then
+      echo "  npm cache is empty (${cache}/_cacache missing): likely a container restart wiped it. Run one online 'npm ci', or set npm_config_cache to a host-mounted path (#3972)." >&2
+    fi
     return 1
   fi
   if [[ -L "${wt}/node_modules" || ! -x "${wt}/node_modules/.bin/tsx" ]] \
