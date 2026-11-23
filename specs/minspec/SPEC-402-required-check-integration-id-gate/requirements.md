@@ -88,11 +88,11 @@ witness — is still missing, for two separate reasons:
 
 ### The existing core treats "never observed" as inconclusive — #1525 asks for the opposite
 
-`auditRequiredCheckPins` (`ruleset-integration-audit.ts:135-188`) classifies a pinned context
+`auditRequiredCheckPins` (`ruleset-integration-audit.ts:176-229`) classifies a pinned context
 with zero observed check-runs in the sample as `unobserved`, documented as *"Inconclusive …
-NOT a failure"* (`:124-126`), and `hasIntegrationIdMismatch` — the function the CLI's exit
-code is keyed to — explicitly excludes `unobserved` (`:191-193`, pinned by test at
-`ruleset-integration-audit.test.ts:136-141`). That is a reasonable reading for a
+NOT a failure"* (`:165-167`), and `hasIntegrationIdMismatch` — the function the CLI's exit
+code is keyed to — explicitly excludes `unobserved` (`:232-234`, pinned by test at
+`ruleset-integration-audit.test.ts:186-191`). That is a reasonable reading for a
 **human-invoked, one-off audit**: a context might simply not have run in the sampled window
 yet (new context, infrequent trigger, sample too small).
 
@@ -103,8 +103,8 @@ closed."* Both framings are internally consistent; they disagree because they ar
 different questions (audit vs. gate). This spec does not resolve that disagreement by edit —
 see **DQ-2**, because flipping the shipped, tested `unobserved` semantics is itself a
 behavior change to code covered by the `auditRequiredCheckPins` suite's 7 tests
-(`ruleset-integration-audit.test.ts:102-179`), 3 of which exercise the `unobserved` status
-and one of which (`:136-141`) directly pins `hasIntegrationIdMismatch` to `false` for it —
+(`ruleset-integration-audit.test.ts:152-230`), 3 of which exercise the `unobserved` status
+and one of which (`:186-191`) directly pins `hasIntegrationIdMismatch` to `false` for it —
 not a free clarification.
 
 ### Where #1525's recommended location collides with blast radius (DR-074 / invariant 3)
@@ -128,7 +128,7 @@ repo-local workflow file instead, with scaffolding to other repos deferred to **
 #1525's Option A names its cost as *"it needs an App JWT to read ruleset config, so the job
 depends on the App credential being present."* That mechanism **already exists and already
 runs in this repo**: `.github/workflows/ai-review.yml` mints a minspec-sdd[bot] installation
-token today via `actions/create-github-app-token` (`:192`) from the `MINSPEC_APP_PRIVATE_KEY`
+token today via `actions/create-github-app-token` (`:224`) from the `MINSPEC_APP_PRIVATE_KEY`
 secret, specifically so a job can act with more than the default `GITHUB_TOKEN`'s permissions.
 Reusing that step is not new infrastructure. What is **unverified** is whether the existing
 App installation's permission grant already includes repository `administration: read` — the
@@ -249,7 +249,7 @@ possibly-contradictory investigations of the same App-permission gap.
 - **DQ-2 — Does "zero observed runs fails" change the shipped `ruleset-integration-audit.ts`
   core, or only the CI wiring around it?**
   - **(A) Wiring-only (recommended).** The pure core's `unobserved` status and the 7 tests in
-    the `auditRequiredCheckPins` suite (`ruleset-integration-audit.test.ts:102-179`) stay
+    the `auditRequiredCheckPins` suite (`ruleset-integration-audit.test.ts:152-230`) stay
     exactly as shipped (correct for the human-invoked one-off audit use case they were built
     for); the CI wrapper treats `unobserved` as a failing exit code for *its own* purposes, the
     same way `hasIntegrationIdMismatch` is already a thin policy function on top of the pure
@@ -259,7 +259,7 @@ possibly-contradictory investigations of the same App-permission gap.
     core's own docblock both need to say explicitly.
   - **(B) Change the core.** Flip `hasIntegrationIdMismatch` (or add a stricter sibling) to
     also return true on `unobserved`. *Cost:* breaks the shipped semantics and the suite's test
-    at `:136-141` that pins `unobserved` as non-failing for the one-off audit CLI's own exit
+    at `:186-191` that pins `unobserved` as non-failing for the one-off audit CLI's own exit
     code, for a use case (unattended gate) the core was not written against.
   - *Recorded recommendation:* **(A)** — the gate's stricter read is a property of being a
     *gate*, not a correction to the audit's own honest "I don't know yet" state.
