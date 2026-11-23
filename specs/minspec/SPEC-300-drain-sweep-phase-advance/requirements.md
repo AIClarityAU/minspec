@@ -1,15 +1,15 @@
 ---
 id: SPEC-300
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness — shared/background automation over a committed, multi-checkout truth
 relates_to: [SPEC-012, SPEC-076]  # SPEC-012 owns the resolver this sweep reuses (FR-4 composes, never re-derives); SPEC-076 is the read-only headless-CLI precedent this sweep's write-adjacent sibling follows for root/marker handling
 depends_on: [DR-057]
 phases:
-  specify: in-progress
-  plan: pending
+  specify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 implements:

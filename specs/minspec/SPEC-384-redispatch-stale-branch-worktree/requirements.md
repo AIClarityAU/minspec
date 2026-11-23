@@ -107,9 +107,17 @@ Changing the daily junk sweep; general crash detection (`agent-crashed` labellin
     onto the issue branch, and a failed commit must abort to deferral.
   - **(c) Defer to a human:** leave it, exit as declined, and label the issue. Cost: a crashed issue
     never self-heals, contradicting tenet 1 (smaller founder job).
+
+  **Recorded selection: the recommended option,** (a), reuse the dead owner's worktree in place. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 - **D2 — Liveness witness.** Reuse the SPEC-044 lease expiry (rec; one witness, already fail-closed;
   cost: a crashed session's lease must expire first, delaying recovery by up to one lease TTL) versus
   also checking the sid's process (faster, but a second producer that can disagree and is
   host-local).
+
+  **Recorded selection: the recommended option,** reuse the SPEC-044 lease expiry as the one liveness witness. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 - **D3 — Scope of "held by".** Treat a holder outside `WORKTREE_BASE` as in flight (rec; safest, cost:
   a human checkout holding the branch blocks dispatch until they release it) versus erroring loudly.
+
+  **Recorded selection: the recommended option,** treat a holder outside `WORKTREE_BASE` as in flight. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.

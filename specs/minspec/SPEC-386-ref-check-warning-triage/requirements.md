@@ -140,12 +140,16 @@ or the exemption file.
   editing approved specs (hash lock).
 - (c) Edit SPEC-051/310/122 to use unmistakable placeholders. Cost: three re-approvals.
 
+**Recorded selection: the recommended option,** (a), add the example ids to `reference-check-exemptions.json`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 **Q2. Non-repo paths (FR-2)?**
 - (a) Exempt absolute (`/`-rooted) paths only **(rec)**. Narrow, mechanical; cost: does not
   cover relative cross-repo paths like `net/unix/af_unix.c`, which then need (b).
 - (b) Per-path entries in the exemption file. Precise; cost: grows a list by hand.
 - (c) Leave the 10 `docs/decisions/` warnings. Cost: permanent noise in a gate meant to be
   clean.
+
+**Recorded selection: the recommended option,** (a), exempt absolute (`/`-rooted) paths only. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
 
 **Q3. When may the fidelity tier leave warning severity (FR-5)?**
 - (a) Stay warning until the count is under a numeric threshold (issue's suggestion) **(rec)**,
@@ -162,6 +166,8 @@ or the exemption file.
 - (b) One issue per top cluster (SPEC-070 etc.). Cost: most would not change a decision within
   30 days (CLAUDE.md filing rule), so it is issue noise.
 - (c) Bulk-fix by regenerating citations. Cost: mass re-approval of approved specs.
+
+**Recorded selection: the recommended option,** (a), one backlog line per cluster in `docs/backlog.md`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
 
 ## Out of Scope
 
