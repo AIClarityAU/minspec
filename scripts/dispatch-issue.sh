@@ -3203,13 +3203,18 @@ else
   # that WAITS out a usage limit (rather than erroring at it) prints no limit notice, so the
   # drain's text classifier cannot see it, and this path used to stamp it `agent-crashed` +
   # `needs-human-review`: a quota condition filed as a harness crash. Ask the meter. A closed
-  # window is the witness that the kill was quota; anything else (open, unreadable, no
-  # reading) leaves the crash path below exactly as it was, so this can only RECLASSIFY a
-  # timeout, never hide one.
+  # window is the witness that the kill was quota. `--quota-cap` fails CLOSED when it cannot
+  # read the meter (`closed unknown | defer:stale|no-reading|no-scratch|no-verdict|bad-config`,
+  # exit 42): that is a BLIND meter, not an observed closed window, so it is not a witness and
+  # the crash path below keeps it. Anything else (open, blind) leaves the crash path exactly as
+  # it was, so this can only RECLASSIFY a timeout on an observed closed window, never hide one.
   QUOTA_TIMEOUT_VERDICT=""
   if [[ "$AGENT_RC" == "124" || "$AGENT_RC" == "137" ]] \
      && ! QUOTA_TIMEOUT_VERDICT=$(bash "${SCRIPT_DIR}/drain-inbox.sh" --quota-cap 2>/dev/null) \
-     && [[ "$QUOTA_TIMEOUT_VERDICT" == closed* ]]; then
+     && [[ "$QUOTA_TIMEOUT_VERDICT" == closed* ]] \
+     && [[ "$QUOTA_TIMEOUT_VERDICT" != "closed unknown"* ]] \
+     && [[ "$QUOTA_TIMEOUT_VERDICT" != *"defer:stale"* && "$QUOTA_TIMEOUT_VERDICT" != *"defer:no-"* \
+           && "$QUOTA_TIMEOUT_VERDICT" != *"defer:bad-config"* ]]; then
     # Readiness is KEPT (no needs-human-review, no agent-crashed): the issue is retried once the
     # window reopens. Only the running stamp comes off.
     gh issue edit "$ISSUE" --repo "$REPO" --remove-label "agent-running" 2>/dev/null || true  # swallow-ok: the claim release on exit is the load-bearing step; a stale agent-running label is cleared by the next claim

@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { useShellTimeout } from './helpers/shell-timeout';
 
@@ -58,6 +59,27 @@ describe('#1713 quota-attributed build timeout', () => {
     expect(block).not.toContain('needs-human-review');
     expect(block).not.toContain('agent-crashed');
     expect(block).toContain('--remove-label "agent-running"');
+  });
+
+  it('a blind meter (closed unknown / stale / no-reading) is not a quota witness and keeps the crash path', () => {
+    const elseAt = dispatch.indexOf('AGENT_RC=$?');
+    const crashAt = dispatch.indexOf('#1307 — a CRASH raises the human gate');
+    const cond = dispatch.slice(elseAt, crashAt).split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')
+      .match(/if \[\[ "\$AGENT_RC"[\s\S]*?; then/)![0];
+    const run = (verdict: string, rc: number): string => {
+      const script = `AGENT_RC=${rc}; SCRIPT_DIR=$T; ${cond.replace(/\$\{SCRIPT_DIR\}\/drain-inbox.sh/, '$T/fake.sh')} echo QUOTA; else echo CRASH; fi`;
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qt-'));
+      fs.writeFileSync(path.join(dir, 'fake.sh'), `echo '${verdict}'\nexit ${verdict.startsWith('open') ? 0 : 42}\n`);
+      const r = spawnSync('bash', ['-c', script.replace(/\$T/g, dir)], { encoding: 'utf-8' });
+      fs.rmSync(dir, { recursive: true, force: true });
+      return r.stdout.trim();
+    };
+    expect(run('closed 7d 95% vs 92.4% ramped; 5h not judged | defer:600 (7d window)', 124)).toBe('QUOTA');
+    expect(run('closed unknown | defer:stale (reading is old)', 124)).toBe('CRASH');
+    expect(run('closed unknown | defer:no-scratch (mktemp failed)', 137)).toBe('CRASH');
+    expect(run('closed 7d unreported; 5h not judged | defer:no-reading (x)', 124)).toBe('CRASH');
+    expect(run('open 7d 10%', 124)).toBe('CRASH');
+    expect(run('closed 7d 95% vs 92.4% ramped | defer:600', 1)).toBe('CRASH');
   });
 
   it('the drain pauses the cycle on a quota outcome on both dispatch paths', () => {
