@@ -7,6 +7,12 @@ product: minspec
 epic: EPIC-002  # Signpost Integrity — two parsers answering one question drift into a false signpost
 aspects: [blocked-by, parity, redos, machinery, single-source, tier-0]
 relates_to: ["#2199", "#2196", "#2135", "#1247", SPEC-371]
+implements:
+  - .github/scripts/ai-review-guard.js
+  - .github/scripts/ai-review-guard.test.js
+  - scripts/lib/issue-rank.ts
+  - packages/minspec/tests/issue-rank.test.ts
+  - packages/minspec/src/lib/ci-review-templates.ts
 ---
 
 # SPEC-380: One blocked-by grammar, imported by both the ai-review guard and the issue ranker (Requirements)
