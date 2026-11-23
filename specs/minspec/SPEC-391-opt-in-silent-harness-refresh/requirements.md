@@ -1,5 +1,5 @@
 ---
-id: SPEC-097
+id: SPEC-391
 type: requirements
 status: specifying
 tier: T3
@@ -60,7 +60,7 @@ bootstrap step (see Context).
 
 ## One-Sentence Scope
 
-Give the `refresh` step of the auto-bootstrap toast (`packages/minspec/src/lib/auto-bootstrap.ts:616-631`)
+Give the `refresh` step of the auto-bootstrap toast (`packages/minspec/src/lib/auto-bootstrap.ts:645-659`)
 the same opt-in, per-project, reversible "Always" standing-consent affordance the `classify`
 step already has (#2079), so that once a user has said "Always auto-update," a later genuine
 template bump (per the #117-fixed detector) runs `refreshHarnessFiles` and shows its existing
@@ -71,19 +71,29 @@ would.
 
 ## Context — what the code does today (read from the worktree, not inferred)
 
-**The generic "Always" mechanism already exists and is reused, not invented.** `BootstrapStep`
-carries optional `alwaysAction` / `alwaysPrefKey` / `alwaysSettingKey` / `alwaysRunArg` fields
-(`auto-bootstrap.ts:480-597`, read for the exact field set during this trace). The `classify`
-step is the one step that currently sets them (`auto-bootstrap.ts:643-649`): `alwaysAction:
-'Always'`, `alwaysPrefKey: 'autoClassifyOnCommit'`, `alwaysSettingKey: 'autoClassifyOnCommit'`.
-`runBootstrap` checks `alwaysChosen(step, prefs, vscode)` **before** offering any toast
-(`auto-bootstrap.ts:895-898`) and, when true, calls `runStepUnattended` (`:857-871`), which
-either runs the step's in-process `action` or `vscode.executeCommand(step.commandId, rootDir,
-step.alwaysRunArg ?? step.commandArg)` — no prompt. `alwaysChosen` reads the project
-preference first, the contributed VS Code setting second (`resolveProjectPreference`,
-DR-078 §4 read order, `auto-bootstrap.ts:839-851`), so a project-local `false` can always
-override a machine-wide `true` setting — "reversible" per the issue's design sketch is
-already a property of this mechanism, not something to build.
+**The "Always" read side is generic; the click side is not.** `BootstrapStep` carries optional
+`alwaysAction` / `alwaysPrefKey` / `alwaysSettingKey` / `alwaysRunArg` fields
+(`auto-bootstrap.ts:574-605`). The `classify` step is the one step that currently sets them
+(`auto-bootstrap.ts:671-677`): `alwaysAction: 'Always'`, `alwaysPrefKey:
+'autoClassifyOnCommit'`, `alwaysSettingKey: 'autoClassifyOnCommit'` (a **bare** key — the host's
+`getBooleanSetting` already reads inside the `minspec` configuration section,
+`extension.ts:763-766`), `alwaysRunArg: { auto: true }`. `runBootstrap` checks
+`alwaysChosen(step, prefs, vscode)` **before** offering any toast (`auto-bootstrap.ts:929`)
+and, when true, calls `runStepUnattended` (`:891`), which either runs the step's in-process
+`action` or `vscode.executeCommand(step.commandId, rootDir, step.alwaysRunArg ??
+step.commandArg)` (`:903`) — no prompt. `alwaysChosen` reads the project preference first, the
+contributed VS Code setting second (`resolveProjectPreference`, DR-078 §4 read order,
+`:873`), so a project-local `false` can always override a machine-wide `true` setting. That
+read path needs no change.
+
+**The click handler is classify-specific and must be fixed.** When the user clicks an
+`alwaysAction`, `runBootstrap` persists `alwaysPrefKey` and then calls
+`vscode.enableAutoClassify(rootDir)` for **every** step that declares an `alwaysAction`
+(`auto-bootstrap.ts:954-968`); the host implementation writes `minspec.autoClassifyOnCommit =
+true` at Workspace scope (`extension.ts:749-757`). Giving `refresh` an `alwaysAction` without
+changing that branch would make "Always auto-update" also switch on auto-classify-on-commit,
+a consent the user never gave (constitution invariant 3). So FR-1 includes a small handler
+change, and this spec is **not** zero-code beyond the step-table entry.
 
 The `refresh` step (`auto-bootstrap.ts:616-631`) sets none of `alwaysAction` /
 `alwaysPrefKey` / `alwaysSettingKey` / `alwaysRunArg` today. It is otherwise shaped exactly
@@ -93,25 +103,25 @@ and `signature: harnessDriftSignature` (#883) already makes the toast re-ask onl
 exactly "genuine drift, every time," not a bug in the signature memory.
 
 **The notification and commit-offer the issue asks to add already exist, on the manual
-path.** `initRefreshCommand` (`packages/minspec/src/commands/init.ts:1482-1533`) — the
+path.** `initRefreshCommand` (`packages/minspec/src/commands/init.ts:1621-1672`) — the
 `commandId` the toast's primary "Refresh" button already dispatches — runs
 `refreshHarnessFiles`, then unconditionally shows a non-modal
-`vscode.window.showInformationMessage(refreshSummaryMessage(warnings))` (`:1517`), surfaces
-any `ManagedRegionWarning` (`:1518-1520`), and offers the commit via `offerScaffoldCommit`
-(`:1525`, the same affordance Initialize gives, SPEC-058). `refreshSummaryMessage`
-(`:1474-1480`) is deliberately **not** an unconditional "edits preserved" claim — per its own
+`vscode.window.showInformationMessage(refreshSummaryMessage(warnings))` (`:1656`), surfaces
+any `ManagedRegionWarning` (`:1657-1659`), and offers the commit via `offerScaffoldCommit`
+(`:1666`, the same affordance Initialize gives, SPEC-058). `refreshSummaryMessage`
+(`:1613`) is deliberately **not** an unconditional "edits preserved" claim — per its own
 comment, it says only what the refresh has evidence for (#1697 NEW-A1) — so the issue's
 proposed wording ("refreshed N harness sections — review via git diff") is a stronger claim
 than MinSpec currently has evidence to make truthfully (see DQ-1 below). Because `runStepUnattended`
 dispatches through the same `commandId`, wiring the `alwaysAction` fields onto `refresh`
-makes the unattended path run this exact notification/commit-offer code for free — the
+makes the unattended path run this exact notification/commit-offer code — the
 "auditable thereafter" half of the issue's design is inherited, not newly specified.
 
 **What an unconditional unattended `initRefreshCommand` run would newly introduce.**
-`initRefreshCommand` also calls `offerRemoteRenameAdvisory` (`:1531`) and
-`offerRulesetAdvisory` (`:1532`) unconditionally after every refresh. Both shell out: the
-remote-rename advisory runs `git` (`init.ts:679-693`) and the ruleset advisory probes `gh`
-and, when `gh` is ready, the GitHub API (`init.ts:908-919`, `isGhReady`/`resolveRepo`). Each
+`initRefreshCommand` also calls `offerRemoteRenameAdvisory` (`:1670`) and
+`offerRulesetAdvisory` (`:1671`) unconditionally after every refresh. Both shell out: the
+remote-rename advisory runs `git` (`init.ts:691`) and the ruleset advisory probes `gh`
+and, when `gh` is ready, the GitHub API (`init.ts:926`, `isGhReady`/`resolveRepo`). Each
 has its own one-time/declined-config suppression, so neither nags on every call — but routing
 the **first-ever** silent refresh through the unmodified command would, on a project that has
 never answered either advisory, run a `git config` read and (if `gh` is authenticated) a
@@ -124,33 +134,47 @@ gap DQ below resolves; it is not addressed by anything already shipped.
 
 ## Functional Requirements
 
-- **FR-1 — `refresh` gets the same "Always" affordance as `classify`.** The `refresh`
-  `BootstrapStep` entry (`auto-bootstrap.ts:616-631`) MUST set `alwaysAction` (a label distinct
-  from `classify`'s, e.g. `'Always auto-update'`, so the two toasts' buttons read
-  unambiguously when either could in principle be the one showing), a new `alwaysPrefKey`
-  (e.g. `'silentHarnessRefresh'`), and a new `alwaysSettingKey` (e.g.
-  `'minspec.autoRefreshHarness'`) following the exact pattern `classify` uses.
+- **FR-1 — `refresh` gets an "Always" affordance, and the click handler stops being
+  classify-specific.** The `refresh` `BootstrapStep` entry (`auto-bootstrap.ts:645-659`) MUST
+  set: `alwaysAction` (a label distinct from `classify`'s, e.g. `'Always auto-update'`);
+  `alwaysPrefKey: 'silentHarnessRefresh'`; `alwaysSettingKey: 'autoRefreshHarness'` — a
+  **bare** key, exactly like classify's `'autoClassifyOnCommit'`, because `getBooleanSetting`
+  already scopes to the `minspec` section (the contributed setting is therefore
+  `minspec.autoRefreshHarness`; passing the prefixed form would be read as
+  `minspec.minspec.autoRefreshHarness`, always false); and `alwaysRunArg: { silent: true }`,
+  the only channel by which the unattended path (`runStepUnattended`,
+  `auto-bootstrap.ts:903`) can hand anything to the command. The "Always" click branch
+  (`auto-bootstrap.ts:954-968`) MUST call `vscode.enableAutoClassify` only for the classify
+  step (e.g. a new optional `BootstrapStep` field such as `alwaysEnablesAutoClassify`, set
+  on classify only, or an equivalent per-step hook); clicking "Always auto-update" MUST NOT
+  write `minspec.autoClassifyOnCommit`.
 - **FR-2 — New preference key, same storage and read order as every other "Always."**
   `BootstrapPreferences` (`preferences.ts:26-93`) MUST gain the new boolean key, and
-  `AlwaysPrefKey` (`preferences.ts:98`) MUST include it. No new store: DR-078 §1 names
+  `AlwaysPrefKey` (`preferences.ts:102`) MUST include it. No new store: DR-078 §1 names
   `.minspec/preferences.json` as the one place MinSpec persists a preference, and this key
   lives there exactly like `autoClassifyOnCommit`, gitignored and per-project — never
   `ConfigurationTarget.Global` (DR-078, constitution invariant 3).
 - **FR-3 — New VS Code setting, mirroring `minspec.autoClassifyOnCommit`'s contribution
-  shape.** `packages/minspec/package.json` MUST contribute a boolean setting (FR-1's
-  `alwaysSettingKey`), default `false`, with a description naming what it does and that it is
+  shape.** `packages/minspec/package.json` MUST contribute a boolean setting
+  `minspec.autoRefreshHarness` (the full name of FR-1's bare `alwaysSettingKey`), default `false`, with a description naming what it does and that it is
   off by default — so a workspace can pre-enable standing consent without ever clicking
   the toast, exactly as `autoClassifyOnCommit` already allows for classification.
 - **FR-4 — The unattended run must not newly reach the network.** Resolved by whichever
-  option DQ-1 below settles. Whatever the unattended `refresh` path calls, it MUST run
+  option DQ-1 below settles; under the recommended option the `silent` flag arrives as the
+  command's second argument (`extension.ts:404` forwards it to `initRefreshCommand`'s `deps`
+  parameter), so `deps`'s type widens to carry `silent?: boolean`. Whatever the unattended `refresh` path calls, it MUST run
   `refreshHarnessFiles`, the existing summary notification, and the existing commit offer;
   it MUST NOT call `offerRulesetAdvisory` or `offerRemoteRenameAdvisory` as a side effect of
   silent template-drift auto-updates — those stay reachable only from a path the user
-  directly invoked (the Command Palette command, or the toast's one-shot "Refresh" button).
+  directly invoked (the Command Palette command, the toast's one-shot "Refresh" button, or
+  the one-time run triggered by the "Always auto-update" click itself, which goes through
+  `executeCommand(step.commandId, rootDir, step.commandArg)` at `auto-bootstrap.ts:969` with
+  no `silent` flag — a user-initiated run, so the advisories are decided to be in scope there,
+  on purpose).
 - **FR-5 — "Always" is reversible per project.** Unchanged behavior of the existing
-  mechanism (`resolveProjectPreference`, DR-078 §4): setting the new preference key to
+  mechanism's read path (`resolveProjectPreference`, DR-078 §4): setting the new preference key to
   `false` in `.minspec/preferences.json`, or disabling the new setting where no project
-  preference overrides it, restores the toast. No new code needed beyond FR-1/FR-2 wiring
+  preference overrides it, restores the toast. No new read-side code beyond FR-1/FR-2 wiring
   this key through the existing read order — call this out explicitly as an Acceptance
   Criterion (AC-5) rather than assuming it, since it is the issue's stated "reversible"
   requirement.
@@ -168,8 +192,10 @@ gap DQ below resolves; it is not addressed by anything already shipped.
   first, per `auto-bootstrap.ts:913-917`).
 - **AC-2.** Clicking "Always auto-update" (a) persists `silentHarnessRefresh: true` to
   `.minspec/preferences.json` before running anything (mirrors `auto-bootstrap.ts:925-929`),
-  and (b) runs the refresh once immediately, showing the same notification a manual Refresh
-  would.
+  and (b) runs the refresh once immediately through the full, non-silent path
+  (`step.commandArg`, no `silent` flag — the same run a manual "Refresh" click makes,
+  advisories included, because the user started it), and (c) does **not** write
+  `minspec.autoClassifyOnCommit` or start the classify watcher.
 - **AC-3.** On a later activation with a **new** genuine drift (different drifted-section
   signature) and `silentHarnessRefresh: true` already set, no toast appears; the refresh runs
   automatically and the non-modal summary notification (and commit offer) still appear.
@@ -204,8 +230,11 @@ gap DQ below resolves; it is not addressed by anything already shipped.
   one project's choice.
 - **INV-4 — Edit-preservation is untouched.** `mergeFile`'s section-merge behavior (#1697) is
   not modified by this spec; AC-7 pins it.
-- **INV-5 — Existing `classify` "Always" behavior is unaffected.** `autoClassifyOnCommit`'s
-  key, setting, and read order are untouched; the new key is additive.
+- **INV-5 — `classify` and `refresh` "Always" are independent.** `autoClassifyOnCommit`'s
+  key, setting, and read order are untouched, and classify still enables its watcher on its
+  own click. The reverse direction is enforced by FR-1: the refresh click never enables
+  auto-classify. A test clicks "Always auto-update" and asserts `enableAutoClassify` is not
+  called and `autoClassifyOnCommit` is not written.
 
 ## Decisions needed (Clarify)
 
@@ -225,9 +254,10 @@ today.
   where either advisory has not yet been declined/suppressed, the first silent refresh would
   be the first time either advisory's network probe runs with no toast in front of it at all.
 - **Option B — add a `silent` flag to `initRefreshCommand`, threaded through to skip the two
-  advisory calls (rec).** Reuses the exact notification/commit-offer code (no duplication);
+  advisory calls (rec).** The flag rides the second command argument (`alwaysRunArg: { silent:
+  true }` → `deps`, see FR-1/FR-4), not a new positional parameter. Reuses the exact notification/commit-offer code (no duplication);
   isolates the one behavioral difference the unattended path actually needs. **Cost:** one
-  new parameter and two `if (!silent)` guards in `init.ts`, plus a test asserting the
+  new optional `deps` field and two `if (!silent)` guards in `init.ts`, plus a test asserting the
   advisories are skipped specifically when `silent: true`.
 - **Option C — a new, separate function that only calls `refreshHarnessFiles` + builds its
   own notification, bypassing `initRefreshCommand` entirely.** **Cost:** duplicates
@@ -243,7 +273,7 @@ issue's proposed wording), or keep `refreshSummaryMessage`'s existing, evidence-
 wording work in this spec).
 
 - **Option A — unchanged message, both paths (rec).** `refreshSummaryMessage` already says
-  only what the refresh has evidence for (`init.ts:1454-1472`); matching the issue's literal
+  only what the refresh has evidence for (`init.ts:1613`); matching the issue's literal
   wording ("refreshed N harness sections") would need a truthful per-run section count the
   function does not currently compute from `warnings` alone (the drifted-section list lives
   in `harnessDriftSignature`'s own computation, not in `refreshHarnessFiles`'s return value).
