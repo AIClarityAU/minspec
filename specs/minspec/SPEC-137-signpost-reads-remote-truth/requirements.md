@@ -32,10 +32,10 @@ The Next-Task signpost must never name an item that is already resolved on `orig
 
 ## Functional requirements
 
-- **FR-1 Behind detection.** Before resolving, compute how far `HEAD` is behind the base ref (`origin/main`) using only local refs (`git rev-list --count HEAD..origin/main`); no fetch, no network (invariant 1).
+- **FR-1 Behind detection.** Before resolving, compute how far `HEAD` is behind the base ref (`origin/main`) using only local refs (`git rev-list --count HEAD..<base ref>`, base ref per D2; `origin/main` is the fallback); no fetch, no network (invariant 1).
 - **FR-2 Honest staleness.** When behind by N>0, every signpost surface (status bar, toast, tree) states "reading is N commits behind origin/main" next to the answer. Silence is not permitted when N>0.
 - **FR-3 Unknown fails visible.** If the base ref is missing, git is unavailable, or the count errors, the signpost shows "freshness unknown" rather than presenting the reading as current (invariant 2, no silent gate). The Tier-0 resolver itself stays pure and unchanged.
-- **FR-4 Remote-truth status (the removal, see Decision D1).** Approvable status (`status:` of DRs/specs) used by the resolver is read from the base ref (`git show origin/main:<path>`) when that ref resolves, so an item accepted upstream is never named as outstanding.
+- **FR-4 Remote-truth status (the removal, see Decision D1).** Approvable status (`status:` of DRs/specs) used by the resolver is read from the base ref (`git show <base ref>:<path>`) when that ref resolves, so an item accepted upstream is never named as outstanding.
 - **FR-5 Local work still counts.** Items that exist only locally (new uncommitted/unpushed spec or DR, branch work) are still surfaced from the working tree; remote truth overrides only the *status of items that exist on the base ref*.
 - **FR-6 Offline.** All of the above uses locally cached refs only. Refreshing `origin/main` is the user's act (or an existing opted-in fetch), never done silently by the signpost.
 - **FR-7 Degrade.** Any failure in FR-1/FR-4 degrades to the working-tree reading plus the FR-3 notice; it must not throw (INV-DEGRADE from SPEC-012).
@@ -43,12 +43,15 @@ The Next-Task signpost must never name an item that is already resolved on `orig
 
 ## Acceptance criteria
 
-- **AC-1 (repro).** Fixture: working tree has `DR-072` `status: proposed`; `origin/main` has it `accepted`; HEAD behind by 7. The signpost does not name DR-072 and shows the behind notice.
-- **AC-2.** Same fixture with option D1=B (notice only): signpost may name DR-072 but MUST include "7 commits behind".
+- **AC-1 (repro; applies under D1=A or D1=C, not D1=B).** Fixture: working tree has `DR-072` `status: proposed`; `origin/main` has it `accepted`; HEAD behind by 7. The signpost does not name DR-072 and shows the behind notice.
+- **AC-2 (applies only under D1=B).** Same fixture with option D1=B (notice only): signpost may name DR-072 but MUST include "7 commits behind".
 - **AC-3.** No `origin/main` ref: signpost shows "freshness unknown", does not throw.
 - **AC-4.** Item present only in the working tree (not on base) is still surfaced.
 - **AC-5.** Up to date (N=0): output identical to today (no new text).
 - **AC-6.** Test binds the source of truth at the T0 level: given a tree behind its base, the signpost never names an item resolved upstream. The test must fail on the current code (red-first).
+- **AC-8 (precedence).** Item on the base ref with a newer uncommitted local `status:` change (e.g. a local accept not yet pushed): the working-tree status wins and the signpost reflects it; remote status overrides only when the working-tree copy is unmodified relative to `HEAD`. Settled in Clarify if D1 changes this rule.
+- **AC-9 (rename/move).** Item renamed or moved between the base ref and the working tree: matched by approvable id (`DR-NNN`/`SPEC-NNN`), not path; a path-only miss must not fall back to treating it as local-only with a stale status.
+- **AC-10 (base-ref fallback).** Where D2 resolves `origin/HEAD` and falls back to `origin/main`: a repo with no `origin/HEAD` uses the fallback and the output states which base ref was read.
 - **AC-7.** No network call is made (spy on spawned git args: only `rev-list`, `show`, `rev-parse`).
 
 ## Invariants this must not break
