@@ -95,7 +95,7 @@ changing that branch would make "Always auto-update" also switch on auto-classif
 a consent the user never gave (constitution invariant 3). So FR-1 includes a small handler
 change, and this spec is **not** zero-code beyond the step-table entry.
 
-The `refresh` step (`auto-bootstrap.ts:616-631`) sets none of `alwaysAction` /
+The `refresh` step (`auto-bootstrap.ts:645-659`) sets none of `alwaysAction` /
 `alwaysPrefKey` / `alwaysSettingKey` / `alwaysRunArg` today. It is otherwise shaped exactly
 like `classify`: `shouldRun` gates on `hasHarnessDrift` (the #117-fixed, raw-vs-raw detector),
 and `signature: harnessDriftSignature` (#883) already makes the toast re-ask only on a
@@ -295,7 +295,7 @@ wording work in this spec).
   entry points; a dedicated command/status-bar toggle is a separate, smaller follow-up if
   wanted (not filed — raise only if a human asks for it).
 - Reporting *which* preserved-without-baseline sections exist with more detail than today —
-  tracked separately as #1753, referenced in `init.ts:1468-1472`, not touched here.
+  tracked separately as #1753, referenced in `init.ts:1609`, not touched here.
 
 ## Why no new DR
 
