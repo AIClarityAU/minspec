@@ -209,7 +209,7 @@ it appears.
   - (c) Delete `transitionPhase`. It has no production caller. Cost: three test files
     lose their tool, and the first future actor that needs a generic advance rewrites it,
     probably without the guard, which is the exact gap DQ-2 wanted to close.
-  **Recorded selection: the recommended option,** (a), keep `transitionPhase`, guard it, and report a refusal as `{ success: false, warning }` with no write. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
+  **Recorded selection: the recommended option,** (a), keep `transitionPhase`, guard it, and report a refusal as `{ success: false, warning }` with no write. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 
 - **D2. How the guard learns the real target (FR-3).**
   - (a) **(rec)** Add an optional `nextPhases` argument to
@@ -222,7 +222,7 @@ it appears.
   - (b) Reuse the approval simulation for every caller. Cost: it judges a state the writer
     is not about to write. For `skip` and for partially-done maps it can pass a transition
     that arms an error, or refuse one that does not, which breaks FR-3.
-  **Recorded selection: the recommended option,** (a), an optional `nextPhases` argument to `assertOwnershipDeclaredForAdvance`, with `violationsIntroducedByApproval` as a one-line wrapper. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
+  **Recorded selection: the recommended option,** (a), an optional `nextPhases` argument to `assertOwnershipDeclaredForAdvance`, with `violationsIntroducedByApproval` as a one-line wrapper. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 
 - **D3. What the FR-5 witness is.**
   - (a) **(rec)** A source-scan test over `packages/minspec/src/**` and `scripts/**`. It
@@ -245,7 +245,7 @@ it appears.
   - (c) The issue's Option 2: a test asserting that every `advanceSpecToImplementing`
     call site is preceded by the guard. Cost: it watches the one function already guarded
     internally and is blind to `transitionPhase`, the actual gap.
-  **Recorded selection: the recommended option,** (a), a source-scan test over `packages/minspec/src/**` and `scripts/**` against a reviewed allowlist. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
+  **Recorded selection: the recommended option,** (a), a source-scan test over `packages/minspec/src/**` and `scripts/**` against a reviewed allowlist. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 
 ## Risks
 

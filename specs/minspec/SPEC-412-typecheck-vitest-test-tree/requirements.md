@@ -107,7 +107,7 @@ tree, so that a green typecheck is evidence about the tests as well as `src/`.
   emit; a mistake pollutes `out/` and the `.vsix`.
 - (c) Leave as is. **Cost:** a green typecheck stays vacuous for tests.
 
-**Recorded selection: the recommended option,** (a), a new `tsconfig.vitest.json` per package, added to `typecheck`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
+**Recorded selection: the recommended option,** (a), a new `tsconfig.vitest.json` per package, added to `typecheck`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 
 ### D2. Scope of packages
 
@@ -115,7 +115,7 @@ tree, so that a green typecheck is evidence about the tests as well as `src/`.
   are also uncovered.** Matches the issue's scope. **Cost:** a possible second PR.
 - (b) All three packages in one PR. **Cost:** a bigger red backlog in one change.
 
-**Recorded selection: the recommended option,** (a), minspec first; core and shared in the same PR only if the control shows they are also uncovered. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
+**Recorded selection: the recommended option,** (a), minspec first; core and shared in the same PR only if the control shows they are also uncovered. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 
 ### D3. How to land a red backlog
 
@@ -125,4 +125,4 @@ tree, so that a green typecheck is evidence about the tests as well as `src/`.
 - (b) Land the config with a baseline of tolerated errors. **Cost:** a baseline is a
   silent-gate shape (invariant 2); rejected unless the count is unmanageable.
 
-**Recorded selection: the recommended option,** (a), fix all errors in the same PR so the gate lands green. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
+**Recorded selection: the recommended option,** (a), fix all errors in the same PR so the gate lands green. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.

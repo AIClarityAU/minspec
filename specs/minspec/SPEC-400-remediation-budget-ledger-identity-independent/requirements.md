@@ -163,7 +163,7 @@ what is considered "ours", not whether authorship matters.
   `MINSPEC_REMEDIATE_AUTHOR_LOGINS` is today's manual mitigation; making it the only path
   keeps the silent reset. Not recommended on its own.
 
-**Recorded selection: the recommended option,** (a), detect and stop. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
+**Recorded selection: the recommended option,** (a), detect and stop. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 
 ### D2: After a stop under (a), how does the operator continue?
 
@@ -172,7 +172,7 @@ what is considered "ours", not whether authorship matters.
   machine.
 - **(b) A one-shot `--accept-author <login>` flag.** Cost: a new interface to maintain.
 
-**Recorded selection: the recommended option,** (a), add the old login to `MINSPEC_REMEDIATE_AUTHOR_LOGINS`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-24; sign-off ratifies it.
+**Recorded selection: the recommended option,** (a), add the old login to `MINSPEC_REMEDIATE_AUTHOR_LOGINS`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 
 ## Follow-ups (tracked)
 
