@@ -2235,7 +2235,7 @@ SHEPHERD_MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"
 #   stuck — the shepherd's OWN automation gave up (ceiling, attempt cap, rebase or fix that
 #           produced nothing): `agent-stuck`, NOT `needs-human-review`, so no consumer reads
 #           it as a human decision. Anything but the literal "human" fails closed to stuck.
-#           The delegated-merge lane reads it (#4016): a handoff on an `agent-stuck` PR without a `hold:*` label is not a human claim.
+#           The delegated-merge lane reads it (#4016): a handoff on an `agent-stuck` PR with no `hold:*` label and no `needs-human-review` label is not a human claim (either label keeps the hold).
 #           Any later retry comes from the label-agnostic drain sweep (drain-inbox.sh
 #           `gh pr list --state open`), NOT from this label; remediate-pr.sh may still
 #           relabel `needs-human-review` when ITS own cap is hit.
@@ -2248,7 +2248,7 @@ shepherd_hand_off() {
   else
     label="agent-stuck"
     desc="Automation gave up — a failure marker, not a human decision (read only by the delegated-merge lane, #4016)"
-    tail='It is labelled `agent-stuck`: this is an automation failure rather than a human decision. Only the delegated-merge lane reads this label, to treat the handoff as not a human claim; a later drain sweep may retry it, and the remediation drain may escalate it to `needs-human-review` if it hits its own cap. The creator will make no further automated attempts.'
+    tail='It is labelled `agent-stuck`: this is an automation failure rather than a human decision. The delegated-merge lane reads this label, to treat the handoff as not a human claim; a later drain sweep may retry it, and the remediation drain may escalate it to `needs-human-review` if it hits its own cap. The creator will make no further automated attempts.'
   fi
   gh label create "$label" --repo "$REPO" --color fbca04 \
     --description "$desc" 2>/dev/null || true
