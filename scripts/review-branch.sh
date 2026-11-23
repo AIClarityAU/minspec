@@ -322,12 +322,22 @@ emit_unavailable() {
   out_len=$(agent_stdout_text | wc -c | tr -d ' ')
   if [[ -n "${AGENT_ERR//[[:space:]]/}" ]]; then branch="stderr(loose)"; else branch="stdout(strict)"; fi
 
+  # #1461 — when the PAYG failover was ATTEMPTED and failed, say so in the marker,
+  # with its own classification and its own (unfiltered) diagnostics. Without this the
+  # subscription attempt's `reason: quota` was re-emitted as if PAYG had never run, and
+  # the PR comment advised enabling a failover that was already configured.
+  local payg_block=""
+  if [[ -n "${PAYG_FAILOVER_RESULT:-}" ]]; then
+    payg_block=$(printf 'failover: payg attempted — %s\nfailover_detail: |\n%s\n' \
+      "$PAYG_FAILOVER_RESULT" "$(printf '%s\n' "${PAYG_FAILOVER_DETAIL:-(no diagnostic text on either stream)}" | tr -d '\r' | head -5 | sed 's/^/  /')")
+  fi
+
   if [[ -n "$detail" ]]; then
-    printf 'REVIEW_UNAVAILABLE_BEGIN\nreason: quota\nevidence: captured\nclassified_via: %s\nstderr_bytes: %s\nstdout_bytes: %s\ndetail: |\n%s\nREVIEW_UNAVAILABLE_END\n' \
-      "$branch" "$err_len" "$out_len" "$detail"
+    printf 'REVIEW_UNAVAILABLE_BEGIN\nreason: quota\nevidence: captured\nclassified_via: %s\nstderr_bytes: %s\nstdout_bytes: %s\n%sdetail: |\n%s\nREVIEW_UNAVAILABLE_END\n' \
+      "$branch" "$err_len" "$out_len" "$payg_block" "$detail"
   else
-    printf 'REVIEW_UNAVAILABLE_BEGIN\nreason: quota\nevidence: NONE (reason is inferred, not observed)\nclassified_via: %s\nstderr_bytes: %s\nstdout_bytes: %s\ndetail: |\n%s\nREVIEW_UNAVAILABLE_END\n' \
-      "$branch" "$err_len" "$out_len" "  (no diagnostic text on either stream — see #1630)"
+    printf 'REVIEW_UNAVAILABLE_BEGIN\nreason: quota\nevidence: NONE (reason is inferred, not observed)\nclassified_via: %s\nstderr_bytes: %s\nstdout_bytes: %s\n%sdetail: |\n%s\nREVIEW_UNAVAILABLE_END\n' \
+      "$branch" "$err_len" "$out_len" "$payg_block" "  (no diagnostic text on either stream — see #1630)"
   fi
 }
 
@@ -389,15 +399,33 @@ if quota_failure; then
   #     keep reviewing on PAYG instead of stalling for the whole reset window.
   if [[ "${AI_REVIEW_FAILOVER:-wait}" == "payg" && -n "${ANTHROPIC_API_KEY:-}" ]]; then
     echo "review-branch.sh: subscription quota hit — failing over to PAYG API (role=$ROLE)" >&2
+    # Keep the subscription attempt's evidence: run_reviewer overwrites AGENT_ERR/OUT.
+    SUBSCRIPTION_DETAIL="$(quota_detail)"
     run_reviewer payg || true
     if VERDICT_BLOCK="$(render_verdict "$AGENT_OUT")"; then
       printf '%s' "$VERDICT_BLOCK"
       exit 0
     fi
     echo "review-branch.sh: PAYG failover also produced no verdict (role=$ROLE)" >&2
+    # #1461 — surface WHY, exactly as the non-quota crash path does. This stream was
+    # captured and then discarded on the one path where the operator needs it most.
+    PAYG_FAILOVER_DETAIL="$(printf '%s\n%s' "$AGENT_ERR" "$(agent_stdout_text)")"
+    printf '%s\n' "$PAYG_FAILOVER_DETAIL" >&2
+    # Classify the PAYG attempt on its OWN output; the earlier quota_failure judged
+    # only the subscription attempt.
+    if quota_failure; then
+      PAYG_FAILOVER_RESULT="PAYG also rate-limited/quota-blocked (transient, retry-able)"
+    else
+      PAYG_FAILOVER_RESULT="PAYG failed for a non-quota reason (likely a dead/exhausted credential — retrying will not help; fix ANTHROPIC_API_KEY)"
+    fi
+    echo "review-branch.sh: $PAYG_FAILOVER_RESULT" >&2
   fi
   echo "review-branch.sh: reviewer UNAVAILABLE (quota/transient, role=$ROLE) — → ai-review:blocked (retry-able)" >&2
-  emit_unavailable "$(quota_detail)"
+  if [[ -n "${PAYG_FAILOVER_RESULT:-}" ]]; then
+    emit_unavailable "$SUBSCRIPTION_DETAIL"
+  else
+    emit_unavailable "$(quota_detail)"
+  fi
   exit 0
 fi
 
