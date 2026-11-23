@@ -1,5 +1,5 @@
 ---
-id: SPEC-080
+id: SPEC-390
 type: requirements
 status: specifying
 tier: T4
@@ -15,7 +15,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-080: The worktree project-rename defect is already fixed — verify and close, don't rebuild
+# SPEC-390: The worktree project-rename defect is already fixed — verify and close, don't rebuild
 
 > **This is a SPECIFICATION ONLY.** No code, script, or test is created by the dispatch
 > that produced it. A human reads this spec, resolves
