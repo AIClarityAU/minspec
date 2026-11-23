@@ -753,14 +753,21 @@ delegated_merge_handoffs_spent() {
 delegated_merge_human_claims() {
   local pr="$1" changed="${2-}" view="" head="" refs="" handoffs="" issue=""
   local marker="<!-- minspec-shepherd-handoff -->"
-  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments,author,body 2>/dev/null) \
+  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments,author,body,labels 2>/dev/null) \
      || ! head=$(printf '%s' "$view" | jq -r '.headRefName' 2>/dev/null) \
      || ! refs=$(printf '%s' "$view" | jq -r '.closingIssuesReferences | if type == "array" then .[].number else error("no list") end' 2>/dev/null) \
      || ! handoffs=$(printf '%s' "$view" | jq -r --arg m "$marker" '.comments | if type == "array" then [.[] | select((.body // "") | contains($m))] | length else error("no list") end' 2>/dev/null); then
     printf 'pr-claims-unreadable\tcould not read PR #%s closing links and comments; failing closed\n' "$pr"
     return 1
   fi
-  if [[ "$handoffs" != "0" ]] && ! delegated_merge_handoffs_spent "$pr" "$marker"; then
+  # #4016: a handoff on an `agent-stuck` PR (no `hold:*` label) is an automation failure,
+  # not a founder decision (#3835 split the label off at the producer). It is not a human
+  # claim, so the PR returns to the agent path. Unreadable or absent labels keep the hold, and so
+  # does `needs-human-review`: remediate-pr.sh adds it at its retry cap without removing
+  # `agent-stuck`, and that escalation is a request for a human, so the handoff stays live.
+  local stuck=""
+  stuck=$(printf '%s' "$view" | jq -r '(.labels // []) | if type == "array" then ([.[] | .name // ""] | (any(. == "agent-stuck") and (any(startswith("hold:")) | not) and (any(. == "needs-human-review") | not))) else false end' 2>/dev/null) || stuck=false  # swallow-ok: unreadable labels leave the handoff live (fail closed)
+  if [[ "$handoffs" != "0" && "$stuck" != "true" ]] && ! delegated_merge_handoffs_spent "$pr" "$marker"; then
     printf 'handed-to-human\tPR #%s was handed to the founder by its creator (shepherd handoff comment); a bot merge would take his decision\n' "$pr"
     return 1
   fi
@@ -2228,7 +2235,7 @@ SHEPHERD_MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"
 #   stuck — the shepherd's OWN automation gave up (ceiling, attempt cap, rebase or fix that
 #           produced nothing): `agent-stuck`, NOT `needs-human-review`, so no consumer reads
 #           it as a human decision. Anything but the literal "human" fails closed to stuck.
-#           No code reads `agent-stuck` (grep: zero consumers); it is a visibility marker.
+#           The delegated-merge lane reads it (#4016): a handoff on an `agent-stuck` PR with no `hold:*` label and no `needs-human-review` label is not a human claim (either label keeps the hold).
 #           Any later retry comes from the label-agnostic drain sweep (drain-inbox.sh
 #           `gh pr list --state open`), NOT from this label; remediate-pr.sh may still
 #           relabel `needs-human-review` when ITS own cap is hit.
@@ -2240,8 +2247,8 @@ shepherd_hand_off() {
     tail='It is labelled `needs-human-review`; a human decision is needed and the creator will make no further automated attempts.'
   else
     label="agent-stuck"
-    desc="Automation gave up — a failure marker, not a human decision (no dedicated consumer)"
-    tail='It is labelled `agent-stuck`: this is an automation failure rather than a human decision. Nothing reads this label; a later drain sweep may retry it, and the remediation drain may escalate it to `needs-human-review` if it hits its own cap. The creator will make no further automated attempts.'
+    desc="Automation gave up — a failure marker, not a human decision (read only by the delegated-merge lane, #4016)"
+    tail='It is labelled `agent-stuck`: this is an automation failure rather than a human decision. The delegated-merge lane reads this label, to treat the handoff as not a human claim; a later drain sweep may retry it, and the remediation drain may escalate it to `needs-human-review` if it hits its own cap. The creator will make no further automated attempts.'
   fi
   gh label create "$label" --repo "$REPO" --color fbca04 \
     --description "$desc" 2>/dev/null || true
