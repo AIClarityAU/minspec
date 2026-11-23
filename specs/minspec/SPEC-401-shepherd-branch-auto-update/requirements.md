@@ -1,5 +1,5 @@
 ---
-id: SPEC-123
+id: SPEC-401
 type: requirements
 status: specifying
 tier: T3
@@ -20,15 +20,16 @@ Materializes **[#181](https://github.com/AIClarityAU/minspec/issues/181)** —
 — can't MinSpec do that for me already?"* (filed 2026-06-05, parked by Claude Code during a
 PR review per DR-033/DR-360).
 
-**Id note.** `SPEC-096` is the highest id committed on `origin/main` as read in this
-worktree. Scanning every local and remote branch/ref for `specs/*/SPEC-NNN-*` finds ids
-claimed up to `SPEC-122` in open work not yet merged. Checked 2026-10-03; if `SPEC-123`
-collides at review time (a concurrent session picked it first), renumber.
+**Id note.** `SPEC-400` is the highest id on `origin/main` (read 2026-11-23, at 5ec29bac), so
+this spec takes `SPEC-401`. It was first drafted as `SPEC-401` when `SPEC-096` was the highest id
+on main; that id sat in a gap (`SPEC-122` and `SPEC-127` exist, `SPEC-401`-`SPEC-126` do not) and
+was renumbered on review to the next id after main's maximum. Open pull requests are invisible
+from a base checkout, so run `scripts/check-dr-id-collision.ts` / `scripts/next-spec-id.ts` at
+review time and renumber again if a concurrent session claimed `SPEC-401` first.
 
-**Re-dispatch note (2026-11-23).** #181 was dispatched again for Specify; this spec already
-exists, so it keeps `SPEC-123` rather than minting a second id. Re-read against the worktree:
-`scripts/lib/shepherd-pr.sh:85` (`do-rebase`) and `scripts/dispatch-issue.sh:1312` (`shepherd_rebase`)
-still match the cited baseline; the only open item remains DQ-1 below.
+**Citation re-check (2026-11-23).** Every `file:line` below was re-read against this worktree
+(base 5ec29bac). Earlier citations in this spec were stale; the lines now cited were read, not
+carried over. The only open item remains DQ-1 below.
 
 ## One-Sentence Scope
 
@@ -54,12 +55,12 @@ mechanically, no human click required:
 - `scripts/lib/shepherd-pr.sh:85` — the pure decision seam `shepherd_decide` emits
   `do-rebase` for a PR classified `rebase-only` by `remediate-pr.sh`'s `--classify` seam
   (behind base, otherwise clean).
-- `scripts/dispatch-issue.sh:1312-1317` (`shepherd_rebase`) — "Mechanical rebase onto
+- `scripts/dispatch-issue.sh:2282-2291` (`shepherd_rebase`) — "Mechanical rebase onto
   `origin/main` — no agent, so no attempt is consumed," dispatched from `do-rebase` at
-  `scripts/dispatch-issue.sh:1551-1552`.
-- `scripts/remediate-pr.sh:717-720` (`rebase-only` action) — "Merge (not rebase) so we
+  `scripts/dispatch-issue.sh:2553-2554`.
+- `scripts/remediate-pr.sh:1258-1260` (`rebase-only` action) — "Merge (not rebase) so we
   never rewrite the PR branch's published history," re-pushed as a fast-forward
-  (`remediate-pr.sh:706`, `:864`).
+  (`remediate-pr.sh:1265`, `:1432`).
 - `scripts/drain-inbox.sh` carries the same recovery as orphan-fallback (SPEC-062 FR-4b,
   `specs/minspec/SPEC-062-autonomous-pr-drain/requirements.md:160-161`) for a PR whose
   creator session is gone.
@@ -197,7 +198,7 @@ See DQ-2. No store, setting, or consent surface is introduced; the reversibility
   PR branches mergeable (auto-update when base advances)."
 - **Resolves the baseline ask via:** [SPEC-044](../SPEC-044-coordinated-self-completing-sessions/requirements.md)
   FR-4 (`status: implementing`) — `scripts/lib/shepherd-pr.sh:85`,
-  `scripts/dispatch-issue.sh:1312-1317`, `scripts/remediate-pr.sh:717-720`.
+  `scripts/dispatch-issue.sh:2282-2291`, `scripts/remediate-pr.sh:1258-1260`.
 - **Tracks the stretch ask via:** [SPEC-044 Amendment A](../SPEC-044-coordinated-self-completing-sessions/requirements.md#amendment-a-2026-09-05---proposed-not-accepted)
   (`PROPOSED, not accepted`, triggered by `minspec #1750`).
 - **Named as a boundary by:** [SPEC-032](../SPEC-032-forgotten-merge-discovery/requirements.md)
