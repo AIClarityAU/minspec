@@ -1,7 +1,7 @@
 ---
 id: SPEC-351
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — commit ↔ spec-task ↔ DR links must not lie or go missing
@@ -11,9 +11,9 @@ implements: none
 implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan. Expected surface: an active-spec resolver, a Suggest Commit Prefix palette command, a status-bar warning, and an extension of `.githooks/commit-msg` (Decision D2).
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
