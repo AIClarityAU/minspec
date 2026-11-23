@@ -855,7 +855,7 @@ async function surfaceBuildSkewAdvisory(
     const verdict = detectBuildSkew(folder, isMinspecRepo);
     if (verdict.kind !== 'stale') return;
 
-    const skipKey = `${BUILD_SKEW_SKIP_PREFIX}${verdict.sha}`;
+    const skipKey = `${BUILD_SKEW_SKIP_PREFIX}${verdict.sha}${verdict.dirty ? '-dirty' : ''}`;
     if (context.workspaceState.get<boolean>(skipKey, false)) return;
 
     const DISMISS = "Don't warn for this build";
