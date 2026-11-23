@@ -10,7 +10,7 @@ relates_to: ["#908", "#892", DR-006, DR-078, DR-074, DR-071, SPEC-050]
 implements: none
 implements_reason: >-
   Specified, not built. No design.md/tasks.md exist; the storage-boundary choice under
-  "Decisions needed (Clarify)" is unanswered.
+  "Decisions needed (Clarify)" has a recorded selection (agent pick of the recommended option; founder decision, queue item clarsel, DR-123).
 ---
 
 # SPEC-372: Auto-bootstrap "Don't ask again" answers survive git operations and re-clones (Requirements)
