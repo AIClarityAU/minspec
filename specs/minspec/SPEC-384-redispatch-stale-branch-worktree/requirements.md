@@ -10,13 +10,13 @@ relates_to: ["#3909", "#3452", DR-066, SPEC-044]
 implements: none
 implements_reason: >-
   Specified, not built. No design.md/tasks.md exist; the Clarify choices below carry agent-recorded
-  selections of the recommended option (DR-123), ratified by sign-off.
+  selections of the recommended option (DR-123); approving the spec will ratify them.
 ---
 
 # SPEC-384: Dispatch reclaims or defers when an old worktree still holds `agent/issue-N` (Requirements)
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. Its *Decisions
-> needed (Clarify)* carry recorded selections (DR-123); it is approved before code changes.
+> needed (Clarify)* carry recorded selections (DR-123); approving the spec will ratify them, and it must be approved before code changes.
 
 Materializes #3909. Sibling: #3452 (stale
 *branch* left behind; handled by `scripts/lib/issue-branch.sh`). This is the stale *worktree
