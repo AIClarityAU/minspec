@@ -1445,24 +1445,6 @@ DISPATCH_CLAIMED=1
 # outlive and therefore nothing for ABS_MAX to protect.
 BUILD_DEADLINE="${BUILD_DEADLINE:-0}"
 
-# Label as running — a COSMETIC MIRROR of the claim only, applied AFTER a won claim,
-# never the authority (D8/FR-9/DR-066: a label is a single, overwritable, non-atomic
-# producer). No ownership decision ever reads it.
-# Both ready labels are cleared (#1169), not just the one this dispatch came in on: a
-# leftover `agent-ready-specify` beside a later plain `agent-ready` would leave the
-# issue wearing two ready classes that disagree about what is authorised.
-#
-# The label is CREATED first because `gh issue edit --remove-label` fails the WHOLE
-# request on a name the repo does not have — so on a repo that has never triaged a
-# T3/T4, removing it would also drop the `agent-running` add riding in the same call.
-gh label create "agent-ready-specify" --repo "$REPO" --color 0e8a16 \
-  --description "Auto-buildable T3/T4 — dispatch the SPECIFY phase only; the human approves the spec before any implementation (DR-076 / #1169)" \
-  2>/dev/null || true
-gh issue edit "$ISSUE" --repo "$REPO" \
-  --remove-label "agent-ready" \
-  --remove-label "agent-ready-specify" \
-  --add-label "agent-running" 2>/dev/null || true
-
 # Create worktree — CLAIM-UNIQUE path (D11/INV-7): ${BASE}/issue-N-<sessionId>, so two
 # same-host racers never share a directory and the cleanup below only ever touches THIS
 # session's own stale dir (pre-SPEC-044 used the shared ${BASE}/issue-N, where racer B
@@ -1519,6 +1501,28 @@ echo "Branch $BRANCH: $BRANCH_MODE (new = from origin/main, existing/track = ear
 # later git operation on the worktree names that directory (lib/agent-worktree.sh). A
 # worktree that cannot be pinned is not one to start an agent in, so this stops the run.
 agent_worktree_pin "$WORKTREE"
+
+# Label as running — a COSMETIC MIRROR of the claim only, applied AFTER a won claim AND after the worktree exists (#1652),
+# never the authority (D8/FR-9/DR-066: a label is a single, overwritable, non-atomic
+# producer). No ownership decision ever reads it.
+# Both ready labels are cleared (#1169), not just the one this dispatch came in on: a
+# leftover `agent-ready-specify` beside a later plain `agent-ready` would leave the
+# issue wearing two ready classes that disagree about what is authorised.
+#
+# The label is CREATED first because `gh issue edit --remove-label` fails the WHOLE
+# request on a name the repo does not have — so on a repo that has never triaged a
+# T3/T4, removing it would also drop the `agent-running` add riding in the same call.
+gh label create "agent-ready-specify" --repo "$REPO" --color 0e8a16 \
+  --description "Auto-buildable T3/T4 — dispatch the SPECIFY phase only; the human approves the spec before any implementation (DR-076 / #1169)" \
+  2>/dev/null || true
+gh issue edit "$ISSUE" --repo "$REPO" \
+  --remove-label "agent-ready" \
+  --remove-label "agent-ready-specify" \
+  --add-label "agent-running" 2>/dev/null || true
+# Placed here, not before provisioning (#1652): `set -e` aborts at `worktree add`, and the EXIT
+# trap releases the lease but never the label, so an earlier flip left `agent-running` set with
+# `agent-ready` already removed - nothing retried it.
+
 
 echo "Launching $ROLE agent for: $ISSUE_TITLE"
 
