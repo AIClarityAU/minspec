@@ -917,7 +917,7 @@ scripts/drain-inbox.sh defaults to concurrency 1 and carries a caveat (around li
 
 ## [DR-115 — The MinSpec App secrets are optional in the scaffolded review stack; without them the review posts with GITHUB_TOKEN as github-actions[bot]](DR-115.md)
 
-*Status: proposed · Date: 2026-10-28*
+*Status: accepted · Date: 2026-10-28*
 
 <!-- dr-summary:DR-115 auto=f4b6ddc36218 -->
 ai-review.yml refuses to run unless CLAUDE_CODE_OAUTH_TOKEN, MINSPEC_APP_ID and MINSPEC_APP_PRIVATE_KEY are all set (.github/workflows/ai-review.yml:204-215), and the setup probe mirrors that (packages/minspec/src/lib/ruleset-advisor.ts:734-738). DR-054 intended consumer repos not to hold the App key (the shared broker, SPEC-034, is still in planning). Until the broker exists, every new repo needs the two App secrets set by hand, and the founder could not get review on a new work-PC repo without them.
@@ -981,7 +981,7 @@ The founder answered this as runner queue item clarsel on 2026-11-17 (words in t
 
 ## [DR-124 — Approving a document commits it - commit-on-approve is default on, commits only the approval's own files, never pushes, and minspec.commitOnApprove is the opt-out](DR-124.md)
 
-*Status: proposed · Date: 2026-11-19*
+*Status: accepted · Date: 2026-11-19*
 
 <!-- dr-summary:DR-124 auto=b3c6f8a249ed -->
 SPEC-022 FR-1 (specs/minspec/SPEC-022-approval-foundation/requirements.md:77) says approval ground truth is **committed** to the repo. Before #576 the approval record was only git-*tracked*: written to disk and left in the working tree. Nothing committed it. So an approval could sit uncommitted indefinitely, be lost to a checkout or a reset, or be swept into an unrelated commit by another session. "Committed ground truth" was a claim the code did not keep.
