@@ -2245,8 +2245,8 @@ shepherd_hand_off() {
     tail='It is labelled `needs-human-review`; a human decision is needed and the creator will make no further automated attempts.'
   else
     label="agent-stuck"
-    desc="Automation gave up — a failure marker, not a human decision (no dedicated consumer)"
-    tail='It is labelled `agent-stuck`: this is an automation failure rather than a human decision. Nothing reads this label; a later drain sweep may retry it, and the remediation drain may escalate it to `needs-human-review` if it hits its own cap. The creator will make no further automated attempts.'
+    desc="Automation gave up — a failure marker, not a human decision (read only by the delegated-merge lane, #4016)"
+    tail='It is labelled `agent-stuck`: this is an automation failure rather than a human decision. Only the delegated-merge lane reads this label, to treat the handoff as not a human claim; a later drain sweep may retry it, and the remediation drain may escalate it to `needs-human-review` if it hits its own cap. The creator will make no further automated attempts.'
   fi
   gh label create "$label" --repo "$REPO" --color fbca04 \
     --description "$desc" 2>/dev/null || true
