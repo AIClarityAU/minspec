@@ -1,7 +1,7 @@
 ---
 id: SPEC-408
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a manifest that vouches for bytes MinSpec never wrote is a false signpost
@@ -13,9 +13,9 @@ implements: none
 implements_reason: >-
   Specify phase only. The behaviour lives in the `affects:` files, which already carry the code (`scaffold.ts` is owned by SPEC-043); any file this spec comes to own is decided at Plan.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
