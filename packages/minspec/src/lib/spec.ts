@@ -505,7 +505,7 @@ export function writeSpecFile(filePath: string, spec: ParsedSpec): void {
  * by free prose that may explain the OLD value ("**Proposed** … not yet accepted, and must
  * not be treated as in force."). Swapping only the leading token there produces a line
  * asserting both the new status and its own negation. Before #2180 nothing checked this —
- * `setBodyStatusToken` rewrote the leading word unconditionally.
+ * `bodyStatusTokenText` rewrote the leading word unconditionally.
  *
  * Tests the claim's whole paragraph (the `**Status:**` line plus any wrapped continuation
  * lines — see `claimParagraphText`), not just the physical line the token sits on, for the
@@ -546,23 +546,23 @@ export function specStatusProseWouldInvert(content: string): { line: number; tex
  * `content` is LF text; `original` is the file as it was read, whose line endings the
  * write restores (SPEC-095).
  */
-function setBodyStatusToken(filePath: string, content: string, status: SpecStatus, original: string): void {
+function bodyStatusTokenText(content: string, status: SpecStatus): string {
   const existing = bodyStatusToken(content, 'spec');
-  if (!existing) return;
+  if (!existing) return content;
   const lines = content.split('\n');
   const capitalized = status.charAt(0).toUpperCase() + status.slice(1);
   lines[existing.line - 1] = lines[existing.line - 1].replace(
     /^(\*\*Status:\*\*[ \t]*)[A-Za-z]+/,
     `$1${capitalized}`,
   );
-  fs.writeFileSync(filePath, restoreLineEndings(lines.join('\n'), original), 'utf-8');
+  return lines.join('\n');
 }
 
 /**
  * Surgically rewrite the `status:` line in a spec's frontmatter in place,
  * adding it if absent, and the body's `**Status:**` line's leading word to match
  * (#667 — the two are separate sources of truth for the same fact; see
- * `setBodyStatusToken`). Returns the new status. Throws on invalid status or no
+ * `bodyStatusTokenText`). Returns the new status. Throws on invalid status or no
  * frontmatter block.
  *
  * Deliberately a line-level rewrite (mirrors `setEpicStatus`/`setAdrStatus`),
@@ -576,10 +576,21 @@ function setBodyStatusToken(filePath: string, content: string, status: SpecStatu
  * failed on a Windows checkout (#2397).
  */
 export function setSpecStatus(filePath: string, status: SpecStatus): SpecStatus {
+  const { text: content, original } = readDocument(filePath);
+  const newContent = withSpecStatus(content, status, filePath);
+  fs.writeFileSync(filePath, restoreLineEndings(newContent, original), 'utf-8');
+  return status;
+}
+
+/**
+ * Pure form of {@link setSpecStatus}: the LF `content` with its frontmatter `status:` line and
+ * body `**Status:**` token rewritten, or a throw — nothing touches disk. Lets a caller that
+ * must make several edits validate the whole result before its single write (#1634).
+ */
+function withSpecStatus(content: string, status: SpecStatus, filePath: string): string {
   if (!(SPEC_STATUSES as readonly string[]).includes(status)) {
     throw new Error(`Invalid spec status: ${status}`);
   }
-  const { text: content, original } = readDocument(filePath);
   const fmMatch = content.match(FRONTMATTER_RE);
   if (!fmMatch) {
     throw new Error(`No frontmatter block in ${filePath}`);
@@ -608,10 +619,7 @@ export function setSpecStatus(filePath: string, status: SpecStatus): SpecStatus 
   const newYaml = statusLineRe.test(yaml)
     ? yaml.replace(statusLineRe, `status: ${status}`)
     : `${yaml}\nstatus: ${status}`;
-  const newContent = content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`);
-  fs.writeFileSync(filePath, restoreLineEndings(newContent, original), 'utf-8');
-  setBodyStatusToken(filePath, newContent, status, original);
-  return status;
+  return bodyStatusTokenText(content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`), status);
 }
 
 /** Options for {@link setSpecPhases} (SPEC-061 DQ-1). */
@@ -687,9 +695,24 @@ export function setSpecPhases(
         `(SPEC-061 DQ-1 / #957).`,
     );
   }
-  // Read through `text-io`; both writes below give the file its own line endings back
+  // Read through `text-io`; the write below gives the file its own line endings back
   // (SPEC-095). A CRLF spec used to throw "No frontmatter block" here.
   const { text: content, original } = readDocument(filePath);
+  const newContent = withSpecPhases(content, phases, opts, filePath);
+  if (newContent === content) return;
+  fs.writeFileSync(filePath, restoreLineEndings(newContent, original), 'utf-8');
+}
+
+/**
+ * Pure form of {@link setSpecPhases} (options already validated): the LF `content` with its
+ * phase lines rewritten (or the block created), nothing touches disk (#1634).
+ */
+function withSpecPhases(
+  content: string,
+  phases: Partial<Record<Phase, PhaseStatus>>,
+  opts: SetSpecPhasesOptions,
+  filePath: string,
+): string {
   const fmMatch = content.match(FRONTMATTER_RE);
   if (!fmMatch) {
     throw new Error(`No frontmatter block in ${filePath}`);
@@ -701,17 +724,12 @@ export function setSpecPhases(
     // shape-preserving no-op this function has always had, because approved FR-6 requires
     // that contract to remain available to any future caller — which unconditional widening
     // would leave no way to obtain. The approval writer is the one caller that opts in.
-    if (!opts.createIfAbsent) return;
+    if (!opts.createIfAbsent) return content;
     // Appended at the end of the frontmatter, matching where every hand-authored spec puts
     // it. Two-space indent is the corpus convention and the shape `parseSpec` reads back.
     const created = ['phases:', ...PHASES.map((p) => `  ${p}: ${phases[p] ?? 'pending'}`)];
     const newYaml = [...lines, ...created].join('\n');
-    fs.writeFileSync(
-      filePath,
-      restoreLineEndings(content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`), original),
-      'utf-8',
-    );
-    return;
+    return content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`);
   }
   for (let i = phasesIdx + 1; i < lines.length; i++) {
     // The phases block ends at the first line that is not an indented child.
@@ -722,11 +740,7 @@ export function setSpecPhases(
     if (val !== undefined) lines[i] = `${m[1]}${m[2]}: ${val}`;
   }
   const newYaml = lines.join('\n');
-  fs.writeFileSync(
-    filePath,
-    restoreLineEndings(content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`), original),
-    'utf-8',
-  );
+  return content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`);
 }
 
 /**
@@ -756,8 +770,10 @@ export function setSpecPhases(
  *   2. if the bytes cannot realize the approval target (the degenerate block), the
  *      advance is REJECTED with a throw rather than silently under-advanced — an
  *      un-committable-bad-state gate (RCDD Phase 4). Real specs all carry an
- *      implementing-band line, so this fires only on a degenerate block, and the
- *      file is left internally consistent (status == derived) either way.
+ *      implementing-band line, so this fires only on a degenerate block.
+ *
+ * Every step runs on in-memory text and the file is written ONCE, after all gates pass
+ * (#1634), so a refused advance leaves the file byte-identical.
  *
  * Preserves approval's flip-then-hash discipline (DR-003): callers invoke this
  * BEFORE recording the approval hash, so the hash binds post-flip bytes. Returns
@@ -800,28 +816,17 @@ export function advanceSpecToImplementing(filePath: string): SpecStatus {
   // a spec whose implement phase has started is stamped `implementing`. This caller
   // runs solely at approval, so the 'approved' verdict is correct here.
   const target = deriveStatus(newPhases, 'approved', undefined);
-  setSpecPhases(filePath, newPhases, { createIfAbsent: true });
+
+  // COMPUTE, VALIDATE, THEN WRITE ONCE (#1634). Every step below works on in-memory text; the
+  // file is touched only by the final write, after every gate has passed. A refused advance
+  // therefore leaves the file byte-identical — verification-after-mutation could only report.
+  const { text: original0, original } = readDocument(filePath);
+  const withPhases = withSpecPhases(original0, newPhases, { createIfAbsent: true }, filePath);
 
   // Derive the status from the PERSISTED bytes (never the in-memory map) so the
-  // `status:` line and the derived status are identical by construction.
-  const persistedStatus = deriveStatus(
-    parseSpec(fs.readFileSync(filePath, 'utf-8')).frontmatter.phases,
-    'approved',
-    undefined,
-  );
-  const status = setSpecStatus(filePath, persistedStatus);
-
-  // Enforced invariant (defense-in-depth): the persisted `status:` line MUST equal
-  // the status its persisted `phases:` map derives (approval-aware). True by
-  // construction above; asserting it turns any future regression into a loud throw,
-  // never a silent self-contradicting file (#148).
-  const after = parseSpec(fs.readFileSync(filePath, 'utf-8')).frontmatter;
-  if (after.status !== deriveStatus(after.phases, 'approved', undefined)) {
-    throw new Error(
-      `advanceSpecToImplementing left ${filePath} desynced: status=${after.status} ` +
-        `but its phases derive ${deriveStatus(after.phases, 'approved', undefined)} (should be impossible).`,
-    );
-  }
+  // `status:` line and the derived status are identical by construction: these are the exact
+  // bytes the write below persists.
+  const persistedStatus = deriveStatus(parseSpec(withPhases).frontmatter.phases, 'approved', undefined);
 
   // Degenerate-block gate: the bytes could not realize the approval target, so
   // reject rather than record an approval that half-advanced the spec.
@@ -834,5 +839,21 @@ export function advanceSpecToImplementing(filePath: string): SpecStatus {
         `or remove the phases block.`,
     );
   }
+
+  const finalText = withSpecStatus(withPhases, persistedStatus, filePath);
+
+  // Enforced invariant (defense-in-depth): the status line MUST equal the status its phases
+  // map derives (approval-aware). True by construction above; asserting it turns any future
+  // regression into a loud throw, never a silent self-contradicting file (#148).
+  const after = parseSpec(finalText).frontmatter;
+  if (after.status !== deriveStatus(after.phases, 'approved', undefined)) {
+    throw new Error(
+      `advanceSpecToImplementing would leave ${filePath} desynced: status=${after.status} ` +
+        `but its phases derive ${deriveStatus(after.phases, 'approved', undefined)} (should be impossible).`,
+    );
+  }
+
+  fs.writeFileSync(filePath, restoreLineEndings(finalText, original), 'utf-8');
+  const status = persistedStatus;
   return status;
 }
