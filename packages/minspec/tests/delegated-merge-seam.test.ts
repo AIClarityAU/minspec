@@ -341,6 +341,24 @@ describe('a shepherd handoff is scoped to the head it was posted against (#3120)
     expect(writes(r.gh)).toEqual([]);
   }, TIMEOUT);
 
+  // #4016: agent-stuck marks an automation failure, so its handoff is no human claim.
+  it.each([
+    ['agent-stuck label', [{ name: 'agent-stuck' }], true],
+    ['agent-stuck plus a hold:* label', [{ name: 'agent-stuck' }, { name: 'hold:specify' }], false],
+    ['an unrelated label only', [{ name: 'ai-review:pass' }], false],
+    ['no labels field', undefined, false],
+  ] as const)('a live handoff with %s: proceeds=%s (#4016)', (_n, labels, proceeds) => {
+    const r = run(['2966'], {
+      view: view({
+        labels,
+        commits: commits('2026-10-14T00:00:00Z'),
+        comments: [{ body: MARK, createdAt: '2026-10-15T17:02:20Z' }],
+      }),
+    });
+    expect(r.status).toBe(proceeds ? 0 : 1);
+    expect(r.verdict).toMatchObject(proceeds ? { proceed: true } : { proceed: false, reason: 'handed-to-human' });
+  }, TIMEOUT);
+
   it('a spent handoff still leaves the closing-link claim in force', () => {
     const r = run(['2966', '--arm'], {
       diff: CODE,

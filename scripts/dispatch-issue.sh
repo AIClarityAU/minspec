@@ -753,14 +753,19 @@ delegated_merge_handoffs_spent() {
 delegated_merge_human_claims() {
   local pr="$1" changed="${2-}" view="" head="" refs="" handoffs="" issue=""
   local marker="<!-- minspec-shepherd-handoff -->"
-  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments,author,body 2>/dev/null) \
+  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments,author,body,labels 2>/dev/null) \
      || ! head=$(printf '%s' "$view" | jq -r '.headRefName' 2>/dev/null) \
      || ! refs=$(printf '%s' "$view" | jq -r '.closingIssuesReferences | if type == "array" then .[].number else error("no list") end' 2>/dev/null) \
      || ! handoffs=$(printf '%s' "$view" | jq -r --arg m "$marker" '.comments | if type == "array" then [.[] | select((.body // "") | contains($m))] | length else error("no list") end' 2>/dev/null); then
     printf 'pr-claims-unreadable\tcould not read PR #%s closing links and comments; failing closed\n' "$pr"
     return 1
   fi
-  if [[ "$handoffs" != "0" ]] && ! delegated_merge_handoffs_spent "$pr" "$marker"; then
+  # #4016: a handoff on an `agent-stuck` PR (no `hold:*` label) is an automation failure,
+  # not a founder decision (#3835 split the label off at the producer). It is not a human
+  # claim, so the PR returns to the agent path. Unreadable or absent labels keep the hold.
+  local stuck=""
+  stuck=$(printf '%s' "$view" | jq -r '(.labels // []) | if type == "array" then ([.[] | .name // ""] | (any(. == "agent-stuck") and (any(startswith("hold:")) | not))) else false end' 2>/dev/null) || stuck=false  # swallow-ok: unreadable labels leave the handoff live (fail closed)
+  if [[ "$handoffs" != "0" && "$stuck" != "true" ]] && ! delegated_merge_handoffs_spent "$pr" "$marker"; then
     printf 'handed-to-human\tPR #%s was handed to the founder by its creator (shepherd handoff comment); a bot merge would take his decision\n' "$pr"
     return 1
   fi
@@ -2228,7 +2233,7 @@ SHEPHERD_MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"
 #   stuck — the shepherd's OWN automation gave up (ceiling, attempt cap, rebase or fix that
 #           produced nothing): `agent-stuck`, NOT `needs-human-review`, so no consumer reads
 #           it as a human decision. Anything but the literal "human" fails closed to stuck.
-#           No code reads `agent-stuck` (grep: zero consumers); it is a visibility marker.
+#           The delegated-merge lane reads it (#4016): a handoff on an `agent-stuck` PR without a `hold:*` label is not a human claim.
 #           Any later retry comes from the label-agnostic drain sweep (drain-inbox.sh
 #           `gh pr list --state open`), NOT from this label; remediate-pr.sh may still
 #           relabel `needs-human-review` when ITS own cap is hit.
