@@ -42,12 +42,11 @@ Materializes **[#185](https://github.com/AIClarityAU/minspec/issues/185)** — *
 icon (👁) prefix on every heading a human reviewer should read carefully... replacing the
 current inline MUST READ / SKIM text in headings... apply going forward; no backfill."*
 
-**Id note.** `git log --all` in this worktree (fetched from `origin` today) finds `SPEC-097`
-through `SPEC-123` already claimed by commit messages on open branches/pull requests not yet
-merged to `main` (highest on disk: `SPEC-096`); none above `SPEC-123`. This checks every
-fetched remote branch, not every open pull request (no `gh`/network access in this dispatch),
-so this is a lower bound, not a guarantee. This spec claims `SPEC-124`. If it collides at
-review time, renumber.
+**Id note.** `SPEC-124` is not present on disk before this spec: `ls specs/minspec/` shows
+`SPEC-122` and `SPEC-127` with `SPEC-124` between them unused (other ids above `SPEC-096`,
+e.g. `SPEC-097`, `SPEC-098`, are on disk too; the tree runs well past this id). The collision
+gate's `Next free id` also counts open pull requests, which a network-less dispatch cannot
+see, so this id is a lower-bound check only. If it collides at review time, renumber.
 
 ## One-Sentence Scope
 
@@ -169,8 +168,9 @@ repo's ADR filter (reversibility-in-under-a-day), that rules out a new Decision 
   the glyph — it marks a section within a document, not the whole document.
 
 - **FR-2 — Retires the literal text, forward-only.** A heading authored under this convention
-  after this spec is approved MUST NOT contain the literal strings "MUST READ" or "SKIM" (any
-  case). No existing document is edited to add, remove, or convert a heading under this spec —
+  after this spec is approved MUST NOT contain the literal uppercase strings "MUST READ" or "SKIM" (case-sensitive, whole
+  word: `\bMUST READ\b` / `\bSKIM\b`; the lowercase word "skim" in ordinary prose headings such
+  as SPEC-024's "skim surface" is not a violation). No existing document is edited to add, remove, or convert a heading under this spec —
   per the issue's own instruction and because the Context section found nothing committed to
   convert.
 
@@ -196,8 +196,8 @@ repo's ADR filter (reversibility-in-under-a-day), that rules out a new Decision 
 - **FR-5 — Advisory lint for the residual text (FR-2's check).** `spec-validator.ts` MUST gain
   one new `warning`-severity `ValidationViolation` (reusing the existing `Severity` /
   `ValidationViolation` machinery, `spec-validator.ts:36`) that fires when a spec body contains
-  a `##`/`###` heading whose text contains the literal strings "MUST READ" or "SKIM" (any
-  case), scoped to `specs/**` only (DQ-3). It MUST NOT change `npm run validate`'s exit code —
+  a `##`/`###` heading whose text contains the literal uppercase strings "MUST READ" or "SKIM" (case-sensitive, whole
+  word, so ordinary lowercase "skim" in existing headings never fires), scoped to `specs/**` only (DQ-3). It MUST NOT change `npm run validate`'s exit code —
   a warning only, never a block, consistent with this repo's existing closed-set frontmatter
   checks (`spec-validator.ts:0b`, all `warning`) and with DR-026's offer-never-silent posture.
   It checks FR-2's "no literal text" rule only; it does NOT mechanically verify FR-1's
