@@ -51,9 +51,11 @@ From SPEC-136 `design.md` (corpus-rules table, rows at roughly lines 189-193) an
 | 27 decision status contradiction (#1812) | `findDecisionContradictions`, `scripts/lib/decision-status-contradiction.ts` (pure text predicate) | yes | No |
 | 28 epic id uniqueness (FATAL, #396) | `checkDeclaredEpicIds`, `scripts/lib/epic-id-collision.ts` | yes (pure) | No |
 
-`packages/core/src/corpus-rules.ts` imports its checks from `packages/minspec/src/lib/*`, never
-from `scripts/`. All four standalone functions above live under `scripts/lib/`. So "call the
-function" crosses a package boundary the core does not cross today (see D2).
+`packages/core/src/corpus-rules.ts` imports most checks from `packages/minspec/src/lib/*`, and
+already imports five from `scripts/lib/` (read at lines 28-32: `corpus-walk`,
+`dr-required-sections`, `dr-id-collision` for `checkDeclaredDrIds`, `spec-id-collision` for
+`checkDeclaredSpecIds`, `domain-doc-rules`). So calling a `scripts/lib/` function is a boundary
+the core already crosses (see D2).
 
 **The defect, stated as mechanism (RCDD, DR-003).** The core's FR-3 promise ("the same checks
 the script runs") is held by a table in prose, and the table's own "left out" rows keep FR-3
@@ -130,13 +132,15 @@ settled by FR1 and are not a decision.)
 
 **D2. Where do the rule 26 and 28 functions live for the core to call them?**
 
-- **(rec) a - Move them into `packages/minspec/src/lib/`** (script re-imports from there).
-  Matches where every other core-called check lives. Cost: touches the script and its two
-  existing test files' import paths; a larger diff for a "small" port.
-- **b - Import from `scripts/lib/` directly.** Smallest diff. Cost: the core, a package,
-  depends on a dev-time scripts directory that may not ship in a packaged install, so the
-  core could fail to load where `scripts/` is absent (I believe this is how packaging works,
-  unverified).
+- **(rec) a - Import from `scripts/lib/` directly.** Matches the precedent in
+  `corpus-rules.ts:28-32`, where the core already imports `checkDeclaredDrIds`,
+  `checkDeclaredSpecIds` and others from `scripts/lib/`. Smallest diff; no script or test
+  import paths change. Cost: the core keeps depending on a dev-time scripts directory, a
+  dependency it already carries, so this adds no new packaging risk but does not retire the
+  existing one (whether `scripts/` ships in a packaged install is unverified).
+- **b - Move them into `packages/minspec/src/lib/`** (script re-imports from there). Cleaner
+  boundary for these two. Cost: touches the script and its two existing test files' import
+  paths, and leaves the core inconsistent with its five existing `scripts/lib/` imports.
 
 **D3. Does one pull request carry all ports, or split 24 (needs wiring) from 26/28 (call-only)?**
 (rec) one pull request: the parity gate (FR5) must see a consistent table. Cost: a rule that
