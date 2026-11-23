@@ -161,6 +161,8 @@ or the exemption file.
 - (c) Stay warning indefinitely. Cost: the tier is advisory forever; #3914 says 926 warnings
   already drown signal.
 
+**Recorded selection: the recommended option,** (a), stay at warning until the count is under a numeric threshold; the number itself is not set here and stays the human's to set, so the tier stays at warning until it is. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
+
 **Q4. Fate of the residue of literal-echo hits (FR-7)?**
 - (a) One backlog line per cluster in `docs/backlog.md` **(rec)**; cost: nobody owns them.
 - (b) One issue per top cluster (SPEC-070 etc.). Cost: most would not change a decision within
