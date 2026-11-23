@@ -73,9 +73,9 @@ export type SkewVerdict =
   /** Not a MinSpec checkout, not a git repo, or a dev build — nothing to say. */
   | { kind: 'not-applicable'; reason: string }
   /** The running build was made from a commit that IS in this checkout's history. */
-  | { kind: 'current'; sha: string }
+  | { kind: 'current'; sha: string; dirty?: boolean }
   /** The running build predates HEAD — gates added since are NOT running. */
-  | { kind: 'stale'; sha: string; behind: number }
+  | { kind: 'stale'; sha: string; behind: number; dirty?: boolean }
   /** The build's commit is unknown here (different repo, shallow clone, gc'd). */
   | { kind: 'unknown'; sha: string; reason: string };
 
@@ -115,6 +115,13 @@ export function detectBuildSkew(
   if (sha === 'dev') {
     return { kind: 'not-applicable', reason: 'development build — compiled from the working tree' };
   }
+  // `scripts/build-extension.sh` stamps a build from an uncommitted tree as `<sha>-dirty`,
+  // which is not a git object. Resolve ancestry against the base commit instead (#1528) —
+  // the bundle is that commit PLUS unknown local edits, so the distance is approximate, and
+  // the verdict carries `dirty` so the message can say so. Silence here would hide the
+  // hazard exactly where it is likeliest: work-in-progress builds.
+  const dirty = sha.endsWith('-dirty');
+  if (dirty) sha = sha.slice(0, -'-dirty'.length);
   if (!isMinspecRepo) {
     return { kind: 'not-applicable', reason: 'workspace is not a MinSpec checkout' };
   }
@@ -122,7 +129,7 @@ export function detectBuildSkew(
   if (head === undefined) {
     return { kind: 'not-applicable', reason: 'not a git checkout' };
   }
-  if (head === sha) return { kind: 'current', sha };
+  if (head === sha) return { kind: 'current', sha, dirty };
 
   // Does this clone even know the build's commit?
   if (git(rootDir, ['cat-file', '-e', `${sha}^{commit}`]) === undefined) {
@@ -140,8 +147,8 @@ export function detectBuildSkew(
 
   const behind = Number(git(rootDir, ['rev-list', '--count', `${sha}..HEAD`]) ?? '0');
   return Number.isFinite(behind) && behind > 0
-    ? { kind: 'stale', sha, behind }
-    : { kind: 'current', sha };
+    ? { kind: 'stale', sha, behind, dirty }
+    : { kind: 'current', sha, dirty };
 }
 
 /**
@@ -157,9 +164,13 @@ export function detectBuildSkew(
  * right about, the extension's pre-approval ownership guard (#1439).
  */
 export function skewMessage(v: Extract<SkewVerdict, { kind: 'stale' }>): string {
+  const origin = v.dirty
+    ? `a build from ${v.sha.slice(0, 7)} plus uncommitted changes, approximately ${v.behind} ` +
+      `commit${v.behind === 1 ? '' : 's'} behind this checkout (approximate: the bundle contains ` +
+      `that commit plus unknown local edits)`
+    : `a build from ${v.sha.slice(0, 7)}, ${v.behind} commit${v.behind === 1 ? '' : 's'} behind this checkout`;
   return (
-    `MinSpec is running a build from ${v.sha.slice(0, 7)}, ${v.behind} commit${v.behind === 1 ? '' : 's'} ` +
-    `behind this checkout. Gates that live in the extension — including the pre-approval ` +
+    `MinSpec is running ${origin}. Gates that live in the extension — including the pre-approval ` +
     `ownership check — are NOT running the current code here, so an approval or commit may ` +
     `pass a check main would refuse. Repo-side gates (git hooks, spec-gate, CI) are unaffected ` +
     `— they read the working tree directly. Rebuild to re-arm the extension's gates.`

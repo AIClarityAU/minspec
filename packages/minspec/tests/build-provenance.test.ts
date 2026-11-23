@@ -86,6 +86,34 @@ describe('detectBuildSkew — the verdict, not just the git plumbing', () => {
   });
 });
 
+describe('detectBuildSkew — dirty stamp (#1528)', () => {
+  it('STALE: `<sha>-dirty` resolves against the base commit, flagged dirty', () => {
+    const v = detectBuildSkew(repo, true, `${shaAt('HEAD~2')}-dirty`);
+    expect(v.kind).toBe('stale');
+    if (v.kind === 'stale') {
+      expect(v.behind).toBe(2);
+      expect(v.sha).toBe(shaAt('HEAD~2'));
+      expect(v.dirty).toBe(true);
+      expect(skewMessage(v)).toContain('plus uncommitted changes');
+      expect(skewMessage(v)).toContain('approximate');
+    }
+  });
+
+  it('clean stale verdict does not claim uncommitted changes', () => {
+    const v = detectBuildSkew(repo, true, shaAt('HEAD~2'));
+    if (v.kind === 'stale') expect(skewMessage(v)).not.toContain('uncommitted');
+  });
+
+  it('CURRENT: a dirty build of HEAD is current, not unknown', () => {
+    expect(detectBuildSkew(repo, true, `${shaAt('HEAD')}-dirty`).kind).toBe('current');
+  });
+
+  it('UNKNOWN: a dirty stamp of an unseen commit stays unknown', () => {
+    const v = detectBuildSkew(repo, true, `${'0'.repeat(40)}-dirty`);
+    expect(v.kind).toBe('unknown');
+  });
+});
+
 describe('detectBuildSkew — scope', () => {
   it('says nothing for a dev build, compiled from the working tree by definition', () => {
     expect(detectBuildSkew(repo, true, 'dev').kind).toBe('not-applicable');
