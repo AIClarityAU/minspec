@@ -1,23 +1,36 @@
---- a/cos.py	2026-11-22 10:58:53.437638328 +1100
-+++ b/cos.py	2026-11-22 10:58:53.449159193 +1100
-@@ -4242,14 +4242,17 @@
-         print(f"  could not record update mark ({type(e).__name__})")
+--- a/cos.py
++++ b/cos.py
+@@ -4054,6 +4054,21 @@
+     return any(r.get("verdict") in ("NEW", "ADVANCES") for r in rows)
  
  
--PRDRIVE_SKIP_LABELS = ("parked", "agent-quarantined")
-+# `awaiting-approval` / `needs-human-review`: the only remaining blocker is a human approval, so
-+# the PR cannot merge however current it is, and it goes BEHIND again on the next merge to main
-+# (strict mode), throwing the update away (#3934).
-+PRDRIVE_SKIP_LABELS = ("parked", "agent-quarantined", "awaiting-approval", "needs-human-review")
++def prdrive_human_cap(hcands, tries, recorded):
++    """Pure: (kept, capped) for the BEHIND human-turn rows, in their given order (#3934).
++
++    Under strict an update to a PR waiting on the founder is thrown away by the next merge to
++    main, so one such PR must not keep the single update slot: measured, #3690 (awaiting-approval,
++    no recorded act) took ~6 updates in 48h. A row with PRDRIVE_PRIORITY_MAX_TRIES or more recent
++    attempts and no recorded founder act is capped: not updated again until the attempts age out
++    of the window, so rows with fewer attempts take the slot first. A recorded act is never
++    capped (the approval is on the branch; updating it is the last step before the founder's
++    merge). Runner-mergeable (DR-112) rows are not in `hcands`: they went to `cands` earlier and
++    are never touched by this."""
++    kept = [n for n in hcands if recorded.get(n) or tries.get(n, 0) < PRDRIVE_PRIORITY_MAX_TRIES]
++    return kept, [n for n in hcands if n not in kept]
++
++
+ def prdrive_human_order(nums, recorded):
+     """Human-turn PRs (given oldest-first) reordered: recorded-act ones first.
  
- 
- def prdrive_skip_label(labs):
-     """Pure: the label that makes pr-drive skip a PR, or None.
- 
--    A PR carrying `parked`, `agent-quarantined` or any `hold:*` label can never be
--    bot-merged, so it must not take the one-at-a-time update slot or count as in flight."""
-+    A PR carrying `parked`, `agent-quarantined`, `awaiting-approval`, `needs-human-review` or
-+    any `hold:*` label can never be bot-merged, so it must not take the one-at-a-time update slot or count as in flight."""
-     for l in sorted(labs):
-         if l in PRDRIVE_SKIP_LABELS or l.startswith("hold:"):
-             return l
+@@ -4572,6 +4587,11 @@
+         for n_ in pool_:
+             recorded[n_] = prdrive_recorded_act(deltas[n_][0])
+         hcands = prdrive_priority_order(hcands, blockers, armed, tries, recorded)
++        hcands, hcapped = prdrive_human_cap(hcands, tries, recorded)
++        if hcapped:
++            print(f"  founder-gated PR(s) at the attempt cap ({PRDRIVE_PRIORITY_MAX_TRIES} updates in "
++                  f"{PRDRIVE_TRIES_WINDOW_SECS // 3600}h, no recorded approval) not updated again: "
++                  + ", ".join(f"#{n_} ({tries.get(n_, 0)})" for n_ in hcapped))
+         show_blockers()
+     promote = hcands[0] if hcands and recorded.get(hcands[0]) else None
+     if not cands and promote is not None:

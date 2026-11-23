@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # apply.sh - install the #3934 fix into the operator's chief-of-staff script.
 #
-# The fix: `cos.py pr-drive` spent its one update slot on PRs whose only remaining blocker is a
-# human approval (`awaiting-approval` / `needs-human-review`, e.g. #3690 updated ~6 times in 48h).
-# Those labels now join PRDRIVE_SKIP_LABELS, so such a PR prints SKIP and neither takes nor holds
-# the update slot.
+# The fix: `cos.py pr-drive` spent its one update slot on one founder-gated PR (`awaiting-approval`
+# / `needs-human-review`, no approval recorded on its branch) again and again: #3690 took ~6
+# updates in 48h, each undone by the next merge to main. The patch adds prdrive_human_cap, which
+# stops updating such a PR once it has PRDRIVE_PRIORITY_MAX_TRIES recent attempts (the existing
+# `tries` count), until they age out. It touches the human-behind path only: founder-gated PRs
+# still reach prdrive_classify, the DR-112 runner-merge path and the bring-current path, and no
+# label joins PRDRIVE_SKIP_LABELS.
 #
 # WHY A PATCH: cos.py lives at ~/.claude/scripts/cos.py, outside this repository and read-only to
 # the dispatched agent, so the fix is staged here for a host-side apply (same shape as #2093).
@@ -39,9 +42,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="${COS_PY:-$HOME/.claude/scripts/cos.py}"
 PATCH="$HERE/cos.py.patch"
 TEST="$HERE/prdrive-skip-awaiting-approval.test.py"
-# sha256 of the cos.py the patch was cut against (2026-11-20). Informational: a
+# sha256 of the cos.py the patch was cut against (2026-11-23). Informational: a
 # different file may still take the patch cleanly, and step 2 is what decides that.
-BASE_SHA="3cb6c73454ac6b899e15714e2c0f2152321ba8daaa3ed912b0a1ab6dfb0764f4"
+BASE_SHA="e98e4dd337f2bb67c194043abab6d7a99b9fbd31faa0463a5357e1511f6d0b64"
 
 die() { echo "apply: $*" >&2; exit 1; }
 
