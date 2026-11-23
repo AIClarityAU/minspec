@@ -1,5 +1,5 @@
 ---
-id: SPEC-407
+id: SPEC-412
 type: requirements
 status: specifying
 tier: T3
@@ -21,7 +21,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-407: The vitest test tree is typechecked, and a green typecheck means it
+# SPEC-412: The vitest test tree is typechecked, and a green typecheck means it
 
 > **This is a SPECIFICATION ONLY.** Written for issue
 > [#1660](https://github.com/AIClarityAU/minspec/issues/1660). Nothing is built until this
