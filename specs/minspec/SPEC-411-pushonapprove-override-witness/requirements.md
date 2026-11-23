@@ -1,5 +1,5 @@
 ---
-id: SPEC-084
+id: SPEC-411
 type: requirements
 status: specifying
 tier: T3
@@ -27,13 +27,13 @@ workspace value overrides it — the documented remedy is inert." Rests on **DR-
 (standing consent is valid consent, personal, not shared) and **DR-078** (standing consent
 lives in `.minspec/preferences.json`, never a machine-wide VS Code scope).
 
-**Id note.** The highest `SPEC-NNN` on this checkout's local branches plus every fetched
-`origin/agent/issue-*` and `bundle/*` remote ref is `SPEC-083`
-(`origin/agent/issue-1499`). Those refs may be stale or already merged; this spec claims
-`SPEC-084` as the next free number on that evidence, and the collision gate
-(`checkDeclaredSpecIds` in `scripts/lib/spec-id-collision.ts`, run from
-`scripts/validate-frontmatter.ts` / `npm run validate` / CI) is the authority if it
-disagrees at review time — renumber per its output, not this note.
+**Id note.** First drafted as `SPEC-084`, the highest id on the refs fetched at the time.
+The CI collision gate (`scripts/check-dr-id-collision.ts`, which compares spec ids across
+`main` and every open pull request) then failed: open PR #2336 (`agent/issue-2335`) already
+claims `SPEC-084` for `SPEC-084-review-token-revocation`. Renumbered to `SPEC-411`, one above
+the highest `SPEC-NNN` on any fetched remote ref on 2026-11-24 (`SPEC-410`,
+`origin/agent/issue-1238`). The collision gate stays the authority if it disagrees at review
+time — renumber per its output, not this note.
 
 ## One-Sentence Scope
 
