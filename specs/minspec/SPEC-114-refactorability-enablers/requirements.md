@@ -637,21 +637,27 @@ third-party tool (INV-8).
 ## Follow-ups (tracked)
 
 Each is outside this spec's scope. Under DR-023's 30-day rule, items 1, 2, 3 and 5 bear on
-this spec's Clarify answers, so they are filed as issues, numbers written in below
+this spec's Clarify answers, so they are filed as issues, issue numbers below
 (filed 2026-11-23, before approval). Items 4 and 6 would not change a decision within 30 days
 and are recorded in `docs/backlog.md` instead.
 
+Verified against GitHub on 2026-11-23T19:19Z by reading each issue; titles and creation times as returned.
+
 1. #4018 - Amend the contract-frontmatter spec for #23 to admit `contracts: none` plus
    `contracts_reason:` (DQ-2 Option A).
+   <https://github.com/AIClarityAU/minspec/issues/4018>, titled "spec(#23): admit contracts: none plus contracts_reason: (SPEC-114 DQ-2 follow-up)", created 2026-11-23T18:56:53Z.
 2. #4019 - Add the three FR-9 inputs to the test-completeness spec for #52 - most importantly
    input (0), a spec's own `## Invariants` ids in its required set (DQ-3 Option A).
+   <https://github.com/AIClarityAU/minspec/issues/4019>, titled "spec(SPEC-353): add SPEC-114's FR-9 inputs, incl. a spec's own Invariants ids (SPEC-114 DQ-3 follow-up)", created 2026-11-23T18:56:56Z.
 3. #4020 - Register `contracts_reason:` in SPEC-109's field table (canonical frontmatter schema)
    alongside the #23 keys it already expects (DQ-2 Option A).
+   <https://github.com/AIClarityAU/minspec/issues/4020>, titled "spec(SPEC-109): register contracts_reason: in the canonical frontmatter field table (SPEC-114 DQ-2 follow-up)", created 2026-11-23T18:56:57Z.
 4. `git-analyzer.ts:188-210` reads a version bump as a new dependency and reads a failed
    diff as "none"; decide whether classification should use FR-11's count instead.
    backlog: `git-analyzer.ts:188-210` reads a version bump as a new dependency...
 5. #4021 - One home for the dependency-budget number, shared with the methodology guardrail spec
    for #125 (DQ-5).
+   <https://github.com/AIClarityAU/minspec/issues/4021>, titled "spec: one home for the dependency-budget number, shared by SPEC-114 and #125 (SPEC-114 DQ-5 follow-up)", created 2026-11-23T18:56:59Z.
 6. After ten specs have passed through FR-3, measure how many answered `contracts: none`.
    backlog: once ten specs have passed through SPEC-114 FR-3 (seam-contract check)...
 
