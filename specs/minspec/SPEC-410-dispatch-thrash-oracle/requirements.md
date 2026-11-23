@@ -69,5 +69,11 @@ Fixing any particular cause of thrash (#912, #1203, #1202); a dashboard or persi
 ## Decisions needed (Clarify)
 
 1. **Breaker default threshold.** Options: (a) rate > 25% over the last 20 completions, min 10 **(rec)** since it would have caught the 32% baseline; cost: a bad streak of three thrashes in ten completions is already 30% and could halt a drain over normal noise, wasting a cycle. (b) 40% over 20, fewer false halts but the issue's own 32% baseline would still hide. (c) report-only, no breaker change; cheapest, but leaves the blind spot that motivated the issue.
+
+   **Recorded selection: the recommended option,** (a), rate > 25% over the last 20 completions, min 10. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 2. **How the oracle knows "roster bytes" and "compact count".** Transcript format is not a stable contract. Options: (a) parse best-effort and show `n/a` for fields not found, listing the count of runs lacking them **(rec)**, resilient but a format change degrades the detail quietly (the rate itself stays correct, as it keys only on the signature); (b) fail on unknown format, loud but brittle.
+
+   **Recorded selection: the recommended option,** (a), parse best-effort and show `n/a` for fields not found, listing the count of runs lacking them. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 3. **Spec number.** SPEC-410 replaces an initial SPEC-137, which collided with the existing error-log-diagnostics spec; the highest id across main and remote branches was 409. Open PRs added later are not visible offline, so confirm it does not collide.
+
+   **Recorded answer:** no collision found. Checked 2026-11-23 against main 1b2e1f18: one `SPEC-410-*` directory on main and on every origin branch, and no open pull request adds a `SPEC-410-*` file. Agent check, no human confirmed it.
