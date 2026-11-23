@@ -1,7 +1,7 @@
 ---
 id: SPEC-384
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness — concurrent multi-session coordination (worktree reclaim built on the SPEC-044 claim/lease)
@@ -11,6 +11,12 @@ implements: none
 implements_reason: >-
   Specified, not built. No design.md/tasks.md exist; the Clarify choices below carry agent-recorded
   selections of the recommended option (DR-123); approving the spec will ratify them.
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-384: Dispatch reclaims or defers when an old worktree still holds `agent/issue-N` (Requirements)
