@@ -11,7 +11,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 import { specHash } from '../../shared/src/canonical';
-import { checkApprovable } from '../../../scripts/lib/approval-sidecar-race';
+import { applyDelegationCoverage, checkApprovable, type RaceFailure } from '../../../scripts/lib/approval-sidecar-race';
 import { useShellTimeout } from './helpers/shell-timeout';
 
 useShellTimeout();
@@ -187,5 +187,182 @@ describe('checkApprovable (pure)', () => {
   });
   it('passes an unapproved file', () => {
     expect(checkApprovable({ ...base, headSidecarText: null }, specHash)).toBeNull();
+  });
+});
+
+// ── #3831: a live delegation turns a voided approval into a warning ─────────────────────
+//
+// DLG-001 (DR-108) lets the bot re-approve a spec after its content merges, but this gate
+// refused the content commit itself, so an approved spec could never be edited at all. When
+// a live delegation covers the spec the void is the EXPECTED state: warn, let it land, and
+// let the delegated caller re-approve. Every witness is read from HEAD and fails closed.
+describe('approval race gate: delegation-covered spec edits (#3831)', () => {
+  const T3V1 = '---\nid: SPEC-900\nstatus: approved\ntier: T3\n---\n\n# S\n\nFR1: original.\n';
+  const T3V2 = '---\nid: SPEC-900\nstatus: approved\ntier: T3\n---\n\n# S\n\nFR1: rewritten.\n';
+  const DELEGATIONS = '.minspec/delegations.json';
+  const DR = 'docs/decisions/DR-108.md';
+  const ENV = { DR_INDEX_GATE_OFF: '1' };
+  const record = (over: Record<string, unknown> = {}) =>
+    JSON.stringify(
+      {
+        version: 1,
+        delegations: [
+          {
+            id: 'DLG-001',
+            decision: 'DR-108',
+            words: 'greenlight',
+            said: '2026-10-17',
+            source: 'test',
+            repo: 'AIClarityAU/minspec',
+            covers: ['spec-approval'],
+            tiers: ['T1', 'T2', 'T3', 'T4'],
+            reviewBy: '2999-01-01',
+            tripwire: { metric: 'repeat-fix-share', max: 0.13 },
+            ...over,
+          },
+        ],
+      },
+      null,
+      2,
+    ) + '\n';
+  const sidecarOf = (body: string) => JSON.stringify({ specPath: SPEC, specHash: specHash(body) }) + '\n';
+
+  /** Commit the witnesses (gate off) under a fix subject so the repeat-fix share is known: 0/1. */
+  function seed(opts: { delegations?: string | null; drStatus?: string; fixCommit?: boolean } = {}) {
+    git(['remote', 'add', 'origin', 'https://github.com/AIClarityAU/minspec.git']);
+    git(['checkout', '-q', '-b', 'work']); // with an origin, the default-branch guard refuses main
+    write(SPEC, T3V1);
+    write(SIDECAR, sidecarOf(T3V1));
+    if (opts.delegations !== null) write(DELEGATIONS, opts.delegations ?? record());
+    write(DR, `---\nid: DR-108\nstatus: ${opts.drStatus ?? 'accepted'}\n---\n\n# DR-108\n`);
+    git(['add', '-A']);
+    const msg = opts.fixCommit === false ? ['-m', 'chore: seed'] : ['-m', 'fix(#1): seed', '-m', 'Root cause: test seed.'];
+    const r = spawnSync('git', ['commit', ...msg], {
+      cwd: tmp,
+      encoding: 'utf-8',
+      env: { ...process.env, APPROVAL_RACE_GATE_OFF: '1', DR_INDEX_GATE_OFF: '1', ADR_BORN_GATE_OFF: '1' },
+    });
+    expect(r.status, r.stderr).toBe(0);
+  }
+  const editSpec = () => {
+    write(SPEC, T3V2);
+    git(['add', SPEC]);
+  };
+
+  it('(a) covered: warns and allows the content commit, leaving the sidecar untouched', () => {
+    seed();
+    editSpec();
+    const r = commit(ENV);
+    expect(r.status, r.stderr).toBe(0);
+    expect(r.stderr).toContain('warning');
+    expect(r.stderr).toContain('sidecar-not-restaged');
+    expect(r.stderr).toContain('DLG-001');
+    // No approval is written or re-written: the committed sidecar still describes V1.
+    expect(execFileSync('git', ['show', `HEAD:${SIDECAR}`], { cwd: tmp, encoding: 'utf-8' })).toBe(sidecarOf(T3V1));
+  });
+
+  it('(b) not covered: decision record not accepted -> refuses as before', () => {
+    seed({ drStatus: 'proposed' });
+    editSpec();
+    const r = commit(ENV);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('sidecar-not-restaged');
+    expect(r.stderr).not.toContain('warning');
+  });
+
+  it('(b) not covered: delegation names another repo -> refuses', () => {
+    seed({ delegations: record({ repo: 'AIClarityAU/sealbox' }) });
+    editSpec();
+    expect(commit(ENV).status).not.toBe(0);
+  });
+
+  it('(b) not covered: tier outside the delegation -> refuses', () => {
+    seed({ delegations: record({ tiers: ['T1'] }) });
+    editSpec();
+    expect(commit(ENV).status).not.toBe(0);
+  });
+
+  it('(b) not covered: repeat-fix share unknown (no fix commits) -> refuses', () => {
+    seed({ fixCommit: false });
+    editSpec();
+    const r = commit(ENV);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('sidecar-not-restaged');
+  });
+
+  it('(c) malformed delegation record -> refuses (fail closed)', () => {
+    seed({ delegations: '{ not json' });
+    editSpec();
+    const r = commit(ENV);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('sidecar-not-restaged');
+  });
+
+  it('(c) missing delegation record -> refuses (fail closed)', () => {
+    seed({ delegations: null });
+    editSpec();
+    expect(commit(ENV).status).not.toBe(0);
+  });
+
+  it('(c) a delegation staged in the same commit grants nothing: witnesses come from HEAD', () => {
+    seed({ delegations: null });
+    editSpec();
+    write(DELEGATIONS, record());
+    git(['add', DELEGATIONS]);
+    expect(commit(ENV).status).not.toBe(0);
+  });
+
+  it('(c) a tier change staged in the same commit grants nothing: the tier is read from HEAD', () => {
+    seed({ delegations: record({ tiers: ['T1'] }) }); // HEAD spec is T3: out of scope
+    write(SPEC, T3V2.replace('tier: T3', 'tier: T1'));
+    git(['add', SPEC]);
+    const r = commit(ENV);
+    expect(r.status, r.stderr).not.toBe(0);
+    expect(r.stderr).toContain('sidecar-not-restaged');
+    expect(r.stderr).not.toContain('warning');
+  });
+
+  it('covered spec, stale STAGED sidecar (sidecar-mismatch) still refuses', () => {
+    seed();
+    write(SPEC, T3V2);
+    write(SIDECAR, JSON.stringify({ specPath: SPEC, specHash: specHash(T3V1), approvedAt: 't' }) + '\n');
+    git(['add', SPEC, SIDECAR]);
+    const r = commit(ENV);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain('sidecar-mismatch');
+  });
+});
+
+describe('applyDelegationCoverage (pure, #3831)', () => {
+  const voided: RaceFailure = { path: SPEC, check: 'sidecar-not-restaged', detail: 'd' };
+  it('downgrades only a covered sidecar-not-restaged', () => {
+    const out = applyDelegationCoverage([voided], () => ({ covered: true, detail: 'covered by DLG-001' }));
+    expect(out.refusals).toEqual([]);
+    expect(out.warnings.map((w) => w.path)).toEqual([SPEC]);
+  });
+  it('refuses when not covered', () => {
+    const out = applyDelegationCoverage([voided], () => ({ covered: false, detail: 'no' }));
+    expect(out.refusals.length).toBe(1);
+    expect(out.warnings).toEqual([]);
+  });
+  it('never asks about, or downgrades, a mismatch or unreadable sidecar', () => {
+    let asked = 0;
+    const cov = () => (asked++, { covered: true, detail: 'x' });
+    const out = applyDelegationCoverage(
+      [
+        { path: SPEC, check: 'sidecar-mismatch', detail: 'm' },
+        { path: SPEC, check: 'sidecar-unreadable', detail: 'u' },
+      ],
+      cov,
+    );
+    expect(out.refusals.length).toBe(2);
+    expect(asked).toBe(0);
+  });
+  it('fails closed when the coverage witness throws', () => {
+    const out = applyDelegationCoverage([voided], () => {
+      throw new Error('boom');
+    });
+    expect(out.refusals.length).toBe(1);
+    expect(out.refusals[0].detail).toContain('boom');
   });
 });
