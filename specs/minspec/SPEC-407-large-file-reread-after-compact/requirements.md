@@ -4,9 +4,19 @@ type: requirements
 status: specifying
 tier: T3
 product: minspec
-epic: EPIC-003  # SDD Core Methodology - dev-time dispatch economics; no epic for dispatch exists, see Decision D4
+epic: EPIC-003  # SDD Core Methodology (placeholder: dev-time dispatch economics); no epic for dispatch exists, see Decision D4
 aspects: [dispatch, context-budget, autocompact, dev-time, offline, no-silent-gate, blast-radius]
 relates_to: [SPEC-062, "#1240", "#1203", "#912", "#1218", "#1200", "#1231", "#1187"]
+implements: none
+implements_reason: >-
+  Specify phase only. Which files this spec will own is decided at Plan. Expected surface: the
+  dispatch scripts under `scripts/`, the dev role prompt, and tests. None of it is claimed yet.
+phases:
+  specify: in-progress
+  clarify: pending
+  plan: pending
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec - Stop dispatched agents re-reading large files after every compact (Requirements)
