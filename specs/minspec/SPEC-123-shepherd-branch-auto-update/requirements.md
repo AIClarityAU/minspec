@@ -25,6 +25,11 @@ worktree. Scanning every local and remote branch/ref for `specs/*/SPEC-NNN-*` fi
 claimed up to `SPEC-122` in open work not yet merged. Checked 2026-10-03; if `SPEC-123`
 collides at review time (a concurrent session picked it first), renumber.
 
+**Re-dispatch note (2026-11-23).** #181 was dispatched again for Specify; this spec already
+exists, so it keeps `SPEC-123` rather than minting a second id. Re-read against the worktree:
+`scripts/lib/shepherd-pr.sh:85` (`do-rebase`) and `scripts/dispatch-issue.sh:1312` (`shepherd_rebase`)
+still match the cited baseline; the only open item remains DQ-1 below.
+
 ## One-Sentence Scope
 
 Before specifying a new mechanism, trace what the auto-build pipeline's existing shepherd
