@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-226-identity-check-reach-not-allowlist/requirements.md",
+  "specHash": "9528e6d5567a161b2df8d3f56cee842a1646b7519859bb26de8eeba6b3bd22cd",
+  "approvedAt": "2026-11-23T08:58:52.456Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:specfix-1123-text",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3980#issuecomment-7095556064"
+}
