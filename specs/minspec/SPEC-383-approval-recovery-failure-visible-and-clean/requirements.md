@@ -9,6 +9,9 @@ aspects: [approval, protected-branch, recovery, no-silent-gate, cleanup, failure
 depends_on: [SPEC-208, SPEC-050]
 relates_to: ["#3880", "#1022", "#2974", "#3515", "#1115", SPEC-140, SPEC-208, SPEC-050, DR-080, DR-123]
 affects: [packages/minspec/src/lib/approval-recover.ts, packages/minspec/src/commands/commit-on-approve.ts]
+implements: none
+implements_reason: >-
+  Specify phase only. Which files this spec will own is decided at Plan, after Decision D-1. Expected surface: `packages/minspec/src/lib/approval-recover.ts` and `packages/minspec/src/commands/commit-on-approve.ts`.
 ---
 
 # SPEC-383: A failed protected-branch approval recovery cleans up after itself and fails visibly
