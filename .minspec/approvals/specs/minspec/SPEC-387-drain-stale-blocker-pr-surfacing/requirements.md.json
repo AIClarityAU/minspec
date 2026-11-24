@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-387-drain-stale-blocker-pr-surfacing/requirements.md",
+  "specHash": "60d28365ff92a0d317ff34cdc78ffca2a977e94a7bf9e011b7eec90eabb0d266",
+  "approvedAt": "2026-11-23T07:00:17.954Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1122b",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3969#issuecomment-7078074036"
+}
