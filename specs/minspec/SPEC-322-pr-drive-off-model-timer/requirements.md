@@ -97,6 +97,8 @@ while the cap is closed.
    up to a stated share of the weekly budget per hour **(rec)**: cost: needs a number from the
    founder. (b) Skip branches whose update would re-trigger review: cost: those never land
    faster. (c) Unbounded: cost: could spend tokens while the cap is deliberately closed.
+
+   **Recorded selection: bound re-reviews by the existing drain cap,** so re-review spend counts against the drain's existing ramped weekly cap and no new number is set. Founder answer, queue item cq322, 2026-11-24.
 3. **Where the timer lives.** (a) In the loop (a second short-sleep path) **(rec)**: one place,
    shares its lock; cost: edits the loop itself. (b) A separate host cron/systemd timer: no loop
    edit; cost: a second scheduler to monitor, and lock sharing must be proven.

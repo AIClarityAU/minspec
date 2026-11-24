@@ -227,6 +227,8 @@ upward-only ratchet, which this catalog keeps.
   *Cost:* #91 then has no trip-frequency data, and the catalog's design gets no field
   contact until after validation.
 
+**Recorded selection: advisory now,** build advisory mode now and enforce only after #91. This is also the human confirmation of the DR-024 reading (graph before enforcement). Founder answer, queue item cq374, 2026-11-24.
+
 ### DQ-2: What is an "obligation": a new lifecycle phase, or a required section?
 
 - **(a) A required section inside an existing phase, via SPEC-013's section registry
