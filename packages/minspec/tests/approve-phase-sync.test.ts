@@ -443,6 +443,26 @@ describe('advanceSpecToImplementing — a spec with no phases: block (SPEC-061)'
     expect(() => advanceSpecToImplementing(p)).toThrow(/Cannot advance/i);
   });
 
+  // #1634 — a refused advance must not mutate the file. The gate used to run AFTER both
+  // writes, so the "rejected" file already carried the rewritten phases and status.
+  it.each([
+    ['no recognized child', 'phases:\n  notaphase: pending'],
+    ['only implement:', 'phases:\n  implement: pending'],
+    ['only tasks:', 'phases:\n  tasks: pending'],
+  ])('a refused advance (%s) leaves the file byte-identical (#1634)', (_n, block) => {
+    const p = write(FM.replace('product: minspec', `product: minspec\n${block}`));
+    const before = fs.readFileSync(p);
+    expect(() => advanceSpecToImplementing(p)).toThrow(/Cannot advance/i);
+    expect(fs.readFileSync(p).equals(before)).toBe(true);
+  });
+
+  it('a refused advance on a CRLF spec leaves the bytes identical (#1634)', () => {
+    const p = write(FM.replace('product: minspec', 'product: minspec\nphases:\n  tasks: pending').replace(/\n/g, '\r\n'));
+    const before = fs.readFileSync(p);
+    expect(() => advanceSpecToImplementing(p)).toThrow(/Cannot advance/i);
+    expect(fs.readFileSync(p).equals(before)).toBe(true);
+  });
+
   it('does not invent individual phase lines inside an existing block', () => {
     const p = write(FM.replace('product: minspec', 'product: minspec\nphases:\n  specify: pending\n  plan: pending'));
     advanceSpecToImplementing(p);
