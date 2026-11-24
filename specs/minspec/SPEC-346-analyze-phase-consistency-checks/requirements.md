@@ -2,7 +2,7 @@
 id: SPEC-346
 type: requirements
 status: specifying
-tier: T4
+tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — see Decisions needed D5 (epic fit unverified)
 aspects: [lifecycle, analyze, tier-0, static-check, diagnostics]
@@ -105,4 +105,11 @@ Add a deterministic, offline **analyze** phase between `tasks` and `implement` t
   frontmatter, so this changes a cross-boundary contract - cost: T4 makes Clarify required
   (`config.ts:176`) and takes the spec out of the T3 lane where an agent pick closes Clarify. The
   tier decides the approval class, so it is the founder's.
-  **Recorded selection: T4,** SPEC-346 is T4 and the founder signs it off. Founder answer, queue item cq346d6, 2026-11-24. (Supersedes the earlier open note, queue item q346d6, 2026-11-23.)
+  **Open, reserved for the founder:** the tier decides the approval class, so no agent pick is
+  recorded (founder decision, queue item clarsel, exception for questions a spec reserves; DR-123
+  section 3 keeps such a question open). Asked as queue item q346d6, 2026-11-23. The founder's
+  answer, recorded from task-queue item cq346d6 on 2026-11-24: "4 T4 (Recommended) = SPEC-346 is
+  T4; I sign it off". A queue answer is not consent (DR-108 section 4), so this question stays
+  open, and the frontmatter keeps `tier: T3`, until the founder confirms T4 himself. Moving to T4
+  also takes this spec out of the T3 lane that D1 to D5's agent picks rely on (DR-123 section 4),
+  so those picks would need his answer too.
