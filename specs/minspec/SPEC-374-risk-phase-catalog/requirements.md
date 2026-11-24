@@ -227,6 +227,14 @@ upward-only ratchet, which this catalog keeps.
   *Cost:* #91 then has no trip-frequency data, and the catalog's design gets no field
   contact until after validation.
 
+**Recorded selection: (a), advisory now,** build advisory mode now and enforce only after #91.
+Source: the answer to task-queue item cq374, 2026-11-24 ("1 Advisory now (Recommended) = build
+advisory mode now, enforce only after #91"), an answer the queue attributes to the founder. A
+queue answer is not consent (DR-108 section 4), so this selection is unverified. Option (a) needs
+a human to confirm the DR-024 reading ("do not *enforce* before #91"), so it binds only if the
+founder approves this spec's text with it in place. A delegated approval does not supply that
+confirmation, and until the founder approves, the reading stays unconfirmed.
+
 ### DQ-2: What is an "obligation": a new lifecycle phase, or a required section?
 
 - **(a) A required section inside an existing phase, via SPEC-013's section registry
