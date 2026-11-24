@@ -19,6 +19,42 @@ INV-1..INV-5 and DQ-1..DQ-5 are settled there and are not re-litigated. This is 
 WHAT or WHY.
 **Dependency budget:** zero new npm dependencies, zero new files.
 
+## Re-measured 2026-11-23 against `696dd202` (#897 re-dispatch)
+
+Re-dispatching #897 found SPEC-055's Specify and Clarify phases already done and
+requirements.md already approved, with the 2026-08-19 sidecar under `.minspec/approvals/`. This dispatch
+leaves requirements.md untouched, because any edit there voids the founder's sign-off. It
+records only how the code moved under this Plan since `d43f235a`. The section below keeps its
+original measurements, so read the line numbers there as of `d43f235a`. Where the two disagree,
+this section is current.
+
+1. **Four status-bar items, not three.** `packages/minspec/src/views/status-bar.ts` calls
+   `createStatusBarItem` at :137 (99, `minspec.nextTask`), :195 (98,
+   `minspec.commitHarnessRefresh`), :253 (97, `minspec.tidyPrimary`) and :311 (96,
+   `minspec.viewQueue`, class `MinSpecQueueDepthStatusBar`, constructed at
+   `packages/minspec/src/extension.ts:345`).
+
+   The fourth item landed on 2026-11-14 with #712 (queue-depth indicator), commit `e0a3c432c`. PQ1 below is restated for four items.
+2. **A fifth comment has the direction backwards.** The four `// just left of` comments now sit at :139, :197,
+   :255 and :313. The new one is `96, // just left of the tidy-primary item (priority 97)`,
+   and it reverses the direction just as :197 and :255 do. AC-1's scope ("anywhere under
+   `packages/minspec/src`") already covers it, so the Components row for `status-bar.ts` gains
+   `:313` → `96, // just right of the tidy-primary item (priority 97)`. The header at :1-12
+   still describes the deleted item's format.
+3. **AC-3's behavioural test has four mocks to clear, not three.** `packages/minspec/tests/extension.test.ts:17-20` now
+   declares `mockQueueDepthStatusBar` alongside the other three, and the class mock at :241-244
+   returns it. The only `onDidChangeActiveTextEditor` in `packages/minspec/src/extension.ts` is at :83.
+4. **No test pins priority 96.** `packages/minspec/tests/status-bar.test.ts` asserts `(1, 99)` at :286, `(1, 98)` at :98 and
+   `(1, 97)` at :151. The `minspec.viewQueue` command is pinned (:331-333), but no test pins its priority.
+   AC-2's pin, if PQ1 (a) is chosen, needs a priority-96 assertion added.
+5. **Unchanged.** `grep -rn 'window\.title' packages/minspec/src` returns 0, so DQ-3's deferral
+   still has nothing to caveat. The non-comment references in PQ2 still exist, but their line
+   numbers moved: `packages/minspec/README.md:182` ("### Status Bar") and
+   `packages/minspec/media/walkthrough/explore-sidebar.md:30` ("## Status Bar").
+
+None of this changes a requirement or settles a Plan Question. It keeps PQ1's premise true so
+the founder can answer it.
+
 ## What this Plan designs against (measured on `d43f235a`)
 
 1. **Three status-bar items, not two.** `packages/minspec/src/views/status-bar.ts` calls
@@ -182,17 +218,21 @@ Implement PR body.
 
 ## Plan Questions
 
-- **PQ1 - AC-2 pins two items; `d43f235a` creates three.** The tidy-primary item
-  (`status-bar.ts:222-261`, priority 97, `minspec.tidyPrimary`) landed after approval, so
+- **PQ1 - AC-2 pins two items; `696dd202` creates four** (three on `d43f235a`; see the
+  2026-11-23 re-measurement). The tidy-primary item (priority 97, `minspec.tidyPrimary`) and
+  the queue-depth item (priority 96, `minspec.viewQueue`, #712) both landed after approval, so
   AC-2's own fail clause ("a third `createStatusBarItem` call appears … without this criterion
-  being updated") has fired. **(a) (rec)** Amend AC-2 in Clarify to pin three items (99
-  `minspec.nextTask`, 98 `minspec.commitHarnessRefresh`, 97 `minspec.tidyPrimary`) and
-  re-approve requirements.md. *Cost:* the edit voids the hash-locked sign-off, so the founder
+  being updated") has fired. A fixed-count pin breaks again whenever someone adds a legitimate status-bar
+  item, which has now happened twice in three months. **(a) (rec)** Amend AC-2 in Clarify to pin
+  the four items (99 `minspec.nextTask`, 98 `minspec.commitHarnessRefresh`, 97
+  `minspec.tidyPrimary`, 96 `minspec.viewQueue`) and re-approve requirements.md. A variant
+  for the founder to weigh is to reword AC-2 to "no item's text names a spec unless FR-2/FR-3 are met",
+  which survives new items but cannot be checked by a count. *Cost:* the edit voids the hash-locked sign-off, so the founder
   re-reads and re-approves, and AC-2 waits for it. **(b)** Test only the two named pairings and
   ignore the rest. *Cost:* the test passes on the state AC-2 says fails, a criterion that cannot
   fail, which the 2026-08-14 AC rewrite (requirements.md:72-77) exists to remove. **(c)** Delete
-  the tidy-primary item. *Cost:* removes shipped #1162 behaviour (keep the primary checkout
-  clean) that no FR here touches. **NOT decided - needs the founder via Clarify.**
+  the two post-approval items. *Cost:* removes shipped #1162 behaviour (keep the primary checkout
+  clean) and #712 behaviour (queue-depth visibility), neither of which an FR here touches. **NOT decided - needs the founder via Clarify.**
 - **PQ2 - Does FR-1's "every stale reference" reach past comments?** FR-1 says "every stale
   reference"; DQ-2 says "the remaining work is the comment sweep"; AC-1 checks comments only.
   Shipped non-comment references: `packages/minspec/README.md:121-125` (a "Status Bar" section - tier, phase,

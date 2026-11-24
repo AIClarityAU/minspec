@@ -634,23 +634,22 @@ third-party tool (INV-8).
 - **A new command or view for these findings.** Rejected: two surfaces already show
   warnings and signals (FR-13).
 
-## Follow-ups (items 1, 2, 3 and 5 not yet filed - this dispatch has no network access)
+## Follow-ups (tracked)
 
 Each is outside this spec's scope. Under DR-023's 30-day rule, items 1, 2, 3 and 5 bear on
-this spec's Clarify answers, so they must be filed as issues, and their numbers written in
-here, before this spec is approved. Items 4 and 6 would not change a decision within 30 days
-and are recorded in `docs/backlog.md` instead.
+this spec's Clarify answers, so each is tracked by the issue it cites. Items 4 and 6 would
+not change a decision within 30 days, so each is tracked by its `docs/backlog.md` line.
 
-1. Amend the contract-frontmatter spec for #23 to admit `contracts: none` plus
+1. #4018 - Amend the contract-frontmatter spec for #23 to admit `contracts: none` plus
    `contracts_reason:` (DQ-2 Option A).
-2. Add the three FR-9 inputs to the test-completeness spec for #52 - most importantly
+2. #4019 - Add the three FR-9 inputs to the test-completeness spec for #52 - most importantly
    input (0), a spec's own `## Invariants` ids in its required set (DQ-3 Option A).
-3. Register `contracts_reason:` in SPEC-109's field table (canonical frontmatter schema)
+3. #4020 - Register `contracts_reason:` in SPEC-109's field table (canonical frontmatter schema)
    alongside the #23 keys it already expects (DQ-2 Option A).
 4. `git-analyzer.ts:188-210` reads a version bump as a new dependency and reads a failed
    diff as "none"; decide whether classification should use FR-11's count instead.
    backlog: `git-analyzer.ts:188-210` reads a version bump as a new dependency...
-5. One home for the dependency-budget number, shared with the methodology guardrail spec
+5. #4021 - One home for the dependency-budget number, shared with the methodology guardrail spec
    for #125 (DQ-5).
 6. After ten specs have passed through FR-3, measure how many answered `contracts: none`.
    backlog: once ten specs have passed through SPEC-114 FR-3 (seam-contract check)...
