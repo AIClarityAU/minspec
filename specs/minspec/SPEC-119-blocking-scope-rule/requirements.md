@@ -1,7 +1,7 @@
 ---
 id: SPEC-119
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the rule scopes SPEC-001 Invariant 5, which lives in that epic
@@ -13,9 +13,9 @@ implements: [packages/minspec/tests/blocking-scope-crossref.test.ts, packages/mi
 # Modified, not owned: the two specs that gain a one-sentence pointer (FR-4, FR-5).
 affects: [specs/minspec/requirements.md, specs/agent-execute/SPEC-019-execution-substrate/requirements.md]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
