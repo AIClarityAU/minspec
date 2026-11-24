@@ -1,7 +1,7 @@
 ---
 id: SPEC-378
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - a required check must exist and be visible, and not depend on timing it does not control
@@ -10,7 +10,13 @@ relates_to: ["#1211", "#1204", "#1176", "#1688", "#1973", "SPEC-182", "SPEC-304"
 implements: none
 implements_reason: >-
   Specified, not built. No design.md/tasks.md exist; the fix-shape choice under
-  "Decisions needed (Clarify)" is unanswered.
+  "Decisions needed (Clarify)" has a recorded selection (agent pick of the recommended option; founder decision, queue item clarsel, DR-123). Q4 is closed and deferred to #3953.
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-378: `ready-to-merge` verdicts are bound to the state they evaluated, so a replayed run cannot regress a green gate (Requirements)

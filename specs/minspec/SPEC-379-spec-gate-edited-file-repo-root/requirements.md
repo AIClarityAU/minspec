@@ -1,7 +1,7 @@
 ---
 id: SPEC-379
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — a governance gate that silently allows is a trust-boundary failure
@@ -10,7 +10,13 @@ relates_to: ["#1893", "#1869", DR-031, DR-047, SPEC-022]
 implements: none
 implements_reason: >-
   Specified, not built. No design.md/tasks.md exist; the cwd-vs-file-root choice under
-  "Decisions needed (Clarify)" is unanswered.
+  "Decisions needed (Clarify)" has a recorded selection (agent pick of the recommended option; founder decision, queue item clarsel, DR-123).
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-379: The T3/T4 spec gate resolves its corpus from the edited file's repo, not the session cwd (Requirements)
