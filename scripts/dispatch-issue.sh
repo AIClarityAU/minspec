@@ -42,6 +42,12 @@ ROLES_DIR="${SCRIPT_DIR}/roles"
 #                          may re-mint its credential and ask again (#3176). Said by status
 #                          only: the caller never reads this script's output for it, because
 #                          the build agent's prose travels on that output (#2233).
+#   DISPATCH_RC_QUOTA_PAUSED  the claim was won and the build agent was killed at its time bound
+#                          (exit 124/137) while the quota meter says the window is closed
+#                          (`drain-inbox.sh --quota-cap`). The kill is evidence of the quota
+#                          wall, not of bad code: a waiting `claude -p` emits no limit text
+#                          for the caller to read, so the meter is the witness (#1713).
+#                          The issue keeps `agent-ready` and gets no crash stamp.
 #   0                      NO ANSWER. An exit neither function below was called for. The
 #                          caller must read it as neither of the two.
 #   anything else          a failure, as before.
@@ -74,6 +80,7 @@ ROLES_DIR="${SCRIPT_DIR}/roles"
 DISPATCH_RC_DECLINED=75
 DISPATCH_RC_STARTED=76
 DISPATCH_RC_AUTH_FAILED=78
+DISPATCH_RC_QUOTA_PAUSED=79
 
 DISPATCH_STATUS_ASKED=0
 case "${MINSPEC_DISPATCH_OUTCOME_STATUS:-}" in
@@ -127,6 +134,15 @@ exit_auth_failed() {
   exit "$DISPATCH_RC_AUTH_FAILED"
 }
 
+# exit_quota_paused: leave, having won the claim, because the build timed out while the quota
+# window was closed (#1713). A caller that did not ask gets exit 0, as for every other end of a
+# run that won its claim.
+exit_quota_paused() {
+  (( DISPATCH_STATUS_ASKED && DISPATCH_CLAIMED )) || exit 0
+  DISPATCH_EXIT_AS="$DISPATCH_RC_QUOTA_PAUSED"
+  exit "$DISPATCH_RC_QUOTA_PAUSED"
+}
+
 # _dispatch_on_exit: the ONE exit trap of this script. It has two jobs.
 #
 # It gives the claim back (D6/D10). That used to be a trap of its own, set where the
@@ -154,7 +170,7 @@ _dispatch_on_exit() {
     lease_stop_renew_ticker; lease_release_all >/dev/null 2>&1 || true
   fi
   if (( DISPATCH_STATUS_ASKED )) \
-    && [[ "$rc" == "$DISPATCH_RC_DECLINED" || "$rc" == "$DISPATCH_RC_STARTED" || "$rc" == "$DISPATCH_RC_AUTH_FAILED" ]] \
+    && [[ "$rc" == "$DISPATCH_RC_DECLINED" || "$rc" == "$DISPATCH_RC_STARTED" || "$rc" == "$DISPATCH_RC_AUTH_FAILED" || "$rc" == "$DISPATCH_RC_QUOTA_PAUSED" ]] \
     && [[ "$rc" != "$DISPATCH_EXIT_AS" ]]; then
     echo "WARNING: #$ISSUE was ending on status $rc, which this script keeps for its own 'started' and 'refused' answers and did not choose here. Reported as a plain failure instead (#2641)." >&2
     exit 1
@@ -737,14 +753,21 @@ delegated_merge_handoffs_spent() {
 delegated_merge_human_claims() {
   local pr="$1" changed="${2-}" view="" head="" refs="" handoffs="" issue=""
   local marker="<!-- minspec-shepherd-handoff -->"
-  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments,author,body 2>/dev/null) \
+  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments,author,body,labels 2>/dev/null) \
      || ! head=$(printf '%s' "$view" | jq -r '.headRefName' 2>/dev/null) \
      || ! refs=$(printf '%s' "$view" | jq -r '.closingIssuesReferences | if type == "array" then .[].number else error("no list") end' 2>/dev/null) \
      || ! handoffs=$(printf '%s' "$view" | jq -r --arg m "$marker" '.comments | if type == "array" then [.[] | select((.body // "") | contains($m))] | length else error("no list") end' 2>/dev/null); then
     printf 'pr-claims-unreadable\tcould not read PR #%s closing links and comments; failing closed\n' "$pr"
     return 1
   fi
-  if [[ "$handoffs" != "0" ]] && ! delegated_merge_handoffs_spent "$pr" "$marker"; then
+  # #4016: a handoff on an `agent-stuck` PR (no `hold:*` label) is an automation failure,
+  # not a founder decision (#3835 split the label off at the producer). It is not a human
+  # claim, so the PR returns to the agent path. Unreadable or absent labels keep the hold, and so
+  # does `needs-human-review`: remediate-pr.sh adds it at its retry cap without removing
+  # `agent-stuck`, and that escalation is a request for a human, so the handoff stays live.
+  local stuck=""
+  stuck=$(printf '%s' "$view" | jq -r '(.labels // []) | if type == "array" then ([.[] | .name // ""] | (any(. == "agent-stuck") and (any(startswith("hold:")) | not) and (any(. == "needs-human-review") | not))) else false end' 2>/dev/null) || stuck=false  # swallow-ok: unreadable labels leave the handoff live (fail closed)
+  if [[ "$handoffs" != "0" && "$stuck" != "true" ]] && ! delegated_merge_handoffs_spent "$pr" "$marker"; then
     printf 'handed-to-human\tPR #%s was handed to the founder by its creator (shepherd handoff comment); a bot merge would take his decision\n' "$pr"
     return 1
   fi
@@ -2212,7 +2235,7 @@ SHEPHERD_MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"
 #   stuck — the shepherd's OWN automation gave up (ceiling, attempt cap, rebase or fix that
 #           produced nothing): `agent-stuck`, NOT `needs-human-review`, so no consumer reads
 #           it as a human decision. Anything but the literal "human" fails closed to stuck.
-#           No code reads `agent-stuck` (grep: zero consumers); it is a visibility marker.
+#           The delegated-merge lane reads it (#4016): a handoff on an `agent-stuck` PR with no `hold:*` label and no `needs-human-review` label is not a human claim (either label keeps the hold).
 #           Any later retry comes from the label-agnostic drain sweep (drain-inbox.sh
 #           `gh pr list --state open`), NOT from this label; remediate-pr.sh may still
 #           relabel `needs-human-review` when ITS own cap is hit.
@@ -2224,8 +2247,8 @@ shepherd_hand_off() {
     tail='It is labelled `needs-human-review`; a human decision is needed and the creator will make no further automated attempts.'
   else
     label="agent-stuck"
-    desc="Automation gave up — a failure marker, not a human decision (no dedicated consumer)"
-    tail='It is labelled `agent-stuck`: this is an automation failure rather than a human decision. Nothing reads this label; a later drain sweep may retry it, and the remediation drain may escalate it to `needs-human-review` if it hits its own cap. The creator will make no further automated attempts.'
+    desc="Automation gave up — a failure marker, not a human decision (read only by the delegated-merge lane, #4016)"
+    tail='It is labelled `agent-stuck`: this is an automation failure rather than a human decision. The delegated-merge lane reads this label, to treat the handoff as not a human claim; a later drain sweep may retry it, and the remediation drain may escalate it to `needs-human-review` if it hits its own cap. The creator will make no further automated attempts.'
   fi
   gh label create "$label" --repo "$REPO" --color fbca04 \
     --description "$desc" 2>/dev/null || true
@@ -3179,6 +3202,33 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude
     fi  # end egress guard: clean-publish branch (quarantine handled above)
   fi
 else
+  # The build's own status: in an `else` branch `$?` is the condition's, and under `pipefail`
+  # that is `timeout`'s 124 (SIGTERM at the ceiling) or 137 (SIGKILL from --kill-after) when
+  # the ceiling killed it. Read FIRST, before anything below changes it.
+  AGENT_RC=$?
+  # #1713 — a build killed at its ceiling is not evidence of a code failure. A `claude -p`
+  # that WAITS out a usage limit (rather than erroring at it) prints no limit notice, so the
+  # drain's text classifier cannot see it, and this path used to stamp it `agent-crashed` +
+  # `needs-human-review`: a quota condition filed as a harness crash. Ask the meter. A closed
+  # window is the witness that the kill was quota. `--quota-cap` fails CLOSED when it cannot
+  # read the meter (`closed unknown | defer:stale|no-reading|no-scratch|no-verdict|bad-config`,
+  # exit 42): that is a BLIND meter, not an observed closed window, so it is not a witness and
+  # the crash path below keeps it. Anything else (open, blind) leaves the crash path exactly as
+  # it was, so this can only RECLASSIFY a timeout on an observed closed window, never hide one.
+  QUOTA_TIMEOUT_VERDICT=""
+  if [[ "$AGENT_RC" == "124" || "$AGENT_RC" == "137" ]] \
+     && ! QUOTA_TIMEOUT_VERDICT=$(bash "${SCRIPT_DIR}/drain-inbox.sh" --quota-cap 2>/dev/null) \
+     && [[ "$QUOTA_TIMEOUT_VERDICT" == closed* ]] \
+     && [[ "$QUOTA_TIMEOUT_VERDICT" != "closed unknown"* ]] \
+     && [[ "$QUOTA_TIMEOUT_VERDICT" != *"defer:stale"* && "$QUOTA_TIMEOUT_VERDICT" != *"defer:no-"* \
+           && "$QUOTA_TIMEOUT_VERDICT" != *"defer:bad-config"* ]]; then
+    # Readiness is KEPT (no needs-human-review, no agent-crashed): the issue is retried once the
+    # window reopens. Only the running stamp comes off.
+    gh issue edit "$ISSUE" --repo "$REPO" --remove-label "agent-running" 2>/dev/null || true  # swallow-ok: the claim release on exit is the load-bearing step; a stale agent-running label is cleared by the next claim
+    echo "Build for #$ISSUE was killed at its time bound (exit $AGENT_RC) while the quota window is closed: $QUOTA_TIMEOUT_VERDICT"
+    echo "Classified as a QUOTA PAUSE, not a code failure — #$ISSUE stays agent-ready and will be retried when the window reopens (#1713). Log: $LOG"
+    exit_quota_paused
+  fi
   # #1307 — a CRASH raises the human gate, exactly as a deliberate escalation does.
   #
   # This path stamped `agent-escalated` alone while the DR-355 escalation path above
