@@ -90,8 +90,10 @@ The suite's own header names the defect by number and describes it in the same w
 > the harness, so the rename was written with zero warnings."
 
 **Live-run confirmation, done for this spec:** `npm ci` (root) then
-`npx vitest run packages/minspec/tests/project-name-1529.test.ts` against this worktree's
-`HEAD` — **12/12 tests passed**. This is a first-hand run, not a read of the test source;
+`npx vitest run packages/minspec/tests/project-name-1529.test.ts` — **12/12 tests passed
+(1 file, 12 tests)** on two commits: this PR's head `68cb06144368cd2057d8a31ac4da0d414779871c`
+and `origin/main` at `48dd712df7eb159a749ec6c2b0cd3e3acfb4fd04` (re-run 2026-11-24 by the
+PR-repair dispatch; `git merge-base --is-ancestor c25c9961 origin/main` also true). This is a first-hand run, not a read of the test source;
 the claims above are grounded in both the implementation reads (file:line citations) and
 this live-green result, per this project's Evidence Discipline rule. That said, the run's
 only record is this paragraph — this dispatch's shell output is transient and is not
@@ -140,8 +142,8 @@ No functional gap is introduced by the different choice of fallback source.
   observation" failure this project's Evidence Discipline rule exists to prevent — in this
   case inverted: assuming a report is current without checking the code first.
 - **FR-2 — Confirm reproduction status with a live run before closing.** This dispatch ran
-  `project-name-1529.test.ts` against this worktree's `HEAD` (which carries `c25c9961`)
-  and observed 12/12 passing (see Context) — a stronger check than a read-only citation,
+  `project-name-1529.test.ts` against the PR head `68cb0614` (which carries `c25c9961`)
+  and observed 12/12 passing on that head and on `origin/main` @ `48dd712d` (see Context) — a stronger check than a read-only citation,
   per Evidence Discipline's "artifact-existence ≠ feature-existence." But the run's only
   evidence is this prose recording the result, not a citable artifact in the diff (no log
   file, no CI link) — a read-only reviewer cannot verify from the diff alone that the run
@@ -170,7 +172,7 @@ No functional gap is introduced by the different choice of fallback source.
 - **INV-3 — Evidence Discipline (RCDD/DR-003).** This spec's own central claim — "already
   fixed" — is written with its verification method stated inline (file:line reads, a git
   ancestry check, and the live regression-suite run recorded under FR-2/Context — 12/12
-  passed against this worktree's `HEAD`, not merely read) so a reviewer can tell exactly
+  passed on PR head `68cb0614` and on `origin/main` @ `48dd712d`, not merely read) so a reviewer can tell exactly
   which parts are checked code and which part (the live run) is independently
   reproducible via the exact command given in Context.
 
@@ -180,8 +182,8 @@ No functional gap is introduced by the different choice of fallback source.
       c25c9961 <candidate-HEAD>` returns true, and `git show -s --format=%ci d1a285b`
       predates `git show -s --format=%ci c25c9961`, for whoever re-checks this. (Context)
 - [ ] **The regression suite has been run green on current `main`**, not merely read,
-      before #1496 is closed. This dispatch already ran it against this worktree's `HEAD`
-      and observed 12/12 passing (Context, FR-2) — but that result lives only in this
+      before #1496 is closed. This was run against PR head `68cb0614` and `origin/main` @ `48dd712d`
+      and observed 12/12 passing on both (Context, FR-2) — but that result lives only in this
       dispatch's transient shell output, not as a citable artifact in the diff, so it does
       not satisfy this item for an independent reader. Left unchecked until whoever closes
       #1496 re-runs `npx vitest run packages/minspec/tests/project-name-1529.test.ts`
@@ -198,7 +200,7 @@ No functional gap is introduced by the different choice of fallback source.
 
 - **DQ-1 — Close #1496 now, given FR-2's live run already passed?**
   *Recommendation:* **yes, close #1496 as already fixed**, citing `c25c9961`
-  (`fix(#1529)`/PR #1536), the regression suite name, and this spec's 12/12 live result —
+  (`fix(#1529)`/PR #1536), the regression suite name, and this spec's 12/12 live result (on `origin/main` @ `48dd712d`) —
   the one thing this spec's Context section was careful to flag as an unproven gap (a live
   test run, not just a source read) was run, in-repo, for this dispatch's own `HEAD`. That
   result is this dispatch's own observation, not yet an independently-verified one (the AC
