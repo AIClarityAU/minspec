@@ -1,7 +1,7 @@
 ---
 id: SPEC-374
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology
@@ -12,6 +12,12 @@ implements_reason: >-
   Specified, not built. No design.md/tasks.md exist. The catalog is gated on reach
   validation (#91) per DR-024, and the questions under "Decisions needed (Clarify)" are
   unanswered.
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-374: Risk→phase catalog — map tripped consequence risks to required ceremony (Requirements)
