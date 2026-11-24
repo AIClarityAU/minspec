@@ -1,7 +1,7 @@
 ---
 id: SPEC-387
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute - the dev-time autonomous build/merge pipeline; the delegated-approval caller is drain Step 0b (scripts/drain-inbox.sh record_delegated_approvals)
@@ -15,9 +15,9 @@ implements_reason: >-
   the record_delegated_approvals stage of `scripts/drain-inbox.sh` (the summary line), and
   `packages/minspec/tests/delegated-approval-caller.test.ts`. None of it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

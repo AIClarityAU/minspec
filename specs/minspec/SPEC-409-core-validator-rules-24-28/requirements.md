@@ -130,6 +130,8 @@ settled by FR1 and are not a decision.)
   currently dark by omission. Cost: two script rules stay permanently absent from the core,
   and FR5 must carry the reason text for each.
 
+**Recorded selection: the recommended option,** a, port all three (rules 24, 25 and 27). Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
+
 **D2. Where do the rule 26 and 28 functions live for the core to call them?**
 
 - **(rec) a - Import from `scripts/lib/` directly.** Matches the precedent in
@@ -142,7 +144,11 @@ settled by FR1 and are not a decision.)
   boundary for these two. Cost: touches the script and its two existing test files' import
   paths, and leaves the core inconsistent with its five existing `scripts/lib/` imports.
 
+**Recorded selection: the recommended option,** a, import from `scripts/lib/` directly. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
+
 **D3. Does one pull request carry all ports, or split 24 (needs wiring) from 26/28 (call-only)?**
 (rec) one pull request: the parity gate (FR5) must see a consistent table. Cost: a rule that
 turns out hard (25) holds the others; the split avoids that at the price of an interim state
 where FR5 lists rules as pending.
+
+**Recorded selection: the recommended option,** one pull request carries all ports. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.

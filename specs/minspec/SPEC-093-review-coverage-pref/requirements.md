@@ -386,6 +386,8 @@ CI, and CI's review is a required merge gate.
   witness, which is the shape constitution invariant 2 forbids; it would need its own
   decision record and is outside this issue.
 
+**Recorded selection: the recommended option,** a, `none` is local-only; CI reviews every pull request regardless. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
+
 ### DQ-2 - What is the level when no file exists?
 
 - **a. `single` (rec).** Matches what both local runners do today, so nobody's behaviour
@@ -399,6 +401,8 @@ CI, and CI's review is a required merge gate.
   every dispatch on top of CI's four, drawn from the subscription quota whose exhaustion
   #1656 (quota recorded as an escalation) and #2142 (a dead voter discards three verdicts)
   already document.
+
+**Recorded selection: the recommended option,** a, `single` when no file exists. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 
 ### DQ-3 - Does `review-pr.sh` keep writing the `ai-review:*` label?
 
@@ -414,6 +418,8 @@ that CI reviewed at `panel`.
   writers of one merge-gating label remain, and a local `changes` from a reduced roster can
   turn the gate red against a CI `pass` (see Context, item 3).
 
+**Recorded selection: the recommended option,** a, comment only, and extend the #600 test to cover it. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
+
 ### DQ-4 - Does `single` include the security voter on a code change?
 
 The issue defines `single` as "one `reviewer` voter". CI's `single` runs reviewer plus
@@ -425,6 +431,8 @@ security whenever a non-Markdown file changed.
 - **b. Exactly one voter.** Cheapest, and matches the issue's text. *Cost:* the dispatch
   stage loses the security read it has today on `packages/` changes, and "single" means
   different things locally and in CI - the drift FR-9 exists to prevent.
+
+**Recorded selection: the recommended option,** a, follow CI: `single` includes the security voter on a non-Markdown change. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 
 ### DQ-5 - Does this file also set the depth of the document reviewer?
 
@@ -440,6 +448,8 @@ SPEC-031 (reviewer across all approvables) FR-7 describes a per-dev depth slider
   SPEC-031 surface into this spec, contradicts SPEC-031's "two surfaces, two independent
   depths" rule, and SPEC-031's dogfood default (depth `single`) would then be forced equal
   to whatever DQ-2 picks.
+
+**Recorded selection: the recommended option,** a, no: this file governs the two pull-request-diff runners only. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
 
 ## Out of Scope
 

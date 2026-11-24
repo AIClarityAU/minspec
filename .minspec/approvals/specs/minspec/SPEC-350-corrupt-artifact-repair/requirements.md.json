@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-350-corrupt-artifact-repair/requirements.md",
+  "specHash": "a7e18055117e5de11c55a3fd49de38fe1e8d5e16509cda7b2b82bbf32fe34488",
+  "approvedAt": "2026-11-23T20:29:25.602Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1123",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4024#issuecomment-7112005209"
+}
