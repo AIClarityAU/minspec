@@ -399,10 +399,10 @@ applies. It does not change DR-066.
 - **Replacing the file copies with an environment indirection so the MCP server keeps
   working.** #2042 names this as separate.
 - **Stopping the harness from recording a secret inside a `permissions.allow` rule.**
-  This is prevention, not detection. *Unfiled follow-up: needs an issue number before
-  approval (see Traceability).*
+  This is prevention, not detection. *Follow-up recorded in `docs/backlog.md` (dated
+  2026-11-12; see Traceability).*
 - **Non-GitHub secrets in agent config** (other MCP servers' API keys). The check's
-  property is GitHub user identity. *Unfiled follow-up, as above.*
+  property is GitHub user identity. *Follow-up recorded in `docs/backlog.md`, as above.*
 - **The location witness.** SPEC-213.
 
 ## Alternatives considered and rejected
@@ -439,7 +439,6 @@ applies. It does not change DR-066.
   invariant 2). Isolation context: [DR-008](../../../docs/decisions/DR-008.md).
 - **Sibling spec:** SPEC-213 (an agent not provably in the container cannot act as the
   founder), in flight on `cos/spec-1816-1018`; it edits the same banner and relies on INV-5.
-- **Follow-ups:** two items under Out of Scope are **unfiled**, because this dispatch makes
-  no network call. Each needs an issue number, or a dated `docs/backlog.md` line under
-  DR-023, before this spec is approved.
+- **Follow-ups:** the two items under Out of Scope are recorded as dated lines in
+  `docs/backlog.md` (2026-11-12, lines 16-17, "source: SPEC-226, Out of Scope") under DR-023.
 - **DR for this spec:** none; see "Why no new DR".

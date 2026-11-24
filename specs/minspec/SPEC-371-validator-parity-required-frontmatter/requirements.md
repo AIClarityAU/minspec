@@ -1,7 +1,7 @@
 ---
 id: SPEC-371
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — a green CI run that the editor would flag is a false signpost
@@ -10,6 +10,12 @@ relates_to: ["#1033", "#972", "#137", "#1027", DR-003, SPEC-075]
 implements:
   - packages/minspec/src/lib/spec-validator.ts
   - scripts/validate-frontmatter.ts
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-371: The CI frontmatter gate and the in-extension validator enforce one required-field schema (Requirements)

@@ -9,13 +9,14 @@ aspects: [dispatch, worktrees, drain, crash-recovery, invariant-2]
 relates_to: ["#3909", "#3452", DR-066, SPEC-044]
 implements: none
 implements_reason: >-
-  Specified, not built. No design.md/tasks.md exist; the Clarify choices below are unanswered.
+  Specified, not built. No design.md/tasks.md exist; the Clarify choices below carry agent-recorded
+  selections of the recommended option (DR-123); approving the spec will ratify them.
 ---
 
 # SPEC-384: Dispatch reclaims or defers when an old worktree still holds `agent/issue-N` (Requirements)
 
-> **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human reads it,
-> answers *Decisions needed (Clarify)*, and approves it before code changes.
+> **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. Its *Decisions
+> needed (Clarify)* carry recorded selections (DR-123); approving the spec will ratify them, and it must be approved before code changes.
 
 Materializes #3909. Sibling: #3452 (stale
 *branch* left behind; handled by `scripts/lib/issue-branch.sh`). This is the stale *worktree
@@ -107,9 +108,17 @@ Changing the daily junk sweep; general crash detection (`agent-crashed` labellin
     onto the issue branch, and a failed commit must abort to deferral.
   - **(c) Defer to a human:** leave it, exit as declined, and label the issue. Cost: a crashed issue
     never self-heals, contradicting tenet 1 (smaller founder job).
+
+  **Recorded selection: the recommended option,** (a), reuse the dead owner's worktree in place. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 - **D2 — Liveness witness.** Reuse the SPEC-044 lease expiry (rec; one witness, already fail-closed;
   cost: a crashed session's lease must expire first, delaying recovery by up to one lease TTL) versus
   also checking the sid's process (faster, but a second producer that can disagree and is
   host-local).
+
+  **Recorded selection: the recommended option,** reuse the SPEC-044 lease expiry as the one liveness witness. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 - **D3 — Scope of "held by".** Treat a holder outside `WORKTREE_BASE` as in flight (rec; safest, cost:
   a human checkout holding the branch blocks dispatch until they release it) versus erroring loudly.
+
+  **Recorded selection: the recommended option,** treat a holder outside `WORKTREE_BASE` as in flight. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.

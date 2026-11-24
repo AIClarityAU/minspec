@@ -140,12 +140,16 @@ or the exemption file.
   editing approved specs (hash lock).
 - (c) Edit SPEC-051/310/122 to use unmistakable placeholders. Cost: three re-approvals.
 
+**Recorded selection: the recommended option,** (a), add the example ids to `reference-check-exemptions.json`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 **Q2. Non-repo paths (FR-2)?**
 - (a) Exempt absolute (`/`-rooted) paths only **(rec)**. Narrow, mechanical; cost: does not
   cover relative cross-repo paths like `net/unix/af_unix.c`, which then need (b).
 - (b) Per-path entries in the exemption file. Precise; cost: grows a list by hand.
 - (c) Leave the 10 `docs/decisions/` warnings. Cost: permanent noise in a gate meant to be
   clean.
+
+**Recorded selection: the recommended option,** (a), exempt absolute (`/`-rooted) paths only. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
 
 **Q3. When may the fidelity tier leave warning severity (FR-5)?**
 - (a) Stay warning until the count is under a numeric threshold (issue's suggestion) **(rec)**,
@@ -157,11 +161,15 @@ or the exemption file.
 - (c) Stay warning indefinitely. Cost: the tier is advisory forever; #3914 says 926 warnings
   already drown signal.
 
+**Recorded selection: the recommended option,** (a), stay at warning until the count is under a numeric threshold; the number itself is not set here and stays the human's to set, so the tier stays at warning until it is. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-23; sign-off ratifies it.
+
 **Q4. Fate of the residue of literal-echo hits (FR-7)?**
 - (a) One backlog line per cluster in `docs/backlog.md` **(rec)**; cost: nobody owns them.
 - (b) One issue per top cluster (SPEC-070 etc.). Cost: most would not change a decision within
   30 days (CLAUDE.md filing rule), so it is issue noise.
 - (c) Bulk-fix by regenerating citations. Cost: mass re-approval of approved specs.
+
+**Recorded selection: the recommended option,** (a), one backlog line per cluster in `docs/backlog.md`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
 
 ## Out of Scope
 
