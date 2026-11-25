@@ -1,7 +1,7 @@
 ---
 id: SPEC-350
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-005  # Auto Structure Repair — the corrupt-artifact half that SPEC-005 parked
@@ -9,6 +9,12 @@ relates_to: [SPEC-005, SPEC-218]  # SPEC-005: parent, additive/missing-only repa
 implements: none
 implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan. Expected surface: a new pure corruption classifier and repair path beside `packages/minspec/src/lib/auto-bootstrap.ts`, reading `config.ts` and `constitution.ts` (both owned elsewhere).
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — Corrupt-artifact repair (Requirements)

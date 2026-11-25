@@ -354,6 +354,13 @@ derive_failing_non_review() {
     | if length > 0 then "yes" else "no" end' <<<"$1"
 }
 
+# #4052: the ONE derivation of ai_review_bad for every caller (drain and dispatch-issue.sh).
+# The ai-review CHECK alone is a blind witness on a machinery PR (decideReviewCheck forces it
+# to NEUTRAL), so the shared `review_bad` predicate also reads the ai-review:changes label.
+derive_ai_review_bad() {
+  jq -r "$ROLLUP_LATEST_JQ"'if review_bad then "yes" else "no" end' <<<"$1"
+}
+
 # ── Rerun-first gate (#3042) ───────────────────────────────────────────────────
 # A red check can be an outside-service fault (a rate limit, a network error) that no
 # commit on the PR can cause or fix; an agent spent on it cannot reproduce it and just
@@ -701,6 +708,10 @@ if [[ "${1:-}" == "--derive-failing" ]]; then
   derive_failing_non_review "$(cat)"
   exit 0
 fi
+if [[ "${1:-}" == "--derive-ai-review-bad" ]]; then
+  derive_ai_review_bad "$(cat)"
+  exit 0
+fi
 if [[ "${1:-}" == "--derive-failed-runs" ]]; then
   derive_failed_run_ids "$(cat)" "${2:-}"
   exit 0
@@ -936,12 +947,7 @@ fi
 # NEUTRAL/SKIPPED/SUCCESS do not. A still-running check (no conclusion) is NOT a
 # failure — we wait, we don't remediate mid-flight.
 FAILING_NON_REVIEW=$(derive_failing_non_review "$PR_JSON")
-AI_REVIEW_BAD=$(jq -r "$ROLLUP_LATEST_JQ"'
-  [ latest_checks[]
-    | select((.name // "") == "ai-review")
-    | (.conclusion // "") ]
-  | map(select(. == "FAILURE" or . == "ERROR"))
-  | if length > 0 then "yes" else "no" end' <<<"$PR_JSON")
+AI_REVIEW_BAD=$(derive_ai_review_bad "$PR_JSON")
 # Is the ai-review check still running from a prior push? Don't stack a second
 # remediation on top of an in-flight re-review.
 AI_REVIEW_PENDING=$(jq -r "$ROLLUP_LATEST_JQ"'
