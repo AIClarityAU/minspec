@@ -649,6 +649,7 @@
     "watch": "npm run build -- --watch --sourcemap",
     "supply-chain:check": "../../scripts/check-supply-chain.sh",
     "prepackage": "npm run supply-chain:check",
+    "package:release": "BUMBLEBEE_CATALOG_REF=${BUMBLEBEE_CATALOG_REF:-main} ../../scripts/fetch-bumblebee-catalogs.sh \"${BUMBLEBEE_CATALOGS:-$HOME/.cache/bumblebee/catalogs}\" && SUPPLY_CHAIN_REQUIRE_CATALOGS=1 npm run package",
     "package": "npm run build && vsce package --no-dependencies",
     "test": "cd ../.. && vitest run packages/minspec/tests",
     "bench": "vitest bench",
