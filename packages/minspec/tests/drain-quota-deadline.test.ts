@@ -722,6 +722,37 @@ describe('T3 regression (#3466 review): a text signal in a cleared gate-hold cyc
   });
 });
 
+describe('T3 regression (#3466 review): the serial dispatch path marks text-seen only on a TEXT signal', () => {
+  // The architect blocked: the serial path set QUOTA_TEXT_SEEN=1 for every saw_quota, so a
+  // status-witness (#1713) pause that later cleared was routed to text-signal, not cleared.
+  // The dispatch loop is not runnable offline, so this reads the serial block's source and
+  // asserts which statements may set the flag (parallel path already did it right).
+  const src = fs.readFileSync(DRAIN, 'utf-8');
+  const end = src.indexOf('_breaker_decide', src.indexOf('Claude usage-limit signal while dispatching #$n'));
+  const start = src.lastIndexOf('book_dispatch "$n" "$outcome" "${verdict:0:1}"\n', end);
+  const block = src.slice(start, end);
+
+  it('located the serial saw_quota block', () => {
+    expect(start).toBeGreaterThan(0);
+    expect(block).toContain('if (( saw_quota )); then');
+  });
+
+  it('QUOTA_TEXT_SEEN=1 is set inside the verdict text-bit branch', () => {
+    expect(block).toMatch(/if \[\[ "\$\{verdict:1:1\}" == "1" \]\]; then[\s\S]*?QUOTA_TEXT_SEEN=1[\s\S]*?\n      fi/);
+  });
+
+  it('QUOTA_TEXT_SEEN=1 is NOT set in the shared saw_quota branch (status witness must not set it)', () => {
+    const shared = block.slice(block.indexOf('if (( saw_quota )); then'));
+    expect(shared).not.toContain('QUOTA_TEXT_SEEN=1');
+  });
+
+  it('the status-witness line sets cause=gate and does not touch the text flag', () => {
+    const line = block.split('\n').find((l) => l.includes('"$outcome" == "quota"')) ?? '';
+    expect(line).toContain('QUOTA_PAUSE_CAUSE="gate"');
+    expect(line).not.toContain('QUOTA_TEXT_SEEN');
+  });
+});
+
 describe('T3 regression (#2233): a text-only signal that a fresh meter contradicts does not sleep to the reset', () => {
   // Measured 2026-09-30. A false match on the word "quota" (19:03) paused the drain; the
   // last in-flight build finished at 19:15:54, and the drain then slept 17061s "to the

@@ -2915,13 +2915,19 @@ run_cycle() {
       break
       done
       book_dispatch "$n" "$outcome" "${verdict:0:1}"
-      [[ "${verdict:1:1}" == "1" ]] && saw_quota=1
+      # Only a TEXT signal (the verdict's quota bit) marks the cycle text-seen (#3466), exactly
+      # as the parallel path does: a status-witness pause (#1713) is the meter's own word, so a
+      # cleared gate hold must not be re-routed onto the #2233 text-signal path by it.
+      if [[ "${verdict:1:1}" == "1" ]]; then
+        saw_quota=1
+        QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"; QUOTA_TEXT_SEEN=1
+      fi
       # A dispatch that said, by status, that the window closed under it (#1713). The meter
       # was the witness, so no text signal may shorten the rest.
       if [[ "$outcome" == "quota" ]]; then saw_quota=1; QUOTA_PAUSE_CAUSE="gate"; fi
       if (( saw_quota )); then
         echo "[drain] Claude usage-limit signal while dispatching #$n — pausing this cycle (will back off, not fail)."
-        QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"; QUOTA_TEXT_SEEN=1
+        QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
         return 42
       fi
       [[ "$(_breaker_decide "$ac_halt" "$ac_outcomes")" == "halt" ]] && { announce_halt; break; }
