@@ -1276,16 +1276,16 @@ fi
 # so it uses no slot of the drain's queue limit, and exit 0 to one that did not. Nothing
 # is changed by the refusal itself, but dispatch_issue_refusal_mark (#2694) then labels
 # `author-refused` and comments once, so a refused issue can be counted and found. The
-# drain offers it again each cycle and says so (NOTHING DISPATCHED, when that leaves nothing started) until its
-# ready label is removed or it is filed again by a listed account.
+# drain offers it again each cycle and says so (NOTHING DISPATCHED, when that leaves
+# nothing started) until its ready label is removed or it is filed again by a listed account.
 AUTHOR_OK=0
 AUTHOR_REASON=""
 if AUTHOR_REASON="$(dispatch_issue_gate "$REPO" "$ISSUE" "$ISSUE_JSON")"; then
   AUTHOR_OK=1
 fi
 if [[ "$AUTHOR_OK" -ne 1 ]]; then
-  echo "Refusing #$ISSUE — ${AUTHOR_REASON:-who wrote it could not be checked}. Nothing was started: no claim, no label, no worktree and no agent. Remove its ready label, or file it again under an account on the list (scripts/lib/dispatch-author-gate.sh)."
-  dispatch_issue_refusal_mark "$REPO" "$ISSUE" "$AUTHOR_REASON"
+  echo "Refusing #$ISSUE — ${AUTHOR_REASON:-who wrote it could not be checked}. Nothing was started: no claim, no worktree and no agent (a real refusal is only labelled author-refused and commented once). Remove its ready label, or file it again under an account on the list (scripts/lib/dispatch-author-gate.sh)."
+  dispatch_issue_refusal_mark "$REPO" "$ISSUE" "$AUTHOR_REASON" "$ISSUE_JSON"
   exit_declined
 fi
 echo "Author: ${AUTHOR_REASON} — and everyone who edited its text is on the dispatch author list."

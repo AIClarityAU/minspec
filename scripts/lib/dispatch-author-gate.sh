@@ -263,6 +263,14 @@ GQL
 # well-formed view: a field that is missing, an account with no number, a history shorter
 # than its own count, a document that does not parse, two documents where one belongs, no
 # jq to parse it with. None of those is evidence about who wrote the issue, so none passes.
+# The ONE place the words of a real refusal ("an account is not on the list") are written.
+# The provenance check builds its refusal sentences from it and dispatch_issue_refusal_mark
+# recognises a real refusal by it, so rewording it moves both together and marking cannot
+# silently stop matching (#2694). It starts "is not on ..." so a "who " prefix reads on.
+_dispatch_not_listed_phrase() {
+  printf '%s' 'is not on the dispatch author list'
+}
+
 dispatch_issue_provenance_check() {
   local provenance="${1-}" view="${2-}" listed out
   if ! listed="$(_dispatch_trusted_identities_json 2>/dev/null)" || [[ -z "$listed" ]]; then
@@ -273,7 +281,7 @@ dispatch_issue_provenance_check() {
   # answer and one view, never two documents that together number two. Read from a file
   # descriptor, so neither meets the limit on the length of one argument.
   out=""
-  if ! out="$(jq -rn --argjson listed "$listed" --arg unreadable "$(_dispatch_unreadable)" \
+  if ! out="$(jq -rn --argjson listed "$listed" --arg unreadable "$(_dispatch_unreadable)" --arg notlisted "$(_dispatch_not_listed_phrase)" \
         --slurpfile answers <(printf '%s' "$provenance") --slurpfile views <(printf '%s' "$view") \
         "$(_dispatch_gate_jq_defs)"'
       def no($why): "no\t" + $why;
@@ -292,7 +300,7 @@ dispatch_issue_provenance_check() {
               elif ($i.author | key) == null
               then no("its author could not be read, and an author that cannot be read is never trusted")
               elif ($i.author | listed | not)
-              then no("its author \($i.author | shown) is not on the dispatch author list")
+              then no("its author \($i.author | shown) " + $notlisted)
               else $i.userContentEdits as $e | $i.timelineItems as $r
                 | if ($e | type) != "object" or ($e.totalCount | type) != "number" or ($e.nodes | type) != "array"
                      or ($r | type) != "object" or ($r.totalCount | type) != "number" or ($r.nodes | type) != "array"
@@ -310,11 +318,11 @@ dispatch_issue_provenance_check() {
                       elif any($editors[]; key == null)
                       then no("an account that edited its body could not be read, and what cannot be read is never trusted")
                       elif any($editors[]; listed | not)
-                      then no("its body was edited by \(first($editors[] | select(listed | not)) | shown), who is not on the dispatch author list")
+                      then no("its body was edited by \(first($editors[] | select(listed | not)) | shown), who " + $notlisted)
                       elif any($renamers[]; key == null)
                       then no("an account that changed its title could not be read, and what cannot be read is never trusted")
                       elif any($renamers[]; listed | not)
-                      then no("its title was changed by \(first($renamers[] | select(listed | not)) | shown), who is not on the dispatch author list")
+                      then no("its title was changed by \(first($renamers[] | select(listed | not)) | shown), who " + $notlisted)
                       else "ok\t\($i.author.login | tostring | printable) (\($i.author | key | sub(":"; " ")))"
                       end
                   end
@@ -353,7 +361,7 @@ dispatch_issue_gate() {
   dispatch_issue_provenance_check "$provenance" "$view"
 }
 
-# dispatch_issue_refusal_mark <owner/repo> <issue-number> <reason>
+# dispatch_issue_refusal_mark <owner/repo> <issue-number> <reason> <issue-view-json>
 #
 # Make an author-gate refusal VISIBLE on the issue (#2694). A refusal is otherwise a line in
 # the drain's log, and an issue filed by an account that is not on the list (the daily
@@ -378,15 +386,19 @@ dispatch_issue_gate() {
 # gh-bot.sh reads $HOME), and must not shadow `gh` process-wide. gh_bot_init is idempotent
 # and offline (#1355).
 dispatch_issue_refusal_mark() {
-  local repo="${1-}" issue="${2-}" reason="${3-}" label="author-refused" have
+  local repo="${1-}" issue="${2-}" reason="${3-}" view="${4-}" label="author-refused" have phrase
   if [[ "$repo" != */* || ! "$issue" =~ ^[0-9]+$ ]]; then
     return 0
   fi
+  phrase="$(_dispatch_not_listed_phrase)"
   case "$reason" in
-    *"is not on the dispatch author list"*) ;;
+    *"$phrase"*) ;;
     *) return 0 ;;
   esac
-  if ! have="$(gh issue view "$issue" --repo "$repo" --json labels --jq '[(.labels // [])[].name] | index("author-refused") != null' 2>/dev/null)"; then
+  # The labels come from the issue view the caller already holds: no second read per
+  # refused issue per cycle. A view that cannot be read marks nothing and says so.
+  if ! have="$(printf '%s' "$view" | jq -r '[(.labels // [])[].name] | index("author-refused") != null' 2>/dev/null)" \
+     || [[ "$have" != "true" && "$have" != "false" ]]; then
     echo "dispatch-author-gate: could not tell whether #${issue} is already marked ${label}; it was not marked this cycle." >&2
     return 0
   fi
