@@ -353,6 +353,54 @@ dispatch_issue_gate() {
   dispatch_issue_provenance_check "$provenance" "$view"
 }
 
+# dispatch_issue_refusal_mark <owner/repo> <issue-number> <reason>
+#
+# Make an author-gate refusal VISIBLE on the issue (#2694). A refusal is otherwise a line in
+# the drain's log, and an issue filed by an account that is not on the list (the daily
+# supply-chain scan files as `github-actions[bot]`) waits for a person with nothing telling
+# that person it is waiting. Leaving that account refused is decided; this makes the
+# refusal countable: one label, `author-refused`, and one comment naming the reason.
+#
+# ONCE PER ISSUE. The label is the marker: an issue that already carries it is left alone,
+# so a drain that refuses it every cycle writes nothing after the first.
+#
+# ONLY A REAL REFUSAL IS MARKED, that is a reason saying an account "is not on the dispatch
+# author list". An unreadable answer, an outage, or an issue edited mid-check is transient
+# and is offered again, so it is neither labelled nor commented.
+#
+# The reason is the gate's own sentence: its only quoted account name has been cut down to
+# the characters a login can have, so it is safe to post. Marking is best-effort ONLY in
+# that it never changes the refusal and never fails its caller (the refusal already
+# happened and is the gate); a write that fails is said on stderr, never swallowed.
+# Writes go through `gh`, which the launchers arm as the pipeline's App (lib/gh-bot.sh).
+dispatch_issue_refusal_mark() {
+  local repo="${1-}" issue="${2-}" reason="${3-}" label="author-refused" have
+  if [[ "$repo" != */* || ! "$issue" =~ ^[0-9]+$ ]]; then
+    return 0
+  fi
+  case "$reason" in
+    *"is not on the dispatch author list"*) ;;
+    *) return 0 ;;
+  esac
+  if ! have="$(gh issue view "$issue" --repo "$repo" --json labels --jq '[(.labels // [])[].name] | index("author-refused") != null' 2>/dev/null)"; then
+    echo "dispatch-author-gate: could not tell whether #${issue} is already marked ${label}; it was not marked this cycle." >&2
+    return 0
+  fi
+  [[ "$have" == "false" ]] || return 0
+  if ! gh label create "$label" --repo "$repo" --color d93f0b \
+        --description "Refused by the dispatch author gate (#2694); needs a person" >/dev/null 2>&1; then
+    : # already exists, or cannot be created: the add below says which
+  fi
+  if ! gh issue edit "$issue" --repo "$repo" --add-label "$label" >/dev/null 2>&1; then
+    echo "dispatch-author-gate: could not add ${label} to #${issue}; no comment was posted either, so it is tried again next cycle." >&2
+    return 0
+  fi
+  if ! gh issue comment "$issue" --repo "$repo" --body "Refused by the dispatch author gate: ${reason}. No triage or agent was started on it, and it will not be until a person picks it up, or it is filed again under an account on the list (scripts/lib/dispatch-author-gate.sh). This comment is posted once; the \`${label}\` label marks it." >/dev/null 2>&1; then
+    echo "dispatch-author-gate: added ${label} to #${issue} but could not post the explaining comment." >&2
+  fi
+  return 0
+}
+
 # dispatch_issue_label_events_query: the newest hundred label applications on an issue,
 # each with who made it. GitHub returns them oldest first, and `last` keeps the newest, so
 # an application older than those hundred is simply not an answer about the current one.

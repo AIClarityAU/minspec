@@ -527,9 +527,29 @@ describe('T0: the real scripts/triage-inbox.sh triages only an issue whose text 
     // A refusal is a decision, not a fault: the drain must not report it as a failed triage.
     expect(r.status, r.out).toBe(0);
     expect(r.launches).toEqual([]);
-    expect(r.ghWrites).toEqual([]);
-    // The read that fetched the issue and the one that asked who wrote it. Nothing after.
-    expect(r.ghCalls).toEqual(['issue view 4242', 'api graphql issue:4242']);
+    if (/is not on the dispatch author list/.test(r.stdout) || /who is not on the dispatch author list/.test(r.stdout)) {
+      // A real refusal (an account not on the list) is made visible once (#2694): the
+      // `author-refused` label and one comment, written as the App, and nothing else.
+      expect(r.ghWrites).toEqual(['label create token=present', 'issue edit token=present', 'issue comment token=present']);
+      expect(r.ghCalls).toEqual(['issue view 4242', 'api graphql issue:4242', 'issue view 4242', 'label create author-refused', 'issue edit 4242', 'issue comment 4242']);
+    } else {
+      // Anything unreadable or transient is not marked: it is offered again.
+      expect(r.ghWrites).toEqual([]);
+      // The read that fetched the issue and the one that asked who wrote it. Nothing after.
+      expect(r.ghCalls).toEqual(['issue view 4242', 'api graphql issue:4242']);
+    }
+  });
+
+  it('a refusal is made visible once: the label and one comment naming the reason, and an already-marked issue is left alone (#2694)', () => {
+    const first = runTriage({ issues: { '4242': { author: ACTIONS_APP } }, only: '4242' });
+    expect(first.ghWrites).toEqual(['label create token=present', 'issue edit token=present', 'issue comment token=present']);
+    expect(first.posted).toHaveLength(1);
+    expect(first.posted[0]).toContain("its author 'github-actions' (Bot 41898282) is not on the dispatch author list");
+    // The next cycle: the label is the marker, so nothing more is written.
+    const again = runTriage({ issues: { '4242': { author: ACTIONS_APP, labels: ['inbox', 'author-refused'] } }, only: '4242' });
+    expect(again.stdout).toMatch(/^Refusing #4242 — /m);
+    expect(again.ghWrites).toEqual([]);
+    expect(again.posted).toEqual([]);
   });
 
   it('who wrote it is asked with a credential: with none to present, the issue is refused and not passed', () => {
@@ -610,7 +630,13 @@ describe('T0: the real scripts/dispatch-issue.sh dispatches only an issue whose 
     expect(r.status, r.out).toBe(DECLINED);
     expect(r.launches).toEqual([]);
     expect(r.claims).toEqual([]);
-    expect(r.ghWrites).toEqual([]);
+    // Only a real refusal (an account not on the list) is made visible, and only by the
+    // `author-refused` label and one comment (#2694); an unreadable one writes nothing.
+    if (/who is not on the dispatch author list|is not on the dispatch author list/.test(r.stdout)) {
+      expect(r.ghWrites).toEqual(['label create token=present', 'issue edit token=present', 'issue comment token=present']);
+    } else {
+      expect(r.ghWrites).toEqual([]);
+    }
     expect(r.worktreeMade).toBe(false);
   });
 

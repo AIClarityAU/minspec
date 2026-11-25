@@ -116,7 +116,7 @@ triage_issue() {
   # A refusal is a decision about this issue and not a fault of this script, so it
   # returns 0: the whole-inbox form below runs under `set -e`, and a non-zero here would
   # end the pass at the first issue a stranger opened, for every issue behind it. It
-  # writes nothing either. The issue keeps `inbox` and is refused again each cycle, at
+  # writes nothing about triage; only dispatch_issue_refusal_mark labels it `author-refused` and comments once (#2694). The issue keeps `inbox` and is refused again each cycle, at
   # the cost of these two reads, until it is closed or filed again by a listed account.
   #
   # The title is printed further down, after this, because it is the author's text too:
@@ -125,6 +125,7 @@ triage_issue() {
   local AUTHOR_REASON
   if ! AUTHOR_REASON="$(dispatch_issue_gate "$REPO" "$ISSUE" "$ISSUE_JSON")"; then
     echo "Refusing #$ISSUE — ${AUTHOR_REASON:-who wrote it could not be checked}. Not triaged: no model was started on it and none of its labels were changed. It stays in the inbox until it is closed, or filed again under an account on the list (scripts/lib/dispatch-author-gate.sh)."
+    dispatch_issue_refusal_mark "$REPO" "$ISSUE" "$AUTHOR_REASON"
     return 0
   fi
 
