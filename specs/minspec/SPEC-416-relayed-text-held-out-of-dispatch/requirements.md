@@ -9,11 +9,11 @@ aspects: [security, provenance, dispatch, triage, prompt-injection, no-silent-ga
 goal: G-2  # Prevent tech debt
 relates_to: [DR-105, DR-118, DR-072, DR-076, DR-086, DR-066, DR-123, "#2692", "#2686", "#1203", "#2589", "#1084", "#983"]
 # Ownership declared in Specify, before approval mints a hash (SPEC-038 FR-1 to FR-3).
-# NEW files: the shared relay predicate (FR-4) and its test. Files MODIFIED are under
+# NEW files: the shared relay predicate (FR-5), scripts/park-issue.sh (FR-2) and their tests. Files MODIFIED are under
 # `affects:`. Every change is under scripts/ or packages/minspec/tests/, so machinery
 # review applies to the build.
-implements: [scripts/lib/relay-marker.sh, packages/minspec/tests/relay-marker.test.ts]
-affects: [scripts/tooling-radar/file-findings.mjs, scripts/triage-decide.sh, scripts/triage-inbox.sh, scripts/dispatch-ready-check.sh, scripts/approve-issue.sh, scripts/lib/dispatch-author-gate.sh, scripts/park-issue.sh, CLAUDE.md, packages/minspec/tests/triage-decide.test.ts, packages/minspec/tests/tooling-radar.test.ts]
+implements: [scripts/lib/relay-marker.sh, scripts/park-issue.sh, packages/minspec/tests/relay-marker.test.ts, packages/minspec/tests/park-issue.test.ts]
+affects: [scripts/tooling-radar/file-findings.mjs, scripts/triage-decide.sh, scripts/triage-inbox.sh, scripts/dispatch-ready-check.sh, scripts/approve-issue.sh, scripts/lib/dispatch-author-gate.sh, CLAUDE.md, packages/minspec/tests/triage-decide.test.ts, packages/minspec/tests/tooling-radar.test.ts]
 phases:
   specify: in-progress
   clarify: pending
