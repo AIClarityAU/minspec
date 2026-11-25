@@ -763,10 +763,12 @@ delegated_merge_human_claims() {
   # #4016: a handoff on an `agent-stuck` PR (no `hold:*` label) is an automation failure,
   # not a founder decision (#3835 split the label off at the producer). It is not a human
   # claim, so the PR returns to the agent path. Unreadable or absent labels keep the hold, and so
-  # does `needs-human-review`: remediate-pr.sh adds it at its retry cap without removing
-  # `agent-stuck`, and that escalation is a request for a human, so the handoff stays live.
+  # does `human-escalated` (#4061): remediate-pr.sh adds it, with `needs-human-review`, whenever it
+  # gives a PR to a human (retry cap, conflict) without removing `agent-stuck`, so the handoff
+  # stays live. `needs-human-review` ALONE does not: the #833 docs lane adds it to every spec PR
+  # at open, so it cannot tell a docs-lane hold from an escalation.
   local stuck=""
-  stuck=$(printf '%s' "$view" | jq -r '(.labels // []) | if type == "array" then ([.[] | .name // ""] | (any(. == "agent-stuck") and (any(startswith("hold:")) | not) and (any(. == "needs-human-review") | not))) else false end' 2>/dev/null) || stuck=false  # swallow-ok: unreadable labels leave the handoff live (fail closed)
+  stuck=$(printf '%s' "$view" | jq -r '(.labels // []) | if type == "array" then ([.[] | .name // ""] | (any(. == "agent-stuck") and (any(startswith("hold:")) | not) and (any(. == "human-escalated") | not))) else false end' 2>/dev/null) || stuck=false  # swallow-ok: unreadable labels leave the handoff live (fail closed)
   if [[ "$handoffs" != "0" && "$stuck" != "true" ]] && ! delegated_merge_handoffs_spent "$pr" "$marker"; then
     printf 'handed-to-human\tPR #%s was handed to the founder by its creator (shepherd handoff comment); a bot merge would take his decision\n' "$pr"
     return 1
@@ -2265,10 +2267,10 @@ SHEPHERD_MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"
 #   stuck — the shepherd's OWN automation gave up (ceiling, attempt cap, rebase or fix that
 #           produced nothing): `agent-stuck`, NOT `needs-human-review`, so no consumer reads
 #           it as a human decision. Anything but the literal "human" fails closed to stuck.
-#           The delegated-merge lane reads it (#4016): a handoff on an `agent-stuck` PR with no `hold:*` label and no `needs-human-review` label is not a human claim (either label keeps the hold).
+#           The delegated-merge lane reads it (#4016): a handoff on an `agent-stuck` PR with no `hold:*` label and no `human-escalated` label is not a human claim (either label keeps the hold; the docs-lane `needs-human-review` does not, #4061).
 #           Any later retry comes from the label-agnostic drain sweep (drain-inbox.sh
 #           `gh pr list --state open`), NOT from this label; remediate-pr.sh may still
-#           relabel `needs-human-review` when ITS own cap is hit.
+#           relabel `needs-human-review` + `human-escalated` when ITS own cap is hit.
 shepherd_hand_off() {
   local pr_num="$1" reason="$2" kind="${3:-stuck}" already label desc tail
   if [[ "$kind" == "human" ]]; then

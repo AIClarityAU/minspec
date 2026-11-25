@@ -345,7 +345,8 @@ describe('a shepherd handoff is scoped to the head it was posted against (#3120)
   it.each([
     ['agent-stuck label', [{ name: 'agent-stuck' }], true],
     ['agent-stuck plus a hold:* label', [{ name: 'agent-stuck' }, { name: 'hold:specify' }], false],
-    ['agent-stuck plus needs-human-review (escalated at the remediation cap)', [{ name: 'agent-stuck' }, { name: 'needs-human-review' }], false],
+    ['agent-stuck plus human-escalated (escalated at the remediation cap)', [{ name: 'agent-stuck' }, { name: 'needs-human-review' }, { name: 'human-escalated' }], false],
+    ['agent-stuck plus the docs-lane needs-human-review only (#4061)', [{ name: 'agent-stuck' }, { name: 'needs-human-review' }], true],
     ['an unrelated label only', [{ name: 'ai-review:pass' }], false],
     ['no labels field', undefined, false],
   ] as const)('a live handoff with %s: proceeds=%s (#4016)', (_n, labels, proceeds) => {
