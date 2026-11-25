@@ -1,5 +1,5 @@
 ---
-id: SPEC-401
+id: SPEC-417
 type: requirements
 status: specifying
 tier: T3
@@ -247,7 +247,7 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
     pattern this repo's own conventions warn against (SPEC-051 INV-5, cited inside SPEC-054
     itself) — a future contributor has to know both exist.
   - **Option C — defer FR-3 to its own follow-up issue, filed now, scoped explicitly to run
-    after SPEC-054 ships**, and this spec (SPEC-401) ships only FR-1/FR-2/FR-4 (the
+    after SPEC-054 ships**, and this spec (SPEC-417) ships only FR-1/FR-2/FR-4 (the
     build-extension.sh and runtime-surface halves). Costs: the class-level fix (any future
     `|| echo <default>` on a provenance variable) stays unenforced for longer, exactly the
     "fixes the instance, not the property" gap the issue's own recommendation warned against
