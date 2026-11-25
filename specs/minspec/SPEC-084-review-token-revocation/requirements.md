@@ -288,6 +288,8 @@ is that endpoint and the broker need not be involved.
   the broker's availability to the revocation path; and is a new endpoint that would
   warrant its own DR.
 
+**Recorded selection: the recommended option,** Option A, the job revokes directly; no broker route. Agent pick of the recommended option, no human chose it. Recorded by agent 2026-11-25 under founder decision, queue item clarsel (2026-11-17), DR-123; sign-off ratifies it.
+
 ### DQ-2 — What does a `failed` revocation do to the run and to the merge?
 
 - **Option A — red job, annotation and summary; the verdict stands (rec).** The review of
@@ -303,6 +305,8 @@ is that endpoint and the broker need not be involved.
 - **Option C — withdraw the pass; revocation becomes merge-gating.** Strongest signal.
   *Cost:* a GitHub API blip blocks merges and a code verdict is reversed for a reason
   unrelated to the code.
+
+**Recorded selection: the recommended option,** Option A, red job, annotation and summary; the verdict stands. Agent pick of the recommended option, no human chose it. Recorded by agent 2026-11-25 under founder decision, queue item clarsel (2026-11-17), DR-123; sign-off ratifies it.
 
 ### DQ-3 — Does the step also cover the natively minted token, or the broker's only?
 
@@ -322,6 +326,8 @@ installation token came from.
   nobody reads. Under this option that gap needs its own issue, which this dispatch could
   not file.
 
+**Recorded selection: the recommended option,** Option A, both mint sources, one explicit step (the native action's own post-job revocation switched off). Agent pick of the recommended option, no human chose it. Recorded by agent 2026-11-25 under founder decision, queue item clarsel (2026-11-17), DR-123; sign-off ratifies it.
+
 ### DQ-4 — Is revocation a precondition for the broker path's first outside repo?
 
 - **Option A — yes: it joins SPEC-034 task 6.2 (security review before any customer repo
@@ -331,6 +337,8 @@ installation token came from.
   adopters run with DR-094's full accepted risk, and the pre-GA security review assesses
   a design that is about to change.
 
+**Recorded selection: the recommended option,** Option A, yes: revocation joins SPEC-034 task 6.2 as a gate before the broker path's first outside repo. Agent pick of the recommended option, no human chose it. Recorded by agent 2026-11-25 under founder decision, queue item clarsel (2026-11-17), DR-123; sign-off ratifies it.
+
 ### DQ-5 — An outside witness for the case where the step never ran?
 
 - **Option A — none; a missing receipt means not revoked (rec).** *Cost:* after a lost
@@ -339,6 +347,8 @@ installation token came from.
 - **Option B — a second job that reports a missing receipt.** Makes that case explicit.
   *Cost:* an extra job on every review in every adopter repo, for an alert nobody can act
   on, since the token cannot be revoked without the token.
+
+**Recorded selection: the recommended option,** Option A, no outside witness; a missing receipt means not revoked. Agent pick of the recommended option, no human chose it. Recorded by agent 2026-11-25 under founder decision, queue item clarsel (2026-11-17), DR-123; sign-off ratifies it.
 
 ## Alternatives considered and rejected
 
