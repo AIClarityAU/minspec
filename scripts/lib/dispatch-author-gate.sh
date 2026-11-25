@@ -373,6 +373,10 @@ dispatch_issue_gate() {
 # that it never changes the refusal and never fails its caller (the refusal already
 # happened and is the gate); a write that fails is said on stderr, never swallowed.
 # Writes go through `gh`, which the launchers arm as the pipeline's App (lib/gh-bot.sh).
+# gh-bot.sh is sourced and armed INSIDE the writing function, not at file scope: this is a
+# library, and the verdict functions must stay usable without HOME or a token script (sourcing
+# gh-bot.sh reads $HOME), and must not shadow `gh` process-wide. gh_bot_init is idempotent
+# and offline (#1355).
 dispatch_issue_refusal_mark() {
   local repo="${1-}" issue="${2-}" reason="${3-}" label="author-refused" have
   if [[ "$repo" != */* || ! "$issue" =~ ^[0-9]+$ ]]; then
@@ -387,6 +391,9 @@ dispatch_issue_refusal_mark() {
     return 0
   fi
   [[ "$have" == "false" ]] || return 0
+  # shellcheck source=scripts/lib/gh-bot.sh
+  source "${BASH_SOURCE[0]%/*}/gh-bot.sh"
+  gh_bot_init   # arm bot attribution before this function's GitHub writes (#1355)
   if ! gh label create "$label" --repo "$repo" --color d93f0b \
         --description "Refused by the dispatch author gate (#2694); needs a person" >/dev/null 2>&1; then
     : # already exists, or cannot be created: the add below says which

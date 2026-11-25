@@ -212,14 +212,16 @@ describe('scripts/lib/dispatch-author-gate.sh: the list is accounts, by kind and
   it('the library reads no variable it did not set itself', () => {
     // The behavioural test above can only try the names somebody thought of. This is the
     // rule that makes the rest unnecessary: every variable the library reads is a
-    // lowercase local or a positional, so there is no name to set from outside.
+    // lowercase local or a positional, so there is no name to set from outside. The one
+    // exception is BASH_SOURCE: bash re-assigns it on every call, so a caller's value never
+    // survives to be read (it locates gh-bot.sh beside this library, #1355).
     const code = fs
       .readFileSync(AUTHOR_GATE_LIB, 'utf-8')
       .split('\n')
       .filter((l) => !/^\s*#/.test(l))
       .join('\n');
     expect(code).toContain('dispatch_issue_provenance_check');
-    expect(code.match(/\$\{?[A-Z][A-Za-z0-9_]*/g) ?? []).toEqual([]);
+    expect((code.match(/\$\{?[A-Z][A-Za-z0-9_]*/g) ?? []).filter((v) => !/^\$\{?BASH_SOURCE$/.test(v))).toEqual([]);
   });
 
   it('what is printed about a refused account is cut down to the characters a login can have', () => {
@@ -740,7 +742,8 @@ describe('T0: through the real drain, an issue refused for who wrote it uses no 
     expect(r.log).toMatch(/\[drain\] NOTHING DISPATCHED this cycle: 1 issue\(s\) ready, 1 refused by the dispatcher before any work started/);
     expect(r.log).toContain('[drain] cycle done. No dispatch was confirmed: see NOTHING DISPATCHED above.');
     expect(r.launches).toEqual([]);
-    expect(r.ghWrites).toEqual([]);
+    // The refusal is made visible once (#2694): the label and one comment, as the App, nothing else.
+    expect(r.ghWrites).toEqual(['label create token=present', 'issue edit token=present', 'issue comment token=present']);
   });
 });
 
