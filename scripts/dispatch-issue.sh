@@ -1814,6 +1814,38 @@ post_advisory_review() {
 }
 # <<< post-advisory-review
 
+# >>> ensure-branch-pr
+# ensure_branch_pr — find or create the PR for $BRANCH; result in $ENSURED_PR_NUM ("" when
+# there is none). Sets a GLOBAL rather than printing: the re-mint inside it must happen in
+# THIS shell, and a command substitution would throw the fresh token away (#4062).
+#
+# A 401 here used to degrade to a WARNING and `return 0`, stranding a finished branch with
+# no PR (#4061). The age-based gh_bot_refresh cannot see a token the broker handed back
+# already dead inside its headroom (#2114), so on an OBSERVED failure (empty result after
+# the create) force ONE re-mint via gh_bot_reauth_read and retry — the same shape as the
+# lease read (#3735). Non-zero from reauth means no different credential: do not retry.
+ensure_branch_pr() {
+  ENSURED_PR_NUM=""
+  local n
+  n=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty falls through to the create + re-query + re-auth retry below
+  if [[ -z "$n" ]]; then
+    gh pr create --repo "$REPO" --base main --head "$BRANCH" \
+      --title "$ISSUE_TITLE" --body "$BODY" 2>/dev/null || true  # swallow-ok: success is judged by the re-query below, never by this exit status
+    n=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: this IS the re-query; empty triggers the re-auth retry below
+  fi
+  if [[ -z "$n" ]] && gh_bot_reauth_read; then
+    echo "ensure_branch_pr: no PR for $BRANCH — retrying once after a forced token re-mint (#4062)." >&2
+    n=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty is reported by the caller as a failed dispatch
+    if [[ -z "$n" ]]; then
+      gh pr create --repo "$REPO" --base main --head "$BRANCH" \
+        --title "$ISSUE_TITLE" --body "$BODY" 2>/dev/null || true  # swallow-ok: success is judged by the re-query below
+      n=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty is reported by the caller as a failed dispatch
+    fi
+  fi
+  ENSURED_PR_NUM="$n"
+}
+# <<< ensure-branch-pr
+
 run_reviewer_stage() {
   local base="origin/main"   # the pre-push fetch point this branch forked from
   local decide="${SCRIPT_DIR}/review-decide.sh"
@@ -1904,15 +1936,12 @@ run_reviewer_stage() {
   #    this branch to ever land. Reuse the already-built $BODY (do not rebuild the
   #    summary) and the issue title for the PR.
   local pr_num
-  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty is handled on the next line, which retries the create and re-queries; if it is still empty the caller warns and returns without merging
+  ensure_branch_pr
+  pr_num="$ENSURED_PR_NUM"
   if [[ -z "$pr_num" ]]; then
-    gh pr create --repo "$REPO" --base main --head "$BRANCH" \
-      --title "$ISSUE_TITLE" --body "$BODY" 2>/dev/null || true
-    pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: this IS the re-query after the create; if it is still empty the check below warns and returns 0 without posting a verdict or merging
-  fi
-  if [[ -z "$pr_num" ]]; then
-    echo "WARNING: no PR for $BRANCH (create failed?) — AI review verdict: $combined (not posted)" >&2
-    return 0
+    echo "WARNING: no PR for $BRANCH after a re-auth retry — AI review verdict: $combined (not posted); the branch is pushed with no PR, so this dispatch counts as FAILED (#4062)" >&2
+    PR_STRANDED=1
+    return 1
   fi
 
   # 6a. VERIFY the `Closes #$ISSUE` trailer (added above, #1322) actually LINKED
@@ -3273,4 +3302,11 @@ done
 # ends on 0 for a caller that did not ask. A caller that asked is answered "started".
 # Keep this the LAST statement: an exit added above it that means the same thing must
 # call exit_started too, or it answers nothing and the caller says so.
+#
+# A finished branch left with no PR (#4062) is a failure, not a quiet success (invariant 2).
+# It exits 1, the plain failure every caller already counts; the exit trap still releases
+# the claim.
+if [[ "${PR_STRANDED:-0}" == "1" ]]; then
+  exit 1
+fi
 exit_started
