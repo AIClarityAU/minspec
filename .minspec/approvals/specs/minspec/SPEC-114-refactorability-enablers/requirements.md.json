@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-114-refactorability-enablers/requirements.md",
+  "specHash": "1836976708e632f6ff61311ab8ca0184f6a99787f10697f08a71dbdc889709d6",
+  "approvedAt": "2026-11-23T20:29:08.131Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/dlg-backlog-1123",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4022#issuecomment-7112948736"
+}
