@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-417-provenance-stamp-fail-closed/requirements.md",
+  "specHash": "3216000524c5d11be93b5c282d9464368c5de7d08a7c7d6aa88ccb6bc72975dc",
+  "approvedAt": "2026-11-25T23:48:01.806Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-unblock-1125",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4064#issuecomment-7176903984"
+}

@@ -1,7 +1,7 @@
 ---
 id: SPEC-417
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — a swallowed provenance failure is DR-066's
@@ -21,9 +21,9 @@ implements_reason: >-
   this spec does not re-declare them. Which files it owns is decided at Plan; DQ-1's recorded
   Option D points at scripts/check-swallowed-gate-signal.ts and scripts/lib/swallowed-gate-signal.ts.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
