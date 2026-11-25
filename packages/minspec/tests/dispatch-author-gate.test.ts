@@ -547,6 +547,9 @@ describe('T0: the real scripts/triage-inbox.sh triages only an issue whose text 
     const first = runTriage({ issues: { '4242': { author: ACTIONS_APP } }, only: '4242' });
     expect(first.ghWrites).toEqual(['label create token=present', 'issue edit token=present', 'issue comment token=present']);
     expect(first.posted).toHaveLength(1);
+    // The marker reads `.labels` from the launcher's own issue view, so that view must ask
+    // for them: the stub returns only the fields a read names, as GitHub does (#2694).
+    expect(first.issueViewFields).toEqual(['body,title,labels']);
     expect(first.posted[0]).toContain("its author 'github-actions' (Bot 41898282) is not on the dispatch author list");
     // The next cycle: the label is the marker, so nothing more is written.
     const again = runTriage({ issues: { '4242': { author: ACTIONS_APP, labels: ['inbox', 'author-refused'] } }, only: '4242' });
@@ -559,7 +562,9 @@ describe('T0: the real scripts/triage-inbox.sh triages only an issue whose text 
     const lib = fs.readFileSync(AUTHOR_GATE_LIB, 'utf-8');
     // Marking matches the shared phrase, and the refusal sentences are built from it.
     expect(lib).toContain('_dispatch_not_listed_phrase');
-    expect(lib.match(/is not on the dispatch author list/g) ?? []).toHaveLength(2);
+    // Count CODE lines only: a comment that quotes the phrase must not break this.
+    const code = lib.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+    expect(code.match(/is not on the dispatch author list/g) ?? []).toHaveLength(2);
   });
 
   it('who wrote it is asked with a credential: with none to present, the issue is refused and not passed', () => {
