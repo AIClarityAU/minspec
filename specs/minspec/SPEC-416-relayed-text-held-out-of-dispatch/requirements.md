@@ -54,8 +54,8 @@ a human approval names it.
 ### The gap
 
 `scripts/lib/dispatch-author-gate.sh` lets an issue reach triage only when every account
-that wrote its text is on a two-entry list (`_dispatch_trusted_identities`, lines 173-178:
-the App `Bot:299695933` and the founder). Its own comment block "What trusting the App
+that wrote its text is on a three-entry list (`_dispatch_trusted_identities`, lines 173-178:
+the App `Bot:299695933` and the founder's two accounts `User:4125483` and `User:318474157`). Its own comment block "What trusting the App
 leaves open" (lines 75-114) lists every path that makes the App write and says which carry
 text a stranger can shape. The gate sees the account, not where the words came from, so
 "on the list" means *filed by* the pipeline, not *written by* it.
