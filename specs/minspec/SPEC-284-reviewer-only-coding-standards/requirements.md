@@ -1,7 +1,7 @@
 ---
 id: SPEC-284
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - review-gate inputs (ai-review panel); nearest existing epic, confirm at Clarify
@@ -14,9 +14,9 @@ implements_reason: >-
   docs/CODING_STANDARDS.md; owned files are still decided at Plan, after the FR-1 inventory, so
   implements stays none.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

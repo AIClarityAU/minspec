@@ -33,6 +33,49 @@ function sourceFiles(dir: string, acc: string[] = []): string[] {
   return acc;
 }
 
+/** Strip line comments and doc-comment lines, keeping line count stable. */
+function stripProse(text: string): string {
+  return text
+    .split('\n')
+    .map(line => line.replace(/\/\/.*$/, '').replace(/^\s*\*.*$/, ''))
+    .join('\n');
+}
+
+/**
+ * Offsets of every `.update(a, b, true ...)` call: `WorkspaceConfiguration.update`
+ * takes `configurationTarget?: ConfigurationTarget | boolean | null`, and a literal
+ * `true` means Global (@types/vscode: "If `true` updates Global settings"), so it is
+ * the same machine-wide write as `ConfigurationTarget.Global` in another spelling
+ * (#1944). Arguments are split at depth 0 so object/array/call values do not
+ * confuse the third-argument position.
+ */
+function booleanGlobalUpdates(text: string): number[] {
+  const hits: number[] = [];
+  const re = /\.\s*update\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    let depth = 0;
+    let argStart = re.lastIndex;
+    const args: string[] = [];
+    for (let i = re.lastIndex; i < text.length; i++) {
+      const c = text[i];
+      if (c === '(' || c === '[' || c === '{') depth++;
+      else if (c === ')' || c === ']' || c === '}') {
+        if (depth === 0) {
+          args.push(text.slice(argStart, i));
+          break;
+        }
+        depth--;
+      } else if (c === ',' && depth === 0) {
+        args.push(text.slice(argStart, i));
+        argStart = i + 1;
+      }
+    }
+    if (args.length >= 3 && args[2].trim() === 'true') hits.push(m.index);
+  }
+  return hits;
+}
+
 describe('INVARIANT 3 — MinSpec never writes machine-wide config', () => {
   /**
    * The gate. DR-078 §3: "What this DR governs is what MinSpec itself may write,
@@ -64,6 +107,32 @@ describe('INVARIANT 3 — MinSpec never writes machine-wide config', () => {
         `Persist to .minspec/preferences.json via savePreferences() instead.\n` +
         `Offending sites:\n  ${offenders.join('\n  ')}`,
     ).toEqual([]);
+  });
+
+  it('T0: no boolean `true` (Global) configuration target exists anywhere in src/', () => {
+    const offenders: string[] = [];
+    for (const file of sourceFiles(SRC_DIR)) {
+      const text = stripProse(fs.readFileSync(file, 'utf-8'));
+      for (const offset of booleanGlobalUpdates(text)) {
+        const line = text.slice(0, offset).split('\n').length;
+        offenders.push(`${path.relative(SRC_DIR, file)}:${line}`);
+      }
+    }
+    expect(
+      offenders,
+      `A literal \`true\` configuration target is a Global write (constitution invariant 3 / DR-078 §3).\n` +
+        `Persist to .minspec/preferences.json via savePreferences() instead.\n` +
+        `Offending sites:\n  ${offenders.join('\n  ')}`,
+    ).toEqual([]);
+  });
+
+  it('T0 meta: the boolean scan detects `true` and ignores other targets', () => {
+    expect(booleanGlobalUpdates(`cfg.update('x', v, true);`)).toHaveLength(1);
+    expect(booleanGlobalUpdates(`cfg.update('x', { a: 1, b: [2, 3] }, true, false);`)).toHaveLength(1);
+    expect(booleanGlobalUpdates(`cfg\n  .update('x', fn(a, b),\n    true)`)).toHaveLength(1);
+    expect(booleanGlobalUpdates(`cfg.update('x', v, vscode.ConfigurationTarget.Workspace);`)).toHaveLength(0);
+    expect(booleanGlobalUpdates(`cfg.update('x', true);`)).toHaveLength(0);
+    expect(booleanGlobalUpdates(`cfg.update('x', true, false);`)).toHaveLength(0);
   });
 
   /** The scan must be able to fail — a gate that cannot fire is not a gate. */

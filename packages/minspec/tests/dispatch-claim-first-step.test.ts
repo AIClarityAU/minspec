@@ -11,6 +11,11 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite's own `run()` wrapper around execFileSync is called per-case; the
+// literal call-site count alone understates it.
+useShellTimeout();
 
 const DISPATCH = path.resolve(__dirname, '../../../scripts/dispatch-issue.sh');
 const LEASE = path.resolve(__dirname, '../../../scripts/lib/issue-lease.sh');
@@ -74,6 +79,20 @@ describe('dispatch-issue.sh: agent-running is a cosmetic MIRROR applied AFTER th
     const acquireIdx = src.indexOf('lease_acquire "$ISSUE"');
     const runningIdx = src.indexOf('--add-label "agent-running"');
     expect(acquireIdx).toBeLessThan(runningIdx);
+  });
+  it('the label flip comes AFTER every worktree provisioning command (#1652)', () => {
+    const runningIdx = src.indexOf('--add-label "agent-running"');
+    const readyIdx = src.indexOf('--remove-label "agent-ready"');
+    const pinIdx = src.indexOf('agent_worktree_pin "$WORKTREE"\n');
+    const adds = [...src.matchAll(/launcher_git -C "\$REPO_ROOT" worktree add/g)].map((m) => m.index ?? -1);
+    expect(adds.length).toBeGreaterThan(0);
+    for (const i of adds) expect(i).toBeLessThan(runningIdx);
+    expect(pinIdx).toBeLessThan(runningIdx);
+    // dropping agent-ready rides in the same edit as the add, so it moves with it
+    expect(readyIdx).toBeGreaterThan(pinIdx);
+    // negative: a normal dispatch still sets agent-running and clears agent-ready in ONE edit
+    const call = src.slice(readyIdx - 80, runningIdx + 40);
+    expect(call).toContain('--remove-label "agent-ready-specify"');
   });
   it('a MINSPEC_CLAIM_OFF kill-switch restores the pre-SPEC-044 behaviour', () => {
     expect(src).toMatch(/MINSPEC_CLAIM_OFF/);

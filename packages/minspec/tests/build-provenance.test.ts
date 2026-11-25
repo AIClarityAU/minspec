@@ -15,6 +15,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { detectBuildSkew, skewMessage, buildSha } from '../src/lib/build-provenance';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite's own `git()` wrapper around execFileSync builds a real git history
+// across several calls; the literal call-site count alone understates it.
+useShellTimeout();
 
 let repo: string;
 let sideSha: string;
@@ -78,6 +83,34 @@ describe('detectBuildSkew — the verdict, not just the git plumbing', () => {
     const v = detectBuildSkew(repo, true, '0000000000000000000000000000000000000000');
     expect(v.kind).toBe('unknown');
     if (v.kind === 'unknown') expect(v.reason).toContain('not in this clone');
+  });
+});
+
+describe('detectBuildSkew — dirty stamp (#1528)', () => {
+  it('STALE: `<sha>-dirty` resolves against the base commit, flagged dirty', () => {
+    const v = detectBuildSkew(repo, true, `${shaAt('HEAD~2')}-dirty`);
+    expect(v.kind).toBe('stale');
+    if (v.kind === 'stale') {
+      expect(v.behind).toBe(2);
+      expect(v.sha).toBe(shaAt('HEAD~2'));
+      expect(v.dirty).toBe(true);
+      expect(skewMessage(v)).toContain('plus uncommitted changes');
+      expect(skewMessage(v)).toContain('approximate');
+    }
+  });
+
+  it('clean stale verdict does not claim uncommitted changes', () => {
+    const v = detectBuildSkew(repo, true, shaAt('HEAD~2'));
+    if (v.kind === 'stale') expect(skewMessage(v)).not.toContain('uncommitted');
+  });
+
+  it('CURRENT: a dirty build of HEAD is current, not unknown', () => {
+    expect(detectBuildSkew(repo, true, `${shaAt('HEAD')}-dirty`).kind).toBe('current');
+  });
+
+  it('UNKNOWN: a dirty stamp of an unseen commit stays unknown', () => {
+    const v = detectBuildSkew(repo, true, `${'0'.repeat(40)}-dirty`);
+    expect(v.kind).toBe('unknown');
   });
 });
 

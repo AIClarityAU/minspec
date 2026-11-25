@@ -559,10 +559,11 @@ describe('#2641: the two numbers the drain reads are the two the dispatcher writ
   }
   const DRAIN_DECLINED = constant(drainSrc, '_DISPATCH_RC_DECLINED');
   const DRAIN_STARTED = constant(drainSrc, '_DISPATCH_RC_STARTED');
+  const DRAIN_QUOTA = constant(drainSrc, '_DISPATCH_RC_QUOTA_PAUSED');
 
   /** The drain's reading of one status, run as shipped, with the drain's own numbers. */
   function outcome(status: string): string {
-    const script = `_DISPATCH_RC_DECLINED=${DRAIN_DECLINED}\n_DISPATCH_RC_STARTED=${DRAIN_STARTED}\n${drainFn('_dispatch_outcome')}\n_dispatch_outcome "$@"`;
+    const script = `_DISPATCH_RC_DECLINED=${DRAIN_DECLINED}\n_DISPATCH_RC_STARTED=${DRAIN_STARTED}\n_DISPATCH_RC_QUOTA_PAUSED=${DRAIN_QUOTA}\n${drainFn('_dispatch_outcome')}\n_dispatch_outcome "$@"`;
     return spawnSync('bash', ['-c', script, 'bash', status], { encoding: 'utf-8' }).stdout;
   }
   /** The drain's choice of ONE status out of a pipeline's, run as shipped. */
@@ -591,7 +592,7 @@ describe('#2641: the two numbers the drain reads are the two the dispatcher writ
   );
 
   it('no status at all is a failure', () => {
-    const script = `_DISPATCH_RC_DECLINED=${DRAIN_DECLINED}\n_DISPATCH_RC_STARTED=${DRAIN_STARTED}\n${drainFn('_dispatch_outcome')}\n_dispatch_outcome`;
+    const script = `_DISPATCH_RC_DECLINED=${DRAIN_DECLINED}\n_DISPATCH_RC_STARTED=${DRAIN_STARTED}\n_DISPATCH_RC_QUOTA_PAUSED=${DRAIN_QUOTA}\n${drainFn('_dispatch_outcome')}\n_dispatch_outcome`;
     expect(spawnSync('bash', ['-c', script], { encoding: 'utf-8' }).stdout).toBe('failed');
   });
 

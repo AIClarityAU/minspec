@@ -4,6 +4,12 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { scopeIndexToDr } from '../src/lib/dr-index-scope';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite spawns git via its execFileSync wrapper per assertion, which the widened shell-timeout gate
+// now counts; on vitest's 5s default it can queue past the limit under load. Must be at
+// module scope (#1399).
+useShellTimeout();
 
 const entry = (n: number, status: string) =>
   `## [DR-${n} — T${n}](DR-${n}.md)\n\n*Status: ${status} · Date: 2026-10-18*\n\n<!-- dr-summary:DR-${n} auto=aaa -->\ns${n}\n<!-- /dr-summary:DR-${n} -->`;

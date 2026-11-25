@@ -1,7 +1,7 @@
 ---
 id: SPEC-277
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a reporting surface must not name a violation the writing side can create
@@ -13,9 +13,9 @@ implements_reason: >-
   Clarify answers are recorded but not ratified (D1-D4, all option (a)). File ownership is still
   decided at Plan; no recorded option names a new file, so implements stays none.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

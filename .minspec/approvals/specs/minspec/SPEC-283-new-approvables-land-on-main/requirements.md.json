@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-283-new-approvables-land-on-main/requirements.md",
+  "specHash": "6d6ea831f0dd10b556ee64bff3785dfbcfb913694cc3890216c795168b32886a",
+  "approvedAt": "2026-11-02T12:29:19.439Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:fix/3390-clarify-wording",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3391#issuecomment-6571380443"
+}

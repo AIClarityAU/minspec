@@ -1,7 +1,7 @@
 ---
 id: SPEC-201
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - evidence-discipline gate; same validator-asymmetry class as SPEC-054
@@ -12,9 +12,9 @@ relates_to: [SPEC-054, SPEC-038, SPEC-029, SPEC-033, SPEC-024, "#1252", "#161", 
 # work, #161); the new module and its test are the only NEW files under every Clarify answer.
 implements: [packages/minspec/src/lib/citation-rot.ts, packages/minspec/tests/citation-rot.test.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

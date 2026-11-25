@@ -11,6 +11,12 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite spawns bash children via a spawnSync wrapper per assertion, which the widened shell-timeout gate
+// now counts; on vitest's 5s default it can queue past the limit under load. Must be at
+// module scope (#1399).
+useShellTimeout();
 
 const root = resolve(__dirname, '../../..');
 const src = readFileSync(resolve(root, 'scripts/dispatch-issue.sh'), 'utf8');

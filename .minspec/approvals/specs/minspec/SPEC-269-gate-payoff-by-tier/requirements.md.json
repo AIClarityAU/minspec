@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-269-gate-payoff-by-tier/requirements.md",
+  "specHash": "fbcc949aa99f7079a52c34e712387389b4438d255e91229b4ecc7e458e9d3de3",
+  "approvedAt": "2026-11-02T19:41:04.048Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-settle-1031",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3399#issuecomment-6537247262"
+}

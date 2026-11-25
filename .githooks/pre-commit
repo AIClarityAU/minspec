@@ -447,4 +447,96 @@ if [ "${DR_INDEX_GATE_OFF:-}" != "1" ] && \
   fi
 fi
 
+# ── approval-race gate (#424) ────────────────────────────────────────────────
+# "Approve Spec" (hash + baseline) and `git commit` are separate, non-atomic steps. A
+# spec edited in between lands with a sidecar describing EARLIER bytes, so it reads
+# `stale` immediately with no history showing the change (SPEC-026, e9f82ca). Refuse a
+# staged approvable whose hash differs from its committed sidecar unless the sidecar is
+# staged too (deliberate re-approval), and refuse a staged sidecar that does not match
+# the staged file. Fails CLOSED if the checker cannot run. Scoped to its own bypass.
+# Bypass: APPROVAL_RACE_GATE_OFF=1 git commit ...
+# Cheap git-only prefilter: spawning tsx costs seconds, so only do it when a staged path is
+# a sidecar or has a committed sidecar (an ordinary commit has neither and pays nothing).
+approval_race_relevant() {
+  local f
+  while IFS= read -r f; do
+    case "$f" in
+      .minspec/approvals/*) return 0 ;;
+      *.md) git cat-file -e "HEAD:.minspec/approvals/$f.json" 2>/dev/null && return 0 ;;
+    esac
+  done < <(git diff --cached --name-only)
+  return 1
+}
+if [ "${APPROVAL_RACE_GATE_OFF:-}" != "1" ] && approval_race_relevant; then
+  race_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  race_script="$race_root/scripts/check-approval-sidecar-race.ts"
+  # Resolve tsx from the HOOK's checkout, like the script itself. A bare `npx --no-install
+  # tsx` looks in the COMMITTING repo's cwd, which (core.hooksPath pointed here from a
+  # throwaway repo, as the gate's own test does) has no node_modules: it then only worked
+  # where a stale npx-cache entry held tsx, and failed closed on a fresh CI runner.
+  race_tsx=(npx --no-install tsx)
+  race_tsx_local=0
+  if [ -x "$race_root/node_modules/.bin/tsx" ]; then
+    race_tsx=("$race_root/node_modules/.bin/tsx")
+    race_tsx_local=1
+  fi
+  if [ -f "$race_script" ]; then
+    # #3963: on the npx fallback (no node_modules in the hook's checkout) probe that tsx is
+    # resolvable at all, so a missing toolchain names itself instead of surfacing as an
+    # opaque `npm error` indistinguishable from a real race finding. Still fails CLOSED.
+    if [ "$race_tsx_local" = 0 ] && ! "${race_tsx[@]}" --version >/dev/null 2>&1; then
+      echo "✖ approval race gate (#424): TOOLCHAIN MISSING, not a race finding — tsx could not be" >&2
+      echo "  resolved ($race_root/node_modules/.bin/tsx absent and 'npx --no-install tsx' failed)." >&2
+      echo "  Your content was NOT checked. Fix: run 'npm install' in $race_root (or link the" >&2
+      echo "  primary checkout's node_modules into this worktree), then retry the commit." >&2
+      echo "  Override: APPROVAL_RACE_GATE_OFF=1 git commit ..." >&2
+      fail=1
+    elif ! race_out="$("${race_tsx[@]}" "$race_script" 2>&1)"; then
+      printf '%s\n' "$race_out" >&2
+      fail=1
+    elif [ -n "$race_out" ]; then
+      # Exit 0 with output = a warning (#3831: a voided approval a live delegation covers).
+      printf '%s\n' "$race_out" >&2
+    fi
+  else
+    echo "✖ approval race gate (#424): checker script missing ($race_script) — failing closed." >&2
+    echo "  Override: APPROVAL_RACE_GATE_OFF=1 git commit ..." >&2
+    fail=1
+  fi
+fi
+
+# ── generated-template gate (#3546) ──────────────────────────────────────────
+# scripts/gen-ci-templates.mjs copies a fixed set of source files word for word into
+# ci-review-templates.ts / hook-templates.ts. Editing one without re-running the
+# generator leaves the committed copy stale, and until now only CI caught it.
+# When a staged path is a generator source (or one of its outputs), run
+# `--check` and fail with the regenerate command. Fails CLOSED: if the source list
+# cannot be read the commit is blocked, never silently passed (invariant 2).
+# Bypass: GEN_CI_TEMPLATES_GATE_OFF=1 git commit ...
+if [ "${GEN_CI_TEMPLATES_GATE_OFF:-}" != "1" ] && [ -f scripts/gen-ci-templates.mjs ]; then
+  if gen_paths="$(node --input-type=module -e "
+    const m = await import('./scripts/gen-ci-templates.mjs');
+    console.log([...m.CI_TEMPLATE_SOURCE_PATHS, ...m.CI_TEMPLATE_OUTPUT_PATHS].join('\\n'));
+  " 2>&1)"; then
+    # Capture first: `git diff | grep -q` under pipefail can SIGPIPE (141) when grep exits
+    # on its first match with output still pending, silently skipping the gate.
+    gen_paths="$(printf '%s\nscripts/gen-ci-templates.mjs' "$gen_paths")"
+    staged_list="$(git diff --cached --name-only)"
+    if grep -qxFf <(printf '%s\n' "$gen_paths") <<<"$staged_list"; then
+      if ! gen_out="$(node scripts/gen-ci-templates.mjs --check 2>&1)"; then
+        printf '%s\n' "$gen_out" >&2
+        echo "✖ generated-template gate: a staged path is a gen-ci-templates source and the" >&2
+        echo "  embedded copy is stale. Run: node scripts/gen-ci-templates.mjs  (then git add the output)" >&2
+        echo "  Override: GEN_CI_TEMPLATES_GATE_OFF=1 git commit ..." >&2
+        fail=1
+      fi
+    fi
+  else
+    printf '%s\n' "$gen_paths" >&2
+    echo "✖ generated-template gate: could not read the generator's source list. Failing closed." >&2
+    echo "  Override: GEN_CI_TEMPLATES_GATE_OFF=1 git commit ..." >&2
+    fail=1
+  fi
+fi
+
 exit $fail

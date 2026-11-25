@@ -1,7 +1,7 @@
 ---
 id: SPEC-210
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - guardrails a shared repo must carry; the scaffolded DR-037 hook harness is one of them
@@ -16,8 +16,8 @@ implements: [packages/minspec/src/lib/hooks-armed.ts, packages/minspec/tests/hoo
 # unapproved spec past Clarify for all sessions (#3234).
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

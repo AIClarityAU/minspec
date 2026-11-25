@@ -1,7 +1,7 @@
 ---
 id: SPEC-296
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - same epic as DR-119 (the delegated-approval merge lane record)
@@ -14,9 +14,9 @@ implements_reason: >-
   `scripts/alta-self-merge.ts`, one new judge under `scripts/lib/`, and new tests. None of
   it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -305,7 +305,14 @@ difference from the table above explained by name.
 
 ## Decisions needed (Clarify)
 
-The draft proceeds on each recommendation below. FR-4 and FR-8 are written to them.
+Each decision below carries a recorded selection: the option this document recommends, copied
+by an agent session (minspec-sdd[bot]) on 2026-11-12. Under DR-123 (a T3 spec, every question
+carrying a recommended option), each recorded pick of the recommended option closes its question.
+No human chose any option; approving the spec ratifies the picks, and the approver may change any
+of them first. DLG-001 (DR-108, the delegated-approval record) covers approval only and is not a
+Clarify answer. The founder's answer on operator queue item c1106au (outside this repo) is not a
+committed record, and DR-108 section 4 says a queue item cannot carry consent, so it closes nothing
+here. FR-4 and FR-8 are written to these recommendations.
 
 **D1 - What if an in-flight pull request's checks never finish?** The record defines in flight as up to date with checks not finished, and it
 says a pull request failing a condition never blocks the rest, but it does not say what happens to a check that hangs. Nothing would fire and nothing would be red.
@@ -316,12 +323,16 @@ says a pull request failing a condition never blocks the rest, but it does not s
 - (b) A ceiling that turns the run red and stops the lane. Visible, but one hung check stops every approval.
 - (c) No ceiling. Cheapest to build, and it is a silent stall.
 
+**Recorded selection: Option (a)** - Agent pick of the recommended option; no human chose it; sign-off ratifies it.
+
 **D2 - Does `needs-human-review` refuse?** Section 1 item 3 names a hand-off comment and does not name this label, which `ai-review.yml` and the shepherd both apply
 when asking for a human. Today only #3089 has it, and #3089 is refused anyway.
 
 - **(a) Refuse on the label** **(rec)**: it can only refuse more than the record does, and it stops the lane from taking a pull request an automation has handed to a human. **Cost:** a stale
   label strands one pull request until someone removes it, visible by name in the run summary.
 - (b) Read only what the record names. Less to maintain, and it merges a pull request whose label is asking for a human.
+
+**Recorded selection: Option (a)** - Agent pick of the recommended option; no human chose it; sign-off ratifies it.
 
 ## Rejected alternatives (DR-086 section 4)
 

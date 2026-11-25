@@ -1,7 +1,7 @@
 ---
 id: SPEC-286
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # no silent gate - a proof flag is observed by the gate, never self-reported
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   Specify phase only. Files owned are decided at Plan, after Decisions D1-D4 are answered.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

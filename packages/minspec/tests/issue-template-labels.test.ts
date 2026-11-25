@@ -15,6 +15,12 @@ import {
   checkTemplate,
   extractLabels,
 } from '../../../scripts/lib/issue-template-labels';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite spawns npx tsx children via an execFileSync wrapper per assertion, which the widened shell-timeout gate
+// now counts; on vitest's 5s default it can queue past the limit under load. Must be at
+// module scope (#1399).
+useShellTimeout();
 
 const REPO = join(__dirname, '../../..');
 const form = (labels: string) => `name: T\ndescription: d\n${labels}\nbody:\n  - type: markdown\n`;
