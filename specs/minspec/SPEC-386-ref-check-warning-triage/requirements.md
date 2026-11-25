@@ -1,7 +1,7 @@
 ---
 id: SPEC-386
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - evidence-discipline gate; follow-up to SPEC-201
@@ -11,8 +11,8 @@ implements: [scripts/reference-check-exemptions.json]
 affects: [packages/minspec/src/lib/reference-checker.ts, scripts/validate-frontmatter.ts, packages/minspec/tests/reference-checker.test.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
