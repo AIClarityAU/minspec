@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-391-opt-in-silent-harness-refresh/requirements.md",
+  "specHash": "57560309123532c8476269f8774a26d1a4132bdcf553abc249008b24caab599c",
+  "approvedAt": "2026-11-25T23:31:19.339Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-unblock-1125",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4064#issuecomment-7176903984"
+}
