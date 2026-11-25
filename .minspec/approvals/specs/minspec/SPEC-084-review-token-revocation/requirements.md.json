@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-084-review-token-revocation/requirements.md",
+  "specHash": "0c41f9a7c607968ddd7ac02860541ba0c345ac1a0ac01abd0bab53fd54bd4098",
+  "approvedAt": "2026-11-25T23:30:45.682Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-unblock-1125",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4064#issuecomment-7176903984"
+}
