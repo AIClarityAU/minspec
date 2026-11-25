@@ -1,7 +1,7 @@
 ---
 id: SPEC-372
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-005  # Auto Structure Repair — auto-bootstrap prompts (DR-006)
@@ -11,6 +11,12 @@ implements: none
 implements_reason: >-
   Specified, not built. No design.md/tasks.md exist; the storage-boundary choice under
   "Decisions needed (Clarify)" has a recorded selection (agent pick of the recommended option; founder decision, queue item clarsel, DR-123).
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-372: Auto-bootstrap "Don't ask again" answers survive git operations and re-clones (Requirements)

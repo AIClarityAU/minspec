@@ -2449,15 +2449,13 @@ shepherd_own_pr() {
       [ .statusCheckRollup[]? | select((.name // "") != "ai-review") | (.conclusion // "") ]
       | map(select(. == "FAILURE" or . == "ERROR" or . == "TIMED_OUT" or . == "CANCELLED"))
       | if length > 0 then "yes" else "no" end' <<<"$pr_json")
-    ai_review_bad=$(jq -r '
-      [ .statusCheckRollup[]? | select((.name // "") == "ai-review") | (.conclusion // "") ]
-      | map(select(. == "FAILURE" or . == "ERROR"))
-      | if length > 0 then "yes" else "no" end' <<<"$pr_json")
+    # #4052: same shared predicate as the drain (label OR red check, de-duplicated checks).
+    # A derivation failure is treated as bad, never as a silent "no".
+    ai_review_bad=$("${SCRIPT_DIR}/remediate-pr.sh" --derive-ai-review-bad <<<"$pr_json" 2>/dev/null) || ai_review_bad=yes
     ai_review_pending=$(jq -r '
       [ .statusCheckRollup[]? | select((.name // "") == "ai-review") | (.status // "") ]
       | map(select(. == "QUEUED" or . == "IN_PROGRESS" or . == "PENDING" or . == "WAITING"))
       | if length > 0 then "yes" else "no" end' <<<"$pr_json")
-    [[ ",$labels_csv," == *",ai-review:changes,"* ]] && ai_review_bad=yes
 
     # Is anything ASYNCHRONOUS still able to change the outcome? Without this the
     # shepherd would poll the whole ceiling on a healthy PR whose only remaining gate
