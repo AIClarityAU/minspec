@@ -15,6 +15,11 @@ relates_to: [SPEC-060, SPEC-054, DR-003, DR-066]
 # doing so would create the exact dual-ownership collision DR-038/SPEC-038 exists
 # to prevent. See "Decisions needed" DQ-1 for how Plan should reconcile this with
 # SPEC-060 rather than silently forking ownership.
+implements: none
+implements_reason: >-
+  Specify phase only. FR-1/FR-2 touch files SPEC-060 already owns (see the comment above), so
+  this spec does not re-declare them. Which files it owns is decided at Plan; DQ-1's recorded
+  Option D points at scripts/check-swallowed-gate-signal.ts and scripts/lib/swallowed-gate-signal.ts.
 phases:
   specify: in-progress
   clarify: pending
@@ -275,6 +280,9 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
     reversed if C ships FR-1 without waiting for FR-3, so the actual regression risk C accepts
     is only the *next* instance of this bug class elsewhere, not a continuation of this one.
 
+
+  **Recorded selection: the recommended option,** Option D, extend `scripts/check-swallowed-gate-signal.ts` / `scripts/lib/swallowed-gate-signal.ts` with the `|| echo|printf <default>` swallow form and the reaches-a-build-artifact rule (supersedes the earlier Option C recommendation, as the question says). Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-26; sign-off ratifies it.
+
 - **DQ-2 — Sequencing FR-2 against SPEC-060 DQ-4's predicate fix: same PR, or a hard blocking
   dependency recorded and enforced how?**
 
@@ -296,6 +304,9 @@ sequencing dependency is normative, not a nice-to-have — see FR-2's MUST-NOT c
     bundling it removes the sequencing risk directly rather than trusting two independently
     dispatched PRs to land in the right order. Cost: the ownership note above, which Plan must
     write explicitly rather than skip.
+
+
+  **Recorded selection: the recommended option,** Option A, the `isMinspecRepo` predicate fix is a prerequisite task in the same PR as FR-2, with an explicit cross-spec ownership note for SPEC-060's file. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-26; sign-off ratifies it.
 
 ## Risks
 

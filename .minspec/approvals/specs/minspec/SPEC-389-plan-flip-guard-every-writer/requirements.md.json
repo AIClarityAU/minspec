@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-389-plan-flip-guard-every-writer/requirements.md",
+  "specHash": "3de0b9c80852c8c243ca51dbeddf735285cb62b0eb23e613ae783e46df491013",
+  "approvedAt": "2026-11-23T20:54:03.855Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1123",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4024#issuecomment-7112005209"
+}
