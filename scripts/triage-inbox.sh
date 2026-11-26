@@ -369,7 +369,18 @@ CONTENT
   # reject the request and the retry warn "could not clear" on every release.
   # Keep only the labels this issue actually wears; a present label that then
   # fails to clear still warns below.
-  local _kept="" _l
+  #
+  # Filter against a FRESH read, not ISSUE_JSON: that was read before the slow classify
+  # call, and a label added meanwhile (`needs-human-review` from dispatch, a ready label
+  # from a concurrent triage) would otherwise never be removed - a stale human-gate label
+  # then blocks the valid verdict at dispatch. If the re-read fails, fall back to the
+  # earlier snapshot rather than skip the clear.
+  local _kept="" _l _now _fresh
+  local -a _cand
+  if _fresh=$(gh issue view "$ISSUE" --repo "$REPO" --json labels 2>/dev/null) \
+     && _now=$(echo "$_fresh" | jq -r '[.labels[].name] | join(",")' 2>/dev/null); then
+    CURRENT_LABELS="$_now"
+  fi
   IFS=',' read -r -a _cand <<< "$SUPERSEDED"
   for _l in "${_cand[@]}"; do
     [[ ",${CURRENT_LABELS}," == *",${_l},"* ]] && _kept+="${_kept:+,}${_l}"

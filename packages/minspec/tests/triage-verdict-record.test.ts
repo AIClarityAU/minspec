@@ -67,7 +67,15 @@ interface TriageRun {
 /** Drive scripts/triage-inbox.sh for one issue with stubbed `gh` and `claude`. */
 function runTriage(
   verdictBlock: string,
-  opts: { failBatchRemove?: boolean; labels?: string[]; rawLabels?: unknown; title?: string; scripts?: string } = {},
+  opts: {
+    failBatchRemove?: boolean;
+    labels?: string[];
+    /** Labels the issue wears on every read AFTER the first (labels added while triage ran). */
+    laterLabels?: string[];
+    rawLabels?: unknown;
+    title?: string;
+    scripts?: string;
+  } = {},
 ): TriageRun {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-triage-'));
   const bin = path.join(dir, 'bin');
@@ -80,6 +88,9 @@ function runTriage(
     labels: 'rawLabels' in opts ? opts.rawLabels : (opts.labels ?? ['inbox']).map((name) => ({ name })),
   });
   fs.writeFileSync(path.join(dir, 'issue.json'), issueJson);
+  if (opts.laterLabels) {
+    fs.writeFileSync(path.join(dir, 'issue-later.json'), JSON.stringify({ title, body: BODY, labels: opts.laterLabels.map((name) => ({ name })) }));
+  }
   fs.writeFileSync(path.join(dir, 'agent-out.txt'), verdictBlock);
   // Triage asks GitHub who wrote this issue's text before it triages it, in a read of
   // its own, and triages only when every one of them is on the list in
@@ -114,7 +125,9 @@ function runTriage(
 set -u
 sub="\${2:-}"
 case "$sub" in
-  view) echo "view" >> "$STUB_LOG"; cat "$STUB_DIR/issue.json" ;;
+  view)
+    echo "view" >> "$STUB_LOG"
+    if [[ -f "$STUB_DIR/issue-later.json" && "$(grep -c '^view$' "$STUB_LOG")" -gt 1 ]]; then cat "$STUB_DIR/issue-later.json"; else cat "$STUB_DIR/issue.json"; fi ;;
   graphql)
     case "$*" in
       *LabeledEvent*) cat "$STUB_DIR/label-events.json" ;;
@@ -329,6 +342,15 @@ describe('triage-inbox.sh writes the verdict record dispatch requires (#983)', (
     const run = runTriage(verdict(), { labels: ['inbox', 'needs-review'] });
     const removed = run.calls.find((c) => /remove=\[[^\]]+\]/.test(c)) ?? '';
     expect(removed).toBe('edit add=[] remove=[inbox,needs-review]');
+  });
+
+  it('removes a label added WHILE triage ran, absent from the first read of the issue', () => {
+    // dispatch can add needs-human-review during the slow classify call; it countermands a
+    // valid verdict, so the removal list must come from the issue as it is NOW.
+    const run = runTriage(verdict(), { labels: ['inbox'], laterLabels: ['inbox', 'needs-human-review'] });
+    const removed = run.calls.find((c) => /remove=\[[^\]]+\]/.test(c)) ?? '';
+    expect(removed).toContain('needs-human-review');
+    expect(removed).toContain('inbox');
   });
 
   it('a rejected BATCH label removal falls back to one-at-a-time, so inbox still clears', () => {
