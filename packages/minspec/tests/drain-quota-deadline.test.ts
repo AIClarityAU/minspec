@@ -647,6 +647,112 @@ describe('T3 regression — the weekly ceiling must outrank the 5h window-reset'
   });
 });
 
+describe('T3 regression (#3466): a gate hold that has already cleared does not sleep to the 5h reset', () => {
+  // Measured 2026-10-31. defer:stale held the queue; another producer refreshed the reading
+  // while in-flight work drained; the rc=42 arm then slept 2340s "to the published reset"
+  // against 5h 82% / 7d 48%, both under their caps. `--quota-gate-sleep` is the pure seam for
+  // the rest after quota_gate itself deferred: "<secs> <cleared|held> <meter says>".
+  const gateSleep = (env: Record<string, string> = {}) => {
+    const r = run(['--quota-gate-sleep'], env);
+    const [secs, verdict] = r.out.split(/\s+/);
+    return { code: r.code, secs: Number(secs), verdict, out: r.out };
+  };
+  const fresh = (q: Record<string, number>) =>
+    fs.writeFileSync(quotaFile, JSON.stringify({ observed_at: nowSec(), ...q }));
+
+  it('fresh reading under both caps, reset 2000s away: short rest, not the reset', () => {
+    fresh({
+      used_percentage: 50, resets_at: nowSec() + 2000,
+      seven_day_percentage: 20, seven_day_resets_at: nowSec() + 400000,
+    });
+    const r = gateSleep();
+    expect(r.code).toBe(0);
+    expect(r.verdict).toBe('cleared');
+    expect(r.secs).toBe(60);
+  });
+
+  it('CONTROL: the same reading after a TEXT signal that is overruled still sleeps to the reset', () => {
+    fresh({
+      used_percentage: 50, resets_at: nowSec() + 2000,
+      seven_day_percentage: 20, seven_day_resets_at: nowSec() + 400000,
+    });
+    const r = run(['--quota-signal-sleep', '1']);
+    const [secs, verdict] = r.out.split(/\s+/);
+    expect(verdict).toBe('overruled');
+    expect(Number(secs)).toBeGreaterThanOrEqual(2000);
+  });
+
+  it('a gate that still defers keeps the reset-bound sleep (held)', () => {
+    fresh({ used_percentage: 95, resets_at: nowSec() + 600 });
+    const r = gateSleep();
+    expect(r.verdict).toBe('held');
+    expect(r.secs).toBeGreaterThanOrEqual(600);
+    expect(r.secs).toBeLessThan(900);
+  });
+
+  it('a still-stale reading is held, never cleared (fail closed)', () => {
+    fresh({ used_percentage: 0, resets_at: nowSec() + 2000, observed_at: nowSec() - 901 });
+    expect(gateSleep({ MINSPEC_DRAIN_QUOTA_BACKOFF: '1800' }).verdict).toBe('held');
+  });
+});
+
+describe('T3 regression (#3466 review): a text signal in a cleared gate-hold cycle keeps the #2233 path', () => {
+  // QUOTA_PAUSE_CAUSE stays `gate` when an in-flight build reports a real usage-limit notice
+  // after the gate held; if the meter then shows room, the short rest must not cover it.
+  const fresh = () => fs.writeFileSync(quotaFile, JSON.stringify({
+    observed_at: nowSec(), used_percentage: 50, resets_at: nowSec() + 2000,
+    seven_day_percentage: 20, seven_day_resets_at: nowSec() + 400000,
+  }));
+
+  it('cleared gate + usage-limit text this cycle: NOT the short rest, routed to the text-signal path', () => {
+    fresh();
+    const r = run(['--quota-gate-sleep', '1']);
+    expect(r.code).toBe(0);
+    expect(r.out.split(/\s+/)[1]).toBe('text-signal');
+  });
+
+  it('CONTROL: same reading, no text signal: the short rest', () => {
+    fresh();
+    expect(run(['--quota-gate-sleep', '0']).out.split(/\s+/)[1]).toBe('cleared');
+  });
+
+  it('text seen but the gate still defers: held (the gate keeps its own rest, fail closed)', () => {
+    fs.writeFileSync(quotaFile, JSON.stringify({ observed_at: nowSec(), used_percentage: 95, resets_at: nowSec() + 600 }));
+    expect(run(['--quota-gate-sleep', '1']).out.split(/\s+/)[1]).toBe('held');
+  });
+});
+
+describe('T3 regression (#3466 review): the serial dispatch path marks text-seen only on a TEXT signal', () => {
+  // The architect blocked: the serial path set QUOTA_TEXT_SEEN=1 for every saw_quota, so a
+  // status-witness (#1713) pause that later cleared was routed to text-signal, not cleared.
+  // The dispatch loop is not runnable offline, so this reads the serial block's source and
+  // asserts which statements may set the flag (parallel path already did it right).
+  const src = fs.readFileSync(DRAIN, 'utf-8');
+  const end = src.indexOf('_breaker_decide', src.indexOf('Claude usage-limit signal while dispatching #$n'));
+  const start = src.lastIndexOf('book_dispatch "$n" "$outcome" "${verdict:0:1}"\n', end);
+  const block = src.slice(start, end);
+
+  it('located the serial saw_quota block', () => {
+    expect(start).toBeGreaterThan(0);
+    expect(block).toContain('if (( saw_quota )); then');
+  });
+
+  it('QUOTA_TEXT_SEEN=1 is set inside the verdict text-bit branch', () => {
+    expect(block).toMatch(/if \[\[ "\$\{verdict:1:1\}" == "1" \]\]; then[\s\S]*?QUOTA_TEXT_SEEN=1[\s\S]*?\n      fi/);
+  });
+
+  it('QUOTA_TEXT_SEEN=1 is NOT set in the shared saw_quota branch (status witness must not set it)', () => {
+    const shared = block.slice(block.indexOf('if (( saw_quota )); then'));
+    expect(shared).not.toContain('QUOTA_TEXT_SEEN=1');
+  });
+
+  it('the status-witness line sets cause=gate and does not touch the text flag', () => {
+    const line = block.split('\n').find((l) => l.includes('"$outcome" == "quota"')) ?? '';
+    expect(line).toContain('QUOTA_PAUSE_CAUSE="gate"');
+    expect(line).not.toContain('QUOTA_TEXT_SEEN');
+  });
+});
+
 describe('T3 regression (#2233): a text-only signal that a fresh meter contradicts does not sleep to the reset', () => {
   // Measured 2026-09-30. A false match on the word "quota" (19:03) paused the drain; the
   // last in-flight build finished at 19:15:54, and the drain then slept 17061s "to the

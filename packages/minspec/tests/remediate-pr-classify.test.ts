@@ -656,3 +656,39 @@ describe('remediate-pr.sh: delegated-approval branches (dlg-approve/*) — mecha
     expect(run(['with-review'])).toEqual(['111', '222']);
   });
 });
+
+// #4052 — ai_review_bad must read the ai-review:changes LABEL: on a machinery PR the
+// ai-review check is forced NEUTRAL, so the check alone is a blind witness.
+describe('remediate-pr.sh --derive-ai-review-bad: label OR red check (#4052)', () => {
+  const neutral = { name: 'ai-review', workflowName: 'ai-review', status: 'COMPLETED', conclusion: 'NEUTRAL' };
+  const green = { name: 'test', workflowName: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS' };
+  function derive(labels: string[], rollup: unknown[]): string {
+    return execFileSync('bash', [SCRIPT, '--derive-ai-review-bad'], {
+      encoding: 'utf-8',
+      input: JSON.stringify({ labels: labels.map((name) => ({ name })), statusCheckRollup: rollup }),
+    }).trim();
+  }
+
+  it('machinery PR: ai-review:changes + NEUTRAL ai-review check → yes', () => {
+    expect(derive(['ai-review:changes', 'ai-review:pending', 'needs-human-review'], [neutral, green])).toBe('yes');
+  });
+
+  it('ai-review:changes with no ai-review check at all → yes', () => {
+    expect(derive(['ai-review:changes', 'ai-review:pending', 'needs-human-review'], [green])).toBe('yes');
+  });
+
+  it('ai-review:pass + NEUTRAL check → no', () => {
+    expect(derive(['ai-review:pass'], [neutral, green])).toBe('no');
+  });
+
+  it('a red ai-review check without the label → yes', () => {
+    expect(derive([], [{ ...neutral, conclusion: 'FAILURE' }, green])).toBe('yes');
+  });
+
+  it('parity: drain and dispatch-issue.sh both derive through the shared helper', () => {
+    const drain = fs.readFileSync(SCRIPT, 'utf-8');
+    const dispatch = fs.readFileSync(path.resolve(__dirname, '../../../scripts/dispatch-issue.sh'), 'utf-8');
+    expect(drain).toMatch(/AI_REVIEW_BAD=\$\(derive_ai_review_bad "\$PR_JSON"\)/);
+    expect(dispatch).toMatch(/remediate-pr\.sh" --derive-ai-review-bad/);
+  });
+});
