@@ -164,6 +164,31 @@ if [ "${#status_hits[@]}" -gt 0 ]; then
   label_args=()
 fi
 
+# $msg is the FULL commit message (subject + body), and this repo's own
+# convention — a subject line, a blank line, then an explanatory body, which
+# the RCDD gate in .githooks/commit-msg actively requires for `fix:` commits —
+# routinely produces a message well past GitHub's 256-char PR title cap
+# ("Title is too long (maximum is 256 characters)"). Passing $msg verbatim as
+# --title fails PR creation *after* the branch is pushed (#1606, #1508). Split
+# it the way git does: first line is the subject (the PR title), whatever
+# follows the first blank line is the body, carried into the PR body.
+#
+# VALIDATED BEFORE ANY PUSH (#1508): push is the irreversible half, so a
+# predictable input error must refuse cleanly here, not strand a pushed
+# branch. An over-long subject is a hard failure — never a silent cut.
+pr_title="${msg%%$'\n'*}"
+if [ "$pr_title" = "$msg" ]; then
+  pr_rest=""
+else
+  pr_rest="${msg#*$'\n'}"
+  pr_rest="${pr_rest#$'\n'}"   # drop the single blank separator line, if present
+fi
+if [ "${#pr_title}" -gt 256 ]; then
+  echo "push-docs: commit subject is ${#pr_title} chars; GitHub caps a PR title at 256." >&2
+  echo "push-docs: shorten the first line of -m (put detail after a blank line). Nothing was pushed." >&2
+  exit 2
+fi
+
 # DR_INDEX_GATE_OFF=1 (NOT --no-verify): the ephemeral worktree has no node_modules /
 # built @aiclarity/shared, so ONLY .githooks/pre-commit's `npm run validate` step crashes
 # on module load. That step has this dedicated kill-switch, and it is the right scope —
@@ -173,29 +198,6 @@ fi
 # and the commit-msg RCDD gate. No invariant hole (vs the blunt --no-verify).
 DR_INDEX_GATE_OFF=1 git -C "$wt" commit -q -m "$msg"
 git -C "$wt" push -q -u origin "$branch"
-
-# $msg is the FULL commit message (subject + body), and this repo's own
-# convention — a subject line, a blank line, then an explanatory body, which
-# the RCDD gate in .githooks/commit-msg actively requires for `fix:` commits —
-# routinely produces a message well past GitHub's 256-char PR title cap
-# ("Title is too long (maximum is 256 characters)"). Passing $msg verbatim as
-# --title therefore fails PR creation *after* the branch is already pushed
-# (#1606). Split it the same way git itself does: first line is the subject
-# (truncated on a word boundary if it alone exceeds 256 chars), and whatever
-# follows the first blank line is the body — carried into the PR body instead
-# of being discarded outright.
-pr_title="${msg%%$'\n'*}"
-if [ "$pr_title" = "$msg" ]; then
-  pr_rest=""
-else
-  pr_rest="${msg#*$'\n'}"
-  pr_rest="${pr_rest#$'\n'}"   # drop the single blank separator line, if present
-fi
-if [ "${#pr_title}" -gt 256 ]; then
-  truncated="${pr_title:0:256}"
-  [[ "$truncated" == *' '* ]] && truncated="${truncated% *}"
-  pr_title="$truncated"
-fi
 
 if [ "${#status_hits[@]}" -gt 0 ]; then
   lane_note="**Not labelled for the docs-lane** — this PR changes a \`status:\` line in: $(printf '\`%s\`, ' "${status_hits[@]}" | sed 's/, $//'). Accepting a DR or approving a spec is a **human act** (DR-029, DR-086 §2), so the lane refuses it by design (#1847). This needs a human merge keystroke (#2158). Files:
