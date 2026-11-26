@@ -34,13 +34,13 @@ affects: [packages/minspec/src/lib/ruleset-advisor.ts, packages/minspec/src/lib/
 > names a **symbol** first and gives the line only as it stood at `8bfc5cc5`, because a
 > line number alone rots silently; the line-level reference gap is #1252).
 >
-> **What a reader should check:** D-11 (the one open human decision), the rewritten FR-7 /
+> **What a reader should check:** D-11 (the founder's answer, recorded from queue item in108 and ratified at approval), the rewritten FR-7 /
 > INV-9 / AC-6, and the rewritten AC-2. Everything else is an anchor or wording correction.
 >
 > **Revision 2026-11-26 (founder's D-11 answer).** The founder answered D-11 himself on
 > 2026-11-26 (queue item in108): option (a), plus an addition asking for the opt-in to be one
 > of several easy toggles on the onboarding/setup page. D-11 now records both of his lines
-> verbatim, and the addition is the new **FR-10** with **AC-9**. Nothing else changed.
+> verbatim, and the addition is the new **FR-10** with **AC-9**. Nothing else changed. The text is a copy of his words; his approval of this spec is the consent record.
 >
 > Note on protection reads: verify `main` protection via
 > `repos/{owner}/{repo}/rules/branches/main` (rulesets). This org uses rulesets, not classic
