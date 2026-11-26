@@ -763,12 +763,16 @@ delegated_merge_human_claims() {
   # #4016: a handoff on an `agent-stuck` PR (no `hold:*` label) is an automation failure,
   # not a founder decision (#3835 split the label off at the producer). It is not a human
   # claim, so the PR returns to the agent path. Unreadable or absent labels keep the hold, and so
-  # does `human-escalated` (#4061): remediate-pr.sh adds it, with `needs-human-review`, whenever it
-  # gives a PR to a human (retry cap, conflict) without removing `agent-stuck`, so the handoff
-  # stays live. `needs-human-review` ALONE does not: the #833 docs lane adds it to every spec PR
-  # at open, so it cannot tell a docs-lane hold from an escalation.
+  # does `human-escalated` (#4061): remediate-pr.sh and shepherd_hand_off (human kind) add it,
+  # with `needs-human-review`, whenever they give a PR to a human. `needs-human-review` keeps
+  # the hold too UNLESS `held-at-open` is present: that label is POSITIVE evidence, written only
+  # by the PR-open holds below (#833 docs lane, closing-link checks), that the PR's
+  # `needs-human-review` came from opening it, not from an escalation. Release is never read
+  # from the ABSENCE of `human-escalated`, so a PR escalated before #4061 (agent-stuck +
+  # needs-human-review, no human-escalated) and any other producer of needs-human-review (the
+  # ai-review workflows, a human) stay held: fail closed.
   local stuck=""
-  stuck=$(printf '%s' "$view" | jq -r '(.labels // []) | if type == "array" then ([.[] | .name // ""] | (any(. == "agent-stuck") and (any(startswith("hold:")) | not) and (any(. == "human-escalated") | not))) else false end' 2>/dev/null) || stuck=false  # swallow-ok: unreadable labels leave the handoff live (fail closed)
+  stuck=$(printf '%s' "$view" | jq -r '(.labels // []) | if type == "array" then ([.[] | .name // ""] | (any(. == "agent-stuck") and (any(startswith("hold:")) | not) and (any(. == "human-escalated") | not) and ((any(. == "needs-human-review") | not) or any(. == "held-at-open")))) else false end' 2>/dev/null) || stuck=false  # swallow-ok: unreadable labels leave the handoff live (fail closed)
   if [[ "$handoffs" != "0" && "$stuck" != "true" ]] && ! delegated_merge_handoffs_spent "$pr" "$marker"; then
     printf 'handed-to-human\tPR #%s was handed to the founder by its creator (shepherd handoff comment); a bot merge would take his decision\n' "$pr"
     return 1
@@ -1932,6 +1936,7 @@ run_reviewer_stage() {
   gh label create "ai-review:pass"    --repo "$REPO" --color 0e8a16 --description "Independent AI review passed (advisory)" 2>/dev/null || true
   gh label create "ai-review:changes" --repo "$REPO" --color d93f0b --description "Independent AI review requested changes"  2>/dev/null || true
   gh label create "needs-human-review" --repo "$REPO" --color fbca04 --description "Held for a human — auto-merge withheld (e.g. approvable-doc change, #833)" 2>/dev/null || true
+  gh label create "held-at-open" --repo "$REPO" --color c5def5 --description "needs-human-review here was added at PR open (docs lane / link checks), not by an escalation (#4061)" 2>/dev/null || true
 
   # 6. Confirm a PR exists for this branch, creating one if not. Direct pushes to
   #    main are blocked by a branch-protection ruleset, so a PR is MANDATORY for
@@ -1964,6 +1969,7 @@ run_reviewer_stage() {
       gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
       gh pr comment "$pr_num" --repo "$REPO" --body "$(printf '## Closing-issue link not confirmed (#2228)\n\nThis PR carries a `Closes #%s` trailer, but GitHub currently reports `closingIssuesReferences` WITHOUT #%s in it — merging this PR may NOT auto-close the issue. Labeled `needs-human-review` and native auto-merge withheld: a human should confirm the link (re-saving the PR body with no text change sometimes re-triggers the parse) before merging, or close #%s manually once this merges.' "$ISSUE" "$ISSUE" "$ISSUE")" 2>/dev/null || true
       echo "WARNING: PR #$pr_num does not show #$ISSUE in closingIssuesReferences — the Closes trailer did not link (#2228). Labeled needs-human-review; native auto-merge withheld." >&2
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "held-at-open" 2>/dev/null || true  # swallow-ok: absent keeps hold (#4061)
     else
       closing_link_confirmed=1
     fi
@@ -1978,6 +1984,7 @@ run_reviewer_stage() {
       closing_link_confirmed=1
     else
       gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "held-at-open" 2>/dev/null || true  # swallow-ok: absent keeps hold (#4061)
       gh pr comment "$pr_num" --repo "$REPO" --body "$(printf '## A spec PR closes an issue (#3348)\n\nThis is a specify-only PR for #%s: merging it must leave #%s open for the build that follows spec sign-off. GitHub reports closing links `%s` (empty means the read failed). Labeled `needs-human-review` and native auto-merge withheld: edit the body so it carries `Refs #%s` and no closing keyword before merging.' "$ISSUE" "$ISSUE" "$(printf '%s' "$closing_refs" | tr '\n' ' ')" "$ISSUE")" 2>/dev/null || true
       echo "WARNING: specify-only PR #$pr_num: spec PR closes an issue, or its closing links could not be read (#3348). Labeled needs-human-review; native auto-merge withheld." >&2
     fi
@@ -2002,9 +2009,11 @@ run_reviewer_stage() {
     local changed_files autonomy_verdict
     if ! changed_files=$(gh pr diff "$pr_num" --repo "$REPO" --name-only 2>/dev/null); then
       gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "held-at-open" 2>/dev/null || true  # swallow-ok: absent keeps hold (#4061)
       echo "  → native auto-merge WITHHELD on PR #$pr_num — could not enumerate changed files; failing closed (#833; derived stop class irreversible-or-outward-facing, #1614). Labeled needs-human-review."
     elif [[ -z "${changed_files//[$'\n\r\t ']/}" ]]; then
       gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "held-at-open" 2>/dev/null || true  # swallow-ok: absent keeps hold (#4061)
       echo "  → native auto-merge WITHHELD on PR #$pr_num — empty changed-file enumeration; failing closed (#833; derived stop class irreversible-or-outward-facing, #1614). Labeled needs-human-review."
     elif ! autonomy_verdict=$(autonomy_may_merge "arm GitHub-native auto-merge (DR-061) on PR #$pr_num" "$changed_files"); then
       # THE decision (#1614). `paths_have_approvable_doc` used to sit here and decide
@@ -2016,6 +2025,7 @@ run_reviewer_stage() {
       # that setting, which is a human decision (#1743) — do not read this comment
       # for today's config value, read .minspec/config.json itself.
       gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "held-at-open" 2>/dev/null || true  # swallow-ok: absent keeps hold (#4061)
       # Name the ACTUAL blocker, from the verdict itself — never a fixed string. The
       # verdict is the sole authority for WHETHER to hold; these lines only DESCRIBE
       # it, so the two can never disagree. Reporting "docs-lane corpus" for a sites/**
@@ -2045,6 +2055,7 @@ run_reviewer_stage() {
       # #3348: in specify-only mode the unconfirmed fact is the opposite one (the
       # spec PR closes something, or its links were unreadable), so say that.
       gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "held-at-open" 2>/dev/null || true  # swallow-ok: absent keeps hold (#4061)
       [[ "${SPECIFY_ONLY:-0}" == "1" ]] \
         && echo "  → native auto-merge WITHHELD on PR #$pr_num — this spec PR is not confirmed to close nothing, so merging could close build issue #$ISSUE (#3348). A human owns this merge. Labeled needs-human-review."
       [[ "${SPECIFY_ONLY:-0}" == "1" ]] \
@@ -2267,22 +2278,26 @@ SHEPHERD_MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"
 #   stuck — the shepherd's OWN automation gave up (ceiling, attempt cap, rebase or fix that
 #           produced nothing): `agent-stuck`, NOT `needs-human-review`, so no consumer reads
 #           it as a human decision. Anything but the literal "human" fails closed to stuck.
-#           The delegated-merge lane reads it (#4016): a handoff on an `agent-stuck` PR with no `hold:*` label and no `human-escalated` label is not a human claim (either label keeps the hold; the docs-lane `needs-human-review` does not, #4061).
+#           The delegated-merge lane reads it (#4016): a handoff on an `agent-stuck` PR with no `hold:*` label and no `human-escalated` label is not a human claim (either label keeps the hold; so does `needs-human-review`, unless `held-at-open` proves it came from the PR-open docs lane, #4061).
 #           Any later retry comes from the label-agnostic drain sweep (drain-inbox.sh
 #           `gh pr list --state open`), NOT from this label; remediate-pr.sh may still
 #           relabel `needs-human-review` + `human-escalated` when ITS own cap is hit.
 shepherd_hand_off() {
   local pr_num="$1" reason="$2" kind="${3:-stuck}" already label desc tail
   if [[ "$kind" == "human" ]]; then
-    label="needs-human-review"
+    # #4061: a hand-off to a human carries `human-escalated` too, so the delegated-merge
+    # lane keeps it as a human claim even when `agent-stuck` is already on the PR.
+    label="needs-human-review,human-escalated"
     desc="Automated gate failed closed — a human must resolve"
-    tail='It is labelled `needs-human-review`; a human decision is needed and the creator will make no further automated attempts.'
+    gh label create "human-escalated" --repo "$REPO" --color fbca04 \
+      --description "Automation handed this PR to a human (#4061) - distinguishes escalation from a docs-lane hold" 2>/dev/null || true
+    tail='It is labelled `needs-human-review` and `human-escalated`; a human decision is needed and the creator will make no further automated attempts.'
   else
     label="agent-stuck"
     desc="Automation gave up — a failure marker, not a human decision (read only by the delegated-merge lane, #4016)"
     tail='It is labelled `agent-stuck`: this is an automation failure rather than a human decision. The delegated-merge lane reads this label, to treat the handoff as not a human claim; a later drain sweep may retry it, and the remediation drain may escalate it to `needs-human-review` if it hits its own cap. The creator will make no further automated attempts.'
   fi
-  gh label create "$label" --repo "$REPO" --color fbca04 \
+  gh label create "${label%%,*}" --repo "$REPO" --color fbca04 \
     --description "$desc" 2>/dev/null || true
   gh pr edit "$pr_num" --repo "$REPO" --add-label "$label" 2>/dev/null || true
   already=$(gh pr view "$pr_num" --repo "$REPO" --json comments \

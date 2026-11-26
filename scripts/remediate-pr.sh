@@ -813,10 +813,13 @@ source "${SCRIPT_DIR}/lib/dispatch-author-gate.sh"
 # AND `human-escalated`. `needs-human-review` alone is ambiguous - dispatch-issue.sh adds it
 # to any spec PR at open (#833 docs lane) - so the delegated-merge lane
 # (delegated_merge_human_claims) reads `human-escalated` to tell a live human escalation
-# from a docs-lane hold. Optional args are extra labels (e.g. agent-quarantined).
+# from a docs-lane hold. `--desc <text>` (first) sets the needs-human-review description used
+# if the label must be created; remaining args are extra labels (e.g. agent-quarantined).
 escalate_to_human_label() {
+  local desc="Automated gate failed closed — a human must resolve"
+  if [[ "${1:-}" == "--desc" ]]; then desc="$2"; shift 2; fi
   gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
-    --description "Automated gate failed closed - a human must resolve" 2>/dev/null || true
+    --description "$desc" 2>/dev/null || true
   gh label create "human-escalated" --repo "$REPO" --color fbca04 \
     --description "Remediation handed this PR to a human (#4061) - distinguishes escalation from a docs-lane hold" 2>/dev/null || true
   local extra=""
@@ -1026,7 +1029,7 @@ case "$ACTION" in
     # no human signal. (ready-to-merge stays the load-bearing hold either way.)
     echo "  Merge conflict — not auto-resolving (left for a human)."
     if ! $DRY_RUN; then
-      escalate_to_human_label
+      escalate_to_human_label --desc "A human is the next actor — auto-merge withheld"
     fi
     exit 0 ;;
   retry-unknown)
