@@ -29,7 +29,7 @@ is needed unless DQ-1 chooses to change the verdict-record contract (see below).
 
 ## Problem
 
-`ai-review.yml` posts `$REVIEWER_BLOCK`, `$SECURITY_BLOCK` and `$ARCHITECT_BLOCK` inside triple-backtick
+`ai-review.yml` posts `$REVIEWER_BLOCK`, `$SECURITY_BLOCK`, `$ARCHITECT_BLOCK` and `$SKEPTIC_BLOCK` inside triple-backtick
 fences, and `dispatch-issue.sh` does the same for its advisory review body. A code fence does not wrap,
 so long findings scroll sideways and are hard to read. The fence is also today's **neutralizer**: the
 reviewer read an untrusted diff and can be steered to emit markdown/HTML, and inside a fence that text
@@ -37,7 +37,7 @@ is inert.
 
 ## Verified facts (cited, not inferred)
 
-- `ai-review.yml:1023-1040` wraps the three blocks in `echo '```'` fences; the blocks come from
+- `ai-review.yml:1023-1040` wraps the four blocks (reviewer, security, architect, skeptic; the skeptic fence is at lines 1041-1046) in `echo '```'` fences; the blocks come from
   `extract_block | redact` (lines 829-838), with fail-closed sentinel strings when no block is emitted.
 - `dispatch-issue.sh:1897-1905` builds `review_body` with `printf` fences, then runs the egress scan.
 - `.github/scripts/ai-review-guard.js:2260` defines `sanitizeLogin` (strips backticks only).
@@ -64,9 +64,9 @@ is inert.
   The header verdict is derived from the parsed `verdict:` token only; an unknown token is `changes`.
 - **FR-5** Length is bounded (per-field and total caps with a visible "truncated" marker) so a hostile
   block cannot flood the comment.
-- **FR-6** `ai-review.yml` replaces the reviewer, security and architect fences with `renderVerdict`
+- **FR-6** `ai-review.yml` replaces the reviewer, security, architect and skeptic fences with `renderVerdict`
   output, invoked via `node -e` reading the block from an environment variable, never shell-interpolated.
-- **FR-7** `dispatch-issue.sh`'s advisory `review_body` uses the same renderer, and the result still
+- **FR-7** `dispatch-issue.sh`'s advisory `review_body` uses the same renderer for EACH embedded verdict block (the Reviewer block, and the Security block when `touches_pkg` is `yes`; `dispatch-issue.sh:1898-1901`), and the result still
   passes through the existing egress scan unchanged (the scan runs on the rendered body).
 - **FR-8** The redaction (`redact`) and egress scan still run on the raw block BEFORE rendering, so
   rendering cannot reintroduce a secret the guard removed.
@@ -111,8 +111,8 @@ is inert.
     change for a cosmetic gain, and may need a DR.
   - **C: replace and emit only a machine-readable one-line marker** (e.g. an HTML comment with the
     verdict token). Cost: new contract the readers must parse; fix agent loses the findings text.
-- **DQ-2 — Architect block.** The issue names two fences; a third (`ARCHITECT_BLOCK`) exists. **(rec)**
-  render all three for consistency; cost: slightly larger diff.
+- **DQ-2 — Architect block.** The issue names two fences; two more exist (`ARCHITECT_BLOCK` and `SKEPTIC_BLOCK`). **(rec)**
+  render all four for consistency; cost: slightly larger diff.
 - **DQ-3 — Caps.** **(rec)** 400 chars per finding description, 30 findings, 8000 total; cost: long
   genuine findings are cut (the raw block under DQ-1 option A still has them).
 
