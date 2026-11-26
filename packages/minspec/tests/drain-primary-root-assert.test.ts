@@ -9,9 +9,10 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
-import { drainBaseEnv } from './helpers/drain-env';
+import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
 
 useShellTimeout();
+useHostileAmbientDrainKnobs();
 
 const SCRIPTS = path.resolve(__dirname, '../../../scripts');
 
