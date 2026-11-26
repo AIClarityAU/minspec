@@ -1,7 +1,7 @@
 ---
 id: SPEC-416
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - which text may start an agent is a trust boundary of the dev-time pipeline
@@ -15,9 +15,9 @@ relates_to: [DR-105, DR-118, DR-072, DR-076, DR-086, DR-066, DR-123, "#2692", "#
 implements: [scripts/lib/relay-marker.sh, scripts/park-issue.sh, packages/minspec/tests/relay-marker.test.ts, packages/minspec/tests/park-issue.test.ts]
 affects: [scripts/tooling-radar/file-findings.mjs, scripts/triage-decide.sh, scripts/triage-inbox.sh, scripts/dispatch-ready-check.sh, scripts/approve-issue.sh, scripts/lib/dispatch-author-gate.sh, CLAUDE.md, packages/minspec/tests/triage-decide.test.ts, packages/minspec/tests/tooling-radar.test.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
