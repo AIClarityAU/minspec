@@ -274,16 +274,19 @@ backfill.
 **D1: One decision for the founder, in two parts.** The issue asks that these come back as one
 item for the chief-of-staff queue, not as a PR question.
 
-- **D1 ANSWERED (founder, 2026-11-26T01:02Z, queue item c313d1).** Verbatim pick: "Baseline +
-  keep headings (Recommended): one command you run once; noise gone, later edits locked - 1
-  Baseline once (Recommended) = baseline accepted decisions with one command, listing
-  agent-edited ones for single re-accept; keep headings". This chooses **D1 (a) option ii**
-  (one-time "Baseline accepted decisions" command) and **D1 (b) option i** (keep the existing
-  `PROPOSED, not accepted` heading convention). Options not chosen: D1 (a) i and iii, D1 (b) ii.
-  Recorded cost the founder accepted: the baseline also vouches for any unlisted agent edits
-  made before 2026-11-26, and it reverses SPEC-251 D2's recorded grandfathering choice. A
-  decision record or SPEC-251 amendment recording the bulk baseline follows, bot-drafted and
-  awaiting founder acceptance (tracked in Follow-ups below).
+- **D1 - Recorded selection (answered, not ratified).** **Recorded selection: D1 (a) option ii
+  (one-time "Baseline accepted decisions" command) and D1 (b) option i (keep the existing
+  `PROPOSED, not accepted` heading convention).** Both are the options this spec marks (rec). An
+  agent copied them from the runner-queue answer to item c313d1 (2026-11-26) and no human
+  chose them in this spec. Authority: founder decision, queue item clarsel (2026-11-17), under
+  which an agent's recorded pick of the (rec) option closes a T3 Clarify question (DR-123).
+  Approving this spec ratifies the pick; the approver may change it before approving.
+  Options not selected: D1 (a) i and iii, D1 (b) ii.
+  Recorded cost: the baseline also vouches for any unlisted agent edits made before
+  2026-11-26. It also reverses SPEC-251 D2's recorded grandfathering choice, but SPEC-251 D2
+  stays in force until the decision record or SPEC-251 amendment carrying that reversal is
+  accepted. Nothing in this spec reverses it; the reversal takes effect only once that record
+  is accepted (tracked in Follow-ups below).
 - **D1 (a): The 100 accepted decisions with no record.** *(Answered: option ii.)*
   - i. **Treat as unverified, and re-accept one at a time when he chooses** (FR-7). Honest
     from day one, and no record is written that he did not create by reading.
