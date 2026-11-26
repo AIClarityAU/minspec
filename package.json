@@ -23,6 +23,7 @@
     "audit:gate-witnesses": "npx tsx scripts/audit-gate-witnesses.ts",
     "check:script-binaries": "npx tsx scripts/check-script-binaries.ts",
     "check:orphaned-docstring": "npx tsx scripts/check-orphaned-docstring.ts",
+    "check:worktree-salvage": "npx tsx scripts/check-worktree-salvage.ts",
     "check:template-version": "npx tsx scripts/check-template-version-bump.ts",
     "pretypecheck": "npm run build --workspace=@aiclarity/shared",
     "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/minspec/tsconfig.json && tsc --noEmit -p packages/core/tsconfig.json",
