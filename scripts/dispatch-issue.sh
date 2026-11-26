@@ -3057,13 +3057,23 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude
       # verdict (independent reviewer #342, forgery-guarded by #410). Absent /
       # pending / failing ⇒ HOLD. This is what stops the on-switch from merging on
       # gate-eligibility ALONE.
+      #
+      # #4078: "SUCCESS" means a `ready-to-merge` status posted by GitHub Actions
+      # (`github-actions[bot]`) — the one writer a session token cannot impersonate.
+      # The combined-status read this replaced took ANY creator's latest status, so
+      # the builder App (which every agent session holds) could post a success here
+      # and steer the merge decision. See scripts/lib/ready-witness.sh.
       READY_STATE="missing"
       if [[ -n "$PR_NUM" ]]; then
         PR_HEAD_SHA=$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo "")
         if [[ -n "$PR_HEAD_SHA" ]]; then
-          READY_STATE=$(gh api "repos/${REPO}/commits/${PR_HEAD_SHA}/status" \
-            --jq '[.statuses[] | select(.context=="ready-to-merge")] | (.[0].state // "missing")' \
-            2>/dev/null || echo "error")
+          # shellcheck source=lib/ready-witness.sh
+          source "${SCRIPT_DIR}/lib/ready-witness.sh"
+          case "$(ready_to_merge_witnessed "$REPO" "$PR_HEAD_SHA")" in
+            yes) READY_STATE="success" ;;
+            no)  READY_STATE="not-witnessed-by-github-actions" ;;
+            *)   READY_STATE="error" ;;
+          esac
         else
           READY_STATE="error"
         fi

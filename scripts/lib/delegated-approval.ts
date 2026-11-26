@@ -72,9 +72,20 @@ import { scopeIndexToDr } from '../../packages/minspec/src/lib/dr-index-scope';
 export const AI_REVIEW_WORKFLOW_PATH = '.github/workflows/ai-review.yml';
 /** The verdict check-run's name (not the runner job's implicit check). */
 export const AI_REVIEW_CHECK_NAME = 'ai-review';
-/** The App that posts the review. The same App the agents use, hence the run binding. */
-export const REVIEWER_LOGIN = BOT_ACTOR;
-export const REVIEWER_APP_SLUG = 'minspec-sdd';
+/**
+ * The App that posts the review (#4078): `aiclarity-minspec-review`, a second GitHub App
+ * used ONLY by ai-review.yml, whose key lives only in this repository's Actions secrets.
+ * It is deliberately NOT `BOT_ACTOR`: the builder App's token reaches every agent session,
+ * so a check-run or comment it wrote is not a review, and a pass it wrote must not clear a
+ * delegation. The run binding below stays as a second, independent check.
+ *
+ * Until the founder switches this repository to review mode (the `AI_REVIEW_APP` and
+ * `AI_REVIEW_BOT_LOGINS` variables, then the ruleset re-pin), verdicts are still written
+ * by the builder App, and every delegated path that reads this denies with
+ * `no-ai-review-check`. That is the fail-closed side: the founder merges as before.
+ */
+export const REVIEWER_LOGIN = 'aiclarity-minspec-review[bot]';
+export const REVIEWER_APP_SLUG = 'aiclarity-minspec-review';
 
 const REVIEW_HEADING = /^## 🤖 AI review — `ai-review:([a-z-]+)`/;
 

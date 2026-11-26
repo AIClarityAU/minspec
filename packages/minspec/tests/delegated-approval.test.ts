@@ -20,6 +20,8 @@ import { BOT_ACTOR, type Delegation } from '../../../scripts/lib/autonomy';
 import { checkApprovalActor, type DelegationWitnesses } from '../../../scripts/lib/approval-actor';
 import {
   AI_REVIEW_WORKFLOW_PATH,
+  REVIEWER_APP_SLUG,
+  REVIEWER_LOGIN,
   authorIdentity,
   gatherReviewEvidence,
   parseCliArgs,
@@ -69,7 +71,7 @@ const W = (over: Partial<DelegationWitnesses> = {}): DelegationWitnesses => ({
   ...over,
 });
 
-const comment = (id: number, label: string, createdAt: string, login = BOT_ACTOR) => ({
+const comment = (id: number, label: string, createdAt: string, login: string = REVIEWER_LOGIN) => ({
   id,
   url: `https://github.com/${REPO}/pull/41#issuecomment-${id}`,
   login,
@@ -93,7 +95,7 @@ const evidence = (over: Partial<ReviewEvidence> = {}): ReviewEvidence => ({
     comment(200, 'pass', '2026-10-19T10:05:00Z'),
   ],
   checkRuns: [
-    { name: 'ai-review', status: 'completed', conclusion: 'success', appSlug: 'minspec-sdd', headSha: HEAD, completedAt: '2026-10-19T10:05:10Z' },
+    { name: 'ai-review', status: 'completed', conclusion: 'success', appSlug: REVIEWER_APP_SLUG, headSha: HEAD, completedAt: '2026-10-19T10:05:10Z' },
   ],
   workflowRuns: [
     { path: AI_REVIEW_WORKFLOW_PATH, event: 'pull_request', status: 'completed', headSha: HEAD, runStartedAt: '2026-10-19T10:00:30Z', updatedAt: '2026-10-19T10:05:20Z' },
@@ -199,6 +201,13 @@ describe('T0 — the review must be an independent CI pass on these bytes', () =
   it('a later non-pass review supersedes an earlier pass', () => {
     const comments = [...evidence().comments, comment(300, 'changes', '2026-10-19T10:30:00Z')];
     expect(reason(planDelegatedApproval(input({ review: evidence({ comments }) })))).toBe('latest-review-not-pass');
+  });
+  it('#4078 T0: a pass written by the BUILDER App (check-run and comment) no longer clears a delegation', () => {
+    expect(REVIEWER_LOGIN).not.toBe(BOT_ACTOR);
+    const builderCheck = [{ name: 'ai-review', status: 'completed', conclusion: 'success', appSlug: 'minspec-sdd', headSha: HEAD, completedAt: '2026-10-19T10:05:10Z' }];
+    expect(reason(planDelegatedApproval(input({ review: evidence({ checkRuns: builderCheck }) })))).toBe('no-ai-review-check');
+    const builderComment = [comment(200, 'pass', '2026-10-19T10:05:00Z', BOT_ACTOR)];
+    expect(reason(planDelegatedApproval(input({ review: evidence({ comments: builderComment }) })))).toBe('no-ai-review-comment');
   });
   it('a pass from any other login is ignored', () => {
     const comments = [comment(150, 'pass', '2026-10-19T10:01:00Z', 'github-actions[bot]'), comment(151, 'pass', '2026-10-19T10:02:00Z', 'harvest316')];

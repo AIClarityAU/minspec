@@ -1413,6 +1413,59 @@ function parseAllowlist(raw) {
     .filter(Boolean);
 }
 
+// #4078 — which App writes the verdicts, and so which logins the gates believe.
+//
+// Two shapes, chosen by the repo/org Actions variable `AI_REVIEW_APP`:
+//   • unset (or `builder`) — the shipped single-App default (DR-054): the verdicts are
+//     posted by the same App that builds, `minspec-sdd[bot]`, and the allowlist is
+//     whatever AI_REVIEW_BOT_LOGINS resolves to (the workflows default it to that
+//     login). Every scaffolded repo runs this way until a separate decision says
+//     otherwise.
+//   • `review` — a SECOND App, used only by ai-review.yml, writes the verdicts, so the
+//     builder App every agent session can obtain can no longer post one that counts
+//     (#2589). Here the builder login on the allowlist is a misconfiguration that would
+//     re-open exactly that hole, so it is REFUSED: the allowlist resolves to empty and
+//     every gate reading it fails closed, with this reason on it.
+// Any other value is a typo, never a silent fall-back to the builder (constitution
+// invariant 2): it resolves to an empty allowlist with a fault naming the value.
+//
+// Pure. `raw` is the AI_REVIEW_BOT_LOGINS string AFTER the workflow's own default.
+const SHIPPED_REVIEWER_LOGIN = 'minspec-sdd[bot]';
+const REVIEW_APP_MODE = 'review';
+function resolveReviewerAllowlist({ mode, raw } = {}) {
+  const m = String(mode == null ? '' : mode).trim().toLowerCase();
+  if (m !== '' && m !== 'builder' && m !== REVIEW_APP_MODE) {
+    return {
+      mode: m,
+      allowlist: [],
+      fault:
+        `AI_REVIEW_APP is \`${sanitizeLogin(m)}\`, which is neither \`${REVIEW_APP_MODE}\` nor unset - ` +
+        'the reviewer identity cannot be resolved',
+    };
+  }
+  const allowlist = parseAllowlist(raw);
+  if (m === REVIEW_APP_MODE) {
+    const builderSlug = SHIPPED_REVIEWER_LOGIN.replace(/\[bot\]$/, '');
+    if (allowlist.some((l) => l === SHIPPED_REVIEWER_LOGIN || l === builderSlug)) {
+      return {
+        mode: m,
+        allowlist: [],
+        fault:
+          `AI_REVIEW_APP is \`${REVIEW_APP_MODE}\` but AI_REVIEW_BOT_LOGINS still names the builder App ` +
+          `\`${SHIPPED_REVIEWER_LOGIN}\` - set it to the review App's login only`,
+      };
+    }
+    if (allowlist.length === 0) {
+      return {
+        mode: m,
+        allowlist: [],
+        fault: `AI_REVIEW_APP is \`${REVIEW_APP_MODE}\` but AI_REVIEW_BOT_LOGINS is empty - set it to the review App's login`,
+      };
+    }
+  }
+  return { mode: m === '' ? 'builder' : m, allowlist, fault: '' };
+}
+
 // Is `login` one of the configured reviewer identities?
 // An empty allowlist authorizes nobody — provenance cannot be verified until the
 // owner configures AI_REVIEW_BOT_LOGINS, so the gate must fail closed.
@@ -2241,6 +2294,9 @@ module.exports = {
   renderVerdictBlock,
   parseCliVerdict,
   parseAllowlist,
+  resolveReviewerAllowlist,
+  SHIPPED_REVIEWER_LOGIN,
+  REVIEW_APP_MODE,
   isAuthorizedReviewer,
   decideProvenanceRevert,
   decideStalenessStrip,
