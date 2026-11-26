@@ -217,6 +217,28 @@ export function alreadyFiled(repo, key, run) {
   return Array.isArray(hits) && hits.length > 0 ? hits[0].number : null;
 }
 
+/**
+ * Assert the labels the filer is about to apply exist in every distinct target repo,
+ * once, before the first `gh issue create`. Planning validates content only; without
+ * this, a repo missing a label refuses mid-loop and leaves the batch half-filed.
+ * Throws on the first gap, naming the repo, the label and the command that fixes it.
+ */
+export function preflightRepos(plans, run) {
+  const wanted = LABELS.split(',');
+  for (const repo of [...new Set(plans.map((p) => p.repo))]) {
+    const out = run('gh', ['label', 'list', '--repo', repo, '--json', 'name', '--limit', '1000']);
+    const have = new Set(JSON.parse(out || '[]').map((l) => l && l.name));
+    for (const label of wanted) {
+      if (!have.has(label)) {
+        throw new Error(
+          `preflight: ${repo} has no '${label}' label; nothing was filed. Create it with: ` +
+            `gh label create ${label} --repo ${repo}`,
+        );
+      }
+    }
+  }
+}
+
 export function main(argv, deps = {}) {
   const {
     log = console.log,
@@ -270,6 +292,9 @@ export function main(argv, deps = {}) {
         env: token ? { ...process.env, GH_TOKEN: token } : process.env,
       });
   }
+
+  // Environment preconditions are checked on the same all-or-nothing side as content.
+  preflightRepos(filing, run);
 
   let filed = 0;
   for (const plan of filing) {
