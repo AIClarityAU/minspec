@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-027-inter-session-comms/requirements.md",
-  "specHash": "deb6dc765ceecf039943c494bba6e620f54f55e56b13d88b10b59a309ef1ed10",
-  "approvedAt": "2026-07-14T08:46:45.360Z",
+  "specHash": "b85ff0af220f189eed517c81458f55c7ef22f7ec806a408045a057c71266d76c",
+  "approvedAt": "2026-11-26T01:05:28.035Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T3",
   "migrated": false,
-  "baselineBlob": "235cc04a89a6cb30e93c6fc00cf6d5bff7fccca7"
+  "baselineBlob": "f267c23a7b7d1ff6ca19adc2c46768e593872abb"
 }
