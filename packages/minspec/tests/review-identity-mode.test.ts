@@ -196,6 +196,10 @@ async function runGate(o: {
   fork?: boolean;
   files?: string[] | Error;
   poster?: string;
+  /** PR author login (pr.user.login). */
+  author?: string;
+  /** context.actor (the run's triggering actor). */
+  actor?: string;
 }) {
   const poster = o.poster ?? ACTIONS_BOT;
   const slug = poster.replace(/\[bot\]$/, '');
@@ -212,6 +216,7 @@ async function runGate(o: {
     auto_merge: null,
     draft: false,
     changed_files: Array.isArray(files) ? files.length : 1,
+    user: { login: o.author ?? 'someone' },
   };
   const rec = (api: string) =>
     Object.assign(
@@ -264,6 +269,7 @@ async function runGate(o: {
   };
   const context = {
     eventName,
+    actor: o.actor ?? 'someone',
     repo: { owner: 'OWNER', repo: 'REPO' },
     payload:
       eventName === 'pull_request'
@@ -463,6 +469,25 @@ describe('AC1/AC4 - the gate turns green on a github-actions pass only where FR5
     expect(r.state).toBe('success');
   });
 
+  // T3 (pre-review round 4): Dependabot-triggered runs get Dependabot secrets, never Actions
+  // secrets (GitHub docs, "Troubleshooting Dependabot on GitHub Actions"), so an App repo's
+  // Dependabot PR reads as identity=actions. Its branch is same-repo and a dependency bump is
+  // not machinery, so without this rule the App repo's gate would trust github-actions[bot].
+  it('Dependabot PR (author dependabot[bot]) never widens, even when its run reads identity=actions', async () => {
+    const r = await runGate({ identity: 'actions', author: 'dependabot[bot]' });
+    expect(r.state).toBe('failure');
+  });
+
+  it('Dependabot-triggered run (actor dependabot[bot]) never widens', async () => {
+    const r = await runGate({ identity: 'actions', actor: 'dependabot[bot]' });
+    expect(r.state).toBe('failure');
+  });
+
+  it('Dependabot workflow_run re-evaluation never widens either', async () => {
+    const r = await runGate({ eventName: 'workflow_run', identity: 'actions', author: 'dependabot[bot]' });
+    expect(r.state).toBe('failure');
+  });
+
   it('AC4: machinery PR in the no-App arm -> failure', async () => {
     const r = await runGate({ identity: 'actions', files: ['src/a.ts', '.github/workflows/evil.yml'] });
     expect(r.state).toBe('failure');
@@ -615,5 +640,20 @@ describe('FR8/AC6 - the setup probe reports the identity mode in words', () => {
       const g = runGuardStep({ oauth: SHAPE, appId: id ? '1' : '', appKey: key ? SHAPE : '' });
       expect(advisor.describeReviewerSecrets(names).identity).toBe(g.outputs.identity);
     }
+  });
+  // T3 (pre-review round 4): the probe reads secret NAMES only, so it cannot see
+  // AI_REVIEW_APP. When the review-only App's secrets exist, the sentence must not assert
+  // github-actions[bot] or minspec-sdd[bot] unqualified: in review mode neither posts.
+  it('review-only App secrets present: the sentence names AI_REVIEW_APP=review and the review-only App', () => {
+    for (const builder of [[], ['MINSPEC_APP_ID', 'MINSPEC_APP_PRIVATE_KEY']]) {
+      const names = new Set(['CLAUDE_CODE_OAUTH_TOKEN', 'MINSPEC_REVIEW_APP_ID', 'MINSPEC_REVIEW_APP_PRIVATE_KEY', ...builder]);
+      const p = advisor.describeReviewerSecrets(names);
+      expect(p.sentence).toMatch(/AI_REVIEW_APP/);
+      expect(p.sentence).toMatch(/review-only App/);
+    }
+  });
+
+  it('no review-only App secrets: the sentence is unchanged (does not mention AI_REVIEW_APP)', () => {
+    expect(advisor.describeReviewerSecrets(new Set(['CLAUDE_CODE_OAUTH_TOKEN'])).sentence).not.toMatch(/AI_REVIEW_APP/);
   });
 });

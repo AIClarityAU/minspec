@@ -430,6 +430,10 @@ jobs:
                 varSet: process.env.AI_REVIEW_BOT_LOGINS_VAR_SET === 'true',
                 isFork: headRepo !== `${owner}/${repo}`,
                 touchesMachinery,
+                // Dependabot runs get no Actions secrets, so ctx's identity reads `actions`
+                // even in an App repo; the guard refuses to widen for them.
+                prAuthor: pr.user && pr.user.login,
+                actor: context.actor,
               });
               allowlist = eff.allowlist;
               core.info(`REVIEWER IDENTITY: ${eff.widened ? 'widened' : 'not widened'} — ${eff.reason}`);

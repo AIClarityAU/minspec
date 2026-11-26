@@ -842,6 +842,21 @@ export interface ReviewerProbe {
  * `ai-review.yml` guard step exactly (a test runs both over the same states).
  */
 export function describeReviewerSecrets(names: ReadonlySet<string>): ReviewerProbe {
+  const base = describeBuilderMode(names);
+  // The probe reads secret NAMES only, so it cannot see `vars.AI_REVIEW_APP` (#4078). When
+  // the review-only App's secrets exist, say which variable decides, rather than asserting a
+  // poster that review mode would replace. `identity` keeps the builder-mode answer, which is
+  // what the workflows do while AI_REVIEW_APP is unset.
+  if (names.has('MINSPEC_REVIEW_APP_ID') && names.has('MINSPEC_REVIEW_APP_PRIVATE_KEY')) {
+    return {
+      ...base,
+      sentence: `${base.sentence.replace(/\.$/, '')} while AI_REVIEW_APP is unset; with AI_REVIEW_APP=review, the review-only App posts instead.`,
+    };
+  }
+  return base;
+}
+
+function describeBuilderMode(names: ReadonlySet<string>): ReviewerProbe {
   const configured = REVIEWER_SECRETS.every((name) => names.has(name));
   const present = REVIEWER_IDENTITY_SECRETS.filter((name) => names.has(name));
   const missing = REVIEWER_IDENTITY_SECRETS.filter((name) => !names.has(name));

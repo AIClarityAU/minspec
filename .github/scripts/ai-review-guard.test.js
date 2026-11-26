@@ -81,6 +81,17 @@ test('parseAllowlist: unset/empty yields an empty list (authorizes nobody)', () 
 });
 
 // ── SPEC-268: effectiveAllowlist + pathsTouchMachinery ───────────────────────
+test('effectiveAllowlist: a Dependabot PR or Dependabot-triggered run never widens (its secrets are withheld)', () => {
+  const ok = { raw: 'minspec-sdd[bot]', identity: 'actions', varSet: false, isFork: false, touchesMachinery: false };
+  assert.equal(effectiveAllowlist(ok).widened, true);
+  for (const delta of [{ prAuthor: 'dependabot[bot]' }, { actor: 'dependabot[bot]' }, { prAuthor: 'Dependabot[bot]' }]) {
+    const r = effectiveAllowlist({ ...ok, ...delta });
+    assert.equal(r.widened, false, JSON.stringify(delta));
+    assert.deepEqual(r.allowlist, ['minspec-sdd[bot]']);
+    assert.match(r.reason, /Dependabot/);
+  }
+});
+
 test('effectiveAllowlist: widens with github-actions[bot] only for a no-App, same-repo, non-machinery PR with no operator list', () => {
   const ok = { raw: 'minspec-sdd[bot]', identity: 'actions', varSet: false, isFork: false, touchesMachinery: false };
   const r = effectiveAllowlist(ok);

@@ -1231,14 +1231,22 @@ const FALLBACK_REVIEWER_LOGIN = 'github-actions[bot]';
  *                                never widened behind its owner's back);
  *   - `isFork === false`         a fork run reads every secret as empty, which would
  *                                otherwise read as `actions`;
+ *   - neither `prAuthor` nor `actor` is `dependabot[bot]`: a Dependabot-triggered run gets
+ *                                Dependabot secrets, never Actions secrets, so an App repo's
+ *                                Dependabot PR (same-repo branch, non-machinery bump) would
+ *                                otherwise read as `actions` too;
  *   - `touchesMachinery === false` a PR touching `.github/` or `scripts/` could add a
  *                                workflow that posts a fake pass as github-actions.
  */
-function effectiveAllowlist({ raw, identity, varSet, isFork, touchesMachinery } = {}) {
+const DEPENDABOT_LOGIN = 'dependabot[bot]';
+function effectiveAllowlist({ raw, identity, varSet, isFork, touchesMachinery, prAuthor, actor } = {}) {
   const allowlist = parseAllowlist(raw);
+  const isDependabot = (l) => typeof l === 'string' && l.trim().toLowerCase() === DEPENDABOT_LOGIN;
   let reason;
   if (identity !== 'actions') reason = 'reviewer identity is not the GITHUB_TOKEN fallback';
   else if (varSet !== false) reason = 'AI_REVIEW_BOT_LOGINS is set explicitly; it is used as written';
+  else if (isDependabot(prAuthor) || isDependabot(actor))
+    reason = 'Dependabot pull request or run: its secrets are withheld, so the identity mode cannot be read from them';
   else if (isFork !== false) reason = 'fork pull request (or head repository unknown)';
   else if (touchesMachinery !== false) reason = 'the pull request touches machinery paths, or its file list could not be read in full';
   if (reason) return { allowlist, widened: false, reason };
