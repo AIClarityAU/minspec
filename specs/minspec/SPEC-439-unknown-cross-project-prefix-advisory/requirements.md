@@ -1,5 +1,5 @@
 ---
-id: SPEC-182
+id: SPEC-439
 type: requirements
 status: specifying
 tier: T3
@@ -9,7 +9,7 @@ aspects: [validate, advisory, project-prefixes, toast, consent, tier-0, tier-1]
 relates_to: [DR-053, DR-050, DR-004, "#500", "#614", "#561", "#396", "#679"]
 ---
 
-# SPEC-182: Unknown cross-project prefix advisory
+# SPEC-439: Unknown cross-project prefix advisory
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human reads
 > it, answers the questions under *Decisions needed (Clarify)*, and approves it through the
@@ -43,7 +43,10 @@ this spec detects only what `resolveRef` resolves today (see FR-9).
 - **FR-1 (detect, pure).** A pure function in the Tier-0 layer scans artifact text and returns
   every token that `resolveRef` classifies `unknown-prefix`, with file-relative line,
   the prefix, and the token. It uses `parsePrefixTable` over the table text and takes the
-  table text as input (no filesystem, no `vscode`, no network). Local refs and known
+  table text as input (no filesystem, no `vscode`, no network). `resolveRef` anchors its patterns
+  (`^...$`), so tokenising running text (trailing punctuation, parentheses, links, word
+  boundaries) is the detector's job; it must delegate every classification to `resolveRef` and
+  hold no copy of the grammar (see FR-9). Local refs and known
   cross-project refs are never reported.
 - **FR-2 (scan surface).** The detector scans the same corpus the validator already walks
   (`specs/`, `docs/decisions/`, per SPEC-075 corpus-from-config), skipping fenced code
@@ -75,7 +78,7 @@ this spec detects only what `resolveRef` resolves today (see FR-9).
   already in the table (case-insensitive) or a project already present; validates the
   prefix against the same `[A-Z]{2,5}` shape the parser accepts; is an append that
   preserves the file's existing bytes and line endings (no re-serialising the table); and
-  is skipped silently-visibly (error toast, no write) on any failure - never a swallowed error.
+  is aborted visibly (error toast, no write) on any failure - never a swallowed error.
 - **FR-9 (grammar boundary).** Detection covers exactly the tokens `resolveRef` handles. Tokens
   of the DR-053 v2 slash grammar are not detected until #679 widens `resolveRef`; this spec
   names that dependency rather than re-implementing parsing, so there is one grammar owner.
