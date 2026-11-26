@@ -1,5 +1,5 @@
 ---
-id: SPEC-137
+id: SPEC-450
 type: requirements
 status: specifying
 tier: T3
@@ -21,7 +21,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-137: Keyed verdict store - a cached review pass is valid only for the exact bytes, rubric and voter that produced it
+# SPEC-450: Keyed verdict store - a cached review pass is valid only for the exact bytes, rubric and voter that produced it
 
 ## In plain terms
 
@@ -44,10 +44,16 @@ fail-closed lookup; skip/delta *consumption* is out of scope (stays in #453).
 ## The gate this closes (RCDD)
 
 Bad state made un-representable: a cached "pass" that no longer corresponds to what
-was reviewed. Mechanism: a store keyed on less than all of (reviewed bytes, rubric
-version, voter) returns a pass produced for different bytes (content drift) or by a
-different reviewer (rubric drift) - the app-pin bug class, a silent bypass. The gate is
-the key plus the lookup's fail-closed rule (FR-3, FR-4), not the data.
+was reviewed. Mechanism: a store keyed on less than everything that decides the verdict
+returns a pass produced for different input (content drift) or by a different reviewer
+(rubric drift) - the app-pin bug class, a silent bypass. In `scripts/review-pr.sh` the
+verdict depends on more than the diff: the failing-check status (a failing
+non-`ready-to-merge` check forces `changes`), the PR title, file list and body, the
+inline rubric text in the prompt, the verdict schema, and the system-prompt role file
+(plus any project instruction file the harness loads into the reviewer's context). A
+key over the diff alone would replay a pass after a check turns red or the PR body
+changes. So the key's input component is the COMPLETE model input (FR-2), not the diff.
+The gate is that key plus the lookup's fail-closed rule (FR-3, FR-4), not the data.
 
 ## Functional requirements
 
@@ -56,27 +62,42 @@ the key plus the lookup's fail-closed rule (FR-3, FR-4), not the data.
   gate's two values (`pass` | `changes`). `headSha` and `reviewedAt` are provenance
   only and are never part of the key.
 - **FR-2 Key components.**
-  - `bytesHash` = hash of the exact text fed to the voter (the diff/section text after
-    any truncation), not the PR number or head SHA.
-  - `roleVersion` = hash of the content of the voter's role file (e.g.
-    `scripts/roles/reviewer.md`), so any edit to a rubric invalidates its old passes.
+  - `bytesHash` = hash of the COMPLETE input fed to the voter, as one canonical
+    serialisation: the full prompt text exactly as passed on stdin (so it carries the
+    diff after any truncation, the truncation note, the check-status block, title, file
+    list, PR body and the inline rubric text) PLUS the verdict schema JSON, PLUS the
+    content of any project instruction file the harness loads into the reviewer's
+    context (e.g. `CLAUDE.md`; the plan fixes whether it is loaded, and if it is, it is
+    hashed). It is never the PR number or head SHA. Any input that can change the
+    verdict and is not in this hash is a spec defect (INV-4). Consequence: a pass
+    recorded while checks were green does not match once a check goes red.
+  - `roleVersion` = hash of the content of the voter's role (system-prompt) file (e.g.
+    `scripts/roles/reviewer.md`), so any edit to that rubric invalidates its old passes.
+    Rubric text that lives outside the role file (the inline prompt rubric, the schema)
+    is covered by `bytesHash` above, not by this component.
   - `voterId` = stable name of the voter (role plus any model/profile discriminator
     the plan fixes; see Decisions needed).
   - The hash function and its hex encoding are one exported function, so writer and
     reader cannot disagree.
 - **FR-3 Lookup.** `findValidVerdict(store, voterId, bytesHash, roleVersion) ->
-  Verdict | null` in `@aiclarity/shared`: pure, deterministic, no `vscode`, no
-  network, no clock, no LLM. Returns the record only when all three components are
+  VerdictRecord | null` in `@aiclarity/shared`: pure, deterministic, no `vscode`, no
+  network, no clock, no LLM. Returns the matching record (the whole record, not just its `verdict` field) only when all three components are
   present and strictly equal.
 - **FR-4 Fail closed on missing and malformed.** A stored record lacking any key
   component, with an empty/non-string component, or with an unrecognised `verdict`
   never satisfies a lookup. A lookup argument that is empty/undefined returns `null`
   (never matches an empty stored component). A malformed store returns `null`, never
-  throws into the caller's pass path.
-- **FR-5 Only pass is reusable; newest wins.** If several records match, the most
-  recent `reviewedAt` decides; if the deciding record is `changes`, the result is that
-  `changes` record (a later failure supersedes an earlier pass). Result is
-  deterministic for a given store (tie-break defined in plan).
+  throws into the caller's pass path. `reviewedAt` is part of record validity: a
+  record whose `reviewedAt` is missing, not a string, or not a parseable ISO-8601
+  timestamp is malformed and is ignored by lookup (it can neither win nor be ordered),
+  so an unparseable timestamp can never let an older `pass` outrank a newer `changes`.
+- **FR-5 Newest matching record wins, whatever its verdict.** If several valid records
+  match, the most recent `reviewedAt` decides; if the deciding record is `changes`, the
+  result is that `changes` record (a later failure supersedes an earlier pass). The
+  lookup does not filter to passes: the consumer (#453) must act only on `verdict ===
+  'pass'` (Decisions needed item 4, settled as option (a)). Result is deterministic for
+  a given store (tie-break on equal `reviewedAt` defined in plan, fail-closed: prefer
+  `changes`).
 - **FR-6 Storage.** Machine-local and gitignored (same posture as `.minspec/auto-drain`
   and the proposed `.minspec/review-coverage` in #453), not committed `config.json`.
   Exact path decided in plan. A cached pass is machine state, not shared ground truth.
@@ -84,10 +105,10 @@ the key plus the lookup's fail-closed rule (FR-3, FR-4), not the data.
   verdict it obtains from the structured output (DR-079), including `changes`. A
   failed write is surfaced as a visible warning and never changes the label decision;
   the store is advisory to the label (nothing consumes it in this spec).
-- **FR-8 Unparseable verdicts are not recorded.** A run with no clean verdict (the
-  fail-closed-to-changes path) and a truncated-diff run (forced `changes` by the
-  truncation backstop, #427) record nothing as a reusable pass; a truncated run's
-  `bytesHash` must not equal the full diff's.
+- **FR-8 Unparseable and truncated runs record nothing.** One rule: a run with no clean
+  verdict (the fail-closed-to-changes path) and a truncated-diff run (forced `changes`
+  by the truncation backstop, #427) write NO record at all. (FR-7's "every verdict"
+  means every verdict obtained from the structured output on a non-truncated run.)
 
 ## Acceptance criteria (tests first, T0/T1)
 
@@ -104,6 +125,13 @@ the key plus the lookup's fail-closed rule (FR-3, FR-4), not the data.
    `bytesHash`; identical input hashes identically (determinism).
 10. `review-pr.sh` writes one record per obtained verdict and none on the no-verdict or
     truncation paths (FR-7, FR-8).
+11. Input drift: same diff, role file and voter, but a changed check-status block, PR
+    body, title, file list, inline rubric text or schema -> a different `bytesHash`,
+    so a lookup returns `null` (FR-2).
+12. Timestamp validity: a newer `changes` record with a missing/unparseable `reviewedAt`
+    is ignored as malformed and never lets an older `pass` be ranked above a valid
+    newer `changes`; equal `reviewedAt` between `pass` and `changes` resolves to
+    `changes` (FR-4, FR-5).
 
 ## Invariants this must not break
 
@@ -134,9 +162,9 @@ needs to bound growth, multi-machine sharing (#453).
 3. **`voterId` granularity.** (a) role name only **(rec)**, keeps skip useful across
    model upgrades; cost: a pass by a weaker model is reused for a stronger one.
    (b) role + model id - strictest; cost: every model bump invalidates all passes.
-4. **Is a cached `changes` ever reusable?** (a) lookup returns any matching verdict
-   and the consumer (#453) decides **(rec)**; cost: consumer must be disciplined to
-   only skip on `pass`. (b) lookup returns passes only; cost: loses the FR-5
-   supersede signal inside the pure function.
+4. **Is a cached `changes` ever reusable?** Settled in FR-5 as (a): lookup returns the
+   newest matching record whatever its verdict **(rec)**, and the consumer (#453)
+   decides; cost: consumer must be disciplined to only skip on `pass`. Rejected (b)
+   (passes only): it loses the FR-5 supersede signal inside the pure function.
 5. **Retention.** Bound by count or age, or leave to #453? Rec: bound by count in
    plan; cost: a very old pass is silently forgotten (safe direction).
