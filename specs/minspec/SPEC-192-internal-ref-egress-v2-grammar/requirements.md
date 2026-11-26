@@ -15,9 +15,10 @@ relates_to: [SPEC-035, "#683", "#679", "#681", "#669", "#225"]
 implements: [packages/shared/src/internal-ref-egress.ts, packages/shared/tests/internal-ref-egress.test.ts]
 # Modified, not owned. project-prefix.ts is #679's (the grammar this predicate consumes, FR-7);
 # scaffold.ts carries the `(#225)` literal that DQ-1's recommended option turns into a finding
-# (FR-11). SPEC-021's render test and static scan (its FR-2/FR-3) are not on disk yet, so they
+# (FR-11); template-registry.ts carries the `MinSpec #1284` and `(#1486)` issue literals FR-11 and AC-10 resolve.
+# SPEC-021's render test and static scan (its FR-2/FR-3) are not on disk yet, so they
 # are not listed; they adopt this predicate when they are built (FR-10).
-affects: [packages/shared/src/project-prefix.ts, packages/minspec/src/lib/scaffold.ts]
+affects: [packages/shared/src/project-prefix.ts, packages/minspec/src/lib/scaffold.ts, packages/minspec/src/lib/template-registry.ts]
 phases:
   specify: done
   clarify: pending
@@ -85,8 +86,8 @@ below are written against the code:
 A third finding sits on the v1 side and bears on DQ-1: the v1 pattern does not cover issue
 refs at all, and an internal issue ref already reaches user output. The same scaffolded
 `tasks.md` body opens with `MinSpec scaffolded this tasks.md (#225).`
-(`scaffold.ts:162`); `#225` is MinSpec's issue, and in the user's repo it links to the
-user's own issue #225. `template-registry.ts:2493` (`MinSpec #1284`) and `:2540` (`(#1486)`)
+(the `ensureTasks` body in `scaffold.ts`, found by its literal; line numbers drift); `#225` is MinSpec's issue, and in the user's repo it links to the
+user's own issue #225. `template-registry.ts` (the `MinSpec #1284` and `(#1486)` literals, found by content)
 carry issue numbers in template strings too — I believe at least the first is written into
 an adopter's workflow file, unverified which surface each reaches; the Plan measures it.
 
@@ -222,8 +223,8 @@ on it. `dr-ok`, the allowlist and the emit-surface list are SPEC-021's and are u
 When the wider predicate is first wired into the gate, every newly flagged literal on `main`
 is resolved in the same change — stripped, rewritten as a full GitHub URL, or marked `dr-ok`
 with a one-clause reason — and the gate passes clean. The Plan measures the list before the
-work starts; the known members today are the `(#225)` in `scaffold.ts:162` and the two
-`template-registry.ts` issue literals (`:2493`, `:2540`), subject to whether each reaches a
+work starts; the known members today are the `(#225)` literal in the `scaffold.ts` tasks body and the two
+`template-registry.ts` issue literals (located by content, not line number), subject to whether each reaches a
 user-facing surface.
 
 ---
