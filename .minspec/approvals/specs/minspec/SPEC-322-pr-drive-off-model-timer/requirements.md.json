@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-322-pr-drive-off-model-timer/requirements.md",
+  "specHash": "7ee48f185ba42217a520f41338153b247b9025a54ed737a57fde7c9ac0a9ca13",
+  "approvedAt": "2026-11-24T10:30:36.932Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/record-cq-1124",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4048#issuecomment-7128287921"
+}
