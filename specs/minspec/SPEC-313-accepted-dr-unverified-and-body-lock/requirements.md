@@ -14,7 +14,7 @@ implements_reason: >-
   decision (D1) is answered.
 phases:
   specify: done
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -274,7 +274,17 @@ backfill.
 **D1: One decision for the founder, in two parts.** The issue asks that these come back as one
 item for the chief-of-staff queue, not as a PR question.
 
-- **D1 (a): The 100 accepted decisions with no record.**
+- **D1 ANSWERED (founder, 2026-11-26T01:02Z, queue item c313d1).** Verbatim pick: "Baseline +
+  keep headings (Recommended): one command you run once; noise gone, later edits locked - 1
+  Baseline once (Recommended) = baseline accepted decisions with one command, listing
+  agent-edited ones for single re-accept; keep headings". This chooses **D1 (a) option ii**
+  (one-time "Baseline accepted decisions" command) and **D1 (b) option i** (keep the existing
+  `PROPOSED, not accepted` heading convention). Options not chosen: D1 (a) i and iii, D1 (b) ii.
+  Recorded cost the founder accepted: the baseline also vouches for any unlisted agent edits
+  made before 2026-11-26, and it reverses SPEC-251 D2's recorded grandfathering choice. A
+  decision record or SPEC-251 amendment recording the bulk baseline follows, bot-drafted and
+  awaiting founder acceptance (tracked in Follow-ups below).
+- **D1 (a): The 100 accepted decisions with no record.** *(Answered: option ii.)*
   - i. **Treat as unverified, and re-accept one at a time when he chooses** (FR-7). Honest
     from day one, and no record is written that he did not create by reading.
     Cost: 100 "unverified" badges, probably for months. Noise like that teaches the reader to
@@ -292,7 +302,7 @@ item for the chief-of-staff queue, not as a PR question.
   - iii. **Keep grandfathering (SPEC-251 D2 as recorded): legacy decisions show plain
     "accepted".** No noise. Cost: this is exactly the false "accepted and current" the
     founder reported. Not recommended.
-- **D1 (b): The marker format for proposed amendments and Rule 16 back-references.**
+- **D1 (b): The marker format for proposed amendments and Rule 16 back-references.** *(Answered: option i.)*
   - i. **Keep the existing heading convention (rec).** A proposed amendment is
     `## Amendment X (date) - PROPOSED, not accepted: ...`. Accepting it rewrites the marker
     to `- ACCEPTED (date):`. A back-reference is a one-line `> Amended by DR-NNN` or
@@ -309,7 +319,7 @@ item for the chief-of-staff queue, not as a PR question.
 
 ## Follow-ups (tracked)
 
-- D1 (a) option ii, if chosen: a DR, or an amendment to SPEC-251 D2, recording the bulk
+- D1 (a) option ii, chosen 2026-11-26 (c313d1): a DR, or an amendment to SPEC-251 D2, recording the bulk
   baseline. It is written at Plan and accepted by the founder. Tracked by this spec, SPEC-313.
 - Whether the FR-12 hook and CI rule ship in the adopter scaffold
   (`packages/minspec/src/lib/template-registry.ts`) is decided at Plan. Tracked by this spec,
