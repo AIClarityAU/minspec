@@ -1099,7 +1099,7 @@ describe('activate()', () => {
   it('surfaces the #320 propose-draft nudge when an initialized constitution is empty', async () => {
     // .minspec/ exists; the (auto-mocked) constitution reads as empty/template →
     // the empty-constitution nudge offers both "Propose draft" (deterministic
-    // seed) and "Generate with AI…" (LLM prompt hand-off), plus a skip option.
+    // seed) and "Prepare AI prompt…" (LLM prompt hand-off), plus a skip option.
     vi.mocked(fs.existsSync).mockReturnValue(true);
 
     activate(makeMockContext());
@@ -1108,7 +1108,7 @@ describe('activate()', () => {
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
         expect.stringContaining('no human-authored rules yet'),
         'Propose draft',
-        'Generate with AI…',
+        'Prepare AI prompt…',
         "Don't ask again",
       );
     });

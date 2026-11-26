@@ -468,7 +468,7 @@ describe('transitionPhase()', () => {
     // Complete clarify, start plan
     transitionPhase(rootDir, 'SPEC-001', 'advance');
     detail = getSpec(rootDir, 'SPEC-001');
-    expect(detail!.summary.status).toBe('implementing'); // plan = implementing
+    expect(detail!.summary.status).toBe('specifying'); // #1380: unapproved cannot pass (INV-1) — not the preview's `implementing`
   });
 
   it('skips a phase', () => {
@@ -513,7 +513,7 @@ describe('transitionPhase()', () => {
     expect(result.warning).toContain('No active phase');
   });
 
-  it('persists status change to done when all phases complete', () => {
+  it('persists the approval-aware status when all phases complete (#1380)', () => {
     createSpec(rootDir, 'Test spec');
 
     // Start and complete all 5 phases (10 advances: start + complete each)
@@ -522,7 +522,9 @@ describe('transitionPhase()', () => {
     }
 
     const detail = getSpec(rootDir, 'SPEC-001');
-    expect(detail!.summary.status).toBe('done');
+    expect(detail!.phases.implement).toBe('done');
+    // #1380: an UNAPPROVED spec never persists `done` (INV-1, deriveStatus).
+    expect(detail!.summary.status).toBe('specifying');
   });
 });
 

@@ -345,7 +345,14 @@ describe('a shepherd handoff is scoped to the head it was posted against (#3120)
   it.each([
     ['agent-stuck label', [{ name: 'agent-stuck' }], true],
     ['agent-stuck plus a hold:* label', [{ name: 'agent-stuck' }, { name: 'hold:specify' }], false],
-    ['agent-stuck plus needs-human-review (escalated at the remediation cap)', [{ name: 'agent-stuck' }, { name: 'needs-human-review' }], false],
+    ['agent-stuck plus human-escalated (escalated at the remediation cap)', [{ name: 'agent-stuck' }, { name: 'needs-human-review' }, { name: 'human-escalated' }], false],
+    ['agent-stuck plus the docs-lane needs-human-review stamped held-at-open (#4061)', [{ name: 'agent-stuck' }, { name: 'needs-human-review' }, { name: 'held-at-open' }], true],
+    ['agent-stuck plus held-at-open plus human-escalated (docs-lane PR later escalated, #4061)', [{ name: 'agent-stuck' }, { name: 'needs-human-review' }, { name: 'held-at-open' }, { name: 'human-escalated' }], false],
+    // Legacy: escalated by remediate-pr.sh before #4061, so no human-escalated. Release is
+    // only ever read from held-at-open, never from the absence of human-escalated (fail closed).
+    ['agent-stuck plus a pre-#4061 needs-human-review (no human-escalated, no held-at-open)', [{ name: 'agent-stuck' }, { name: 'needs-human-review' }], false],
+    // Finding 1 order: stuck handoff first, then a human-kind handoff (merge conflict).
+    ['agent-stuck then a human-kind handoff (needs-human-review + human-escalated)', [{ name: 'agent-stuck' }, { name: 'needs-human-review' }, { name: 'human-escalated' }], false],
     ['an unrelated label only', [{ name: 'ai-review:pass' }], false],
     ['no labels field', undefined, false],
   ] as const)('a live handoff with %s: proceeds=%s (#4016)', (_n, labels, proceeds) => {

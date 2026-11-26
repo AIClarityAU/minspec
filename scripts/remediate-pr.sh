@@ -814,6 +814,24 @@ source "${SCRIPT_DIR}/lib/agent-egress.sh"
 # shellcheck source=lib/dispatch-author-gate.sh
 source "${SCRIPT_DIR}/lib/dispatch-author-gate.sh"
 
+# #4061: every remediation path that hands a PR to a human labels it `needs-human-review`
+# AND `human-escalated`. `needs-human-review` alone is ambiguous - dispatch-issue.sh adds it
+# to any spec PR at open (#833 docs lane) - so the delegated-merge lane
+# (delegated_merge_human_claims) reads `human-escalated` to tell a live human escalation
+# from a docs-lane hold. `--desc <text>` (first) sets the needs-human-review description used
+# if the label must be created; remaining args are extra labels (e.g. agent-quarantined).
+escalate_to_human_label() {
+  local desc="Automated gate failed closed — a human must resolve"
+  if [[ "${1:-}" == "--desc" ]]; then desc="$2"; shift 2; fi
+  gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
+    --description "$desc" 2>/dev/null || true
+  gh label create "human-escalated" --repo "$REPO" --color fbca04 \
+    --description "Remediation handed this PR to a human (#4061) - distinguishes escalation from a docs-lane hold" 2>/dev/null || true
+  local extra=""
+  [[ $# -gt 0 ]] && extra="$(IFS=,; echo "$*"),"
+  gh pr edit "$PR" --repo "$REPO" --add-label "${extra}needs-human-review,human-escalated" 2>/dev/null || true
+}
+
 # The ONLY place a marker is ever written to a PR. It sanitises the body (so nothing
 # interpolated into it can carry or forge a marker) and appends the marker on its own
 # final line — the exact position count_markers_json matches. Keeping emission in one
@@ -1027,9 +1045,7 @@ case "$ACTION" in
     # no human signal. (ready-to-merge stays the load-bearing hold either way.)
     echo "  Merge conflict — not auto-resolving (left for a human)."
     if ! $DRY_RUN; then
-      gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
-        --description "A human is the next actor — auto-merge withheld" 2>/dev/null || true
-      gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      escalate_to_human_label --desc "A human is the next actor — auto-merge withheld"
     fi
     exit 0 ;;
   retry-unknown)
@@ -1080,9 +1096,7 @@ fi
 # agent, because a content edit breaks the sidecar's hash binding.
 dlg_to_human() {
   echo "  Delegated-approval PR: $1 — no agent edit allowed; leaving for a human."
-  gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
-    --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
-  gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+  escalate_to_human_label
 }
 
 # Runaway guard: TWO independent budgets, both counted from marker comments on this
@@ -1126,9 +1140,7 @@ if [[ "$ACTION" == agent-* || "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "
     if [[ "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "yes" ]]; then
       dlg_to_human "could not establish this automation's identity, so its rerun and update budgets cannot be counted"
     else
-      gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
-        --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
-      gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      escalate_to_human_label
     fi
     exit 0
   fi
@@ -1155,9 +1167,7 @@ if [[ "$ACTION" == agent-* || "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "
   CAP_HIT=$(cap_hit_summary "${ATTEMPTS:-0}" "$MAX_ATTEMPTS" "${CRASHES:-0}" "$MAX_CRASHES")
   if [[ -n "$CAP_HIT" ]]; then
     echo "  Cap reached ($CAP_HIT) — leaving for a human."
-    gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
-      --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
-    gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+    escalate_to_human_label
     # Notify beyond the label: a label is easy to miss, so post a PR comment the FIRST
     # time we cap this PR. Whether this sweep posts or stays silent is the one decision
     # constitution invariant #2 hangs on, so it lives in the pure, tested
@@ -1420,9 +1430,7 @@ while true; do
         continue
       fi
       echo "  Agent ESCALATED after retry (reason: $REASON) — leaving for a human."
-      gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
-        --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
-      gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      escalate_to_human_label
       post_marked_comment "$ATTEMPT_MARKER" "$(printf 'Auto-remediation escalated and could not resolve this automatically: `%s`. Left for a human.' "$REASON")"
       cleanup; exit 0
     fi
@@ -1442,9 +1450,7 @@ while true; do
       printf '%s\n' "$MATCHES" >&2
       gh label create "agent-quarantined" --repo "$REPO" --color b60205 \
         --description "Agent output blocked by the pre-publish egress guard — human review required" 2>/dev/null || true
-      gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
-        --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
-      gh pr edit "$PR" --repo "$REPO" --add-label "agent-quarantined,needs-human-review" 2>/dev/null || true
+      escalate_to_human_label agent-quarantined
       post_marked_comment "$ATTEMPT_MARKER" "$(printf 'Auto-remediation was QUARANTINED: the pre-publish egress guard matched a secret/exfil marker in the agent output. Nothing was pushed; the worktree `%s` is left for a human to inspect.' "$WORKTREE")"
       echo "  Worktree left for inspection at: $WORKTREE"
       exit 0
