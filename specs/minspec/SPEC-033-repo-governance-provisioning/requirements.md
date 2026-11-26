@@ -41,7 +41,7 @@ relates_to: [SPEC-024, SPEC-030, SPEC-034, SPEC-063, DR-058, DR-061]  # SPEC-024
 > unprotected branch.
 
 **Date:** 2026-07-07 (clarify refinements applied 2026-07-14; re-checked and corrected 2026-10-01 — both [#703](https://github.com/AIClarityAU/minspec/issues/703))
-**Status:** Specifying (the 2026-08-07 approval, #1367, was against the pre-correction bytes; one open decision, D-11)
+**Status:** Specifying (the 2026-08-07 approval, #1367, was against the pre-correction bytes; D-11 has a recorded selection, pending ratification at approval)
 **Triggered by:** [#557](https://github.com/AIClarityAU/minspec/issues/557) — "provision repo governance (branch protection + ai-review) on init/refresh — detect & offer to fix."
 **Builds on:** [DR-037](../../../docs/decisions/DR-037.md) — the managed-region template mechanism this rides · [DR-050](../../../docs/decisions/DR-050.md) — shelling the user's own `gh` on consent (FR-3) · [DR-058](../../../docs/decisions/DR-058.md) + [DR-061](../../../docs/decisions/DR-061.md) — the two auto-merge decisions FR-7 rests on · the ai-review workflow set ([#342](https://github.com/AIClarityAU/minspec/issues/342) / [#428](https://github.com/AIClarityAU/minspec/issues/428) / [#480](https://github.com/AIClarityAU/minspec/issues/480)), propagated **unchanged**, not rewritten.
 **Relates:** [SPEC-024](../SPEC-024-auto-merge-eligibility/requirements.md) — the auto-merge gate that only becomes meaningful once the `ai-review:pass` label it consumes is actually produced on every repo, which today it is not.
@@ -242,7 +242,8 @@ finding: the gate checks the thing it happens to know about and is silent on the
 
   **The "then flip" half is no longer a standing instruction — it is D-11.** Its stated
   condition has, per the 2026-08-05 audit, already fired, and DR-061 changed what a flip
-  would mean. Until D-11 is answered this spec ships deny on both switches and no flip.
+  would mean. **D-11 has a recorded selection (2026-11-26, option (a), awaiting ratification at approval):** this spec ships deny on both
+  switches and no flip.
   A per-repo setting always wins over the scaffold default in either direction (INV-9).
 - **FR-8 — Workspace-wide init offer (added 2026-07-12; refined 2026-07-14 per #703).** When
   `Initialize SDD Structure` runs with a multi-root `*.code-workspace` open, offer (non-modal)
@@ -357,9 +358,18 @@ finding: the gate checks the thing it happens to know about and is silent on the
 
 ## Decisions needed (Clarify — human-only)
 
-### Open — needs the founder before this can be re-approved
+### Recorded selection — D-11 (agent-recorded, ratified at approval)
 
-- **D-11 — What auto-merge posture does a freshly scaffolded repo get, now that the #703
+- **D-11 — Recorded selection (answered, not ratified).** **Recorded selection: option (a),
+  Off, owner opts in:** deny on both auto-merge switches in a freshly scaffolded repo, no
+  automatic flip; turning either on stays a deliberate per-repo act by its owner. It is the
+  option marked (rec). An agent copied it from the runner-queue answer to item in108
+  (2026-11-26) and no human chose it in this spec. Authority: founder decision, queue item
+  clarsel (2026-11-17), under which an agent's recorded pick of the (rec) option closes a T3
+  Clarify question (DR-123). Approving this spec ratifies the pick; the approver may change it
+  before approving. Options (b) and (c) are not selected; INV-9 and FR-7 stand as written.
+  Original question and options follow.
+  **What auto-merge posture does a freshly scaffolded repo get, now that the #703
   flip condition has fired?** #703 resolved: `pr-gate` until #489/#490/#491/#466 close,
   then flip to `consequence-hybrid`. Two things have changed since.
   *The condition fired.* The 2026-08-05 audit (#1271) recorded all four closed, and this

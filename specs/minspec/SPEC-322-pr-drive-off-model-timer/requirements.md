@@ -1,7 +1,7 @@
 ---
 id: SPEC-322
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - same epic as the merge-lane spec this complements
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. The loop and `cos.py` live outside this repo (read-only mount in the
   container); the deliverable here is a host patch. Which files this repo owns is decided at Plan.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -97,6 +97,15 @@ while the cap is closed.
    up to a stated share of the weekly budget per hour **(rec)**: cost: needs a number from the
    founder. (b) Skip branches whose update would re-trigger review: cost: those never land
    faster. (c) Unbounded: cost: could spend tokens while the cap is deliberately closed.
+
+   **Recorded selection: bound re-reviews by the existing drain cap,** so re-review spend counts
+   against the drain's existing ramped weekly cap and no new number is set. This is a variant of
+   option (a) that needs no new number from the founder. Source: the answer to task-queue item
+   cq322, 2026-11-24 ("1 Drain cap (Recommended) = bound re-reviews by the existing drain cap"),
+   an answer the queue attributes to the founder. A queue answer is not consent (DR-108
+   section 4), so this selection is unverified and binds only if this spec is approved with it in
+   place, by the founder or by the bot under DLG-001. Unlike item 1, this is not an agent copy of
+   the (rec) option under DR-123.
 3. **Where the timer lives.** (a) In the loop (a second short-sleep path) **(rec)**: one place,
    shares its lock; cost: edits the loop itself. (b) A separate host cron/systemd timer: no loop
    edit; cost: a second scheduler to monitor, and lock sharing must be proven.
