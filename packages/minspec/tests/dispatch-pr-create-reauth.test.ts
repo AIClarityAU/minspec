@@ -54,14 +54,14 @@ fi
 exit 0
 `;
 
-function run(reauthOk: boolean) {
+function run(reauthOk: boolean, gh: string = GH, tok = 'dead') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ensure-pr-'));
   try {
     const bin = path.join(dir, 'bin');
     fs.mkdirSync(bin);
-    fs.writeFileSync(path.join(bin, 'gh'), GH, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'gh'), gh, { mode: 0o755 });
     fs.writeFileSync(path.join(dir, 'calls.log'), '');
-    fs.writeFileSync(path.join(dir, 'tok'), 'dead');
+    fs.writeFileSync(path.join(dir, 'tok'), tok);
     const script = [
       'set -euo pipefail',
       'REPO=O/R; BRANCH=agent/issue-1; ISSUE_TITLE=t; BODY=b',
@@ -74,11 +74,12 @@ function run(reauthOk: boolean) {
     ].join('\n');
     const r = spawnSync('bash', ['-c', script], {
       encoding: 'utf-8',
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_STUB_STATE: dir },
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, GH_STUB_STATE: dir, PR_RATE_LIMIT_WAIT: '0' },
     });
     return {
       status: r.status,
       stdout: r.stdout || '',
+      stderr: r.stderr || '',
       calls: fs.readFileSync(path.join(dir, 'calls.log'), 'utf-8').split('\n').filter(Boolean),
     };
   } finally {
@@ -100,6 +101,40 @@ describe('dispatch-issue.sh — PR create re-auths once on a 401 and fails visib
     expect(r.stdout).toContain('PR=[]');
     expect(r.calls.filter((c) => c === 'REAUTH')).toHaveLength(1);
     expect(r.calls.filter((c) => c.startsWith('pr create'))).toHaveLength(1);
+  });
+
+  it('rate limit (#4102): backs off and retries WITHOUT re-minting, and logs gh stderr', () => {
+    // First two creates are rate limited; the third succeeds.
+    const RL = `#!/usr/bin/env bash
+S="$GH_STUB_STATE"
+printf '%s\\n' "$*" >> "$S/calls.log"
+if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
+  c=$(grep -c '^pr create' "$S/calls.log")
+  if [ "$c" -ge 3 ]; then echo 88 > "$S/pr"; exit 0; fi
+  echo "GraphQL: API rate limit already exceeded for installation ID 1" >&2; exit 1
+fi
+if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  if [ -f "$S/pr" ]; then cat "$S/pr"; exit 0; fi
+  echo "GraphQL: API rate limit already exceeded for installation ID 1" >&2; exit 1
+fi
+exit 0
+`;
+    const r = run(true, RL, 'live');
+    expect(r.stdout).toContain('PR=[88]');
+    expect(r.calls.filter((c) => c === 'REAUTH')).toHaveLength(0);
+    expect(r.stderr).toContain('rate limit already exceeded');
+    expect(r.stderr).toContain('#4102');
+  });
+
+  it('rate limit (#4102): gives up empty after the bounded retries, still without a re-mint', () => {
+    const RL = `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$GH_STUB_STATE/calls.log"
+echo "GraphQL: API rate limit already exceeded" >&2; exit 1
+`;
+    const r = run(true, RL, 'live');
+    expect(r.stdout).toContain('PR=[]');
+    expect(r.calls.filter((c) => c === 'REAUTH')).toHaveLength(0);
+    expect(r.calls.filter((c) => c.startsWith('pr create'))).toHaveLength(6);
   });
 
   it('the caller turns an empty PR into a non-zero dispatch exit, not a quiet return 0', () => {

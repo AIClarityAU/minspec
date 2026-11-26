@@ -1830,25 +1830,54 @@ post_advisory_review() {
 # already dead inside its headroom (#2114), so on an OBSERVED failure (empty result after
 # the create) force ONE re-mint via gh_bot_reauth_read and retry — the same shape as the
 # lease read (#3735). Non-zero from reauth means no different credential: do not retry.
+#
+# A GraphQL rate limit is per INSTALLATION, so a re-mint cannot help and an immediate retry
+# hits the same wall (#4102: six finished branches stranded at concurrency 8 while the log
+# blamed the token). gh's stderr is therefore CAPTURED and echoed to the dispatch log, and a
+# rate-limit refusal backs off and retries (no re-mint) up to PR_RATE_LIMIT_RETRIES times,
+# PR_RATE_LIMIT_WAIT seconds apart, before the empty result fails the dispatch.
+_ensure_pr_query() {  # sets _EPR_N (number or "") and _EPR_ERR (gh's stderr text)
+  local out
+  out=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>&1 || true)  # swallow-ok: a non-number result is kept in _EPR_ERR and logged by the caller
+  if [[ "$out" =~ ^[0-9]+$ ]]; then _EPR_N="$out"; _EPR_ERR=""; else _EPR_N=""; _EPR_ERR="$out"; fi
+}
+_ensure_pr_attempt() {  # find, else create + re-query; success is the re-query, never create's exit
+  local cerr=""
+  _ensure_pr_query
+  if [[ -z "$_EPR_N" ]]; then
+    local qerr="$_EPR_ERR"
+    cerr=$(gh pr create --repo "$REPO" --base main --head "$BRANCH" \
+      --title "$ISSUE_TITLE" --body "$BODY" 2>&1 >/dev/null || true)  # swallow-ok: success is judged by the re-query below, never by this exit status
+    _ensure_pr_query
+    if [[ -z "$_EPR_N" ]]; then _EPR_ERR="${qerr}${qerr:+ | }${cerr}${cerr:+ | }${_EPR_ERR}"; fi
+  fi
+}
 ensure_branch_pr() {
   ENSURED_PR_NUM=""
-  local n
-  n=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty falls through to the create + re-query + re-auth retry below
-  if [[ -z "$n" ]]; then
-    gh pr create --repo "$REPO" --base main --head "$BRANCH" \
-      --title "$ISSUE_TITLE" --body "$BODY" 2>/dev/null || true  # swallow-ok: success is judged by the re-query below, never by this exit status
-    n=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: this IS the re-query; empty triggers the re-auth retry below
-  fi
-  if [[ -z "$n" ]] && gh_bot_reauth_read; then
-    echo "ensure_branch_pr: no PR for $BRANCH — retrying once after a forced token re-mint (#4062)." >&2
-    n=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty is reported by the caller as a failed dispatch
-    if [[ -z "$n" ]]; then
-      gh pr create --repo "$REPO" --base main --head "$BRANCH" \
-        --title "$ISSUE_TITLE" --body "$BODY" 2>/dev/null || true  # swallow-ok: success is judged by the re-query below
-      n=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty is reported by the caller as a failed dispatch
+  local _EPR_N="" _EPR_ERR="" rl_tries=0 reauthed=0
+  local rl_max="${PR_RATE_LIMIT_RETRIES:-5}" rl_wait="${PR_RATE_LIMIT_WAIT:-60}"
+  while :; do
+    _ensure_pr_attempt
+    if [[ -n "$_EPR_N" ]]; then break; fi
+    if [[ -n "$_EPR_ERR" ]]; then echo "ensure_branch_pr: no PR for $BRANCH — gh said: $_EPR_ERR" >&2; fi
+    if [[ "$_EPR_ERR" =~ [Rr]ate[[:space:]]+[Ll]imit ]]; then
+      if (( rl_tries >= rl_max )); then
+        echo "ensure_branch_pr: GraphQL rate limit persisted through $rl_max back-offs (#4102)." >&2
+        break
+      fi
+      rl_tries=$((rl_tries + 1))
+      echo "ensure_branch_pr: rate limited (per installation; a re-mint cannot help) — waiting ${rl_wait}s, retry $rl_tries/$rl_max (#4102)." >&2
+      sleep "$rl_wait"
+      continue
     fi
-  fi
-  ENSURED_PR_NUM="$n"
+    if (( reauthed == 0 )) && gh_bot_reauth_read; then
+      reauthed=1
+      echo "ensure_branch_pr: no PR for $BRANCH — retrying once after a forced token re-mint (#4062)." >&2
+      continue
+    fi
+    break
+  done
+  ENSURED_PR_NUM="$_EPR_N"
 }
 # <<< ensure-branch-pr
 
