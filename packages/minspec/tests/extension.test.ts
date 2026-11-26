@@ -247,7 +247,7 @@ vi.mock('../src/views/status-bar', async (importOriginal) => ({
 // status-bar wiring runs without building a real graph (no fs in this mock).
 vi.mock('../src/commands/next-task', () => ({
   nextTaskCommand: vi.fn(() => vi.fn()),
-  computeNextTask: vi.fn(() => null),
+  computeSignpostState: vi.fn(() => ({ kind: 'clear' })),
 }));
 vi.mock('../src/views/spec-panel', () => ({
   SpecPanel: vi.fn(function () { return mockSpecPanel; }),
@@ -317,7 +317,7 @@ vi.mock('path', async () => {
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { activate, deactivate } from '../src/extension';
-import { computeNextTask } from '../src/commands/next-task';
+import { computeSignpostState } from '../src/commands/next-task';
 import { initCommand, initRefreshCommand, commitHarnessRefreshCommand } from '../src/commands/init';
 import { classifyCommand } from '../src/commands/classify';
 import { statusCommand } from '../src/commands/status';
@@ -466,13 +466,13 @@ describe('activate()', () => {
   // function body. That hypothesis was REFUTED by code review (every risky
   // call already visible in activate() is individually try/catch-guarded) —
   // this test asserts the specific guard around the next-task status bar
-  // paint holds: computeNextTask throwing must not prevent approveActive (or
+  // paint holds: computeSignpostState throwing must not prevent approveActive (or
   // its sibling approve/accept commands) from registering. Asserts the
   // registration LIST, not the happy path, per RCDD Phase 3 (a happy-path
   // assertion would pass even if the guard were deleted, as long as nothing
   // actually throws in the mocked run).
-  it('registers minspec.approveActive even when computeNextTask throws', () => {
-    vi.mocked(computeNextTask).mockImplementation(() => {
+  it('registers minspec.approveActive even when computeSignpostState throws', () => {
+    vi.mocked(computeSignpostState).mockImplementation(() => {
       throw new Error('simulated: malformed workspace graph');
     });
 

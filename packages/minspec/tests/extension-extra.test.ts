@@ -217,7 +217,7 @@ vi.mock('../src/views/status-bar', async (importOriginal) => ({
 }));
 vi.mock('../src/commands/next-task', () => ({
   nextTaskCommand: vi.fn(() => vi.fn()),
-  computeNextTask: vi.fn(() => null),
+  computeSignpostState: vi.fn(() => ({ kind: 'clear' })),
 }));
 vi.mock('../src/views/spec-panel', () => ({
   SpecPanel: vi.fn(function () { return mockSpecPanel; }),

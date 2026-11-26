@@ -25,6 +25,7 @@ vi.mock('vscode', () => ({
   window: {
     showInformationMessage: vi.fn(),
     showErrorMessage: vi.fn(),
+    showWarningMessage: vi.fn(),
     showTextDocument: vi.fn(() => Promise.resolve({})),
     createStatusBarItem: vi.fn(() => mockStatusBarItem),
   },
@@ -115,19 +116,25 @@ describe('nextTaskCommand', () => {
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('MinSpec: Approve SPEC-001');
   });
 
-  it('graph build throws → clear toast, NO error message, no rethrow', async () => {
+  it('graph build throws → "state unclear" warning (never "clear"), no error message, no rethrow', async () => {
     (buildArtifactGraph as ReturnType<typeof vi.fn>).mockImplementation(() => {
       throw new Error('boom');
     });
     await expect(nextTaskCommand(ROOT)()).resolves.toBeUndefined();
-    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-      "MinSpec: nothing to review — you're clear. ✓",
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('state unclear'),
     );
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining('boom'));
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
     expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
   });
 });
 
 describe('formatNextTaskText', () => {
+  it('unclear reason → warning glyph, never the clear tick', () => {
+    expect(formatNextTaskText(null, 'boom')).toBe('$(warning) MinSpec: state unclear');
+  });
+
   it('null → clear', () => {
     expect(formatNextTaskText(null)).toBe('$(check) MinSpec: clear');
   });
@@ -135,5 +142,16 @@ describe('formatNextTaskText', () => {
     // Wording after the icon/brand comes from @aiclarity/shared formatNextTaskLabel
     // so this reads identically to the planned DAG-viz node (#742/#48).
     expect(formatNextTaskText(task())).toBe('$(milestone) MinSpec Next Task: Approve SPEC-001');
+  });
+});
+
+describe('MinSpecNextTaskStatusBar unclear state (#1466)', () => {
+  it('renders a warning with the reason, not the clear tick', async () => {
+    const { MinSpecNextTaskStatusBar } = await import('../src/views/status-bar');
+    const bar = new MinSpecNextTaskStatusBar();
+    bar.update(null, 'bad config');
+    expect(mockStatusBarItem.text).toBe('$(warning) MinSpec: state unclear');
+    expect(String(mockStatusBarItem.tooltip)).toContain('bad config');
+    expect(mockStatusBarItem.accessibilityInformation).toEqual({ label: 'MinSpec: state unclear' });
   });
 });

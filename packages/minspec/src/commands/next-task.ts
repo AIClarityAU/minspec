@@ -6,8 +6,8 @@
  * reveals the target artifact, and surfaces the imperative as a NON-MODAL toast
  * over the visible artifact (HITL UX rule). When the queue is clear it says so
  * cheerfully; it NEVER crashes the thread — a missing workspace, an empty repo,
- * or a graph-build failure all degrade to the friendly "clear" message
- * (INV-DEGRADE).
+ * degrade without throwing (INV-DEGRADE); a graph-build failure shows a
+ * "state unclear" warning, never the "clear" message (#1466).
  */
 
 import * as vscode from 'vscode';
@@ -15,18 +15,35 @@ import { formatImperativeForSignpost, resolveNextTask, type NextTask } from '@ai
 import { buildArtifactGraph, artifactFileIndex } from '../lib/artifact-graph';
 
 const CLEAR_MESSAGE = "MinSpec: nothing to review — you're clear. ✓";
+const UNCLEAR_MESSAGE = "MinSpec: state unclear — couldn't read this workspace";
 
 /**
- * Compute the next task for a workspace, or null. Pure-ish wrapper: degrades a
- * build/resolve failure to `null` (treated as "clear") rather than throwing, so
- * every caller (command + status bar) shares one fail-safe path.
+ * What the signpost knows. `unclear` is a FAILURE TO KNOW (graph build / resolve
+ * threw) and must never render as the affirmative `clear` (#1466).
  */
-export function computeNextTask(workspaceRoot: string): NextTask | null {
+export type SignpostState =
+  | { kind: 'task'; task: NextTask }
+  | { kind: 'clear' }
+  | { kind: 'unclear'; reason: string };
+
+/**
+ * Compute the signpost state. Degrades a build/resolve failure to `unclear`
+ * (carrying the reason) rather than throwing (INV-DEGRADE), without
+ * conflating it with a genuinely empty queue.
+ */
+export function computeSignpostState(workspaceRoot: string): SignpostState {
   try {
-    return resolveNextTask(buildArtifactGraph(workspaceRoot));
-  } catch {
-    return null;
+    const task = resolveNextTask(buildArtifactGraph(workspaceRoot));
+    return task === null ? { kind: 'clear' } : { kind: 'task', task };
+  } catch (err) {
+    return { kind: 'unclear', reason: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/** Next task for a workspace, or null (clear OR unclear — use {@link computeSignpostState} to tell apart). */
+export function computeNextTask(workspaceRoot: string): NextTask | null {
+  const state = computeSignpostState(workspaceRoot);
+  return state.kind === 'task' ? state.task : null;
 }
 
 /**
@@ -39,19 +56,17 @@ export function nextTaskCommand(workspaceRoot: string): () => Promise<void> {
       return;
     }
 
-    let task: NextTask | null;
-    try {
-      task = resolveNextTask(buildArtifactGraph(workspaceRoot));
-    } catch {
-      // Degrade: a malformed/partial workspace must never crash the signpost.
+    const state = computeSignpostState(workspaceRoot);
+    if (state.kind === 'unclear') {
+      // Degrade without crashing, but never claim "clear" for a state we failed to compute.
+      vscode.window.showWarningMessage(`${UNCLEAR_MESSAGE} (${state.reason})`);
+      return;
+    }
+    if (state.kind === 'clear') {
       vscode.window.showInformationMessage(CLEAR_MESSAGE);
       return;
     }
-
-    if (task === null) {
-      vscode.window.showInformationMessage(CLEAR_MESSAGE);
-      return;
-    }
+    const task = state.task;
 
     // Reveal the target artifact so the toast lands over the thing to act on.
     // A corruption node may point at a dangling id with no file — skip the open

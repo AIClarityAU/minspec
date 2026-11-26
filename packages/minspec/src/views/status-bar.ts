@@ -32,9 +32,11 @@ import { formatImperativeForSignpost, formatNextTaskLabel, type NextTask } from 
  * (#742/#48). This surface adds only its own chrome: the `$(milestone)`
  * "signpost" codicon and the "MinSpec" brand prefix.
  *   null → '$(check) MinSpec: clear'
+ *   unclearReason → '$(warning) MinSpec: state unclear' (a failure to know is never "clear", #1466)
  *   task → '$(milestone) MinSpec Next Task: <imperative>'   e.g. "…Accept DR-022"
  */
-export function formatNextTaskText(task: NextTask | null): string {
+export function formatNextTaskText(task: NextTask | null, unclearReason?: string): string {
+  if (unclearReason !== undefined) return '$(warning) MinSpec: state unclear';
   if (!task) return '$(check) MinSpec: clear';
   return `$(milestone) MinSpec ${formatNextTaskLabel(task)}`;
 }
@@ -142,10 +144,14 @@ export class MinSpecNextTaskStatusBar {
   }
 
   /** Update the signpost. Pass null to show the "clear" state. */
-  update(task: NextTask | null): void {
-    const text = formatNextTaskText(task);
-    this.statusBarItem.text = text;
-    const base = task ? task.evidence.explanation : 'No Pending Approvables.';
+  update(task: NextTask | null, unclearReason?: string): void {
+    const unclear = unclearReason !== undefined;
+    this.statusBarItem.text = formatNextTaskText(unclear ? null : task, unclearReason);
+    const base = unclear
+      ? `MinSpec could not compute the next task: ${unclearReason}`
+      : task
+        ? task.evidence.explanation
+        : 'No Pending Approvables.';
     this.statusBarItem.tooltip = this.keybindingLabel
       ? buildShortcutTooltip(base, this.keybindingLabel)
       : base;
@@ -153,9 +159,11 @@ export class MinSpecNextTaskStatusBar {
     // the clause-stripped, word-boundary-truncated imperative too, not the
     // raw tasks.md markdown.
     this.statusBarItem.accessibilityInformation = {
-      label: task
-        ? `MinSpec next task: ${formatImperativeForSignpost(task.imperative)}`
-        : 'MinSpec: no pending Approvables',
+      label: unclear
+        ? 'MinSpec: state unclear'
+        : task
+          ? `MinSpec next task: ${formatImperativeForSignpost(task.imperative)}`
+          : 'MinSpec: no pending Approvables',
     };
     this.statusBarItem.show();
   }
