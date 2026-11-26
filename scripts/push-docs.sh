@@ -44,6 +44,16 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$msg" ] || { echo "push-docs: need -m <commit/PR message>" >&2; exit 2; }
 
+# The PR title is the message's first line, and GitHub rejects a title over 256
+# chars. Fail HERE, before any worktree/commit/push, so a rejected title can
+# never strand a pushed branch with no PR (#1438).
+subject_line="${msg%%$'\n'*}"
+if [ "${#subject_line}" -gt 256 ]; then
+  echo "push-docs: subject line is ${#subject_line} chars; GitHub's PR title limit is 256." >&2
+  echo "push-docs: shorten the first line of -m (put detail after a blank line). Nothing was committed or pushed." >&2
+  exit 2
+fi
+
 root="$(git rev-parse --show-toplevel)"
 slug="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 git -C "$root" fetch -q origin main
@@ -181,7 +191,7 @@ git -C "$wt" push -q -u origin "$branch"
 # ("Title is too long (maximum is 256 characters)"). Passing $msg verbatim as
 # --title therefore fails PR creation *after* the branch is already pushed
 # (#1606). Split it the same way git itself does: first line is the subject
-# (truncated on a word boundary if it alone exceeds 256 chars), and whatever
+# (already length-checked up front, before any commit), and whatever
 # follows the first blank line is the body — carried into the PR body instead
 # of being discarded outright.
 pr_title="${msg%%$'\n'*}"
@@ -191,12 +201,6 @@ else
   pr_rest="${msg#*$'\n'}"
   pr_rest="${pr_rest#$'\n'}"   # drop the single blank separator line, if present
 fi
-if [ "${#pr_title}" -gt 256 ]; then
-  truncated="${pr_title:0:256}"
-  [[ "$truncated" == *' '* ]] && truncated="${truncated% *}"
-  pr_title="$truncated"
-fi
-
 if [ "${#status_hits[@]}" -gt 0 ]; then
   lane_note="**Not labelled for the docs-lane** — this PR changes a \`status:\` line in: $(printf '\`%s\`, ' "${status_hits[@]}" | sed 's/, $//'). Accepting a DR or approving a spec is a **human act** (DR-029, DR-086 §2), so the lane refuses it by design (#1847). This needs a human merge keystroke (#2158). Files:
 $(printf -- '- \`%s\`\n' "${files[@]}")"
