@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { type Delegation } from '../../../scripts/lib/autonomy';
-import { type ReviewEvidence } from '../../../scripts/lib/delegated-approval';
+import { REVIEWER_APP_SLUG, REVIEWER_LOGIN, type ReviewEvidence } from '../../../scripts/lib/delegated-approval';
 import { specHash } from '../../../packages/shared/src/canonical';
 import {
   gatherMergeInput,
@@ -58,10 +58,10 @@ function review(headSha = HEAD): ReviewEvidence {
     pull: { number: PR, merged: false, headSha, headRef: 'cos/plan-b-1028', authorLogin: BOT, files: [DESIGN, TASKS] },
     artifactAtHead: '# Design\n',
     comments: [
-      { id: 222, url: VERDICT_URL, login: BOT, body: '## 🤖 AI review — `ai-review:pass`\n\nOK.', createdAt: '2026-11-01T01:00:30Z' },
+      { id: 222, url: VERDICT_URL, login: REVIEWER_LOGIN, body: '## 🤖 AI review — `ai-review:pass`\n\nOK.', createdAt: '2026-11-01T01:00:30Z' },
     ],
     checkRuns: [
-      { name: 'ai-review', status: 'completed', conclusion: 'success', appSlug: 'minspec-sdd', headSha, completedAt: '2026-11-01T01:01:00Z' },
+      { name: 'ai-review', status: 'completed', conclusion: 'success', appSlug: REVIEWER_APP_SLUG, headSha, completedAt: '2026-11-01T01:01:00Z' },
     ],
     workflowRuns: [
       {

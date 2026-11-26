@@ -58,6 +58,19 @@
 # Until this variable is set, the allowlist is empty and EVERY `ai-review:pass`
 # is treated as unverifiable → never green (fail closed).
 #
+# ── OPTIONAL — a review-only App (#4078) ─────────────────────────────────────
+# By default the App that posts the verdicts is the same one your build agents use,
+# so anything holding that App's token can post a pass. To close that, create a
+# second App used ONLY by ai-review.yml, put its id and key in the Actions secrets
+# `MINSPEC_REVIEW_APP_ID` / `MINSPEC_REVIEW_APP_PRIVATE_KEY`, then set BOTH variables:
+#   - `AI_REVIEW_BOT_LOGINS` = that App's login alone, e.g. `my-review-app[bot]`
+#   - `AI_REVIEW_APP` = `review`
+# With `AI_REVIEW_APP=review` this gate refuses an allowlist that still names
+# `minspec-sdd[bot]` (red, with the reason), and ai-review.yml fails visibly if the
+# review secrets are missing - it never falls back to the builder App. If your branch
+# ruleset pins the required `ai-review` check to an App, re-pin it to the review App
+# in the same sitting, or every pull request waits on a check no App can now post.
+#
 # ── REQUIRED MANUAL STEP 2 — make the gate enforcing ─────────────────────────
 # A workflow file cannot make itself gating. Add `ready-to-merge` as a *required
 # status check* in Settings → Branches → branch protection for `main`. Until
@@ -164,6 +177,11 @@ jobs:
           # is retained ONLY as the enterprise override, for a customer running their
           # own App under their own bot login.
           AI_REVIEW_BOT_LOGINS: ${{ vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]' }}
+          # #4078 - which App writes the verdicts. Unset = the shipped single-App default
+          # above. `review` = a second App used only by ai-review.yml; the guard then
+          # REFUSES an allowlist that still names `minspec-sdd[bot]` and fails this gate
+          # closed with that reason (guard.resolveReviewerAllowlist).
+          AI_REVIEW_APP: ${{ vars.AI_REVIEW_APP }}
         with:
           script: |
             const path = require('path');
@@ -219,7 +237,44 @@ jobs:
             // The just-added label (labeled events) and the actor who added it.
             const addedLabel = context.payload.label && context.payload.label.name;
             const senderLogin = context.payload.sender && context.payload.sender.login;
-            const allowlist = guard.parseAllowlist(process.env.AI_REVIEW_BOT_LOGINS);
+            // #4078 - resolve WHO may write a verdict. A misconfiguration (review mode
+            // with the builder App still allowlisted, an empty list, or an unknown
+            // AI_REVIEW_APP value) is posted red with its reason and stops here: the
+            // gate fails closed and visibly, never on a guessed allowlist. A base guard
+            // that predates #4078 cannot honour review mode, so a request for it fails
+            // closed too rather than silently trusting the builder.
+            const failClosed = async (why) => {
+              core.error(`ready-to-merge: ${why}`);
+              await github.rest.repos.createCommitStatus({
+                owner,
+                repo,
+                sha: pr.head.sha,
+                state: 'failure',
+                context: 'ready-to-merge',
+                description: why.length > 140 ? `${why.slice(0, 139)}…` : why,
+              });
+            };
+            let allowlist;
+            if (typeof guard.resolveReviewerAllowlist === 'function') {
+              const resolved = guard.resolveReviewerAllowlist({
+                mode: process.env.AI_REVIEW_APP,
+                raw: process.env.AI_REVIEW_BOT_LOGINS,
+              });
+              if (resolved.fault) {
+                await failClosed(resolved.fault);
+                return;
+              }
+              allowlist = resolved.allowlist;
+            } else {
+              const mode = String(process.env.AI_REVIEW_APP || '').trim().toLowerCase();
+              if (mode !== '' && mode !== 'builder') {
+                await failClosed(
+                  'AI_REVIEW_APP is set but the base guard predates #4078 and cannot resolve it',
+                );
+                return;
+              }
+              allowlist = guard.parseAllowlist(process.env.AI_REVIEW_BOT_LOGINS);
+            }
 
             // ── Active-cleanup decisions (pure) ────────────────────────────
             const provenance = guard.decideProvenanceRevert({
@@ -613,7 +668,8 @@ jobs:
                   `allowlisted reviewer identity re-applies it after a real review.\n\n` +
                   `Owner: the allowlist defaults to \`minspec-sdd[bot]\`. If you run ` +
                   `your own review App, set the \`AI_REVIEW_BOT_LOGINS\` Actions variable ` +
-                  `to its login (see \`.github/workflows/ready-to-merge.yml\`).`,
+                  `to its login and \`AI_REVIEW_APP\` to \`review\` ` +
+                  `(see \`.github/workflows/ready-to-merge.yml\`).`,
               );
               await removePass();
             } else if (staleness.strip) {

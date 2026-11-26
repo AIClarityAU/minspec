@@ -744,6 +744,14 @@ export const REVIEWER_SECRETS = [
  *   - `ANTHROPIC_API_KEY` — the PAYG quota-failover credential. `review-branch.sh`
  *     retries on it only when `AI_REVIEW_FAILOVER == payg` AND the key is set; with
  *     neither, the default `wait` path is unchanged.
+ *   - `MINSPEC_REVIEW_APP_ID` / `MINSPEC_REVIEW_APP_PRIVATE_KEY` — the review-only
+ *     GitHub App (#4078). Read only when the `AI_REVIEW_APP` repo variable is
+ *     `review`; unset (the shipped single-App default, DR-054) never touches them.
+ *     In `review` mode they DO become necessary, but their absence is not a silent
+ *     gap the probe must catch: ai-review.yml fails that run red with the reason and
+ *     never falls back to the builder App (constitution invariant 2). Folding them
+ *     into {@link REVIEWER_SECRETS} would instead report every single-App repo
+ *     "not configured" — the mirror-image deadlock described below.
  *
  * Deliberately NOT part of {@link REVIEWER_SECRETS}, and the distinction is the whole
  * point of this constant. {@link probeReviewerConfigured} answers "can this repo
@@ -759,7 +767,11 @@ export const REVIEWER_SECRETS = [
  * declared here — the anti-drift property survives the split. Adding a name to THIS
  * list is the explicit claim "the reviewer works without it".
  */
-export const REVIEWER_OPTIONAL_SECRETS = ['ANTHROPIC_API_KEY'] as const;
+export const REVIEWER_OPTIONAL_SECRETS = [
+  'ANTHROPIC_API_KEY',
+  'MINSPEC_REVIEW_APP_ID',
+  'MINSPEC_REVIEW_APP_PRIVATE_KEY',
+] as const;
 
 /**
  * Is the reviewer pipeline OPERATIONAL on the repo — are the secrets that make
