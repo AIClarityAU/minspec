@@ -8,6 +8,12 @@ epic: EPIC-009  # Team Readiness — same epic as SPEC-034 (the review broker) a
 aspects: [ci, ai-review, broker, github-app, credentials, revocation, silent-gate, accepted-risk]
 depends_on: [SPEC-034, DR-094]
 relates_to: [DR-054, DR-066, DR-023, DR-033, SPEC-054, "#2335", "#2314", "#2114", "#1869"]
+implements: none
+implements_reason: >-
+  Specify phase only. Which files this spec will own is decided at Plan. Expected surface, from
+  the spec's own Context and FR-14: the revocation step in .github/workflows/ai-review.yml, the
+  embedded adopter copy in packages/minspec/src/lib/ci-review-templates.ts, and a broker test
+  for FR-11 under packages/broker/.
 phases:
   specify: done
   clarify: pending

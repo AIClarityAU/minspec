@@ -6,6 +6,10 @@ tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness — concurrent multi-session coordination
 relates_to: [SPEC-044, SPEC-032, SPEC-024, DR-033, DR-061]
+implements: none
+implements_reason: >-
+  Documentation-only disposition spec: AC-3 says no packages/, scripts/ or tests/ file is
+  touched by this spec or its approval, and DQ-1's recorded Option A closes #181 with no code change.
 ---
 
 # MinSpec — Keep auto-built PR branches mergeable as base advances (Requirements)
