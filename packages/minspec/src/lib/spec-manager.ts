@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { Tier, Phase, SpecsLayout } from './config';
 import { hashLockReminder, readRecord, writeRecord, removeRecord } from './approval-store';
 import { specRelPath, canonicalSpecHash, resolveStatus, refKey } from './approval';
+import { assertOwnershipDeclaredForAdvance } from './ownership-advance-guard';
 import { ensureDirectory } from './opt-in';
 import { loadConfig, PHASES, resolveAndValidate, DEFAULT_CONFIG } from './config';
 import type { SpecFrontmatter, ParsedSpec } from './spec';
@@ -12,6 +13,8 @@ import {
   createInitialPhases,
   getCurrentPhase,
   getSpecStatus,
+  deriveStatus,
+  explicitTerminalOf,
   advancePhase,
   skipPhase,
   goBackToPhase,
@@ -638,10 +641,21 @@ export function transitionPhase(
   }
 
   if (result.success) {
+    const newPhases = result.newPhases as Record<Phase, import('./spec').PhaseStatus>;
+    const filePath = entryDisplayPath(entry);
+    // #1380 — lib-boundary gate, like the approver gate (DR-056 Decision 2): refuse a
+    // transition that introduces validator errors BEFORE any write, so every caller
+    // (incl. the phase-advance queue consumer, DR-057 §2) inherits it. Throws.
+    assertOwnershipDeclaredForAdvance(filePath, parsed, newPhases);
+    // `result.newStatus` is `getSpecStatus`'s phases-only PREVIEW (DO-NOT-ALIGN, lifecycle.ts)
+    // and says `implementing` for an unapproved spec in the plan/tasks band. Never stamp
+    // that into the file: write the approval-aware `deriveStatus` (DR-069 / #886).
+    const rel = specRelPath(rootDir, filePath);
+    const approval = resolveStatus(readRecord(rootDir, rel), canonicalSpecHash(filePath));
     const newFm: SpecFrontmatter = {
       ...parsed.frontmatter,
-      status: result.newStatus,
-      phases: result.newPhases as Record<Phase, import('./spec').PhaseStatus>,
+      status: deriveStatus(newPhases, approval, explicitTerminalOf(parsed.frontmatter.status)),
+      phases: newPhases,
     };
     writeEntry(entry, { ...parsed, frontmatter: newFm });
   }
