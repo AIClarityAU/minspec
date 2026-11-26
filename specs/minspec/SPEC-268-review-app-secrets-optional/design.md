@@ -90,8 +90,8 @@ New first step `ctx` (github-script, GITHUB_TOKEN):
      `workflow_run` run that exited without writing would cancel that queued run and post
      nothing, leaving the head with no `ready-to-merge` status, which breaks the #1973
      property "the latest-started evaluation writes last". Re-evaluating from fresh API
-     state keeps that property: the run that displaced the queued one evaluates a state at
-     least as new. It applies the same allowlist and witness rules as any non-`labeled` run, so
+     state keeps that property whenever the re-evaluation can read the PR and base: the run
+     that displaced the queued one evaluates a state at least as new. It applies the same allowlist and witness rules as any non-`labeled` run, so
      it reads pass provenance from the label timeline; when that lags, its outcome can differ
      from the `labeled` run's (fail closed, R6, #4140). It writes what a gate run writes: the
      `ready-to-merge` status and the `awaiting-approval`/`blocked-by` label sync.
@@ -165,9 +165,11 @@ it precedes the unset.
   posted status (red), never a false green; the next push re-evaluates.
 - The very first PR that installs the scaffold cannot self-trigger `workflow_run` (the
   workflow must be on the default branch). Its gate stays red; merge as a machinery PR.
-- The re-evaluation that D2 (b) adds can post `failure` over a fresh `success` when the
-  issue timeline lags, and a run it replaces in the queue skips its provenance revert and
-  stale-pass strip. Both fail closed (never a false green); tracked in #4140.
+- The FR7 re-evaluation (both arms) has four residuals, listed in requirements FR7 and
+  tracked in #4140, all failing closed (never a false green): timeline lag can turn a fresh
+  `success` red; a run it replaces in the queue skips its provenance revert and stale-pass
+  strip; a PR read failure posts on the reviewed head; and a newer head whose queued run it
+  replaced can have no status until that head's own review completes.
 - The forge DR-115 accepts (a same-repo PR editing a non-machinery path cannot post as
   `github-actions` without touching `.github/`, so FR6 closes the workflow route).
 
