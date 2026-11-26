@@ -11,7 +11,7 @@
  *     that is not a pass, and a recording session that is the authoring one all deny;
  *   - the record it builds passes the validator's own predicate.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -71,6 +71,7 @@ const W = (over: Partial<DelegationWitnesses> = {}): DelegationWitnesses => ({
   ...over,
 });
 
+const REVIEW_APP_LOGIN = 'aiclarity-minspec-review[bot]';
 const comment = (id: number, label: string, createdAt: string, login: string = REVIEWER_LOGIN) => ({
   id,
   url: `https://github.com/${REPO}/pull/41#issuecomment-${id}`,
@@ -193,21 +194,40 @@ describe('T0 — the review must be an independent CI pass on these bytes', () =
     expect(reason(planDelegatedApproval(input({ review: evidence({ checkRuns }) })))).toBe('ai-review-check-not-success');
   });
   it('a check from another app, on another commit, or under another name does not count', () => {
-    for (const patch of [{ appSlug: 'other-app' }, { appSlug: undefined }, { headSha: 'b'.repeat(40) }, { name: 'ai-review-runner' }]) {
+    for (const patch of [{ headSha: 'b'.repeat(40) }, { name: 'ai-review-runner' }]) {
       const checkRuns = [{ ...evidence().checkRuns[0], ...patch }];
       expect(reason(planDelegatedApproval(input({ review: evidence({ checkRuns }) })))).toBe('no-ai-review-check');
+    }
+    // An `ai-review` verdict on the head from an App this session does not trust is a
+    // forged verdict or a stale reviewer configuration: denied outright (#4078).
+    for (const patch of [{ appSlug: 'other-app' }, { appSlug: undefined }]) {
+      const checkRuns = [{ ...evidence().checkRuns[0], ...patch }];
+      expect(reason(planDelegatedApproval(input({ review: evidence({ checkRuns }) })))).toBe('reviewer-identity-mismatch');
     }
   });
   it('a later non-pass review supersedes an earlier pass', () => {
     const comments = [...evidence().comments, comment(300, 'changes', '2026-10-19T10:30:00Z')];
     expect(reason(planDelegatedApproval(input({ review: evidence({ comments }) })))).toBe('latest-review-not-pass');
   });
-  it('#4078 T0: a pass written by the BUILDER App (check-run and comment) no longer clears a delegation', () => {
-    expect(REVIEWER_LOGIN).not.toBe(BOT_ACTOR);
-    const builderCheck = [{ name: 'ai-review', status: 'completed', conclusion: 'success', appSlug: 'minspec-sdd', headSha: HEAD, completedAt: '2026-10-19T10:05:10Z' }];
-    expect(reason(planDelegatedApproval(input({ review: evidence({ checkRuns: builderCheck }) })))).toBe('no-ai-review-check');
-    const builderComment = [comment(200, 'pass', '2026-10-19T10:05:00Z', BOT_ACTOR)];
-    expect(reason(planDelegatedApproval(input({ review: evidence({ comments: builderComment }) })))).toBe('no-ai-review-comment');
+  it('#4078 T0: under AI_REVIEW_APP=review a pass written by the BUILDER App (check-run or comment) no longer clears a delegation', () => {
+    vi.stubEnv('AI_REVIEW_APP', 'review');
+    vi.stubEnv('AI_REVIEW_BOT_LOGINS', REVIEW_APP_LOGIN);
+    try {
+      // Builder check-run alongside a review-App comment: the builder check is foreign.
+      const reviewComment = [comment(200, 'pass', '2026-10-19T10:05:00Z', REVIEW_APP_LOGIN)];
+      expect(reason(planDelegatedApproval(input({ review: evidence({ comments: reviewComment }) })))).toBe('reviewer-identity-mismatch');
+      // Review-App check-run with a builder comment: no comment from the reviewer.
+      const reviewCheck = [{ ...evidence().checkRuns[0], appSlug: 'aiclarity-minspec-review' }];
+      expect(reason(planDelegatedApproval(input({ review: evidence({ checkRuns: reviewCheck }) })))).toBe('no-ai-review-comment');
+      // Both written by the review App: clears.
+      expect(planDelegatedApproval(input({ review: evidence({ checkRuns: reviewCheck, comments: reviewComment }) })).ok).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+  it('#4078: by default (AI_REVIEW_APP unset) the shipped reviewer is the builder App, as on main', () => {
+    expect(REVIEWER_LOGIN).toBe(BOT_ACTOR);
+    expect(planDelegatedApproval(input()).ok).toBe(true);
   });
   it('a pass from any other login is ignored', () => {
     const comments = [comment(150, 'pass', '2026-10-19T10:01:00Z', 'github-actions[bot]'), comment(151, 'pass', '2026-10-19T10:02:00Z', 'harvest316')];

@@ -4230,4 +4230,27 @@ test('readFailureReason: a rate-limited read says so and names the re-run; any o
     assert.equal(r.fault, '');
     assert.deepEqual(r.allowlist, ['aiclarity-minspec-review[bot]']);
   });
+
+  test('#4078: resolveReviewerFromEnv applies the workflows\' own default, then the same rule', () => {
+    // The workflows pass `vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]'`: unset and
+    // EMPTY both take the default; a caller outside a workflow must get the same answer.
+    for (const env of [{}, { AI_REVIEW_BOT_LOGINS: '' }, { AI_REVIEW_APP: 'builder' }, undefined]) {
+      assert.deepEqual(g.resolveReviewerFromEnv(env), { mode: 'builder', allowlist: ['minspec-sdd[bot]'], fault: '' });
+    }
+    const configs = [
+      { AI_REVIEW_APP: 'review', AI_REVIEW_BOT_LOGINS: REVIEW_LOGINS },
+      { AI_REVIEW_APP: 'review' },
+      { AI_REVIEW_APP: 'review', AI_REVIEW_BOT_LOGINS: 'minspec-sdd[bot]' },
+      { AI_REVIEW_APP: 'reveiw', AI_REVIEW_BOT_LOGINS: REVIEW_LOGINS },
+    ];
+    for (const env of configs) {
+      assert.deepEqual(
+        g.resolveReviewerFromEnv(env),
+        g.resolveReviewerAllowlist({ mode: env.AI_REVIEW_APP, raw: env.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]' }),
+        JSON.stringify(env),
+      );
+    }
+    // Review mode with the logins variable unset is refused (the default names the builder).
+    assert.deepEqual(g.resolveReviewerFromEnv({ AI_REVIEW_APP: 'review' }).allowlist, []);
+  });
 }

@@ -1466,6 +1466,22 @@ function resolveReviewerAllowlist({ mode, raw } = {}) {
   return { mode: m === '' ? 'builder' : m, allowlist, fault: '' };
 }
 
+// #4078 (PR #4086 review) — the ONE reviewer-identity rule, from the same two inputs the
+// workflows read, with the workflows' own default applied. ai-review.yml and
+// ready-to-merge.yml pass `vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]'` and
+// `vars.AI_REVIEW_APP` into resolveReviewerAllowlist; a caller outside a workflow (the
+// delegated approval and merge paths in scripts/lib/delegated-approval.ts) passes its
+// environment here and gets the identical answer, so the two can never trust different
+// Apps for the same configuration. Pure: `env` is a plain object (`process.env` or a
+// test fixture); nothing here reads the process.
+function resolveReviewerFromEnv(env) {
+  const e = env && typeof env === 'object' ? env : {};
+  // `||`, not `??`: an EMPTY variable takes the default, exactly as the workflow
+  // expression `vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]'` does.
+  const raw = e.AI_REVIEW_BOT_LOGINS || SHIPPED_REVIEWER_LOGIN;
+  return resolveReviewerAllowlist({ mode: e.AI_REVIEW_APP, raw });
+}
+
 // Is `login` one of the configured reviewer identities?
 // An empty allowlist authorizes nobody — provenance cannot be verified until the
 // owner configures AI_REVIEW_BOT_LOGINS, so the gate must fail closed.
@@ -2295,6 +2311,7 @@ module.exports = {
   parseCliVerdict,
   parseAllowlist,
   resolveReviewerAllowlist,
+  resolveReviewerFromEnv,
   SHIPPED_REVIEWER_LOGIN,
   REVIEW_APP_MODE,
   isAuthorizedReviewer,
