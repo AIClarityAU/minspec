@@ -1,7 +1,7 @@
 ---
 id: SPEC-322
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - same epic as the merge-lane spec this complements
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. The loop and `cos.py` live outside this repo (read-only mount in the
   container); the deliverable here is a host patch. Which files this repo owns is decided at Plan.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

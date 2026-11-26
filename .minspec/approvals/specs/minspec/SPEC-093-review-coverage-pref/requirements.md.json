@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-093-review-coverage-pref/requirements.md",
+  "specHash": "d3a9202c8a31ac7dd0acbe9175f7f06a1fa7961aa61b6264a4c04d20f0a972f8",
+  "approvedAt": "2026-11-23T20:19:21.604Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1123",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4024#issuecomment-7112005209"
+}
