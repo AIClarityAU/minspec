@@ -1,7 +1,7 @@
 ---
 id: SPEC-313
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # approval integrity - an accepted record must be checked against its witness, not trusted
@@ -14,8 +14,8 @@ implements_reason: >-
   decision (D1) is answered.
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -274,7 +274,20 @@ backfill.
 **D1: One decision for the founder, in two parts.** The issue asks that these come back as one
 item for the chief-of-staff queue, not as a PR question.
 
-- **D1 (a): The 100 accepted decisions with no record.**
+- **D1 - Recorded selection (answered, not ratified).** **Recorded selection: D1 (a) option ii
+  (one-time "Baseline accepted decisions" command) and D1 (b) option i (keep the existing
+  `PROPOSED, not accepted` heading convention).** Both are the options this spec marks (rec). An
+  agent copied them from the runner-queue answer to item c313d1 (2026-11-26) and no human
+  chose them in this spec. Authority: founder decision, queue item clarsel (2026-11-17), under
+  which an agent's recorded pick of the (rec) option closes a T3 Clarify question (DR-123).
+  Approving this spec ratifies the pick; the approver may change it before approving.
+  Options not selected: D1 (a) i and iii, D1 (b) ii.
+  Recorded cost: the baseline also vouches for any unlisted agent edits made before
+  2026-11-26. It also reverses SPEC-251 D2's recorded grandfathering choice, but SPEC-251 D2
+  stays in force until the decision record or SPEC-251 amendment carrying that reversal is
+  accepted. Nothing in this spec reverses it; the reversal takes effect only once that record
+  is accepted (tracked in Follow-ups below).
+- **D1 (a): The 100 accepted decisions with no record.** *(Answered: option ii.)*
   - i. **Treat as unverified, and re-accept one at a time when he chooses** (FR-7). Honest
     from day one, and no record is written that he did not create by reading.
     Cost: 100 "unverified" badges, probably for months. Noise like that teaches the reader to
@@ -292,7 +305,7 @@ item for the chief-of-staff queue, not as a PR question.
   - iii. **Keep grandfathering (SPEC-251 D2 as recorded): legacy decisions show plain
     "accepted".** No noise. Cost: this is exactly the false "accepted and current" the
     founder reported. Not recommended.
-- **D1 (b): The marker format for proposed amendments and Rule 16 back-references.**
+- **D1 (b): The marker format for proposed amendments and Rule 16 back-references.** *(Answered: option i.)*
   - i. **Keep the existing heading convention (rec).** A proposed amendment is
     `## Amendment X (date) - PROPOSED, not accepted: ...`. Accepting it rewrites the marker
     to `- ACCEPTED (date):`. A back-reference is a one-line `> Amended by DR-NNN` or
@@ -309,7 +322,7 @@ item for the chief-of-staff queue, not as a PR question.
 
 ## Follow-ups (tracked)
 
-- D1 (a) option ii, if chosen: a DR, or an amendment to SPEC-251 D2, recording the bulk
+- D1 (a) option ii, chosen 2026-11-26 (c313d1): a DR, or an amendment to SPEC-251 D2, recording the bulk
   baseline. It is written at Plan and accepted by the founder. Tracked by this spec, SPEC-313.
 - Whether the FR-12 hook and CI rule ship in the adopter scaffold
   (`packages/minspec/src/lib/template-registry.ts`) is decided at Plan. Tracked by this spec,

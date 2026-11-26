@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-328-ruleset-advisory-tiered-wiring-proof/requirements.md",
+  "specHash": "35c46a57e344619532b12d090d8a536fc30697ca87ad58ca2d1ed5ae1fb3dcfe",
+  "approvedAt": "2026-11-23T20:19:56.150Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T2",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1123",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4024#issuecomment-7112005209"
+}
