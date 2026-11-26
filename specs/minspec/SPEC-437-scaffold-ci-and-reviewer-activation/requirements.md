@@ -24,14 +24,14 @@ Finish the two unbuilt slices of #564: (a) scaffold a `ci.yml` managed template 
 Init/Refresh tell the user — by exact name, consent-gated — which reviewer secrets and App
 install are still missing, so a scaffolded `ai-review` gate can actually go live.
 
-## Already built — do NOT rebuild (verified against code, 2026-10-16; re-checked 2026-11-27 — still no `ci.yml` template and no activation offer in `template-registry.ts`/`init.ts`)
+## Already built — do NOT rebuild (verified against code, 2026-10-16; re-checked 2026-11-27, line numbers refreshed — still no `ci.yml` template and no activation offer in `template-registry.ts`/`init.ts`)
 
 | #564 slice | State | Evidence |
 |---|---|---|
-| 1 — ai-review.yml, ready-to-merge.yml, ai-review-retry.yml + reviewer scripts/roles as managed files | **Built** | `template-registry.ts:2583` `CI_REVIEW_STACK_TEMPLATES` (workflows `:2586-2599`, scripts `:2628-2636`, roles `:2683-2701`, guard `:2707`); spread into the registry at `:2754`, `:2797` |
-| 2 — ruleset advisor requires Tier A (`ai-review`, `ready-to-merge`) once scaffolded | **Built** | `ruleset-advisor.ts:350-353` check constants; `:428` resolver builds from `DEFAULT_REQUIRED_CHECK_CONTEXTS`; wired in `init.ts:797-803` |
-| 3a — read-only probe: are all three reviewer secrets set? | **Built, boolean-only — extended by FR-4/FR-8, see FR-9** | `ruleset-advisor.ts:712` `REVIEWER_SECRETS` (single source of truth), `:768` `probeReviewerConfigured` declaration (returns at `:790`; names only, never values). It returns a plain `boolean`: every error path (non-zero `gh` exit, bad JSON, non-array) collapses to `false`, and it exposes no set of present names |
-| 4a — code-check detection from `package.json` scripts | **Built** | `ruleset-advisor.ts:378` `detectCodeChecks`; consumed `init.ts:802` |
+| 1 — ai-review.yml, ready-to-merge.yml, ai-review-retry.yml + reviewer scripts/roles as managed files | **Built** | `template-registry.ts:2965` `CI_REVIEW_STACK_TEMPLATES` (workflows `:2967-2987`, scripts `:3010-3057`, roles `:3065-3083`, guard `:3089`); spread into the registry at `:3138`, `:3181` |
+| 2 — ruleset advisor requires Tier A (`ai-review`, `ready-to-merge`) once scaffolded | **Built** | `ruleset-advisor.ts:373-377` check constants; `:441` resolver builds from `DEFAULT_REQUIRED_CHECK_CONTEXTS`; wired in `init.ts:818-826` |
+| 3a — read-only probe: are all three reviewer secrets set? | **Built, boolean-only — extended by FR-4/FR-8, see FR-9** | `ruleset-advisor.ts:734` `REVIEWER_SECRETS` (single source of truth), `:802` `probeReviewerConfigured` declaration (returns at the `return` inside it; names only, never values). It returns a plain `boolean`: every error path (non-zero `gh` exit, bad JSON, non-array) collapses to `false`, and it exposes no set of present names |
+| 4a — code-check detection from `package.json` scripts | **Built** | `ruleset-advisor.ts:400` `detectCodeChecks`; consumed `init.ts:823` |
 
 ## Remaining gap (the two slices this spec owns)
 
