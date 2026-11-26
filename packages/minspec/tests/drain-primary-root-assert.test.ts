@@ -48,4 +48,19 @@ describe('PRIMARY_ROOT work-tree assertion and sentinel display (#2006)', () => 
     const r = run(`short_sha df63a85c9210df63a85c9210df63a85c9210abcd; echo; short_sha noorigin; echo; short_sha norun`);
     expect(r.out.split('\n')).toEqual(['df63a85', '<unresolved:noorigin>', '<unresolved:norun>']);
   });
+
+  it('ensure_fresh_run_dir runs the assertion before BOTH origin/main comparisons', () => {
+    const src = fs.readFileSync(path.join(SCRIPTS, 'drain-inbox.sh'), 'utf-8');
+    const m = /^ensure_fresh_run_dir\(\) \{\n[\s\S]*?^\}$/m.exec(src);
+    expect(m).not.toBeNull();
+    const body = m![0];
+    const check = body.indexOf('assert_primary_is_worktree');
+    // The run-dir path (drain-service.sh starts the drain from the run dir) compares
+    // against origin/main first, so the check must precede that block too.
+    const runDirBlock = body.indexOf('local executing_from_run_dir=false');
+    const firstCompare = body.indexOf('rev-parse origin/main');
+    expect(check).toBeGreaterThan(-1);
+    expect(check).toBeLessThan(runDirBlock);
+    expect(check).toBeLessThan(firstCompare);
+  });
 });

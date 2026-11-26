@@ -1029,6 +1029,9 @@ ensure_fresh_run_dir() {
         return 0 ;;
   esac
 
+  # Before EITHER origin/main comparison below (the run-dir path returns early, so a check
+  # placed later never ran in production).
+  assert_primary_is_worktree || true   # swallow-ok: it already printed a loud ERROR; the fail-safe fallback below (children re-check, #481) is the intended behaviour
   GIT_TERMINAL_PROMPT=0 git -C "$PRIMARY_ROOT" fetch origin main -q 2>/dev/null || true
 
   # Executing FROM the run dir (drain-service.sh starts it there, #3747): never create,
@@ -1090,7 +1093,6 @@ ensure_fresh_run_dir() {
   # behind), do NOT export MINSPEC_FRESHNESS_CHECKED — fall back to in-place so each
   # child's own #481 guard fires instead of silently running STALE orchestration.
   local run_head origin_head
-  assert_primary_is_worktree || true   # swallow-ok: it already printed a loud ERROR; the fail-safe fallback below (children re-check, #481) is the intended behaviour
   run_head="$(git -C "$DRAIN_RUN_DIR" rev-parse HEAD 2>/dev/null || echo 'norun')"
   origin_head="$(git -C "$PRIMARY_ROOT" rev-parse origin/main 2>/dev/null || echo 'noorigin')"
   if [[ "$run_head" == "$origin_head" && -x "${DRAIN_RUN_DIR}/scripts/dispatch-issue.sh" ]]; then
