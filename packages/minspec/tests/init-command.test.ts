@@ -323,7 +323,7 @@ describe('initRefreshCommand() — write-failure surfacing (#153)', () => {
  * T3 — REGRESSION (#1546). SPEC-025 FR-6 still holds; what changed is WHO emits it.
  *
  * The advisory had two producers. The compliant one lives in `extension.ts` and
- * carries "Propose draft", "Generate with AI…" and "Don't ask again", honouring the
+ * carries "Propose draft", "Prepare AI prompt…" and "Don't ask again", honouring the
  * per-workspace skip flag. The one deleted here fired from the init command as a bare
  * `showInformationMessage` — no actions, and structurally unable to read the skip flag
  * (it took only a folder path, never an ExtensionContext), so it silently overrode the
