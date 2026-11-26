@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-381-voided-arm-requeues-delegated-merge/requirements.md",
+  "specHash": "e4c5b6e6080802703f13a02c878a8b89df8b32a71f82a02cb9c3f89f01ea8789",
+  "approvedAt": "2026-11-22T05:04:23.708Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:founder-picks-381-378-1122",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3954#issuecomment-7074417215"
+}

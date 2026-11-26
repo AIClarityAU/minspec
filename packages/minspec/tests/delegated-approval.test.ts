@@ -11,7 +11,7 @@
  *     that is not a pass, and a recording session that is the authoring one all deny;
  *   - the record it builds passes the validator's own predicate.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -20,6 +20,8 @@ import { BOT_ACTOR, type Delegation } from '../../../scripts/lib/autonomy';
 import { checkApprovalActor, type DelegationWitnesses } from '../../../scripts/lib/approval-actor';
 import {
   AI_REVIEW_WORKFLOW_PATH,
+  REVIEWER_APP_SLUG,
+  REVIEWER_LOGIN,
   authorIdentity,
   gatherReviewEvidence,
   parseCliArgs,
@@ -69,7 +71,8 @@ const W = (over: Partial<DelegationWitnesses> = {}): DelegationWitnesses => ({
   ...over,
 });
 
-const comment = (id: number, label: string, createdAt: string, login = BOT_ACTOR) => ({
+const REVIEW_APP_LOGIN = 'aiclarity-minspec-review[bot]';
+const comment = (id: number, label: string, createdAt: string, login: string = REVIEWER_LOGIN) => ({
   id,
   url: `https://github.com/${REPO}/pull/41#issuecomment-${id}`,
   login,
@@ -93,7 +96,7 @@ const evidence = (over: Partial<ReviewEvidence> = {}): ReviewEvidence => ({
     comment(200, 'pass', '2026-10-19T10:05:00Z'),
   ],
   checkRuns: [
-    { name: 'ai-review', status: 'completed', conclusion: 'success', appSlug: 'minspec-sdd', headSha: HEAD, completedAt: '2026-10-19T10:05:10Z' },
+    { name: 'ai-review', status: 'completed', conclusion: 'success', appSlug: REVIEWER_APP_SLUG, headSha: HEAD, completedAt: '2026-10-19T10:05:10Z' },
   ],
   workflowRuns: [
     { path: AI_REVIEW_WORKFLOW_PATH, event: 'pull_request', status: 'completed', headSha: HEAD, runStartedAt: '2026-10-19T10:00:30Z', updatedAt: '2026-10-19T10:05:20Z' },
@@ -191,14 +194,40 @@ describe('T0 — the review must be an independent CI pass on these bytes', () =
     expect(reason(planDelegatedApproval(input({ review: evidence({ checkRuns }) })))).toBe('ai-review-check-not-success');
   });
   it('a check from another app, on another commit, or under another name does not count', () => {
-    for (const patch of [{ appSlug: 'other-app' }, { appSlug: undefined }, { headSha: 'b'.repeat(40) }, { name: 'ai-review-runner' }]) {
+    for (const patch of [{ headSha: 'b'.repeat(40) }, { name: 'ai-review-runner' }]) {
       const checkRuns = [{ ...evidence().checkRuns[0], ...patch }];
       expect(reason(planDelegatedApproval(input({ review: evidence({ checkRuns }) })))).toBe('no-ai-review-check');
+    }
+    // An `ai-review` verdict on the head from an App this session does not trust is a
+    // forged verdict or a stale reviewer configuration: denied outright (#4078).
+    for (const patch of [{ appSlug: 'other-app' }, { appSlug: undefined }]) {
+      const checkRuns = [{ ...evidence().checkRuns[0], ...patch }];
+      expect(reason(planDelegatedApproval(input({ review: evidence({ checkRuns }) })))).toBe('reviewer-identity-mismatch');
     }
   });
   it('a later non-pass review supersedes an earlier pass', () => {
     const comments = [...evidence().comments, comment(300, 'changes', '2026-10-19T10:30:00Z')];
     expect(reason(planDelegatedApproval(input({ review: evidence({ comments }) })))).toBe('latest-review-not-pass');
+  });
+  it('#4078 T0: under AI_REVIEW_APP=review a pass written by the BUILDER App (check-run or comment) no longer clears a delegation', () => {
+    vi.stubEnv('AI_REVIEW_APP', 'review');
+    vi.stubEnv('AI_REVIEW_BOT_LOGINS', REVIEW_APP_LOGIN);
+    try {
+      // Builder check-run alongside a review-App comment: the builder check is foreign.
+      const reviewComment = [comment(200, 'pass', '2026-10-19T10:05:00Z', REVIEW_APP_LOGIN)];
+      expect(reason(planDelegatedApproval(input({ review: evidence({ comments: reviewComment }) })))).toBe('reviewer-identity-mismatch');
+      // Review-App check-run with a builder comment: no comment from the reviewer.
+      const reviewCheck = [{ ...evidence().checkRuns[0], appSlug: 'aiclarity-minspec-review' }];
+      expect(reason(planDelegatedApproval(input({ review: evidence({ checkRuns: reviewCheck }) })))).toBe('no-ai-review-comment');
+      // Both written by the review App: clears.
+      expect(planDelegatedApproval(input({ review: evidence({ checkRuns: reviewCheck, comments: reviewComment }) })).ok).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+  it('#4078: by default (AI_REVIEW_APP unset) the shipped reviewer is the builder App, as on main', () => {
+    expect(REVIEWER_LOGIN).toBe(BOT_ACTOR);
+    expect(planDelegatedApproval(input()).ok).toBe(true);
   });
   it('a pass from any other login is ignored', () => {
     const comments = [comment(150, 'pass', '2026-10-19T10:01:00Z', 'github-actions[bot]'), comment(151, 'pass', '2026-10-19T10:02:00Z', 'harvest316')];
@@ -396,5 +425,33 @@ describe('a delegated spec approval never changes the spec body (#3380)', () => 
     fs.writeFileSync(abs, '---\nid: DR-900\ntitle: x\nstatus: proposed\ndate: 2026-10-31\n---\n\n## Status\n\nProposed\n\n## Context\n\nx\n');
     expect(writeLifecycleHashNeutral(root, abs, 'engineering-dr-acceptance')).toBeUndefined();
     expect(fs.readFileSync(abs, 'utf-8')).toMatch(/status: accepted/);
+  });
+});
+
+describe('a delegated DR acceptance scopes INDEX.md to its own row (#581)', () => {
+  it("does not carry another DR's uncommitted status flip into the INDEX", async () => {
+    const { execFileSync } = await import('child_process');
+    const { regenerateDrIndex } = await import('../src/lib/adr-manager');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dlgidx-'));
+    fs.mkdirSync(path.join(root, '.minspec'), { recursive: true });
+    const dir = path.join(root, 'docs', 'decisions');
+    fs.mkdirSync(dir, { recursive: true });
+    const dr = (n: number): string =>
+      `---\nid: DR-${n}\ntitle: T${n}\nstatus: proposed\ndate: 2026-10-31\n---\n\n## Status\n\nProposed\n\n## Context\n\nctx ${n}\n`;
+    fs.writeFileSync(path.join(dir, 'DR-900.md'), dr(900));
+    fs.writeFileSync(path.join(dir, 'DR-901.md'), dr(901));
+    regenerateDrIndex(root);
+    const git = (...a: string[]): void => {
+      execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd: root, stdio: 'pipe' });
+    };
+    git('init', '-q');
+    git('add', '.');
+    git('commit', '-q', '-m', 'base');
+    // unrelated, uncommitted drift on DR-901
+    fs.writeFileSync(path.join(dir, 'DR-901.md'), dr(901).replace('status: proposed', 'status: accepted'));
+    expect(writeLifecycleHashNeutral(root, path.join(dir, 'DR-900.md'), 'engineering-dr-acceptance')).toBeUndefined();
+    const index = fs.readFileSync(path.join(dir, 'INDEX.md'), 'utf-8');
+    expect(index).toMatch(/DR-900[^\n]*\n\n\*Status: accepted/);
+    expect(index).toMatch(/DR-901[^\n]*\n\n\*Status: proposed/);
   });
 });

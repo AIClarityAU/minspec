@@ -7,6 +7,9 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a human act needs a witness the agent cannot forge
 aspects: [approval, dr-acceptance, extension-command, no-silent-gate]
 relates_to: [SPEC-251, SPEC-290, SPEC-041, DR-065, DR-056, DR-062, "#3017", "#3016", "#2861", "#2992", "#2628"]
+affects: [packages/minspec/src/commands/adr.ts, packages/minspec/package.json]
+implements: none
+implements_reason: creates no file of its own. The Accept Amendment command (Clarify decision 1) sits beside acceptAdrCommand and setAdrStatusCommand in the shared packages/minspec/src/commands/adr.ts, reusing their identity gate and writeRecord path (FR-3, FR-4), plus one command contribution in packages/minspec/package.json (FR-7); both are listed in affects:.
 phases:
   specify: in-progress
   clarify: pending
@@ -87,12 +90,18 @@ amendments queued (#2861, #2992, #2628) this will be done repeatedly.
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 2 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
+
 1. **Surface.** (rec) **A new "Accept Amendment" command**, because the name states the act and
    Accept ADR keeps its simple contract; cost: one more command and menu entry to maintain.
    Alternative: let **Accept ADR re-accept** when the hash drifted; cost: one command doing two
    acts, so a click meant as a first acceptance cannot be told from a re-acceptance by its label.
    Alternative: keep the two-step and document it; cost: two clicks per amendment and a
    committable intermediate `proposed` state.
+
+   **Recorded selection: the recommended option,** a new "Accept Amendment" command. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 2. **Confirmation.** (rec) Show a non-modal toast over the visible diff-vs-record before writing
    (HITL approval UX); cost: one extra click. Alternative: write immediately; cost: an
    accidental click accepts an unread amendment.
+
+   **Recorded selection: the recommended option,** a non-modal toast over the visible diff-vs-record before writing. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.

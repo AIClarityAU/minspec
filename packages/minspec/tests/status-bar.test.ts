@@ -16,6 +16,18 @@ vi.mock('vscode', () => ({
     createStatusBarItem: vi.fn(() => mockStatusBarItem),
   },
   StatusBarAlignment: { Left: 1, Right: 2 },
+  MarkdownString: class {
+    value = '';
+    isTrusted: unknown = false;
+    appendText(v: string) {
+      this.value += v;
+      return this;
+    }
+    appendMarkdown(v: string) {
+      this.value += v;
+      return this;
+    }
+  },
 }));
 
 import * as vscode from 'vscode';
@@ -23,6 +35,9 @@ import {
   MinSpecScaffoldCommitStatusBar,
   MinSpecNextTaskStatusBar,
   MinSpecTidyPrimaryStatusBar,
+  MinSpecQueueDepthStatusBar,
+  formatQueueDepthText,
+  resolveKeybinding,
   formatScaffoldCommitText,
   formatTidyPrimaryText,
   formatKeybindingForDisplay,
@@ -241,6 +256,17 @@ describe('resolveNextTaskKeybinding', () => {
       Object.defineProperty(process, 'platform', { value: original, configurable: true });
     }
   });
+
+  it('ships a mac override that avoids the Option+N dead key (#950)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const pkg = JSON.parse(readFileSync(resolve(__dirname, '../package.json'), 'utf8'));
+    const kb = pkg.contributes.keybindings.find(
+      (k: { command: string }) => k.command === 'minspec.nextTask',
+    );
+    expect(kb.mac).toBe('cmd+alt+n');
+    expect(kb.mac).not.toBe(kb.key);
+  });
 });
 
 // =============================================================================
@@ -264,14 +290,22 @@ describe('MinSpecNextTaskStatusBar class', () => {
   it('appends the shortcut to the tooltip for a pending task', () => {
     const bar = new MinSpecNextTaskStatusBar('Alt+N');
     bar.update(nextTask());
-    expect(mockStatusBarItem.tooltip).toBe('SPEC-001 is unapproved\nShortcut: Alt+N');
+    const tip = mockStatusBarItem.tooltip as unknown as { value: string; isTrusted: unknown };
+    expect(tip.value).toContain('SPEC-001 is unapproved\nShortcut: Alt+N');
+    expect(tip.value).toContain(
+      '[Change…](command:workbench.action.openGlobalKeybindings?%5B%22minspec.nextTask%22%5D)',
+    );
+    // trust scoped to the one command, never blanket `true`
+    expect(tip.isTrusted).toEqual({ enabledCommands: ['workbench.action.openGlobalKeybindings'] });
     expect(mockStatusBarItem.show).toHaveBeenCalled();
   });
 
   it('shows the shortcut even in the "clear" state', () => {
     const bar = new MinSpecNextTaskStatusBar('Alt+N');
     bar.update(null);
-    expect(mockStatusBarItem.tooltip).toBe('No pending review tasks.\nShortcut: Alt+N');
+    const tip = mockStatusBarItem.tooltip as unknown as { value: string };
+    expect(tip.value).toContain('No Pending Approvables.\nShortcut: Alt+N');
+    expect(tip.value).toContain('Change…');
   });
 
   it('omits the shortcut line when no keybinding is known (never invents one)', () => {
@@ -279,5 +313,48 @@ describe('MinSpecNextTaskStatusBar class', () => {
     bar.update(nextTask());
     expect(mockStatusBarItem.tooltip).toBe('SPEC-001 is unapproved');
     expect(mockStatusBarItem.tooltip).not.toContain('Shortcut');
+  });
+});
+
+// =============================================================================
+// Phase-advance queue-depth status bar (#737)
+// =============================================================================
+
+describe('MinSpecQueueDepthStatusBar (#737)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStatusBarItem.text = '';
+    mockStatusBarItem.tooltip = '';
+    mockStatusBarItem.command = '';
+  });
+
+  it('binds to minspec.viewQueue', () => {
+    new MinSpecQueueDepthStatusBar();
+    expect(mockStatusBarItem.command).toBe('minspec.viewQueue');
+  });
+
+  it('hides at zero depth', () => {
+    new MinSpecQueueDepthStatusBar().update([]);
+    expect(mockStatusBarItem.hide).toHaveBeenCalled();
+    expect(mockStatusBarItem.show).not.toHaveBeenCalled();
+  });
+
+  it('shows depth, oldest timestamp and the hotkey in the tooltip', () => {
+    const bar = new MinSpecQueueDepthStatusBar('Ctrl+K Ctrl+Y');
+    bar.update([
+      { specPath: 'specs/a/requirements.md', requestedAt: '2020-01-01T00:00:00.000Z' },
+      { specPath: 'specs/b/requirements.md' },
+    ]);
+    expect(mockStatusBarItem.text).toBe(formatQueueDepthText(2));
+    expect(mockStatusBarItem.tooltip).toContain('2020-01-01T00:00:00.000Z');
+    expect(mockStatusBarItem.tooltip).toContain('Shortcut: Ctrl+K Ctrl+Y');
+    expect(mockStatusBarItem.show).toHaveBeenCalled();
+  });
+
+  it('resolveKeybinding reads the shipped chord for minspec.viewQueue from the manifest', () => {
+    const pkg = { contributes: { keybindings: [{ command: 'minspec.viewQueue', key: 'ctrl+k ctrl+y' }] } };
+    const label = resolveKeybinding(pkg, 'minspec.viewQueue');
+    expect(label).toContain('K');
+    expect(resolveKeybinding(pkg, 'minspec.other')).toBeUndefined();
   });
 });

@@ -15,7 +15,7 @@
  * extension source can even import this package.
  */
 import { createAppAuth } from '@octokit/auth-app';
-import type { InstallationTokenFactory } from './mint';
+import { AppNotInstalledError, type InstallationTokenFactory } from './mint';
 
 /** Worker bindings. Secrets and vars are both plain strings at runtime. */
 export interface BrokerEnv {
@@ -75,12 +75,14 @@ export function makeInstallationTokenFactory(env: BrokerEnv): InstallationTokenF
         'user-agent': UA,
       },
     });
-    if (!lookup.ok) {
-      // Deliberately undifferentiated for now. Turning a 404 into the "install the App"
-      // 403 of AC-4 is task 2.1, which specifies its own integration test; writing that
-      // mapping here would leave the behaviour present but unverified.
-      throw new Error('installation lookup failed');
-    }
+    // 404 is GitHub's answer when the App has no installation covering this repository:
+    // not installed on the owner, or installed without access to this repo. It is the
+    // one lookup outcome the customer can fix, so it alone becomes AppNotInstalledError
+    // (task 2.1, AC-4). A 401/403 here means OUR App JWT was refused and a 5xx means
+    // GitHub failed; reporting either as "install the App" would blame the customer for
+    // a fault that is ours or GitHub's, so they stay undifferentiated.
+    if (lookup.status === 404) throw new AppNotInstalledError();
+    if (!lookup.ok) throw new Error('installation lookup failed');
     const installation = (await lookup.json()) as { id?: number };
     if (typeof installation.id !== 'number') throw new Error('installation lookup returned no id');
 

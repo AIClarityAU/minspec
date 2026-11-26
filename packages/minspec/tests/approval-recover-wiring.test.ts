@@ -218,6 +218,22 @@ describe('protected-branch recovery wiring — #1115', () => {
     expect(warnings.join('\n')).toContain('default branch');
   });
 
+  it('T3 in97: a FAILED recovery names WHY in the toast - the hook stderr, not only the console', async () => {
+    // 2026-11-22: five approvals in a row failed recovery on the founder's host; the
+    // toast said only "NOT committed", and the reason (a pre-commit gate failing closed)
+    // went to console.warn, which he cannot see. The reason must reach the toast.
+    CONFIG.pushOnApprove = 'always';
+    recoverMock.mockResolvedValue({
+      outcome: 'failed',
+      error: 'approval race gate: cannot resolve tsx - failing closed\nsecond line of stderr',
+    });
+    const r = await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+    expect(r.suffix).toContain('NOT committed');
+    const shown = warnings.join('\n');
+    expect(shown).toContain('cannot resolve tsx');
+    expect(shown).not.toContain('second line of stderr');
+  });
+
   // ── #1653 — the recovered branch must be FINISHED into a PR ────────────────
   //
   // The defect: this path stopped at a toast whose `Open PR` action opened the

@@ -257,7 +257,9 @@ export async function hasRequiredChecksRuleset(
 
   for (const rs of rulesets) {
     if (rs.target !== 'branch') continue;
-    if (rs.enforcement === 'disabled') continue;
+    // Only an ENFORCED ruleset counts as already configured: `evaluate`
+    // (dry-run/audit) and `disabled` do not block a merge (#369).
+    if (rs.enforcement !== 'active') continue;
     if (typeof rs.id !== 'number') continue;
 
     const detail = await runSafe(run, 'gh', [
@@ -289,8 +291,9 @@ interface RulesetDetail {
 }
 
 /**
- * Does this ruleset detail BOTH target a branch (default-branch sentinel or any
- * `refs/heads/*` include) AND carry a `required_status_checks` rule? Pure;
+ * Does this ruleset detail BOTH target the default branch (the `~DEFAULT_BRANCH`
+ * or `~ALL` sentinel — an explicit `refs/heads/*` include may name a NON-default
+ * branch, so it does not count, #369) AND carry a `required_status_checks` rule? Pure;
  * tolerant of partial / unexpected JSON.
  */
 export function rulesetGuardsDefaultBranchChecks(detail: unknown): boolean {
@@ -300,10 +303,7 @@ export function rulesetGuardsDefaultBranchChecks(detail: unknown): boolean {
   const include = d.conditions?.ref_name?.include;
   if (!Array.isArray(include)) return false;
   const targetsBranch = include.some(
-    (ref) =>
-      ref === '~DEFAULT_BRANCH' ||
-      ref === '~ALL' ||
-      (typeof ref === 'string' && ref.startsWith('refs/heads/')),
+    (ref) => ref === '~DEFAULT_BRANCH' || ref === '~ALL',
   );
   if (!targetsBranch) return false;
 
@@ -744,6 +744,14 @@ export const REVIEWER_SECRETS = [
  *   - `ANTHROPIC_API_KEY` — the PAYG quota-failover credential. `review-branch.sh`
  *     retries on it only when `AI_REVIEW_FAILOVER == payg` AND the key is set; with
  *     neither, the default `wait` path is unchanged.
+ *   - `MINSPEC_REVIEW_APP_ID` / `MINSPEC_REVIEW_APP_PRIVATE_KEY` — the review-only
+ *     GitHub App (#4078). Read only when the `AI_REVIEW_APP` repo variable is
+ *     `review`; unset (the shipped single-App default, DR-054) never touches them.
+ *     In `review` mode they DO become necessary, but their absence is not a silent
+ *     gap the probe must catch: ai-review.yml fails that run red with the reason and
+ *     never falls back to the builder App (constitution invariant 2). Folding them
+ *     into {@link REVIEWER_SECRETS} would instead report every single-App repo
+ *     "not configured" — the mirror-image deadlock described below.
  *
  * Deliberately NOT part of {@link REVIEWER_SECRETS}, and the distinction is the whole
  * point of this constant. {@link probeReviewerConfigured} answers "can this repo
@@ -759,7 +767,11 @@ export const REVIEWER_SECRETS = [
  * declared here — the anti-drift property survives the split. Adding a name to THIS
  * list is the explicit claim "the reviewer works without it".
  */
-export const REVIEWER_OPTIONAL_SECRETS = ['ANTHROPIC_API_KEY'] as const;
+export const REVIEWER_OPTIONAL_SECRETS = [
+  'ANTHROPIC_API_KEY',
+  'MINSPEC_REVIEW_APP_ID',
+  'MINSPEC_REVIEW_APP_PRIVATE_KEY',
+] as const;
 
 /**
  * Is the reviewer pipeline OPERATIONAL on the repo — are the secrets that make
