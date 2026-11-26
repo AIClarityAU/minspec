@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-407-large-file-reread-after-compact/requirements.md",
+  "specHash": "69181a2ca8b7320512a763778ecc4bcb1887f65eeaedaf06a47791d698967343",
+  "approvedAt": "2026-11-23T22:06:29.147Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1123",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4024#issuecomment-7112005209"
+}
