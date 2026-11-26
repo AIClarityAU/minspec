@@ -7,15 +7,17 @@ product: minspec
 epic: EPIC-002  # Signpost Integrity - a spec that says "built" when the code does not support it is a lying signpost
 aspects: [traceability, drift, false-built, validation, tier-0, offline, no-silent-gate, never-wrong, spec-gate]
 depends_on: [SPEC-038, DR-062]  # SPEC-038 supplies the file-level implements: edges this refines to symbols; DR-062 §6 names this work as its leg B (approvable to code)
-relates_to: [SPEC-041, SPEC-022, DR-053, DR-034, DR-069, DR-032, DR-003, "#643", "#362", "#626", "#627", "#681"]
+relates_to: [SPEC-041, SPEC-022, SPEC-308, SPEC-326, SPEC-051, DR-053, DR-034, DR-069, DR-032, DR-003, "#643", "#362", "#626", "#627", "#681"]
 # Ownership declared in Specify, before approval mints a hash (SPEC-038 FR-3). Every
 # path below is needed under every answer to the open questions: a pure verdict engine,
 # a symbol extractor, a link-store reader/writer, and the tests that pin each of them.
 # Paths are greenfield; FR-4 of SPEC-038 allows that.
 implements: [packages/shared/src/trace-graph.ts, packages/shared/tests/trace-graph.test.ts, packages/minspec/src/lib/symbol-index.ts, packages/minspec/src/lib/trace-links.ts, packages/minspec/tests/symbol-index.test.ts, packages/minspec/tests/trace-links.test.ts, packages/minspec/tests/trace-graph-validator.test.ts]
 # Modified, not owned: the corpus validator gains the trace check; the old line-anchored
-# store and its CodeLens consumer are migrated (FR-11); the shared barrel exports the engine.
-affects: [packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/traceability.ts, packages/minspec/src/views/codelens-provider.ts, packages/shared/src/index.ts, scripts/validate-frontmatter.ts]
+# store, its CodeLens consumer, the linkToSpec writer and the extension.ts file watcher are
+# migrated (FR-11); validate.ts supplies the symbol table the way it already supplies
+# pathExists (FR-12); the shared barrel exports the engine.
+affects: [packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/traceability.ts, packages/minspec/src/views/codelens-provider.ts, packages/minspec/src/extension.ts, packages/minspec/src/commands/validate.ts, packages/shared/src/index.ts, scripts/validate-frontmatter.ts]
 phases:
   specify: done
   clarify: pending
@@ -68,7 +70,8 @@ asserting a code fact the code does not support ("extracted to packages/shared",
 confirm", "Layer 2 delivered"). Those gates check the artifact against other artifacts. None
 checks it against code.
 
-**What exists today, measured in this checkout.**
+**What exists today, read from `origin/main` at `0274f0a9` (2026-11-26).** Line numbers
+below are from that commit and will rot; the symbol names are the stable reference.
 
 - **File-level ownership** - SPEC-038's `implements:` / `affects:` frontmatter (status
   `done`). It names files, explicitly allows paths that do not exist yet (SPEC-038 FR-4),
@@ -77,19 +80,42 @@ checks it against code.
 - **A line-anchored link store** - `packages/minspec/src/lib/traceability.ts` reads
   `.minspec/traceability.json`, whose schema (`traceability.ts:7-17`) stores
   a `files` list of entries shaped `<path>:<start>-<end>` - file plus line range. A CodeLens
-  (`packages/minspec/src/views/codelens-provider.ts`) consumes it. Line ranges are the
+  (`packages/minspec/src/views/codelens-provider.ts`) consumes it, the palette command
+  `minspec.linkToSpec` (`linkToSpecCommand`, `codelens-provider.ts:439`) writes it, and
+  `extension.ts:646` watches it to refresh the CodeLens. Line ranges are the
   exact anchor #643 says rots. This repo has no `.minspec/traceability.json`, so no link
   data exists here; adopters may have some (unverified).
+- **A file-level "claims implementation, code absent" rule - already built.**
+  `validateImplementEvidence` (`spec-validator.ts:1087`, rule
+  `implement.claimed-without-evidence`, #1751) fires when `phases.implement` is
+  `in-progress`/`done` and a declared `implements:` path does not exist on disk. Severity is
+  `config.implementEvidence`, default `warn` (`config.ts:180`); SPEC-308 (status `planning`)
+  decides its flip to error and closes its `implements: none` hole. That rule answers "does
+  the file exist?"; this spec answers "does the symbol FR-3 names exist, and has it changed?"
+  - one level finer, same family. Two things follow. First, the trace check must sit beside
+  that rule and reuse its caller-supplied-resolver shape (the lookup in
+  `commands/validate.ts`, the decision in the pure module), not re-derive "is this spec
+  claiming implementation?" with a second predicate that can drift from the first. Second,
+  that rule's contract is "omitting the resolver skips the check entirely"
+  (`spec-validator.ts:1078-1081`). That is acceptable for an advisory file check; it is NOT
+  acceptable here, because a skipped trace check reads as green - see FR-10.
+- **A report-only AI conformance check - specified, not built.** SPEC-326 (status
+  `planning`) asks a model whether a merged diff obeys the approved spec it implements, and
+  names "declared paths that vanish" as #643's job, not its own. The two are complementary:
+  this spec proves the named code *exists and is unchanged*; SPEC-326 judges whether it
+  *does what the spec says*. Neither substitutes for the other (FR-13).
 - **CodeGraph** - the issue proposes resolving symbols against "the existing CodeGraph
-  index". In this repo that index is `.codegraph/`, listed in `.gitignore:133` under the
+  index". In this repo that index is `.codegraph/`, listed in `.gitignore:136` under the
   comment "CodeGraph local index (33M+ SQLite db, machine-local, rebuilt on demand)". It is
   an external tool, not part of MinSpec, absent on a fresh clone and in CI, and DR-029 R5
   classes it Tier-1. **This spec therefore does not make CodeGraph the resolver** (see FR-5
   and OQ-1); the issue's "fresh clone / CI / teammate must see them" requirement cannot be
   met by a gitignored index.
 - **A test parser** - `packages/minspec/src/lib/test-scanner.ts` already extracts `it` /
-  `test` titles from test source (`test-scanner.ts:39`, `:165-204`). The test-anchor
-  resolver should reuse it rather than writing a second parser.
+  `test` titles from test source (the `testName` field, `test-scanner.ts:40`). It records the
+  test's own title only - no enclosing `describe` chain - so the title-path test anchor
+  below needs that chain added. The test-anchor resolver should extend that scanner rather
+  than write a second parser.
 - **The approval-time fingerprint primitive** - SPEC-041 FR-1 snapshots an upstream
   artifact's hash at approval and derives `upstream-stale` on read. DR-062 §6 says #643's
   drift flag "is exactly this DR's `upstreamDeps` primitive pointed at code". SPEC-041 is
@@ -135,7 +161,7 @@ and it is load-bearing.
   per-spec link record (location: OQ-2), not in `requirements.md` frontmatter. Reason: the
   symbols usually do not exist when the spec is approved, and adding them to frontmatter
   later would edit hashed bytes and stale the approval (SPEC-038 FR-3's note on
-  `canonical.ts`). The record's schema is a versioned, validated contract (a Zod schema or
+  `packages/shared/src/canonical.ts`). The record's schema is a versioned, validated contract (a Zod schema or
   TypeScript interface in `@aiclarity/shared`), and an unknown `version` is a visible error,
   never a silent skip.
 - **FR-3 - Anchors name symbols and tests, never lines.** A symbol anchor or test anchor
@@ -173,7 +199,10 @@ and it is load-bearing.
   - `exempt` - FR-4.
   - `untraced` - no link and no exemption.
   - `unresolvable` - an anchor is in a language or form the extractor cannot parse
-    (FR-10). Distinct from `broken`, and never reported as `linked`.
+    (FR-10), or it matches more than one symbol or test (two overload signatures, two
+    `it` blocks with the same title path). The finding states which case it is. Distinct
+    from `broken`, and never reported as `linked`; an ambiguous anchor is never resolved by
+    picking the first match.
   Links in the record whose requirement id no longer appears in the spec body are reported
   as **orphan links** (the requirement was renumbered or deleted).
 - **FR-8 - The engine is a pure function.** The verdict computation is a pure function of
@@ -192,7 +221,10 @@ and it is load-bearing.
   language it does not support, yields `unresolvable` for every anchor in it, reported by
   name. It MUST NOT count toward `linked` and MUST NOT silence a `done` check (FR-12). A
   crash inside the extractor fails the trace check closed and visibly, with the file named
-  (constitution invariant 2).
+  (constitution invariant 2). Unlike `validateImplementEvidence`, the trace check MUST NOT
+  treat a missing symbol table as "skip": a caller that supplies no symbol table for a spec
+  with a link record or a `done` status gets a visible finding ("trace check not run for
+  SPEC-NNN: no symbol table"), never an empty result.
 
 ### D. Where it reports
 
@@ -204,7 +236,9 @@ and it is load-bearing.
   it is not silently ignored.
 - **FR-12 - Corpus validator integration.** The corpus validator (`spec-validator.ts`,
   run by `npm run validate`) runs the trace check over every spec with a link record, and
-  over every spec whose literal or derived status is `done`. Severity per verdict follows
+  over every spec whose literal or derived status is `done`. The symbol table is built by
+  the caller (`commands/validate.ts` and `scripts/validate-frontmatter.ts`) and passed in,
+  the same split `implement.claimed-without-evidence` uses. Severity per verdict follows
   OQ-3. At minimum: `broken`, orphan links, line-number anchors, undeclared paths and
   extractor failures are reported by spec, requirement id and anchor; `drifted` is reported
   and names the requirement to re-read.
@@ -213,7 +247,10 @@ and it is load-bearing.
   ("SPEC-NNN says done; FR-3 is untraced"). The reverse MUST NOT hold: all requirements
   `linked` does **not** make a spec `done` or move any phase. A resolving symbol proves the
   code exists, not that it does what the requirement says - artifact existence is not
-  feature existence (CLAUDE.md, Evidence Discipline). Whether `deriveStatus`
+  feature existence (CLAUDE.md, Evidence Discipline). This finding refines
+  `implement.claimed-without-evidence` (file absent) to the symbol level; when both fire on
+  one spec the trace finding names the requirement and the file finding names the path, and
+  neither suppresses the other. Whether `deriveStatus`
   (`packages/minspec/src/lib/lifecycle.ts:133`) should itself floor such a spec is OQ-7;
   this spec delivers the validator finding only.
 - **FR-14 - Recording and refreshing links.** A link can be written or its fingerprints
@@ -254,6 +291,10 @@ and it is load-bearing.
 - **AC-14 (both directions, #137)** - A test asserts the check fails on a *missing* link
   for a `done` spec AND on an *invalid* present link, so the validator-asymmetry class
   cannot return.
+- **AC-15 (no silent skip)** - Calling the trace check with no symbol table for a spec that
+  has a link record produces a visible finding, not an empty result (FR-10).
+- **AC-16 (ambiguity)** - A test anchor whose title path matches two `it` blocks reports
+  `unresolvable` (ambiguous), never `linked` (FR-7).
 
 ## Invariants (must not break)
 
@@ -366,7 +407,8 @@ Each option names the recommendation **(rec)** and what the recommendation costs
 
 ### OQ-7 - Should `deriveStatus` consume the trace verdict?
 
-- **a - Not in this spec; validator finding only. (rec)** Keeps the blast radius off the
+- **a - Not in this spec; validator finding only. (rec)** SPEC-308 also keeps `deriveStatus`
+  out of scope, so this stays consistent with the nearest sibling. Keeps the blast radius off the
   signpost derivation (DR-034, DR-069) until the verdicts have run on the real corpus.
   Cost: the signpost may still show `done` for a spec the validator flags, until a
   follow-on wires the floor in.
@@ -439,5 +481,7 @@ so at least one test asserts a non-empty symbol table before asserting a verdict
   symbol plus test, not line), [DR-032](../../../docs/decisions/DR-032.md) (same
   deterministic-gate family).
 - Layering, lowest first: deterministic artifact gates (#626, dangling-ref,
-  accepted-on-proposed), then status derivation, then **this trace graph**, then the AI
-  panel as the semantic backstop.
+  accepted-on-proposed), then status derivation and the file-level evidence rule
+  (`implement.claimed-without-evidence`, SPEC-308), then **this trace graph** (symbol-level),
+  then the AI checks as the semantic backstop: the review panel and SPEC-326's post-merge
+  conformance report.
