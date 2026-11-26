@@ -37,9 +37,9 @@ without ever contacting GitHub outside the user's Backlog gesture (SPEC-085).
   a single `inFlight` promise, so there is nowhere to hold "folder A loaded, folder B failed".
 - `SpecTreeProvider` / `AdrTreeProvider` already enumerate folders through
   `allWorkspaceRoots()` (`packages/minspec/src/lib/resolve-folder.ts:106`) and render a folder tier only when more
-  than one root exists (`spec-tree-provider.ts:363-378`, `SpecFolderNode`, #549).
+  than one root exists (`spec-tree-provider.ts:366-375`, `SpecFolderNode` at `:285`, #549).
 - `onDidChangeWorkspaceFolders` already calls `backlogTreeProvider.refreshIfStale()`
-  (`extension.ts:253-257`), which only re-renders and starts no `gh` (SPEC-085 FR-1/FR-4).
+  (`extension.ts:250-257`), which only re-renders and starts no `gh` (SPEC-085 FR-1/FR-4).
 
 **Why this is not a copy of #549.** Specs/DRs aggregate local files. Backlog aggregates GitHub
 issues through `gh`, one process per repository. That adds three things the tree fix did not
@@ -125,7 +125,7 @@ repo while others succeed); (3) several folders that may map to the same reposit
    empty list; one folder's failure never hides another's data.
 3. Blast radius (constitution 3). No behaviour change in single-root workspaces (FR-2).
 4. `refresh` / `refreshIfStale` remain the provider's public surface (two activation suites pin
-   them; SPEC-085 comment at `backlog-view.ts:302`).
+   them; SPEC-085 comment at `backlog-view.ts:301-304`).
 
 ## Decisions needed (Clarify)
 
