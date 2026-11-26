@@ -12,6 +12,9 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { classifyWorktree } from '../../../scripts/lib/worktree-salvage';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+useShellTimeout();
 
 const none = { stagedNumstat: '', unstagedNumstat: '', untracked: [] as string[] };
 
