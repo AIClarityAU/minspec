@@ -24,7 +24,7 @@ Finish the two unbuilt slices of #564: (a) scaffold a `ci.yml` managed template 
 Init/Refresh tell the user — by exact name, consent-gated — which reviewer secrets and App
 install are still missing, so a scaffolded `ai-review` gate can actually go live.
 
-## Already built — do NOT rebuild (verified against code, 2026-10-16)
+## Already built — do NOT rebuild (verified against code, 2026-10-16; re-checked 2026-11-27 — still no `ci.yml` template and no activation offer in `template-registry.ts`/`init.ts`)
 
 | #564 slice | State | Evidence |
 |---|---|---|
