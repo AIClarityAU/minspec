@@ -171,7 +171,7 @@ it precedes the unset.
   tracked in #4140, all failing closed (never a false green): timeline lag can turn a fresh
   `success` red; a run it replaces in the queue skips its provenance revert and stale-pass
   strip; a PR read failure posts on the reviewed head; and a newer head whose queued run it
-  replaced can have no status until that head's own review completes.
+  replaced can have no status until the next gate run for that head that writes one.
 - The forge DR-115 accepts (a same-repo PR editing a non-machinery path cannot post as
   `github-actions` without touching `.github/`, so FR6 closes the workflow route).
 
