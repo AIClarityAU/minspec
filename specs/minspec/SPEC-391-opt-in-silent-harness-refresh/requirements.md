@@ -266,6 +266,8 @@ today.
   the kind of split DR-003's RCDD discipline flags as a tell that the real fix is a shared
   gate, not a second copy.
 
+**Recorded selection: the recommended option,** Option B, a `silent` flag on `initRefreshCommand`, carried in `deps`, that skips only the two advisory calls. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-26; sign-off ratifies it.
+
 ### DQ-2 — Should the silent-path notification name the count of refreshed sections (the
 issue's proposed wording), or keep `refreshSummaryMessage`'s existing, evidence-bounded text?
 
@@ -284,6 +286,8 @@ wording work in this spec).
   post-refresh message, a second message string to keep in sync with
   `refreshSummaryMessage`'s truthfulness rules, and a wording difference between the silent
   and manual paths that a user switching between them would need to notice is intentional.
+
+**Recorded selection: the recommended option,** Option A, the existing `refreshSummaryMessage` text, unchanged, for both paths. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-26; sign-off ratifies it.
 
 ## Out of Scope
 
