@@ -582,10 +582,14 @@ function parsePatchFingerprint(text) {
 }
 
 // The review protocol's control tokens. Named here so this module has ONE definition
-// instead of two, and so a cross-file test can pin them against the other sites that
-// hardcode the same literals - scripts/review-decide.sh, scripts/review-branch.sh and
-// .github/workflows/ai-review.yml. They cannot be IMPORTED there (two of the three are
-// bash), so a shared constant cannot be the mechanism; the test is (#2163 review).
+// instead of two. The other sites that hardcode the same literals -
+// scripts/review-decide.sh, scripts/review-branch.sh and .github/workflows/ai-review.yml -
+// cannot IMPORT them (two of the three are bash), so a shared constant cannot be the
+// mechanism; a cross-file test that reads those files is (#2163 review). One case per
+// (site, token) pins them, for example:
+//   ai-review-guard.test.js: "review protocol tokens: scripts/review-decide.sh still uses REVIEW_VERDICT_BEGIN"
+//   ai-review-guard.test.js: "review protocol tokens: scripts/review-branch.sh still uses REVIEW_UNAVAILABLE"
+//   ai-review-guard.test.js: "review protocol tokens: .github/workflows/ai-review.yml still uses REVIEW_VERDICT_END"
 const VERDICT_BEGIN_TOKEN = 'REVIEW_VERDICT_BEGIN';
 const VERDICT_END_TOKEN = 'REVIEW_VERDICT_END';
 const UNAVAILABLE_TOKEN = 'REVIEW_UNAVAILABLE';
@@ -714,8 +718,10 @@ function parseVoterRecords(text) {
  * reuse happened "within ONE head SHA" while the code compared only the patch
  * fingerprint and never looked at `head_sha` - so it reused across commits whenever the
  * diff matched, which IS the base-moved case #1840 was closed over, justified by a
- * sentence saying it was not. Three voters caught it; the diff's own test reused across
- * two SHAs and proved it.
+ * sentence saying it was not. Three voters caught it; the first version's own test fed
+ * runs on two different SHAs, asserted reuse across them, and so proved the defect. What
+ * pins the fix now:
+ *   ai-review-guard.test.js: "selectVotersToRun: refuses to reuse a record from a DIFFERENT head SHA, same patch or not"
  *
  * The fix narrows the CODE to the claim rather than widening the claim to the code,
  * because the claim is what makes the feature safe and the narrowing costs nothing:
@@ -731,7 +737,10 @@ function parseVoterRecords(text) {
  * Among candidates on that SHA, the MOST RECENT wins, by `checkRunTime` - the same
  * ordering verifyHeadPassCheckRun uses, so a re-run's fresher record supersedes an
  * earlier one. Caller array order is deliberately NOT load-bearing: it was, and the
- * test asserting recency passed only because the fixture happened to be ordered.
+ * first recency check passed only because its fixture happened to be ordered. Pinned now,
+ * with the fixture ordered oldest first and then reversed:
+ *   ai-review-guard.test.js: "selectVotersToRun: reuses the MOST RECENT record on this head, by timestamp not array order"
+ *   ai-review-guard.test.js: "selectVotersToRun: is order-independent: the same inputs reversed give the same answer"
  */
 function selectVotersToRun({ roles, checkRuns, patchHash, allowlist, headSha } = {}) {
   const wanted = Array.isArray(roles) ? roles.slice() : [];
@@ -914,7 +923,10 @@ function findReattestableVerdict({ checkRuns, patchHash, allowlist } = {}) {
 // NOT BOUND, AND SAID SO: project context the reviewer CLI loads by convention
 // (CLAUDE.md and the like) and every other file in the base checkout. They are the
 // same class as "the base moved" above. PANEL_KEY_PATHS is the review machinery the
-// scripts name explicitly, and a test pins it to what review-branch.sh reads.
+// scripts name explicitly. No shipped test checks that list against what
+// review-branch.sh actually reads; what is pinned is narrower - a listing that cannot be
+// read, or lacks a required path, yields no key, so nothing carries:
+//   ai-review-guard.test.js: "#1688 panel key: an unreadable or incomplete listing yields NO key, so nothing carries"
 
 /** The disclosure label a carried verdict wears. NOT a verdict label (see VERDICT_LABELS). */
 const CARRIED = 'ai-review:carried';
@@ -1399,6 +1411,75 @@ function parseAllowlist(raw) {
     .split(/[\s,]+/)
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
+}
+
+// #4078 — which App writes the verdicts, and so which logins the gates believe.
+//
+// Two shapes, chosen by the repo/org Actions variable `AI_REVIEW_APP`:
+//   • unset (or `builder`) — the shipped single-App default (DR-054): the verdicts are
+//     posted by the same App that builds, `minspec-sdd[bot]`, and the allowlist is
+//     whatever AI_REVIEW_BOT_LOGINS resolves to (the workflows default it to that
+//     login). Every scaffolded repo runs this way until a separate decision says
+//     otherwise.
+//   • `review` — a SECOND App, used only by ai-review.yml, writes the verdicts, so the
+//     builder App every agent session can obtain can no longer post one that counts
+//     (#2589). Here the builder login on the allowlist is a misconfiguration that would
+//     re-open exactly that hole, so it is REFUSED: the allowlist resolves to empty and
+//     every gate reading it fails closed, with this reason on it.
+// Any other value is a typo, never a silent fall-back to the builder (constitution
+// invariant 2): it resolves to an empty allowlist with a fault naming the value.
+//
+// Pure. `raw` is the AI_REVIEW_BOT_LOGINS string AFTER the workflow's own default.
+const SHIPPED_REVIEWER_LOGIN = 'minspec-sdd[bot]';
+const REVIEW_APP_MODE = 'review';
+function resolveReviewerAllowlist({ mode, raw } = {}) {
+  const m = String(mode == null ? '' : mode).trim().toLowerCase();
+  if (m !== '' && m !== 'builder' && m !== REVIEW_APP_MODE) {
+    return {
+      mode: m,
+      allowlist: [],
+      fault:
+        `AI_REVIEW_APP is \`${sanitizeLogin(m)}\`, which is neither \`${REVIEW_APP_MODE}\` nor unset - ` +
+        'the reviewer identity cannot be resolved',
+    };
+  }
+  const allowlist = parseAllowlist(raw);
+  if (m === REVIEW_APP_MODE) {
+    const builderSlug = SHIPPED_REVIEWER_LOGIN.replace(/\[bot\]$/, '');
+    if (allowlist.some((l) => l === SHIPPED_REVIEWER_LOGIN || l === builderSlug)) {
+      return {
+        mode: m,
+        allowlist: [],
+        fault:
+          `AI_REVIEW_APP is \`${REVIEW_APP_MODE}\` but AI_REVIEW_BOT_LOGINS still names the builder App ` +
+          `\`${SHIPPED_REVIEWER_LOGIN}\` - set it to the review App's login only`,
+      };
+    }
+    if (allowlist.length === 0) {
+      return {
+        mode: m,
+        allowlist: [],
+        fault: `AI_REVIEW_APP is \`${REVIEW_APP_MODE}\` but AI_REVIEW_BOT_LOGINS is empty - set it to the review App's login`,
+      };
+    }
+  }
+  return { mode: m === '' ? 'builder' : m, allowlist, fault: '' };
+}
+
+// #4078 (PR #4086 review) — the ONE reviewer-identity rule, from the same two inputs the
+// workflows read, with the workflows' own default applied. ai-review.yml and
+// ready-to-merge.yml pass `vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]'` and
+// `vars.AI_REVIEW_APP` into resolveReviewerAllowlist; a caller outside a workflow (the
+// delegated approval and merge paths in scripts/lib/delegated-approval.ts) passes its
+// environment here and gets the identical answer, so the two can never trust different
+// Apps for the same configuration. Pure: `env` is a plain object (`process.env` or a
+// test fixture); nothing here reads the process.
+function resolveReviewerFromEnv(env) {
+  const e = env && typeof env === 'object' ? env : {};
+  // `||`, not `??`: an EMPTY variable takes the default, exactly as the workflow
+  // expression `vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]'` does.
+  const raw = e.AI_REVIEW_BOT_LOGINS || SHIPPED_REVIEWER_LOGIN;
+  return resolveReviewerAllowlist({ mode: e.AI_REVIEW_APP, raw });
 }
 
 // Is `login` one of the configured reviewer identities?
@@ -2229,6 +2310,10 @@ module.exports = {
   renderVerdictBlock,
   parseCliVerdict,
   parseAllowlist,
+  resolveReviewerAllowlist,
+  resolveReviewerFromEnv,
+  SHIPPED_REVIEWER_LOGIN,
+  REVIEW_APP_MODE,
   isAuthorizedReviewer,
   decideProvenanceRevert,
   decideStalenessStrip,

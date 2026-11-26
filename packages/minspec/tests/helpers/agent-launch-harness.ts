@@ -250,6 +250,9 @@ if [[ "$noun $verb" == "api graphql" ]]; then
     # it is answered "no native blockers" and kept out of gh-calls.log, which pins the
     # author gate's reads exactly.
     *"blockedBy("*) echo '{"data":{"repository":{"issue":{"blockedBy":{"totalCount":0,"nodes":[]}}}}}'; exit 0 ;;
+    # The dispatch gate's open-closing-PR read (#3161): likewise not a provenance read, so
+    # it is answered "no open PRs" and kept out of gh-calls.log.
+    *"pullRequests(states:OPEN"*) echo '{"data":{"repository":{"pullRequests":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}}'; exit 0 ;;
     *"issue("*) third="issue:$number"; answer="$dir/provenance.$number.json" ;;
     *) third="unrecognised" ;;
   esac

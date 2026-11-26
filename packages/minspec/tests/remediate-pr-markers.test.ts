@@ -52,11 +52,16 @@ function markersInSource(): string[] {
 
 type Comment = { author?: { login?: string }; body?: string };
 
+// The marker contract is independent of the Caveman trial; its launch notice goes to
+// stderr, so pin the trial off in every child instead of inheriting the ambient setting.
+const CHILD_ENV = { ...process.env, MINSPEC_CAVEMAN_MODE: 'off' };
+
 function countMarkers(marker: string, comments: Comment[] | string, authors?: string): string {
   const args = [SCRIPT, '--count-markers', marker];
   if (authors !== undefined) args.push(authors);
   return execFileSync('bash', args, {
     encoding: 'utf-8',
+    env: CHILD_ENV,
     input: typeof comments === 'string' ? comments : JSON.stringify({ comments }),
   }).trim();
 }
@@ -65,13 +70,7 @@ function countMarkers(marker: string, comments: Comment[] | string, authors?: st
 // first argument, so "exit code 1" alone cannot tell a gate REJECTING its input from a
 // build that never had the gate. Tests below assert the distinguishing message.
 function run(args: string[], input?: string): { code: number; stdout: string; stderr: string } {
-  // MINSPEC_CAVEMAN_MODE=off: sourcing agent-context.sh prints a "Caveman trial" notice on
-  // stderr whenever the trial is on (default), which is not what these tests assert about.
-  const r = spawnSync('bash', [SCRIPT, ...args], {
-    encoding: 'utf-8',
-    input: input ?? '',
-    env: { ...process.env, MINSPEC_CAVEMAN_MODE: 'off' },
-  });
+  const r = spawnSync('bash', [SCRIPT, ...args], { encoding: 'utf-8', env: CHILD_ENV, input: input ?? '' });
   return { code: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
@@ -287,6 +286,7 @@ describe('remediate-pr.sh --cap-notice-decision: the "capped — needs a human" 
     return r.stdout.trim();
   };
 
+  const phantomFallback: Comment = { author: { login: 'reviewer' }, body: `quoted: ${CAPPED}` };
   const ourNotice: Comment = { author: { login: 'drain-operator' }, body: `## 🛑 capped\n${CAPPED}` };
   // A phantom: an ai-review comment quoting this file, ending with the capped marker.
   const phantomNotice: Comment = { author: { login: 'minspec-sdd[bot]' }, body: `quoting the diff:\n${CAPPED}` };
@@ -318,6 +318,19 @@ describe('remediate-pr.sh --cap-notice-decision: the "capped — needs a human" 
     // `" , "` passes `[[ -n … ]]` but survives the trim as zero logins.
     expect(decide([ourNotice], ' , ')).toBe('post');
     expect(decide([ourNotice], '   ')).toBe('post');
+  });
+
+  it('unprovable authorship: our own prior notice (heading + marker) still dedups (#3054)', () => {
+    const real: Comment = {
+      author: { login: 'minspec-sdd[bot]' },
+      body: `## 🛑 Auto-remediation capped — needs a human\n\nbody\n${CAPPED}`,
+    };
+    expect(decide([real])).toBe('skip');
+    expect(decide([real], ' , ')).toBe('skip');
+  });
+
+  it('unprovable authorship: a phantom quoting the marker without the heading still posts', () => {
+    expect(decide([phantomFallback])).toBe('post');
   });
 
   it('rejects a wrong arg count with a usage error', () => {
@@ -442,7 +455,7 @@ describe('remediate-pr.sh: a failed `gh api user` never becomes the author allow
     fs.writeFileSync(path.join(dir, 'gh'), `#!/usr/bin/env bash\n${ghScript}\n`, { mode: 0o755 });
     const r = spawnSync('bash', [SCRIPT, '--resolve-self-login'], {
       encoding: 'utf-8',
-      env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
+      env: { ...CHILD_ENV, PATH: `${dir}:${process.env.PATH}` },
     });
     return r.stdout.trim();
   }

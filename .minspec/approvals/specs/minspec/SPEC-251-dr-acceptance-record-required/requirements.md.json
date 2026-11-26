@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-251-dr-acceptance-record-required/requirements.md",
+  "specHash": "1b9a749556e8d1f4355d9fc495e5c0f4b731b2897e0c230f3f4776f24702e480",
+  "approvedAt": "2026-11-12T05:39:19.156Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-pile-1112a-implements",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3630#issuecomment-6815532762"
+}

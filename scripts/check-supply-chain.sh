@@ -8,7 +8,11 @@
 # Bypass with SKIP_SUPPLY_CHAIN_CHECK=1 (use only for known-good emergency cuts).
 #
 # Catalogs live in ~/.cache/bumblebee/catalogs/*.json. Empty catalog dir =
-# pre-flight inventory only (script still fails on bumblebee errors).
+# pre-flight inventory only (script still fails on bumblebee errors) — EXCEPT in
+# release mode: SUPPLY_CHAIN_REQUIRE_CATALOGS=1 (set by `npm run package:release`, #2410)
+# makes an empty catalog dir exit 2, since a release's "green" must mean "compared
+# against a catalog", not just "a scan ran". The require switch is not bypassed by
+# an empty dir; only SKIP_SUPPLY_CHAIN_CHECK=1 skips the whole gate.
 #
 # BUMBLEBEE_VERSION below also pins scripts/fetch-bumblebee-catalogs.sh's catalog
 # fetch ref. The version pins across FOUR surfaces (both scripts + ci.yml +
@@ -165,9 +169,50 @@ check_go_version() {
 }
 # ----------------------------------------------------------------------------
 
-# Self-install bumblebee on first run. A missing toolchain or a failed install is a
+# Does the binary already at $BUMBLEBEE_BIN match the pin (#582)? A machine whose binary
+# predates the pin (installed @latest) would otherwise be used forever, so the pin would
+# only hold for fresh installs. Reads the module version from the binary's embedded build
+# info (`go version -m`). A SHA pin is a pseudo-version ending in the first 12 hex chars
+# of the SHA (v0.0.0-<date>-<sha12>); a tag pin compares equal.
+#   0 = installed version matches the pin
+#   1 = installed version is known and DIFFERENT (stale / unpinned) → reinstall
+#   2 = cannot tell (no Go toolchain, or no readable build info, e.g. a non-Go stand-in
+#       binary) → proceed with the existing binary, with a warning; never fail on it
+installed_matches_pin() {
+  _g="$(resolve_go_bin || true)"  # swallow-ok: empty is handled on the next line as "cannot tell"
+  [ -n "$_g" ] || return 2
+  _mod="$("$_g" version -m "$BUMBLEBEE_BIN" 2>/dev/null | sed -n 's/^[[:space:]]*mod[[:space:]][[:space:]]*github.com\/perplexityai\/bumblebee[[:space:]][[:space:]]*\([^[:space:]]*\).*/\1/p' | head -n 1)" || return 2
+  [ -n "$_mod" ] || return 2
+  case "$BUMBLEBEE_VERSION" in
+    *[!0-9a-f]*|"") _want="$BUMBLEBEE_VERSION" ;;
+    *) _want="$(printf '%s' "$BUMBLEBEE_VERSION" | cut -c1-12)" ;;
+  esac
+  case "$_want" in
+    v*) [ "$_mod" = "$_want" ] && return 0 || return 1 ;;
+    *) case "$_mod" in *-"$_want") return 0 ;; *) return 1 ;; esac ;;
+  esac
+}
+
+# Self-install bumblebee on first run, and reinstall when an existing binary is not the
+# pinned version (#582). A missing toolchain or a failed install is a
 # scan-COULD-NOT-RUN condition (exit 2), never a finding — the scan never happened.
+NEED_INSTALL=0
 if [ ! -x "$BUMBLEBEE_BIN" ]; then
+  NEED_INSTALL=1
+else
+  _rc=0
+  installed_matches_pin || _rc=$?
+  case "$_rc" in
+    1)
+      echo "check-supply-chain: existing $BUMBLEBEE_BIN is not bumblebee $BUMBLEBEE_VERSION — reinstalling the pinned version" >&2
+      NEED_INSTALL=1
+      ;;
+    2)
+      echo "check-supply-chain: warning — could not verify $BUMBLEBEE_BIN against pin $BUMBLEBEE_VERSION (no Go toolchain or build info); using it as-is" >&2
+      ;;
+  esac
+fi
+if [ "$NEED_INSTALL" = "1" ]; then
   # Not `if ! GO_RESOLVED=$(...)` — under `set -e` that form is fine, but keeping the
   # assignment separate makes the failure branch explicit and the exit code readable.
   GO_RESOLVED="$(resolve_go_bin || true)"  # swallow-ok: the next line branches on empty explicitly and takes the unresolved path
@@ -229,6 +274,12 @@ mkdir -p "$OUT_DIR" "$CATALOG_DIR"
 CATALOG_FLAG=""
 if [ -n "$(ls -1 "$CATALOG_DIR"/*.json 2>/dev/null)" ]; then
   CATALOG_FLAG="--exposure-catalog=$CATALOG_DIR"
+elif [ "${SUPPLY_CHAIN_REQUIRE_CATALOGS:-}" = "1" ]; then
+  echo "✗ check-supply-chain: no exposure catalogs in $CATALOG_DIR and SUPPLY_CHAIN_REQUIRE_CATALOGS=1 (release mode)." >&2
+  echo "  A release must be compared against a threat catalog. Run scripts/fetch-bumblebee-catalogs.sh" >&2
+  echo "  (or use \`npm run package:release\`, which does), then retry." >&2
+  echo "  (exit 2: could not run the comparison — not a threat finding)" >&2
+  exit 2
 fi
 
 echo "check-supply-chain: scanning $REPO_ROOT" >&2

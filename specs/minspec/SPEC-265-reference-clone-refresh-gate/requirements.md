@@ -1,7 +1,7 @@
 ---
 id: SPEC-265
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - a stale upstream copy is a supply-chain signpost that lies
@@ -10,13 +10,13 @@ depends_on: []
 relates_to: ["#2846", "#2705", "#230", "#231", "#232"]
 implements: none
 implements_reason: >-
-  Clarify answers are recorded but not ratified (D1-D5, all option (a)). The files this spec will
+  Clarify answers are recorded, binding once this spec is approved (D1-D5, all option (a)). The files this spec will
   own (a hook script under scripts/hooks/, a registry file, a settings.json entry, a scheduled lag
   check) are still fixed at Plan; no recorded option names them by path, so implements stays none.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -24,8 +24,8 @@ phases:
 # SPEC-265: Reference clones are refreshed before an agent relies on them - a gate, not a remembered rule
 
 > **This is a SPECIFICATION ONLY.** Written for issue #2846 (refresh reference repos before
-> use). Nothing is built until a human reads it, answers
-> [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it. No decision record
+> use). Nothing is built until its
+> [Decisions needed (Clarify)](#decisions-needed-clarify) are answered and it is approved. No decision record
 > is created: every choice here is a hook and a config file, undone in well under a day
 > (the "cannot be undone in under a day" decision-record filter).
 
@@ -200,10 +200,10 @@ hook; the missing witness for vendored copies is any recorded comparison against
 
 ## Decisions needed (Clarify)
 
-All 5 decisions are answered, not ratified: an agent session selected, for each, the option this document
+All 5 decisions are answered: an agent session selected, for each, the option this document
 already recommended. No human chose them, and no delegation covers authoring Clarify answers
-(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). This spec is
-unapproved, so these answers bind nothing until a human or a covered delegation approves it.
+(DLG-001, DR-108, covers spec approval and engineering-DR acceptance only). These answers
+bind once this spec is approved, by a human or a covered delegation, and not before.
 
 - **D1 - Recorded selection: Option (a),** if #2705 is a scheduled lag check, fold FR-10..FR-13
   into it and cut half 2 from this spec.

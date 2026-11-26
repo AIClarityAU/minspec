@@ -50,7 +50,7 @@
 # Testable pure seams (no gh/git/claude):
 #   scripts/remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> \
 #       <labels_csv> <failing_non_review:yes|no> <ai_review_bad:yes|no> \
-#       [<live_nonself_claim:yes|no>]
+#       [<live_nonself_claim:yes|no> [<sweep_defer_pass:yes|no> [<pass_witnessed:yes|no>]]]
 #     → prints ONE action token: skip-not-automation | skip-live-owned | skip-conflict |
 #       agent-remediate-checks | agent-remediate-review | dlg-rerun | rebase-only | retry-unknown |
 #       skip-clean | skip-unhandled-state
@@ -180,6 +180,10 @@ classify_pr() {
   # is already ai-review:pass is left for its one-at-a-time merge-time refresh instead
   # of being merged-into on every cycle (which restarts CI on every green PR).
   local sweep_defer_pass="${8:-no}"
+  # #4078: is the pass WITNESSED — a `ready-to-merge` success posted by GitHub Actions on
+  # this head (scripts/lib/ready-witness.sh)? The bare `ai-review:pass` label is writable
+  # by the builder App every agent session holds, so it no longer steers the sweep.
+  local pass_witnessed="${9:-no}"
 
   # 1. Scope gate — only automation branches (and, #3036, delegated-approval branches,
   #    which are limited to mechanical actions below).
@@ -226,7 +230,7 @@ classify_pr() {
     # BEHIND + ai-review:pass PR is only waiting for its merge turn. Under strict
     # required checks every merge re-BEHINDs the rest, so refreshing it now is wasted
     # CI; it is refreshed one at a time at merge time.
-    if [[ "$sweep_defer_pass" == "yes" && ",$labels_csv," == *",ai-review:pass,"* ]]; then
+    if [[ "$sweep_defer_pass" == "yes" && "$pass_witnessed" == "yes" ]]; then
       echo "skip-awaiting-merge-turn"; return 0
     fi
     echo "rebase-only"; return 0
@@ -312,6 +316,26 @@ def review_bad:
   ((.labels // []) | any(.name == "ai-review:changes"))
   or ([ latest_checks[] | select((.name // "") == "ai-review") | (.conclusion // "")
         | select(. == "FAILURE" or . == "ERROR") ] | length > 0);
+# #3953 (SPEC-378 Decision 4, #1211): a rerun is only ever aimed at the NEWEST run of a workflow.
+# `latest_checks` keeps one entry per check identity, so a check that ran in an older run but
+# not in a newer one (path filter, renamed job) would still point a rerun at the older run, and
+# a replay of an older run can shadow the result of the newer one. run_id_of reads the digits after
+# `/actions/runs/` in the details/target URL (null when there is none); newest_run_ids maps each
+# workflow to the highest run id seen across ALL its latest checks (green or red);
+# in_newest_run keeps an entry only when its run is that one. An entry with no run id is not
+# filtered here: it yields no id downstream anyway.
+def run_id_of:
+  ((.detailsUrl // .targetUrl // "") | capture("/actions/runs/(?<id>[0-9]+)")? | .id) // null;
+# Note: newest by highest run id, while latest_checks picks by startedAt; a re-run of an older run (same id) can
+# be dropped as not-newest. That fails safe (no rerun), never a wrong rerun.
+def newest_run_ids:
+  [ latest_checks[] | (run_id_of) as $r | select($r != null)
+    | {w: (.workflowName // ""), id: ($r | tonumber)} ]
+  | group_by(.w) | map({key: .[0].w, value: (map(.id) | max)}) | from_entries;
+def in_newest_run($nr):
+  (run_id_of) as $r
+  | if $r == null then true
+    else ($nr[(.workflowName // "")] // 0) as $n | ($r | tonumber) == $n end;
 # The run that produced the verdict. Neither verdict check carries its id: the App posts
 # `ai-review` with no details_url, so its URL is the App homepage, and `ai-review/pass` has
 # no target_url. The id is on the job of workflow `ai-review-runner` (ai-review.yml), read
@@ -319,8 +343,9 @@ def review_bad:
 # only spend the one rerun.
 def review_run_ids:
   if review_bad then
-    latest_checks[] | select((.workflowName // "") == "ai-review-runner")
+    newest_run_ids as $nr | latest_checks[] | select((.workflowName // "") == "ai-review-runner")
     | select(outcome != "SKIPPED")
+    | select(in_newest_run($nr))
     | ((.detailsUrl // "") | capture("/actions/runs/(?<id>[0-9]+)")? | .id)
   else empty end;
 '
@@ -331,6 +356,13 @@ derive_failing_non_review() {
       | outcome ]
     | map(select(. == "FAILURE" or . == "ERROR" or . == "TIMED_OUT" or . == "CANCELLED"))
     | if length > 0 then "yes" else "no" end' <<<"$1"
+}
+
+# #4052: the ONE derivation of ai_review_bad for every caller (drain and dispatch-issue.sh).
+# The ai-review CHECK alone is a blind witness on a machinery PR (decideReviewCheck forces it
+# to NEUTRAL), so the shared `review_bad` predicate also reads the ai-review:changes label.
+derive_ai_review_bad() {
+  jq -r "$ROLLUP_LATEST_JQ"'if review_bad then "yes" else "no" end' <<<"$1"
 }
 
 # ── Rerun-first gate (#3042) ───────────────────────────────────────────────────
@@ -346,10 +378,12 @@ derive_failed_run_ids() {
   # $2 = "with-review" (#3036) also keeps the review run when the verdict is bad, so a
   # delegated-approval PR can be re-reviewed; the ready-to-merge gate is always excluded.
   jq -r --arg inc "${2:-}" "$ROLLUP_LATEST_JQ"'
-    [ ( latest_checks[]
+    newest_run_ids as $nr
+    | [ ( latest_checks[]
         | select(self_cert_gate | not)
         | select(outcome == "FAILURE" or outcome == "ERROR"
                  or outcome == "TIMED_OUT" or outcome == "CANCELLED")
+        | select(in_newest_run($nr))
         | ((.detailsUrl // .targetUrl // "") | capture("/actions/runs/(?<id>[0-9]+)")? | .id) ),
       ( if $inc == "with-review" then review_run_ids else empty end ) ]
     | map(select(. != null)) | unique | .[]' <<<"$1"
@@ -366,11 +400,29 @@ derive_review_run_ids() {
 # latest_checks: a queued rerun has no startedAt yet and would sort behind the verdict it is
 # about to replace. While a re-review runs, the old `ai-review` check and label still read
 # red, so acting on them would spend the PR's budget against a stale verdict.
+#
+# #3949: an entry counts only while it is plausibly running. GitHub can leave a check run
+# `in_progress` forever (actionlint on #3703, started 2026-11-13, conclusion already success),
+# and an unbounded "wait" on it deferred that PR every sweep with no word. So an entry is
+# NOT in flight when (a) it already carries a conclusion (inconsistent state; the verdict is
+# in) or (b) it started more than CHECK_STUCK_AFTER_SECS ago (default 6h). Case (b) is named
+# loudly on stderr so a stuck check is never a silent wait (constitution invariant 2).
 checks_in_flight() {
-  jq -r '[ (.statusCheckRollup // [])[]
-           | select((.status // "") == "QUEUED" or (.status // "") == "IN_PROGRESS"
+  local bound="${CHECK_STUCK_AFTER_SECS:-21600}"
+  [[ "$bound" =~ ^[0-9]+$ ]] || bound=21600
+  local unfinished='select((.status // "") == "QUEUED" or (.status // "") == "IN_PROGRESS"
                     or (.status // "") == "PENDING" or (.status // "") == "WAITING"
-                    or (.status // "") == "REQUESTED" or (.state // "") == "PENDING") ]
+                    or (.status // "") == "REQUESTED" or (.state // "") == "PENDING")'
+  local age='((.startedAt // "") as $t | if ($t == "" or $t == "0001-01-01T00:00:00Z") then 0 else (now - ($t | fromdateiso8601? // now)) end)'
+  jq -r --argjson bound "$bound" '(.statusCheckRollup // [])[]
+           | '"$unfinished"'
+           | select((.conclusion // "") == "" )
+           | select('"$age"' > $bound)
+           | "  Stuck check \(.name // .context // "?") since \(.startedAt) - older than \($bound)s, not counted as in flight (#3949)."' <<<"$1" >&2
+  jq -r --argjson bound "$bound" '[ (.statusCheckRollup // [])[]
+           | '"$unfinished"'
+           | select((.conclusion // "") == "")
+           | select('"$age"' <= $bound) ]
          | if length > 0 then "yes" else "no" end' <<<"$1"
 }
 
@@ -487,6 +539,7 @@ sanitize_comment_body() { printf '%s' "${1-}" | sed -e 's/<!--/<!- -/g' -e 's/--
 #   $3 — CSV of author logins to accept; EMPTY (or naming nobody) counts NOTHING (#3592):
 #        an unprovable author is never charged. Callers must not spend budget-bounded
 #        work on a 0 that came from an empty allowlist.
+#   $4 — optional body prefix; with it, an EMPTY allowlist counts by marker+prefix instead (#3054).
 # A comment counts only when the marker is the LAST non-whitespace text of its body —
 # the one position post_marked_comment ever writes one. Fail-soft: any jq/parse failure
 # yields 0 and the caller proceeds, as before.
@@ -500,18 +553,19 @@ sanitize_comment_body() { printf '%s' "${1-}" | sed -e 's/<!--/<!- -/g' -e 's/--
 # comment would have counted zero for the same reason. Both are the UN-BOUNDING
 # direction — those attempts spend no budget, the cap never trips, remediation loops.
 count_markers_json() {
-  local marker="$1" json="$2" authors="${3:-}" out
-  out=$(jq --arg m "$marker" --arg authors "$authors" '
+  local marker="$1" json="$2" authors="${3:-}" prefix="${4:-}" out
+  out=$(jq --arg m "$marker" --arg authors "$authors" --arg prefix "$prefix" '
     ($authors
       | split(",")
       | map(sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "") | ascii_downcase | sub("\\[bot\\]$"; ""))
       | map(select(length > 0))) as $allow
-    | if ($allow | length) == 0 then [] else
+    | if ($allow | length) == 0 and $prefix == "" then [] else
       [ .comments[]?
         | (((.author.login) // "") | ascii_downcase | sub("\\[bot\\]$"; "")) as $login
-        | select(($allow | index($login)) != null)
+        | select(($allow | length) == 0 or (($allow | index($login)) != null))
         | ((.body // "") | sub("[[:space:]]+$"; ""))
         | select(endswith($m))
+        | select($prefix == "" or startswith($prefix))
       ] end | length' <<<"$json" 2>/dev/null) || out=""
   [[ "$out" =~ ^[0-9]+$ ]] || out=0
   printf '%s\n' "$out"
@@ -598,10 +652,19 @@ resolve_author_identity() {
 # the PR over with a label and no message, the silent gate constitution invariant #2
 # forbids. So dedup is attempted ONLY when authorship is provable; otherwise this always
 # says `post`. A repeated notice is noise; a missing one is a silent gate.
+#
+# When authorship is NOT provable (an App installation token cannot `gh api user`, #3054),
+# the author filter is unavailable, so the dedup instead requires the body to OPEN with
+# the notice's own heading as well as END with the marker. A quote of the marker in a
+# review comment or diff hunk does not begin with that heading, so it cannot suppress
+# the notice; without this fallback the notice re-posted on every 20-minute sweep.
+CAP_NOTICE_HEADING="## 🛑 Auto-remediation capped"
 cap_notice_decision() {
   local authors="${1-}" json="${2-}" capped=0
   if authors_provable "$authors"; then
     capped=$(count_markers_json "$CAPPED_MARKER" "$json" "$authors")
+  else
+    capped=$(count_markers_json "$CAPPED_MARKER" "$json" "" "$CAP_NOTICE_HEADING")
   fi
   if [[ "${capped:-0}" -eq 0 ]]; then printf 'post\n'; else printf 'skip\n'; fi
 }
@@ -637,16 +700,21 @@ if [[ "${1:-}" == "--classify" ]]; then
   shift
   # Require 6 or 7 positional args, but allow empties (labels_csv is often "") — so
   # validate the COUNT, not each value (a `${n:?}` would reject an empty label). The
-  # 7th (live_nonself_claim) is optional so the creator's 6-arg contract is unchanged.
-  if [[ $# -lt 6 || $# -gt 8 ]]; then
-    echo "Usage: remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> <labels_csv> <failing_non_review> <ai_review_bad> [<live_nonself_claim> [<sweep_defer_pass>]]" >&2
+  # 7th (live_nonself_claim) is optional so the creator's 6-arg contract is unchanged;
+  # 8th (sweep_defer_pass) and 9th (pass_witnessed, #4078) are optional too.
+  if [[ $# -lt 6 || $# -gt 9 ]]; then
+    echo "Usage: remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> <labels_csv> <failing_non_review> <ai_review_bad> [<live_nonself_claim> [<sweep_defer_pass> [<pass_witnessed>]]]" >&2
     exit 2
   fi
-  classify_pr "$1" "$2" "$3" "$4" "$5" "$6" "${7:-no}" "${8:-no}"
+  classify_pr "$1" "$2" "$3" "$4" "$5" "$6" "${7:-no}" "${8:-no}" "${9:-no}"
   exit 0
 fi
 if [[ "${1:-}" == "--derive-failing" ]]; then
   derive_failing_non_review "$(cat)"
+  exit 0
+fi
+if [[ "${1:-}" == "--derive-ai-review-bad" ]]; then
+  derive_ai_review_bad "$(cat)"
   exit 0
 fi
 if [[ "${1:-}" == "--derive-failed-runs" ]]; then
@@ -798,7 +866,7 @@ _PR_FETCH_ERR=$(mktemp)
 gh_bot_warm_read
 _fetch_pr_json() {
   gh pr view "$PR" --repo "$REPO" \
-    --json number,state,isDraft,headRefName,headRepository,headRepositoryOwner,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>"$_PR_FETCH_ERR"
+    --json number,state,isDraft,headRefName,headRefOid,headRepository,headRepositoryOwner,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>"$_PR_FETCH_ERR"
 }
 if ! PR_JSON=$(_fetch_pr_json); then
   echo "WARNING: fetch of PR #$PR failed: $(tr '\n' ' ' <"$_PR_FETCH_ERR")" >&2
@@ -859,7 +927,7 @@ if [[ "$MERGE_STATE" == "UNKNOWN" ]]; then
   # as health — and say out loud that the look itself failed.
   RETRY_RC=0
   RETRY_JSON=$(gh pr view "$PR" --repo "$REPO" \
-    --json number,state,isDraft,headRefName,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>/dev/null) || RETRY_RC=$?
+    --json number,state,isDraft,headRefName,headRefOid,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>/dev/null) || RETRY_RC=$?
   if (( RETRY_RC != 0 )); then
     echo "  the re-poll of PR #$PR FAILED (gh exited $RETRY_RC) — keeping mergeStateStatus UNKNOWN rather than treating an unreadable answer as an answer." >&2
   elif [[ -z "$RETRY_JSON" ]]; then
@@ -884,12 +952,7 @@ fi
 # NEUTRAL/SKIPPED/SUCCESS do not. A still-running check (no conclusion) is NOT a
 # failure — we wait, we don't remediate mid-flight.
 FAILING_NON_REVIEW=$(derive_failing_non_review "$PR_JSON")
-AI_REVIEW_BAD=$(jq -r "$ROLLUP_LATEST_JQ"'
-  [ latest_checks[]
-    | select((.name // "") == "ai-review")
-    | (.conclusion // "") ]
-  | map(select(. == "FAILURE" or . == "ERROR"))
-  | if length > 0 then "yes" else "no" end' <<<"$PR_JSON")
+AI_REVIEW_BAD=$(derive_ai_review_bad "$PR_JSON")
 # Is the ai-review check still running from a prior push? Don't stack a second
 # remediation on top of an in-flight re-review.
 AI_REVIEW_PENDING=$(jq -r "$ROLLUP_LATEST_JQ"'
@@ -922,7 +985,18 @@ if [[ -n "$ITEM" && "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
   fi
 fi
 
-ACTION=$(classify_pr "$BRANCH" "$MERGEABLE" "$MERGE_STATE" "$LABELS_CSV" "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD" "$LIVE_NONSELF_CLAIM" yes)
+# #4078: the sweep defers a BEHIND pull request only on a WITNESSED pass (a
+# `ready-to-merge` success from GitHub Actions on this head), never on the bare label.
+# Read only when it can matter. A failed read is "no": the PR is refreshed, the safe
+# side, since a refresh costs CI and never merges anything.
+PASS_WITNESSED=no
+if [[ "$MERGE_STATE" == "BEHIND" ]]; then
+  # shellcheck source=lib/ready-witness.sh
+  source "${SCRIPT_DIR}/lib/ready-witness.sh"
+  _head_sha=$(jq -r '.headRefOid // ""' <<<"$PR_JSON" 2>/dev/null || true)  # swallow-ok: an empty sha makes ready_to_merge_witnessed print error, which is not yes
+  [[ "$(ready_to_merge_witnessed "$REPO" "$_head_sha")" == "yes" ]] && PASS_WITNESSED=yes
+fi
+ACTION=$(classify_pr "$BRANCH" "$MERGEABLE" "$MERGE_STATE" "$LABELS_CSV" "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD" "$LIVE_NONSELF_CLAIM" yes "$PASS_WITNESSED")
 # #3036: updating a RED delegated PR restarts CI and a paid review, and it stays red if main
 # did not hold the fix. While main keeps moving it would be BEHIND again on every sweep, so
 # this update, unlike a green one, is charged to the attempt budget below.
@@ -1089,7 +1163,7 @@ if [[ "$ACTION" == agent-* || "$ACTION" == "dlg-rerun" || "$DLG_RED_UPDATE" == "
     # constitution invariant #2 hangs on, so it lives in the pure, tested
     # cap_notice_decision() seam above rather than inline here.
     if [[ "$(cap_notice_decision "$AUTHOR_ALLOW" "$COMMENTS_JSON")" == "post" ]]; then
-      post_marked_comment "$CAPPED_MARKER" "$(printf '## 🛑 Auto-remediation capped — needs a human\n\nThis PR hit an automated-remediation cap — **%s** — without clearing its gate, so automated attempts have stopped. It is labelled `needs-human-review`; a human needs to take it from here.' "$CAP_HIT")"
+      post_marked_comment "$CAPPED_MARKER" "$(printf '%s — needs a human\n\nThis PR hit an automated-remediation cap — **%s** — without clearing its gate, so automated attempts have stopped. It is labelled `needs-human-review`; a human needs to take it from here.' "$CAP_NOTICE_HEADING" "$CAP_HIT")"
     fi
     exit 0
   fi
@@ -1306,11 +1380,26 @@ RUN_MODEL="sonnet"
 RUN_PROMPT="$PROMPT"
 ESCALATED_ALREADY=0
 
+# Context-slim (#927, same root cause as #912): `claude -p` inside the worktree with
+# the default system prompt auto-loads the large CLAUDE.md + global CLAUDE.md +
+# auto-memory before the task starts -> autocompact thrash. Pass the dev role as the
+# SYSTEM PROMPT via --system-prompt-file (replaces that ambient load; auth-neutral,
+# subscription OAuth preserved). The task prompt already tells the agent to read
+# CLAUDE.md on demand. Kill-switch: MINSPEC_DISPATCH_SLIM_CONTEXT=0 restores the
+# default system prompt (same switch as dispatch-issue.sh).
+REMEDIATE_ROLE_FILE="${SCRIPT_DIR}/roles/dev.md"
+SYS_PROMPT_ARGS=()
+if [[ "${MINSPEC_DISPATCH_SLIM_CONTEXT:-1}" != "0" && -f "$REMEDIATE_ROLE_FILE" ]]; then
+  SYS_PROMPT_ARGS=(--system-prompt-file "$REMEDIATE_ROLE_FILE")
+  echo "  Context-slim: dev role via --system-prompt-file (#927)"
+fi
+
 echo "  Launching remediation agent (model: $RUN_MODEL, log: $LOG)..."
 while true; do
   if (cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$RUN_PROMPT" \
         "${AGENT_CONTEXT_ARGS[@]}" \
         ${AGENT_CAVEMAN_ARGS[@]+"${AGENT_CAVEMAN_ARGS[@]}"} \
+        ${SYS_PROMPT_ARGS[@]+"${SYS_PROMPT_ARGS[@]}"} \
         --model "$RUN_MODEL" \
         --allowedTools "$ALLOWED_TOOLS" \
         --output-format text 2>&1 | tee "$LOG"); then

@@ -49,16 +49,10 @@ npm run validate  # frontmatter check on specs/**/*.md
 
 A release is published by a person, never by an agent ([DR-076](docs/decisions/DR-076.md)), and always from a packaged file. Run these from the repository root.
 
-Before packaging, fetch the current threat catalogs the supply-chain scan compares against (this needs a signed-in `gh`). With none fetched the scan still passes, as an inventory only ([#2410](https://github.com/AIClarityAU/minspec/issues/2410), the gap that lets a release build skip the comparison), so check that the package step prints `0 findings against N catalog(s)`:
+Step 1, package. Use `package:release`, not `package`. It fetches the current threat catalogs the supply-chain scan compares against (this needs network and a working catalog fetch), then runs the scan with catalogs required, then the build, then writes `packages/minspec/minspec-<version>.vsix`. If the fetch fails or the catalog directory is empty the build fails (exit 2), so a release can no longer pass as an inventory-only scan ([#2410](https://github.com/AIClarityAU/minspec/issues/2410)). The plain `npm run package` still allows an inventory-only scan for day-to-day work ([DR-005](docs/decisions/DR-005.md)).
 
 ```bash
-BUMBLEBEE_CATALOG_REF=main ./scripts/fetch-bumblebee-catalogs.sh
-```
-
-Step 1, package. This runs the supply-chain scan, then the build, then writes `packages/minspec/minspec-<version>.vsix`:
-
-```bash
-(cd packages/minspec && npm run package)
+(cd packages/minspec && npm run package:release)
 ```
 
 Step 2, publish that file. It needs a Marketplace token:

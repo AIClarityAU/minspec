@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-380-blocked-by-grammar-single-source/requirements.md",
+  "specHash": "09bd9e02042bf5ab44546e16153abe3ce66c4992e247510ec84998f206c644e4",
+  "approvedAt": "2026-11-22T05:23:52.064Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/implements-1122",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3956#issuecomment-7074562376"
+}

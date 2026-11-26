@@ -47,6 +47,8 @@ export type { BrokerEnv };
  *   broken, not handed a bad request. Reporting it as `oidc_invalid` would blame the
  *   caller for our deployment and send an adopter hunting a token problem that does not
  *   exist.
+ * - `no_such_route` (404) / `method_not_allowed` (405) — routing refusals, not
+ *   "unbuilt feature": the old catch-all `not_implemented` (#1963) is retired.
  *
  * Tracked for the design update rather than resolved silently here.
  */
@@ -59,7 +61,8 @@ export type ErrorCode =
   | 'unexpected_field'
   | 'unsupported_profile'
   | 'broker_misconfigured'
-  | 'not_implemented';
+  | 'no_such_route'
+  | 'method_not_allowed';
 
 /** Fail-closed error body — never accompanied by a token. */
 export interface TokenError {
@@ -79,6 +82,17 @@ function json(body: unknown, status: number): Response {
     },
   });
 }
+
+/**
+ * The AC-4 reason: what the customer must do, naming only the public App slug.
+ *
+ * Constant on purpose. It quotes no App id, installation id or GitHub response text, so
+ * nothing about our side of the exchange leaks through the one refusal that is meant to
+ * be read by a person.
+ */
+export const APP_NOT_INSTALLED_REASON =
+  'the minspec-sdd GitHub App is not installed on this repository: install it, or grant ' +
+  'its existing installation access to this repository, then re-run';
 
 /** The one route this Worker serves. */
 export const TOKEN_PATH = '/installation-token';
@@ -109,14 +123,14 @@ export function createFetchHandler(deps: HandlerDeps = {}) {
     const url = new URL(request.url);
 
     if (url.pathname !== TOKEN_PATH) {
-      return json({ error: 'not_implemented', reason: 'no such route' } satisfies TokenError, 404);
+      return json({ error: 'no_such_route', reason: 'no such route' } satisfies TokenError, 404);
     }
 
     // Method check precedes everything: a GET that fell through to the token path
     // should never reach verification logic.
     if (request.method !== 'POST') {
       return json(
-        { error: 'not_implemented', reason: 'POST required' } satisfies TokenError,
+        { error: 'method_not_allowed', reason: 'POST required' } satisfies TokenError,
         405,
       );
     }
@@ -185,6 +199,13 @@ export function createFetchHandler(deps: HandlerDeps = {}) {
     // remembering to pass the right string.
     const result = await mintScopedToken(verified.claims, factory);
     if (!result.ok) {
+      // FR-4 / AC-4: the App is not installed on (or not granted) this repository. The
+      // caller has already proven, by a verified OIDC claim matched against the body,
+      // that this is THEIR repository, so telling them is not an oracle about anyone
+      // else's - which is why this sits after authorisation and never before it.
+      if (result.code === 'app_not_installed') {
+        return json({ error: 'app_not_installed', reason: APP_NOT_INSTALLED_REASON } satisfies TokenError, 403);
+      }
       return json({ error: 'mint_failed', reason: 'could not mint' } satisfies TokenError, 502);
     }
 
