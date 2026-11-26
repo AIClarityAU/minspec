@@ -27,7 +27,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { ParsedSpec } from './spec';
-import { violationsIntroducedByApproval } from './spec-validator';
+import { violationsIntroducedByApproval, violationsIntroducedByPhases } from './spec-validator';
 import { loadConfig } from './config';
 
 /**
@@ -66,6 +66,12 @@ function repoRootFor(specFilePath: string): string | undefined {
 export function assertOwnershipDeclaredForAdvance(
   specFilePath: string,
   parsed: ParsedSpec,
+  /**
+   * The phase map the caller is about to write (#1380). Omitted = the approval advance
+   * (`phasesForApproval`); `transitionPhase` and any future phase-map writer pass the
+   * map their own transition produced, so the gate judges the move actually made.
+   */
+  newPhases?: ParsedSpec['frontmatter']['phases'],
 ): void {
   let introduced;
   try {
@@ -88,9 +94,11 @@ export function assertOwnershipDeclaredForAdvance(
     // false claim (a spec whose advance lands it on `implement: in-progress` while its
     // declared `implements:` paths don't exist). `fs`/`path` are already this module's
     // own imports (see header) — the resolver itself is trivial.
-    introduced = violationsIntroducedByApproval(parsed, loadConfig(rootDir), {
-      pathExists: (relPath) => fs.existsSync(path.join(rootDir, relPath)),
-    });
+    const options = { pathExists: (relPath: string) => fs.existsSync(path.join(rootDir, relPath)) };
+    const config = loadConfig(rootDir);
+    introduced = newPhases
+      ? violationsIntroducedByPhases(parsed, config, newPhases, options)
+      : violationsIntroducedByApproval(parsed, config, options);
   } catch (err) {
     console.warn(
       `[minspec] ownership pre-check skipped for ${path.basename(specFilePath)} — the ` +
