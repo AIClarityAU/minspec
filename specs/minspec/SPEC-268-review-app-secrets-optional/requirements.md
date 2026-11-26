@@ -161,9 +161,11 @@ with the identity consequence.
   `CLAUDE_CODE_OAUTH_TOKEN` set: opening a non-machinery PR runs the review; the verdict comment,
   `ai-review:pass` label, `ai-review` check-run and `ai-review/pass` status are posted by
   `github-actions[bot]`; `ready-to-merge` turns `success` without any human label action.
-- **AC2 (App arm, unchanged).** With all three secrets set, the posted artifacts, actors, and
-  `ready-to-merge` outcomes are identical to base `118548be` on the same PR fixtures; the FR7
-  trigger posts no `ready-to-merge` status of its own in this arm unless D1 resolves otherwise.
+- **AC2 (App arm, outcomes unchanged).** With all three secrets set, the posted artifacts,
+  actors, and `ready-to-merge` outcomes are identical to base `118548be` on the same PR
+  fixtures. Per D2 (b), the FR7 trigger re-evaluates in this arm too: it posts the same
+  `ready-to-merge` state the `labeled` run would post for that head (same allowlist, same
+  witnesses), so the only visible difference is one more status write of an identical value.
 - **AC3 (fallback is the mutating arm — tested explicitly).** Tests drive the Actions arm
   directly: guard output `identity=actions` for (none set), (ID only), (key only); each write step
   resolves to `GITHUB_TOKEN`; the ready-to-merge allowlist gains `github-actions[bot]` only in
@@ -224,13 +226,20 @@ with the identity consequence.
 **Recorded selection: the recommended option,** (a), a `workflow_run` trigger on `ai-review` `completed`, added to `ready-to-merge.yml`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
 
 **D2 — In the App arm, does the new trigger also re-evaluate the gate?**
-- **(a) The trigger fires in both arms but exits early, posting nothing, when the App secrets
-  are present (rec).** Keeps the App arm's writes identical to today (acceptance "identical to
-  today"). Cost: one empty Actions run (seconds) per review in App repos.
-- (b) It re-evaluates in both arms. A redundant second evaluation could rescue a missed
-  `labeled` event, but it changes App-arm behaviour, which the issue asked to keep identical.
+- (a) The trigger fires in both arms but exits early, posting nothing, when the App secrets
+  are present. Keeps the App arm's writes identical to today. Rejected at Plan (design.md R3):
+  the trigger must share the per-PR concurrency group (FR7), and GitHub keeps one running and
+  one pending run per group, cancelling the older pending run when a newer one queues. A
+  `workflow_run` run that exits without writing can therefore cancel the queued `labeled` or
+  `synchronize` gate run and post nothing, leaving the head with no `ready-to-merge` status
+  (breaks #1973, "the latest-started evaluation writes last").
+- **(b) It re-evaluates in both arms (rec).** Each run evaluates fresh API state, so the run
+  that displaced a queued one evaluates a state at least as new, and a missed `labeled` event
+  is rescued. App-arm outcomes stay those the `labeled` run would post (AC2). Cost: one more
+  `ready-to-merge` status write per review in App repos, and App-arm behaviour is no longer
+  byte-identical to today, which the issue asked for.
 
-**Recorded selection: the recommended option,** (a), the trigger fires in both arms but exits early, posting nothing, when the App secrets are present. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+**Recorded selection: the recommended option,** (b), the trigger re-evaluates in both arms. Amended at Plan from the earlier recorded pick (a) for the design.md R3 reason above (a do-nothing run can cancel the queued gate run and leave a PR with no status). Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, first recorded 2026-11-22 as (a), amended 2026-11-27; sign-off ratifies it.
 
 **D3 — Record the trust change as a new DR or as an amendment to DR-054?**
 - **(a) New DR-115, `proposed`, citing DR-054 as amended (rec; drafted in this PR).** A
