@@ -19,14 +19,12 @@ phases:
 
 # SPEC-268 - Design: the review stack runs with only the Claude secret (Plan)
 
-Contract: [requirements.md](requirements.md). Decisions D1-D3 are closed there with the
-recommended picks (DR-123): D1 `workflow_run`, D2 early exit in the App arm, D3 DR-115.
-
-**This plan departs from the D2 pick, and from the AC2 clause that follows from it** ("the
-FR7 trigger posts no `ready-to-merge` status of its own in this arm"). Reason, under R3: the
-pick is unsound once the trigger shares the per-PR concurrency group FR7 requires. The
-requirements text needs a one-line amendment to D2/AC2; until then this section is the
-record.
+Contract: [requirements.md](requirements.md). Decisions D1-D3 are closed there: D1
+`workflow_run` and D3 DR-115 (recommended picks, DR-123), and D2 option (b), re-evaluate in
+both arms (the founder's choice on 2026-11-27, replacing the earlier agent pick of an early
+exit). The reason is R3: an early exit is unsound once the trigger shares the per-PR
+concurrency group FR7 requires. Requirements D2 and AC2 are amended to match in a separate founder-approved change (the
+approval is his act, so it lands through his editor, not in this pull request).
 
 ## R1 - Identity mode, decided once per run
 

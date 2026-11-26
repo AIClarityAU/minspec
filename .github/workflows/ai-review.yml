@@ -522,6 +522,18 @@ jobs:
           # interpolation). If the fetch fails, the diff is empty → fail closed.
           git fetch --no-tags --quiet origin "$HEAD" 2>/dev/null || true
 
+          # SPEC-268 review finding (#4079): actions/checkout persists the job's
+          # Actions job token into .git/config as an http extraheader, and in the Actions
+          # arm that token now carries checks/statuses/issues/pull-requests write.
+          # The voters below read this workspace (Read/Glob/Grep), so a prompt-
+          # injected voter could read the header and echo it into its verdict. The
+          # last fetch is done; drop the persisted credential before any voter runs.
+          git config --local --unset-all 'http.https://github.com/.extraheader' 2>/dev/null || :
+          if git config --local --get-regexp '^http\..*\.extraheader$' >/dev/null 2>&1; then
+            echo "::error::a persisted git credential is still in .git/config; refusing to run the reviewers over it"
+            exit 1
+          fi
+
           # Marker = the token ALONE ON A LINE, the SAME predicate review-decide.sh
           # uses to decide the label (#1157). Display and decision must agree: when
           # this extractor matched a marker the decider did not (or vice versa), the
