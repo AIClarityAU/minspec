@@ -23,8 +23,9 @@ Contract: [requirements.md](requirements.md). Decisions D1-D3 are closed there: 
 `workflow_run` and D3 DR-115 (recommended picks, DR-123), and D2 option (b), re-evaluate in
 both arms (the founder's own choice, 2026-11-26 at 21:56 UTC, which was 2026-11-27 in Sydney,
 replacing the earlier agent pick of an early exit). The reason is R3: an early exit is unsound
-once the trigger shares the per-PR concurrency group FR7 requires. Requirements plain terms, FR1,
-FR2, FR3, FR5, FR7, AC2, D2 and the App-arm invariant are amended to match in a separate change that lands with the
+once the trigger shares the per-PR concurrency group FR7 requires. Requirements plain terms, the
+banner, FR1, FR2, FR3, FR5, FR7, FR8, FR9, AC1, AC2, AC5, AC6, D2, the invariants and the
+rejected alternatives are amended to match in a separate change that lands with the
 founder's own approval of that text (the approval is his act, so it lands through his editor,
 not in this pull request).
 
@@ -115,6 +116,7 @@ base   = parseAllowlist(AI_REVIEW_BOT_LOGINS)          // unchanged default line
 widen  = identity == 'actions'
          && AI_REVIEW_BOT_LOGINS variable is unset      // operator's explicit list wins
          && PR head repo == base repo                   // never on a fork
+         && PR author and actor != 'dependabot[bot]'    // its runs get no Actions secrets
          && touchesMachinery === false                  // FR6; unknown => no widening
 result = widen ? base + ['github-actions[bot]'] : base
 ```
