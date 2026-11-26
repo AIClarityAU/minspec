@@ -85,7 +85,9 @@ the plan must re-run it, because pins move.)
 - **FR-2 - Drift gate across surfaces, generalised.** A test asserts, for every inventory
   entry, that each listed surface carries exactly the inventory's value, and that no
   in-scope pin exists on disk without an inventory entry (an unlisted `uses:` or an
-  unlisted `npm install -g …@` in a workflow fails the test, naming file:line). This
+  unlisted `npm install -g …@` in a workflow fails the test, naming file:line). The
+  matcher must be YAML-aware or anchored to a `uses:` step key, because a plain grep also
+  matches prose such as `uses: write` or `uses: the`. This
   generalises the bumblebee-only four-surface test in `fetch-bumblebee-catalogs.test.ts`
   rather than adding a parallel one; that test's existing assertions keep passing.
 - **FR-3 - Allowed pin forms are enforced.** The drift test rejects a moving ref - a branch
@@ -116,8 +118,9 @@ the plan must re-run it, because pins move.)
 - **FR-7 - Security review gate for `sensitive` entries.** A proposal for a `security:
   sensitive` entry (at minimum: the bumblebee scanner and osvcatalog; any action or CLI that
   runs in a job holding a write-scoped token or a secret) additionally carries a
-  `needs-security-review` marker and links the bumblebee security-review issue referenced in
-  #658, and is not mergeable until that marker is cleared by a human.
+  `needs-security-review` marker and links the bumblebee security-review issue that #658 names
+  (no issue number is filed yet; the Plan must file it or record the number before this FR
+  is testable), and is not mergeable until that marker is cleared by a human.
 - **FR-8 - Release-age cooldown.** A candidate younger than a minimum age (Clarify **D6**) is
   not proposed yet; the job reports it as "candidate held for cooldown until <date>". This is
   the defence against a hijacked-publisher release being bumped in within hours of upload.
