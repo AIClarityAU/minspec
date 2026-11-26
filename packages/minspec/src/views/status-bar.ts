@@ -143,9 +143,10 @@ export class MinSpecNextTaskStatusBar {
     this.statusBarItem.command = 'minspec.nextTask';
   }
 
-  /** Update the signpost. Pass null to show the "clear" state. */
+  /** Update the signpost. Pass null to show the "clear" state; pass `unclearReason` to show "state unclear" instead (#1466). */
   update(task: NextTask | null, unclearReason?: string): void {
     const unclear = unclearReason !== undefined;
+    if (unclear) console.warn(`[minspec] signpost state unclear: ${unclearReason}`);
     this.statusBarItem.text = formatNextTaskText(unclear ? null : task, unclearReason);
     const base = unclear
       ? `MinSpec could not compute the next task: ${unclearReason}`

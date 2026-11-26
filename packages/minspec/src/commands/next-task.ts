@@ -29,14 +29,16 @@ export type SignpostState =
 /**
  * Compute the signpost state. Degrades a build/resolve failure to `unclear`
  * (carrying the reason) rather than throwing (INV-DEGRADE), without
- * conflating it with a genuinely empty queue.
+ * conflating it with a genuinely empty queue. Covers SPEC-262 FR-4 / AC-3
+ * ("unknown is not clear", EPIC-002); FR-3's plan-phase false-clear stays with SPEC-262.
  */
 export function computeSignpostState(workspaceRoot: string): SignpostState {
   try {
     const task = resolveNextTask(buildArtifactGraph(workspaceRoot));
     return task === null ? { kind: 'clear' } : { kind: 'task', task };
   } catch (err) {
-    return { kind: 'unclear', reason: err instanceof Error ? err.message : String(err) };
+    const raw = err instanceof Error ? err.message : String(err);
+    return { kind: 'unclear', reason: raw || 'unknown error' };
   }
 }
 
