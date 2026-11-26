@@ -23,8 +23,8 @@ Contract: [requirements.md](requirements.md). Decisions D1-D3 are closed there: 
 `workflow_run` and D3 DR-115 (recommended picks, DR-123), and D2 option (b), re-evaluate in
 both arms (the founder's own choice, 2026-11-26 at 21:56 UTC, which was 2026-11-27 in Sydney,
 replacing the earlier agent pick of an early exit). The reason is R3: an early exit is unsound
-once the trigger shares the per-PR concurrency group FR7 requires. Requirements D2, FR3, AC2
-and the App-arm invariant are amended to match in a separate change that lands with the
+once the trigger shares the per-PR concurrency group FR7 requires. Requirements plain terms, FR1,
+FR2, FR3, FR5, FR7, AC2, D2 and the App-arm invariant are amended to match in a separate change that lands with the
 founder's own approval of that text (the approval is his act, so it lands through his editor,
 not in this pull request).
 
@@ -35,6 +35,7 @@ not in this pull request).
 | both | `app` | none |
 | neither | `actions` | none |
 | exactly one | `actions` | `::warning` naming the missing secret |
+| any, with `vars.AI_REVIEW_APP=review` (#4078) | `app` (the review-only App) | missing review secrets or an unknown value fail red |
 
 Decided in two places that cannot share code, because one is a bash step in
 `ai-review.yml` and the other runs before the trusted guard module is checked out in
@@ -42,11 +43,12 @@ Decided in two places that cannot share code, because one is a bash step in
 
 - `ai-review.yml` step `guard` (bash) emits `configured` (Claude secret only, FR1) and
   `identity`.
-- `ready-to-merge.yml` step `ctx` (github-script) emits `identity` from two booleans
-  (`secrets.X != ''`), so no secret value enters the step.
+- `ready-to-merge.yml` step `ctx` (github-script) emits `identity` from three booleans
+  (`secrets.X != ''`, and whether `AI_REVIEW_APP` is unset or `builder`), so no secret value
+  enters the step.
 
-A parity test (T0) executes both steps over all four secret states and asserts the same
-`identity`. The duplicated rule is therefore bound by a test, not by a comment.
+A parity test (T0) executes both steps over all four secret states, in builder and review
+mode, and asserts the same `identity`. The duplicated rule is therefore bound by a test, not by a comment.
 
 ## R2 - Token selection in `ai-review.yml` (FR2-FR4)
 
@@ -80,7 +82,8 @@ New first step `ctx` (github-script, GITHUB_TOKEN):
 1. Decide `identity` (R1).
 2. `pull_request` event: `proceed=true`, `pr_number` and `base_sha` from the payload.
 3. `workflow_run` event:
-   - Both arms re-evaluate (D2 option b, not the recorded pick a). GitHub's concurrency
+   - Both arms re-evaluate (D2 option (b), the founder's recorded choice, which replaced the
+     earlier pick of (a)). GitHub's concurrency
      keeps one running and one PENDING run per group and cancels the older pending run
      when a newer one queues. The review's completion arrives seconds after its label
      (App arm: a `labeled` run) or after a push cancelled it (a `synchronize` run). A
@@ -88,8 +91,10 @@ New first step `ctx` (github-script, GITHUB_TOKEN):
      nothing, leaving the head with no `ready-to-merge` status, which breaks the #1973
      property "the latest-started evaluation writes last". Re-evaluating from fresh API
      state keeps that property: the run that displaced the queued one evaluates a state at
-     least as new. Outcomes in the App arm are the ones the `labeled` run would post (same
-     allowlist, same witnesses); the visible difference is one more status write.
+     least as new. It applies the same allowlist and witness rules as any non-`labeled` run, so
+     it reads pass provenance from the label timeline; when that lags, its outcome can differ
+     from the `labeled` run's (fail closed, R6, #4140). It writes what a gate run writes: the
+     `ready-to-merge` status and the `awaiting-approval`/`blocked-by` label sync.
    - no PR in `workflow_run.pull_requests` (fork run, or a run not tied to a PR): NOTICE,
      `proceed=false`. The PR's last status stands; `opened`/`synchronize` already posted
      `failure`, so it reads red, never pending.
@@ -145,6 +150,14 @@ by login, check-run by `app.slug` + `[bot]` (`verifyHeadPassCheckRun`).
    (executed, not grepped: the guard runs with only the Claude secret and must emit
    `configured=true`).
 
+## R5b - Persisted checkout credential is removed before the voters run
+
+The widened `GITHUB_TOKEN` (both arms, FR4) is persisted by `actions/checkout` into
+`.git/config` as an `http` extraheader, where the read-only voters could read it. After the
+last fetch, `ai-review.yml` unsets that extraheader and fails closed if any extraheader
+remains, before any voter runs. This runs in both arms; the fetch path is unchanged because
+it precedes the unset.
+
 ## R6 - Accepted residuals
 
 - `GITHUB_TOKEN` re-runs from `ai-review-retry.yml` may not fire `workflow_run` (GitHub's
@@ -152,12 +165,9 @@ by login, check-run by `app.slug` + `[bot]` (`verifyHeadPassCheckRun`).
   posted status (red), never a false green; the next push re-evaluates.
 - The very first PR that installs the scaffold cannot self-trigger `workflow_run` (the
   workflow must be on the default branch). Its gate stays red; merge as a machinery PR.
-- The widened `GITHUB_TOKEN` (both arms, FR4) is persisted by the base checkout into
-  `.git/config`, where the read-only voters could read it. Not a new capability: under the
-  `pull_request` trigger a same-repo PR author already runs their own copy of this
-  workflow with this token, and fork runs get a read-only token and skip for want of the
-  Claude secret. Hardening (`persist-credentials: false`, then authenticating the head
-  fetch explicitly) is left out because it changes the App arm's fetch path.
+- The re-evaluation that D2 (b) adds can post `failure` over a fresh `success` when the
+  issue timeline lags, and a run it replaces in the queue skips its provenance revert and
+  stale-pass strip. Both fail closed (never a false green); tracked in #4140.
 - The forge DR-115 accepts (a same-repo PR editing a non-machinery path cannot post as
   `github-actions` without touching `.github/`, so FR6 closes the workflow route).
 

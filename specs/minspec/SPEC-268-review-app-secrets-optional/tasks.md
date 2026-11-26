@@ -27,7 +27,8 @@ and needs a founder push (the bot has no `workflows` permission).
    `packages/minspec/tests/review-identity-mode.test.ts`: executes the `ai-review.yml`
    guard step and the `ready-to-merge.yml` `ctx` step over the four secret states; token
    expression binding; gate allowlist widening, fork and machinery refusals; `workflow_run`
-   resolution (App early exit, no PR, read failure, closed PR, current base).
+   resolution (App arm re-evaluates too, per D2 option (b); no PR, read failure, closed PR,
+   current base; review mode is always `app`, #4078).
 2. **Guard helpers** (FR5, FR6) - `.github/scripts/ai-review-guard.js`:
    `effectiveAllowlist`, `pathsTouchMachinery`, `FALLBACK_REVIEWER_LOGIN`.
 3. **`ai-review.yml`** (FR1-FR4, FR10) - guard, mint condition, token expression,
