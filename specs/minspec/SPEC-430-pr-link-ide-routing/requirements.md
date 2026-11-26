@@ -1,5 +1,5 @@
 ---
-id: SPEC-137
+id: SPEC-430
 type: requirements
 status: specifying
 tier: T3
@@ -15,7 +15,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-137: Open PR links in the IDE when the GitHub PR extension is present
+# SPEC-430: Open PR links in the IDE when the GitHub PR extension is present
 
 Issue: [#541](https://github.com/AIClarityAU/minspec/issues/541). Split out of SPEC-018
 (its FR-14 / FR-OQ5 / FR-15a); PR-link routing is orthogonal to the approvable editor.
@@ -47,9 +47,11 @@ comment threads, checkout or sync. Link routing only.
 
 - **FR-1 (one helper).** A single `openPullRequest(prUrl)` MUST be the only way MinSpec opens a
   PR URL. Both sites above MUST call it, and a test MUST fail if a new
-  `openExternal` on a `/pull/<n>` URL appears outside it.
+  `openExternal` call appears in a file outside an explicit allowlist (the helper's module plus
+  the non-PR callers known today). PR URLs exist only at runtime, so the test scans for the
+  `openExternal` call, not for a `/pull/` literal; adding a caller means a reviewed allowlist edit.
 - **FR-2 (recognise a PR URL).** The helper routes only URLs matching
-  `https://github.com/<owner>/<repo>/pull/<n>` (host `github.com`). Anything else goes straight
+  `https://github.com/<owner>/<repo>/pull/<n>` (host `github.com`; GitHub Enterprise hosts are a non-goal and open in the browser). Anything else goes straight
   to `openExternal` unchanged.
 - **FR-3 (detect).** Extension present means `vscode.extensions.getExtension(GITHUB_PR_EXTENSION_ID) !== undefined`,
   evaluated at click time, not cached at activation.
@@ -58,8 +60,9 @@ comment threads, checkout or sync. Link routing only.
   (invariant 1, DR-004 Tier 0).
 - **FR-5 (never a dead action).** If the in-IDE open throws, rejects, or the command is
   unknown, fall back to `openExternal(prUrl)`. Absent extension also uses `openExternal`.
-  The fallback MUST NOT be silent about a *systematic* failure: log it once to the MinSpec
-  output channel (invariant 2 spirit; the user still gets the PR, but the failure is visible).
+  The fallback MUST NOT be silent: every in-IDE failure (throw, reject, unknown command) is
+  logged to the MinSpec output channel with the failure reason (invariant 2 spirit; the user
+  still gets the PR, but the failure is visible). Absent extension is not a failure and logs nothing.
 - **FR-6 (install offer).** Keep the existing offer's behaviour (declinable, consent is the
   click, no network call before the click). When #533's checklist page exists the offer MUST
   appear there as an item and the standalone toast MUST be removed; until then the toast stays.
@@ -79,13 +82,13 @@ comment threads, checkout or sync. Link routing only.
 
 ## Acceptance criteria
 
-- **AC-1 (FR-1).** Test: both call sites invoke `openPullRequest`; a source-scan test fails if
-  `openExternal` receives a PR URL elsewhere (mutation: revert one site, test goes red).
+- **AC-1 (FR-1).** Test: both call sites invoke `openPullRequest`; an allowlist scan fails if
+  `openExternal` is called in any file outside the allowlist (mutation: revert one site, test goes red).
 - **AC-2 (FR-2).** Non-PR and non-`github.com` URLs reach `openExternal` untouched.
 - **AC-3 (FR-3/4).** With a stubbed extension present, the in-IDE entry point is called and
   `openExternal` is not.
 - **AC-4 (FR-5).** With the entry point stubbed to throw, `openExternal` is called with the
-  original URL and the failure is logged; with the extension absent, `openExternal` is called.
+  original URL and every failure is logged; with the extension absent, `openExternal` is called and nothing is logged.
 - **AC-5 (FR-6).** Install offer fires nothing before the click; "Not now" is a no-op.
 - **AC-6 (INV-1).** Test over every string FR-7 or the toasts emit: no `SPEC-`, `DR-`, `EPIC-`.
 - **AC-7 (INV-2).** No new network import in `packages/minspec` (existing import-ban test passes).
