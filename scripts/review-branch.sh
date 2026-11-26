@@ -88,7 +88,11 @@ fi
 # Diff from the CURRENT working directory (caller's responsibility). Three-dot
 # `base...head` = the changes head introduced since it forked from base — the
 # same form dispatch-issue.sh uses to derive changedFiles.
-DIFF="$(git diff "${BASE}...${HEAD_REF}")"
+# #4080: exclude the GENERATED ci-review-templates.ts (base64 of the CI templates).
+# Editing one early template line re-encodes nearly the whole file; on #4079 that
+# was ~1.22 MB and every voter refused with "Prompt is too long". The file is a pure
+# function of sources that ARE in the diff, so it carries no review signal.
+DIFF="$(git diff "${BASE}...${HEAD_REF}" -- . ':(exclude)packages/minspec/src/lib/ci-review-templates.ts')"
 if [[ -z "$DIFF" ]]; then
   # Nothing to review. Emit NO verdict → the downstream gate fails closed to
   # request-changes (an empty/anomalous branch must never auto-pass). We do NOT
