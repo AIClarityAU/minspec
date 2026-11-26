@@ -21,10 +21,12 @@ phases:
 
 Contract: [requirements.md](requirements.md). Decisions D1-D3 are closed there: D1
 `workflow_run` and D3 DR-115 (recommended picks, DR-123), and D2 option (b), re-evaluate in
-both arms (the founder's choice on 2026-11-27, replacing the earlier agent pick of an early
-exit). The reason is R3: an early exit is unsound once the trigger shares the per-PR
-concurrency group FR7 requires. Requirements D2 and AC2 are amended to match in a separate founder-approved change (the
-approval is his act, so it lands through his editor, not in this pull request).
+both arms (the founder's own choice, 2026-11-26 at 21:56 UTC, which was 2026-11-27 in Sydney,
+replacing the earlier agent pick of an early exit). The reason is R3: an early exit is unsound
+once the trigger shares the per-PR concurrency group FR7 requires. Requirements D2, FR3, AC2
+and the App-arm invariant are amended to match in a separate change that lands with the
+founder's own approval of that text (the approval is his act, so it lands through his editor,
+not in this pull request).
 
 ## R1 - Identity mode, decided once per run
 
