@@ -112,6 +112,22 @@ describe('generateHarnessFiles()', () => {
     // Hashes should be identical
     expect(secondHashes).toEqual(firstHashes);
   });
+
+  it('#941: re-init over a locally-edited harness file keeps the prior template baseline (does not adopt the edited bytes)', () => {
+    generateHarnessFiles(tmpDir);
+    const baseline = loadHashes(tmpDir)['CLAUDE.md'];
+    expect(baseline).toBeDefined();
+
+    // User edits the file locally (not yet refreshed), then init is re-run.
+    const claudePath = path.join(tmpDir, 'CLAUDE.md');
+    fs.appendFileSync(claudePath, '\n## My own section\n\nhand-written paragraph\n');
+
+    generateHarnessFiles(tmpDir);
+
+    // Manifest is unchanged: the edit is not recorded as MinSpec's output, so the
+    // next refresh still sees it as a user modification (#1697 F1).
+    expect(loadHashes(tmpDir)['CLAUDE.md']).toEqual(baseline);
+  });
 });
 
 describe('refreshHarnessFiles()', () => {
