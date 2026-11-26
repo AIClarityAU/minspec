@@ -22,6 +22,12 @@ phases:
 Contract: [requirements.md](requirements.md). Decisions D1-D3 are closed there with the
 recommended picks (DR-123): D1 `workflow_run`, D2 early exit in the App arm, D3 DR-115.
 
+**This plan departs from the D2 pick, and from the AC2 clause that follows from it** ("the
+FR7 trigger posts no `ready-to-merge` status of its own in this arm"). Reason, under R3: the
+pick is unsound once the trigger shares the per-PR concurrency group FR7 requires. The
+requirements text needs a one-line amendment to D2/AC2; until then this section is the
+record.
+
 ## R1 - Identity mode, decided once per run
 
 | App secrets present | `identity` | Extra |
@@ -74,8 +80,16 @@ New first step `ctx` (github-script, GITHUB_TOKEN):
 1. Decide `identity` (R1).
 2. `pull_request` event: `proceed=true`, `pr_number` and `base_sha` from the payload.
 3. `workflow_run` event:
-   - `identity == app` (D2): NOTICE, `proceed=false`. Nothing is posted; the App arm keeps
-     its `labeled` trigger exactly as today.
+   - Both arms re-evaluate (D2 option b, not the recorded pick a). GitHub's concurrency
+     keeps one running and one PENDING run per group and cancels the older pending run
+     when a newer one queues. The review's completion arrives seconds after its label
+     (App arm: a `labeled` run) or after a push cancelled it (a `synchronize` run). A
+     `workflow_run` run that exited without writing would cancel that queued run and post
+     nothing, leaving the head with no `ready-to-merge` status, which breaks the #1973
+     property "the latest-started evaluation writes last". Re-evaluating from fresh API
+     state keeps that property: the run that displaced the queued one evaluates a state at
+     least as new. Outcomes in the App arm are the ones the `labeled` run would post (same
+     allowlist, same witnesses); the visible difference is one more status write.
    - no PR in `workflow_run.pull_requests` (fork run, or a run not tied to a PR): NOTICE,
      `proceed=false`. The PR's last status stands; `opened`/`synchronize` already posted
      `failure`, so it reads red, never pending.
@@ -138,6 +152,12 @@ by login, check-run by `app.slug` + `[bot]` (`verifyHeadPassCheckRun`).
   posted status (red), never a false green; the next push re-evaluates.
 - The very first PR that installs the scaffold cannot self-trigger `workflow_run` (the
   workflow must be on the default branch). Its gate stays red; merge as a machinery PR.
+- The widened `GITHUB_TOKEN` (both arms, FR4) is persisted by the base checkout into
+  `.git/config`, where the read-only voters could read it. Not a new capability: under the
+  `pull_request` trigger a same-repo PR author already runs their own copy of this
+  workflow with this token, and fork runs get a read-only token and skip for want of the
+  Claude secret. Hardening (`persist-credentials: false`, then authenticating the head
+  fetch explicitly) is left out because it changes the App arm's fetch path.
 - The forge DR-115 accepts (a same-repo PR editing a non-machinery path cannot post as
   `github-actions` without touching `.github/`, so FR6 closes the workflow route).
 
@@ -148,5 +168,11 @@ by login, check-run by `app.slug` + `[bot]` (`verifyHeadPassCheckRun`).
 - Load the guard module before PR resolution to keep one identity implementation:
   rejected, the trusted base is unknown until the PR is resolved; the parity test binds the
   two copies instead.
+- D2 option a (App arm exits without writing): rejected at Plan, see R3; it loses a
+  queued gate run under GitHub's pending-run cancellation.
+- Job-level concurrency keyed on a `ctx` job's output, so an App-arm `workflow_run` never
+  joins the group: rejected, gate jobs would queue in `ctx` completion order rather than
+  event order, and a `pull_request` gate reads its PR from the event payload, so an older
+  event could write last (a #1973 regression in the App arm).
 - Scaffold-time rewrite of the templates (leave this repo's workflows untouched): rejected,
   it breaks the byte-identity the portability test proves (#564) and AC7.
