@@ -21,7 +21,7 @@ import { showedOptInRefusal } from './opt-in-refusal';
  * the prompt is handed off. The future Tier-1 agent-execute provider implements
  * the same ConstitutionProvider seam — no rework here.
  *
- * This is the "Generate with AI" leg of the empty-constitution nudge (#320): the
+ * This is the "Prepare AI prompt" leg of the empty-constitution nudge (#320): the
  * LLM-powered alternative to the deterministic {@link constitutionProposeCommand}
  * seed. `folderArg` lets the nudge target the exact folder it evaluated instead
  * of re-resolving (multi-root safe, mirrors the propose command's own arg).
