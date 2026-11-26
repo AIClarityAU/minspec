@@ -34,13 +34,13 @@ affects: [packages/minspec/src/lib/ruleset-advisor.ts, packages/minspec/src/lib/
 > names a **symbol** first and gives the line only as it stood at `8bfc5cc5`, because a
 > line number alone rots silently; the line-level reference gap is #1252).
 >
-> **What a reader should check:** D-11 (the founder's answer, recorded from queue item in108 and ratified at approval), the rewritten FR-7 /
+> **What a reader should check:** D-11 (an agent recorded it from the founder's answer to runner-queue item in108; ratified when he approves this spec), the rewritten FR-7 /
 > INV-9 / AC-6, and the rewritten AC-2. Everything else is an anchor or wording correction.
 >
-> **Revision 2026-11-26 (founder's D-11 answer).** The founder answered D-11 himself on
-> 2026-11-26 (queue item in108): option (a), plus an addition asking for the opt-in to be one
+> **Revision 2026-11-26 (D-11 recorded from the founder's answer).** The founder answered runner-queue
+> item in108 on 2026-11-26: option (a), plus an addition asking for the opt-in to be one
 > of several easy toggles on the onboarding/setup page. D-11 now records both of his lines
-> verbatim, and the addition is the new **FR-10** with **AC-9**. Nothing else changed. The text is a copy of his words; his approval of this spec is the consent record.
+> verbatim, and the addition is the new **FR-10** with **AC-9**. Nothing else changed. An agent copied his answer into this spec from the queue item; his approval of this spec is the consent record.
 >
 > Note on protection reads: verify `main` protection via
 > `repos/{owner}/{repo}/rules/branches/main` (rulesets). This org uses rulesets, not classic
@@ -48,7 +48,7 @@ affects: [packages/minspec/src/lib/ruleset-advisor.ts, packages/minspec/src/lib/
 > unprotected branch.
 
 **Date:** 2026-07-07 (clarify refinements applied 2026-07-14; re-checked and corrected 2026-10-01 — both [#703](https://github.com/AIClarityAU/minspec/issues/703))
-**Status:** Specifying (the 2026-08-07 approval, #1367, was against the pre-correction bytes; D-11 answer recorded from the founder's words 2026-11-26, queue item in108, and ratified when he approves this spec)
+**Status:** Specifying (the 2026-08-07 approval, #1367, was against the pre-correction bytes; D-11 recorded by an agent from the founder's answer to runner-queue item in108, 2026-11-26, and ratified when he approves this spec)
 **Triggered by:** [#557](https://github.com/AIClarityAU/minspec/issues/557) — "provision repo governance (branch protection + ai-review) on init/refresh — detect & offer to fix."
 **Builds on:** [DR-037](../../../docs/decisions/DR-037.md) — the managed-region template mechanism this rides · [DR-050](../../../docs/decisions/DR-050.md) — shelling the user's own `gh` on consent (FR-3) · [DR-058](../../../docs/decisions/DR-058.md) + [DR-061](../../../docs/decisions/DR-061.md) — the two auto-merge decisions FR-7 rests on · the ai-review workflow set ([#342](https://github.com/AIClarityAU/minspec/issues/342) / [#428](https://github.com/AIClarityAU/minspec/issues/428) / [#480](https://github.com/AIClarityAU/minspec/issues/480)), propagated **unchanged**, not rewritten.
 **Relates:** [SPEC-024](../SPEC-024-auto-merge-eligibility/requirements.md) — the auto-merge gate that only becomes meaningful once the `ai-review:pass` label it consumes is actually produced on every repo, which today it is not.
@@ -249,7 +249,7 @@ finding: the gate checks the thing it happens to know about and is silent on the
 
   **The "then flip" half is no longer a standing instruction — it is D-11.** Its stated
   condition has, per the 2026-08-05 audit, already fired, and DR-061 changed what a flip
-  would mean. **D-11 is answered (founder, 2026-11-26, option (a)):** this spec ships deny on
+  would mean. **D-11 is recorded (an agent copied it from the founder's answer to queue item in108, 2026-11-26, option (a)):** this spec ships deny on
   both switches and no flip. His addition (the opt-in is one of several easy toggles on the
   onboarding/setup page) is FR-10; it is an owner act, not a scaffold default, so it does not
   change FR-7.
@@ -301,12 +301,12 @@ finding: the gate checks the thing it happens to know about and is silent on the
   it inflates scope, it is cleanly separable to its own T2 issue — the governance-content FRs
   do not depend on it.)*
 - **FR-10 - Auto-merge is an easy toggle on the onboarding/setup page, off by default (added
-  2026-11-26, founder's D-11 addition, verbatim in D-11).** The onboarding/setup page
+  2026-11-26, from the founder's in108 addition as recorded by an agent, verbatim in D-11).** The onboarding/setup page
   ([SPEC-042](../SPEC-042-onboarding-checklist/requirements.md), *MinSpec: Getting Started*)
   shows the repo's auto-merge opt-in as one toggle among its other easy toggles.
   1. **Off by default.** The toggle reads the repo's current state and shows it; in a freshly
      scaffolded repo that state is off, because init/refresh writes no enablement (FR-7,
-     INV-9). Rendering the page writes nothing and makes no network call (SPEC-042 FR-14).
+     INV-9). Rendering the page writes nothing and makes no network call (SPEC-042 INV-1/AC-1).
   2. **What it switches.** The GitHub-native switch of DR-061: `.minspec/config.json`
      `autoMerge.native` and the repository's `allow_auto_merge` setting, plus any ruleset
      change the switch needs to work. The consequence-gate mode has no config seam today
@@ -368,7 +368,7 @@ finding: the gate checks the thing it happens to know about and is silent on the
   unreadable, or unrecognised resolves to hold (the resolvers' existing behaviour,
   `auto-merge-gate.ts:79`, `dispatch-issue.sh:75-88` — propagation must not weaken it). A
   value the repo's owner set is never overwritten by re-init/refresh, in **either**
-  direction. D-11 was answered with option (a), which keeps this invariant as written. The
+  direction. D-11 records option (a), which keeps this invariant as written. The
   FR-10 toggle is not init/refresh: it writes only when the repo's owner flips it, so it is
   the "deliberate per-repo act by its owner" that option (a) names, not an exception to INV-9.
 - **INV-10 — Workspace-wide offer is declared, not discovered (FR-8).** The offer never
@@ -394,12 +394,12 @@ finding: the gate checks the thing it happens to know about and is silent on the
 
 ## Decisions needed (Clarify — human-only)
 
-### Founder's answer recorded - D-11 (2026-11-26, ratified at approval)
+### D-11 recorded from the founder's in108 answer (2026-11-26, ratified at approval)
 
-- **D-11 - Founder's answer recorded (human-chosen, 2026-11-26, queue item in108; ratified
-  when he approves this spec).** The founder chose this himself, in an AskUserQuestion put
-  to him by the queue proxy; it is not an agent's pick.
-  **Resolved: option (a), chosen by the founder.** His pick, verbatim:
+- **D-11 - Recorded from the founder's answer (2026-11-26, runner-queue item in108; ratified
+  when he approves this spec).** The founder answered runner-queue item in108 by picking
+  option (a); an agent copied that answer into this spec from the queue item.
+  **Recorded selection: option (a), as in the founder's in108 answer; an agent copied it.** His pick, verbatim:
 
   > "(a) Off, owner opts in (Recommended): deny on both auto-merge switches in a freshly scaffolded repo, no automatic flip; turning either on stays a deliberate per-repo act by its owner"
 
@@ -454,10 +454,10 @@ confirm) is what `ruleset-advisor.ts` does today (see *What exists*).
 *Added 2026-11-26.* The repo's Clarify check (`scripts/lib/clarify-open.ts`) reads D-1, D-2,
 D-4, D-5 and D-7 as still open, because none of them carries a recorded selection. So each
 now carries one. D-1, D-2 and D-4 use the form DR-123 sets for a T3 spec: an agent copied the
-option the item recommends, no human chose it, and approving this spec ratifies the pick (the
+option the item recommends, and approving this spec ratifies the pick (the
 approver may change it first). D-5 names no option, so no agent pick is possible; it is
 answered by an accepted decision record it already cites, the way D-3 is. D-7 is closed by
-the founder's D-11 answer.
+D-11, recorded from the founder's in108 answer.
 
 
 - **D-1 — Tier: T3 or T4?** Half (A) is T3-shaped (files + one command). Half (B) adds a
@@ -513,7 +513,7 @@ the founder's D-11 answer.
   follow-up once those close. A per-repo override still wins in either direction (INV-9).
   **→ Condition since met and overtaken by DR-061; the flip is re-opened as D-11
   (2026-10-01). The `pr-gate`-by-default half stands and is what FR-7 ships.**
-  **→ Resolved: closed by the founder's D-11 answer (2026-11-26, option (a)).**
+  **→ Resolved: closed by D-11 (2026-11-26, option (a), recorded by an agent from the founder's in108 answer).**
 - **D-10 — Collapse the two init/refresh palette commands into one? → RESOLVED (2026-07-14,
   Paul Harvey, #703): yes — one state-detecting command (FR-9).** `initCommand` (first-run +
   onboarding) and `initRefreshCommand` (merge-preserving) do genuinely different things, but
@@ -596,7 +596,7 @@ the founder's D-11 answer.
   lockstep.** It inventories this spec's FR-1/FR-3/FR-6/FR-7 as its removal checklist and
   names FR-9's command; FR-7's artifact is now a generated bundle rather than the raw
   `scripts/auto-merge-gate.ts`, and D-11 may add or remove a config write. SPEC-063 must be
-  re-read against whatever D-11 decides. **Re-read 2026-11-26 against the founder's D-11
+  re-read against whatever D-11 decides. **Re-read 2026-11-26 against D-11, as recorded from the founder's in108
   answer:** option (a) adds no scaffold write, so SPEC-063's removal list needs nothing for
   it. FR-10 does add owner-made writes (`autoMerge.native`, the repo's `allow_auto_merge`,
   any ruleset change) that SPEC-063's inventory does not list; SPEC-063 is approved, so this
@@ -634,7 +634,7 @@ Recorded because nobody reviewed these choices live (DR-086 §4).
 - **Edit the body but leave `status: implementing`.** Rejected: the stored approval hash
   covers the old bytes, so the file would claim an approval it no longer has.
 
-## Alternatives rejected in the 2026-11-26 revision (founder's D-11 answer)
+## Alternatives rejected in the 2026-11-26 revision (D-11 recorded from the founder's answer)
 
 Recorded because nobody reviewed these choices live (DR-086 §4).
 
@@ -647,5 +647,6 @@ Recorded because nobody reviewed these choices live (DR-086 §4).
   every write on the row before the flip.
 - **A second toggle for the consequence-gate mode.** Rejected for now: the mode has no config
   seam (FR-7 item 3), so the toggle would change nothing. It can be added when a seam exists.
-- **Keep D-11 as an agent-recorded selection under DR-123.** Rejected: the founder chose
-  option (a) himself, so recording it as an agent's pick was false.
+- **Record D-11 as a DR-123 pick of the recommended option.** Rejected: the founder's in108
+  answer exists, so D-11 copies his answer and his words instead; an agent recorded it, and
+  approving this spec ratifies it.
