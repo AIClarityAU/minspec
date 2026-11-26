@@ -1,5 +1,5 @@
 ---
-id: SPEC-137
+id: SPEC-429
 type: requirements
 status: specifying
 tier: T3
@@ -31,17 +31,17 @@ SPEC-032 FR-1/FR-2 enumerate local branches plus `origin/*` only; Non-Goals excl
 
 **FR-1 — Remote set.** Discovery computes the remote set from `git remote` (local config, no network). Default set = `{origin}` (v1 behaviour, unchanged). A secondary remote is included only if it passes the opt-in rule in Decision D1.
 
-**FR-2 — Fetch each included remote.** For every included remote run `git fetch --prune <remote>` (SPEC-032 FR-1 semantics per remote). Fetch is the only mutation (SPEC-032 INV-3). Remotes are fetched independently: one failing remote must not block or hide the others.
+**FR-2 — Fetch each included remote.** For every included remote run `git fetch --prune <remote>` (SPEC-032 FR-1 semantics per remote). Fetch is the only mutation (SPEC-032 INV-3). Remotes are fetched independently: one failing remote must not block or hide the others. Each fetch has a per-remote timeout; a remote that times out is treated as a failed fetch and shown stale (FR-4), never blocking the others.
 
-**FR-3 — Enumerate the union.** Candidate set = SPEC-032 FR-2 union extended with `<remote>/*` tracking refs for each included remote, minus current branch, minus anything merged into the default base, minus each remote's `HEAD` symref.
+**FR-3 — Enumerate the union.** Candidate set = SPEC-032 FR-2 union extended with `<remote>/*` tracking refs for each included remote, minus current branch, minus anything merged into the default base **of its own remote** (`origin/*` candidates are tested against the `origin` default branch, `<remote>/*` candidates against that remote's default branch as named by its `HEAD` symref; if that symref is unresolved, the remote is listed as partial under FR-4 and its candidates are not excluded as merged), minus each remote's `HEAD` symref.
 
 **FR-4 — Per-remote honesty (extends SPEC-032 INV-1).** Each candidate carries its remote. A remote whose fetch failed, was never fetched, or was skipped is listed explicitly as stale/partial/skipped with the reason; the result is never presented as complete while any included remote is stale. A configured-but-excluded remote is reported as "not scanned" (never silently omitted).
 
-**FR-5 — De-duplication across remotes.** The same commit tip reachable on several remotes (e.g. `origin/feat` and `upstream/feat`) yields ONE candidate listing all remotes; a same-named branch with a different tip yields separate candidates labelled by remote. De-duplication is a pure function of (ref name, tip SHA).
+**FR-5 — De-duplication across remotes.** The same commit tip reachable on several remotes (e.g. `origin/feat` and `upstream/feat`) yields ONE candidate listing all remotes; a same-named branch with a different tip yields separate candidates labelled by remote. De-duplication is a pure function of (short branch name with the `<remote>/` prefix stripped, tip SHA), so `origin/feat` and `upstream/feat` at the same tip merge into one row.
 
 **FR-6 — Classification and done-ness unchanged in kind.** SPEC-032 FR-3 classification and FR-5/6 done-ness apply as-is, with the remote added as a classifier input: a branch on a non-`origin` remote is never classified `your-own` by name alone (author identity must match). PR/CI signals (SPEC-024) are looked up against the repo that owns the remote; where that cannot be resolved offline, signals are `none`/unknown and the verdict cannot be `ready` (fail toward `needs-attention`, not toward merge).
 
-**FR-7 — Surface.** The signpost section (SPEC-032 FR-8) shows the remote on each row and a one-line scan summary ("scanned: origin, upstream · not scanned: alice-fork"). Keyboard paths are unchanged.
+**FR-7 — Surface.** The signpost section (SPEC-032 FR-8) shows the remote on each row and a one-line scan summary ("scanned: origin, upstream · not scanned: alice-fork"), **only when more than one remote is configured**; with a single remote the surface is byte-identical to v1 (INV-3). Keyboard paths are unchanged.
 
 **FR-8 — Action gate.** Merge actions in SPEC-028 on a candidate whose only remote is non-`origin` MUST be single-merge only (never in "merge all clean"), pending Decision D2.
 
@@ -61,7 +61,8 @@ SPEC-032 FR-1/FR-2 enumerate local branches plus `origin/*` only; Non-Goals excl
 4. Configured remote not opted in → not fetched (assert no fetch command issued), listed "not scanned".
 5. Repo with only `origin` → output and git commands identical to SPEC-032 (regression test).
 6. Non-`origin`-only candidate is excluded from "merge all clean" (pending D2).
-7. Viewing the surface adds/edits no remote and mutates nothing beyond `git fetch`.
+7. A remote whose fetch exceeds the per-remote timeout is listed stale, the other remotes' results are still shown, and the result is flagged partial (FR-2).
+8. Viewing the surface adds/edits no remote and mutates nothing beyond `git fetch`.
 
 ## Decisions needed (Clarify)
 
@@ -74,7 +75,7 @@ SPEC-032 FR-1/FR-2 enumerate local branches plus `origin/*` only; Non-Goals excl
 - (a) **No — single-merge only** *(recommended)*; reflects that a fork's branch is another party's code with weaker provenance. Cost: slower for a maintainer merging many fork PRs.
 - (b) Yes under the same SPEC-028 gates — consistent, but extends outward-facing bulk action to less-trusted sources without a separate approval.
 
-**D3 — Fetch trigger.**
+**D3 — Fetch trigger.** (The per-remote timeout is already required by FR-2; this decision only chooses the trigger.)
 - (a) **Fetch only the allowlisted remotes when the inbox is opened/refreshed** *(recommended)* — same trigger as v1. Cost: a slow remote slows refresh (mitigate with a per-remote timeout showing stale).
 - (b) Background periodic fetch — fresher, but network activity the user did not trigger; would need a DR and consent UX.
 
