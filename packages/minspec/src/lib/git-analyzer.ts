@@ -1,4 +1,4 @@
-import type { SimpleGit } from 'simple-git';
+import type { DiffResult, SimpleGit } from 'simple-git';
 import { simpleGit } from 'simple-git';
 import * as path from 'path';
 
@@ -19,12 +19,14 @@ export interface GitAnalyzerOptions {
   git?: SimpleGit;
 }
 
-/** Parsed diff file entry from simple-git */
-interface DiffFile {
-  file: string;
-  insertions: number;
-  deletions: number;
-  binary: boolean;
+/**
+ * Line delta of a diff entry. simple-git types an entry as a union and the
+ * binary arm carries byte counts (`before`/`after`) with no `insertions` or
+ * `deletions` (#1197), so narrow on `binary` instead of asserting the union
+ * away: a binary file is still a changed file but contributes zero lines.
+ */
+function lineDelta(f: DiffResult['files'][number]): { insertions: number; deletions: number } {
+  return f.binary ? { insertions: 0, deletions: 0 } : { insertions: f.insertions, deletions: f.deletions };
 }
 
 /**
@@ -144,7 +146,7 @@ export async function analyzeGitDiff(
     return [];
   }
 
-  const files = diffSummary.files as DiffFile[];
+  const files = diffSummary.files;
 
   // No changes = no signals
   if (files.length === 0) {
@@ -153,7 +155,10 @@ export async function analyzeGitDiff(
 
   // Compute raw metrics
   const fileCount = files.length;
-  const totalLines = files.reduce((sum, f) => sum + f.insertions + f.deletions, 0);
+  const totalLines = files.reduce((sum, f) => {
+    const d = lineDelta(f);
+    return sum + d.insertions + d.deletions;
+  }, 0);
 
   const extensions = new Set<string>();
   const directories = new Set<string>();
@@ -284,6 +289,24 @@ function statusFromGit(
 }
 
 /**
+ * Expand git's diffstat rename compression back to a real path pair.
+ * `git diff --stat` renders a rename as `dir/{old => new}/tail` (common prefix
+ * and suffix factored out) or bare `old => new` when nothing is shared.
+ * Returns `null` for an ordinary path.
+ */
+export function expandRenamePath(p: string): { from: string; to: string } | null {
+  const braced = /^(.*)\{(.*) => (.*)\}(.*)$/.exec(p);
+  if (braced) {
+    const [, pre, a, b, post] = braced;
+    const join = (mid: string) => (pre + mid + post).replace(/\/{2,}/g, '/');
+    return { from: join(a), to: join(b) };
+  }
+  const bare = /^(.*) => (.*)$/.exec(p);
+  if (bare) return { from: bare[1], to: bare[2] };
+  return null;
+}
+
+/**
  * Build the pure {@link ConsequenceInput} for the consequence analyzers from the
  * current git diff. **This is the IO seam** (INV-1): all git/disk reads live here
  * in the analyzer-adjacent IO layer; the analyzers themselves stay pure and
@@ -317,7 +340,7 @@ export async function buildConsequenceInput(
   } catch {
     return empty;
   }
-  const files = diffSummary.files as DiffFile[];
+  const files = diffSummary.files;
   if (files.length === 0) return empty;
 
   // Classify status from `git status`.
@@ -341,23 +364,30 @@ export async function buildConsequenceInput(
   const changedFiles: ChangedFile[] = [];
 
   for (const file of files) {
-    const status = statusFromGit(file.file, created, deleted, renamed);
+    // A rename arrives as git's compressed `dir/{old => new}` stat form; resolve
+    // it to the destination path (new content) and source path (old content).
+    const expanded = expandRenamePath(file.file);
+    const filePath = expanded ? expanded.to : file.file;
+    const oldPath = expanded ? expanded.from : file.file;
+    const status = expanded ? 'renamed' : statusFromGit(filePath, created, deleted, renamed);
 
     let content: string | undefined;
     let oldContent: string | undefined;
 
-    if (status !== 'deleted') {
+    // A binary blob decoded as UTF-8 is meaningless to the analyzers and can be
+    // large: keep the file (blast radius) but skip the content reads.
+    if (status !== 'deleted' && !file.binary) {
       // New/current content: the staged blob (`:path`) or, for working-tree
       // mode, the file on disk via the same `:path` falls back to HEAD; read the
       // working tree directly when not staged.
       try {
         if (staged) {
-          content = await git.show([`:${file.file}`]);
+          content = await git.show([`:${filePath}`]);
         } else {
           // Working-tree content: read from disk relative to repo root.
-          const abs = path.isAbsolute(file.file)
-            ? file.file
-            : path.join(repoPath, file.file);
+          const abs = path.isAbsolute(filePath)
+            ? filePath
+            : path.join(repoPath, filePath);
           content = await fsReadFile(abs);
         }
       } catch {
@@ -365,18 +395,17 @@ export async function buildConsequenceInput(
       }
     }
 
-    if (status !== 'added') {
+    if (status !== 'added' && !file.binary) {
       try {
-        oldContent = await git.show([`HEAD:${file.file}`]);
+        oldContent = await git.show([`HEAD:${oldPath}`]);
       } catch {
         oldContent = undefined;
       }
     }
 
     changedFiles.push({
-      path: file.file,
-      insertions: file.insertions,
-      deletions: file.deletions,
+      path: filePath,
+      ...lineDelta(file),
       status,
       content,
       oldContent,

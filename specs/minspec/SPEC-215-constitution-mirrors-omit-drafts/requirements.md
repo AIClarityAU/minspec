@@ -1,7 +1,7 @@
 ---
 id: SPEC-215
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a harness mirror must not present a pending proposal as a binding rule
@@ -19,8 +19,8 @@ implements_reason: >-
 affects: [packages/minspec/src/lib/constitution.ts, packages/minspec/src/lib/template-engine.ts, packages/minspec/src/lib/template-registry.ts, packages/minspec/src/lib/constitution-compaction.ts, packages/minspec/src/lib/constitution-nudge.ts, packages/minspec/src/lib/constitution-proposer.ts, packages/minspec/tests/refresh-constitution-draft-fixed-point.test.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

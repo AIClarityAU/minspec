@@ -37,12 +37,13 @@
  *
  * Without `--write` it prints the decision and the record it would write. With `--write`
  * it also writes the sidecar and moves the artifact's lifecycle (a spec advances to
- * implementing; a DR flips to `accepted` and the register index is regenerated), the
+ * its derived status (usually `planning`, DR-069); a DR flips to `accepted` and the register index is regenerated), the
  * same writes the founder's *Approve Spec* / *Accept ADR* make. Committing and opening the
  * approval pull request stay with the caller. Exit 0 = approved (or would be), 1 = denied.
  */
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
+import { createRequire } from 'module';
 import * as path from 'path';
 
 import { specHash } from '../../packages/shared/src/canonical';
@@ -57,6 +58,8 @@ import { readRepeatFixShare, utcToday } from './repeat-fix-share';
 import { openClarifyDetail } from './clarify-open';
 import { readContentPullRequest } from './content-pr';
 import { readSpecFile, parseSpec, advanceSpecToImplementing } from '../../packages/minspec/src/lib/spec';
+import { deriveStatus, phasesForApproval } from '../../packages/minspec/src/lib/lifecycle';
+import { bodyStatusToken } from '../../packages/minspec/src/lib/status-parity';
 import { isTerminalSpecStatus } from '../../packages/minspec/src/lib/spec-vocabulary';
 import { loadConfig } from '../../packages/minspec/src/lib/config';
 import { validateSpec } from '../../packages/minspec/src/lib/spec-validator';
@@ -64,14 +67,65 @@ import { epicRefSet } from '../../packages/minspec/src/lib/epic-manager';
 import { readShardIdFiles } from '../../packages/minspec/src/lib/spec-layout';
 import { assertOwnershipDeclaredForAdvance } from '../../packages/minspec/src/lib/ownership-advance-guard';
 import { setAdrStatus, regenerateDrIndex } from '../../packages/minspec/src/lib/adr-manager';
+import { scopeIndexToDr } from '../../packages/minspec/src/lib/dr-index-scope';
 
 /** Where the AI review panel's run lives. A comment outside one of its runs is not a verdict. */
 export const AI_REVIEW_WORKFLOW_PATH = '.github/workflows/ai-review.yml';
 /** The verdict check-run's name (not the runner job's implicit check). */
 export const AI_REVIEW_CHECK_NAME = 'ai-review';
-/** The App that posts the review. The same App the agents use, hence the run binding. */
-export const REVIEWER_LOGIN = BOT_ACTOR;
-export const REVIEWER_APP_SLUG = 'minspec-sdd';
+/**
+ * WHO may write a verdict that counts (#4078). Not a constant here: the ONE rule lives in
+ * `.github/scripts/ai-review-guard.js` (`resolveReviewerFromEnv`, over
+ * `resolveReviewerAllowlist`), the same function the gating workflows call, fed the same
+ * two inputs with the same default:
+ *
+ *   - `AI_REVIEW_APP` unset (or `builder`): the shipped single-App default, the builder
+ *     App `minspec-sdd[bot]` (or whatever `AI_REVIEW_BOT_LOGINS` names).
+ *   - `AI_REVIEW_APP=review`: only the logins in `AI_REVIEW_BOT_LOGINS` (the review-only
+ *     App, `aiclarity-minspec-review[bot]` in this repository); the builder App on that
+ *     list is refused.
+ *   - anything else, or review mode with an empty or builder-naming list: a fault, and
+ *     every judgement below DENIES (fails closed), never falls back to the builder.
+ *
+ * In a workflow those inputs are the repository variables. This path runs in agent
+ * sessions, whose App token cannot read Actions variables (403, checked 2026-11-26), so it
+ * reads them from its environment. A session whose environment still says `builder` after
+ * the repository moved to review mode is caught by the foreign-verdict tripwire in
+ * `judgeHeadReviewPass`: the review App's own `ai-review` check-run on the head is then
+ * from an App it does not trust, and it denies rather than believing the builder.
+ */
+export interface ReviewerResolution {
+  readonly mode: string;
+  /** Lower-cased logins (`name[bot]`) that may write a verdict; empty authorizes nobody. */
+  readonly allowlist: readonly string[];
+  /** Non-empty = the identity could not be resolved; every judgement denies with it. */
+  readonly fault: string;
+}
+
+interface GuardReviewerApi {
+  readonly SHIPPED_REVIEWER_LOGIN: string;
+  resolveReviewerFromEnv(env: Readonly<Record<string, string | undefined>>): ReviewerResolution;
+  isAuthorizedReviewer(login: string | undefined, allowlist: readonly string[]): boolean;
+}
+
+// The guard is plain CommonJS with no type declarations; `createRequire` loads the same
+// file under `npx tsx` (CJS) and vitest (ESM), as machinery-paths.test.ts does.
+const guard = createRequire(__filename)('../../.github/scripts/ai-review-guard.js') as GuardReviewerApi;
+
+/** The reviewer identity for an environment (default: this process's). */
+export function resolveReviewer(env: Readonly<Record<string, string | undefined>> = process.env): ReviewerResolution {
+  return guard.resolveReviewerFromEnv(env);
+}
+
+/**
+ * The SHIPPED DEFAULT reviewer (AI_REVIEW_APP unset), taken from the guard so there is no
+ * second literal. Used for messages and test fixtures; the judgement below never reads it.
+ */
+export const REVIEWER_LOGIN: string = guard.SHIPPED_REVIEWER_LOGIN;
+export const REVIEWER_APP_SLUG: string = REVIEWER_LOGIN.replace(/\[bot\]$/, '');
+
+/** The Actions runner's own app: posts the implicit per-job check, never a verdict. */
+const ACTIONS_APP_SLUG = 'github-actions';
 
 const REVIEW_HEADING = /^## 🤖 AI review — `ai-review:([a-z-]+)`/;
 
@@ -260,15 +314,39 @@ export function planDelegatedApproval(input: PlanInput): PlanResult {
  */
 export function judgeHeadReviewPass(
   review: ReviewEvidence,
+  reviewer: ReviewerResolution = resolveReviewer(),
 ): { readonly ok: true; readonly url: string } | { readonly ok: false; readonly reason: string; readonly detail: string } {
   const deny = (reason: string, detail: string) => ({ ok: false as const, reason, detail });
   const { pull } = review;
+  // Who may write the verdict: the guard's rule (header of REVIEWER_LOGIN). A fault or an
+  // empty list authorizes nobody, so it denies, never trusts a guessed App.
+  if (reviewer.fault !== '') return deny('reviewer-identity-unresolved', reviewer.fault);
+  if (reviewer.allowlist.length === 0) {
+    return deny('reviewer-identity-unresolved', 'the reviewer allowlist is empty, so no verdict can be verified');
+  }
+  const trusted = reviewer.allowlist.join(', ');
+  const appTrusted = (slug: string | undefined): boolean =>
+    slug !== undefined && slug !== '' && (guard.isAuthorizedReviewer(slug, reviewer.allowlist) || guard.isAuthorizedReviewer(`${slug}[bot]`, reviewer.allowlist));
+  const onHead = review.checkRuns.filter((c) => c.name === AI_REVIEW_CHECK_NAME && c.headSha === pull.headSha);
+  // Foreign-verdict tripwire. An `ai-review` check-run on this head from an App this
+  // session does not trust means either a forged verdict or a session whose
+  // AI_REVIEW_APP / AI_REVIEW_BOT_LOGINS lag the repository's (it cannot read the
+  // repository variables). Either way the configured identity is not the one writing
+  // verdicts here, so deny, never pick a side.
+  const foreign = onHead.filter((c) => !appTrusted(c.appSlug) && c.appSlug !== ACTIONS_APP_SLUG);
+  if (foreign.length > 0) {
+    return deny(
+      'reviewer-identity-mismatch',
+      `${AI_REVIEW_CHECK_NAME} check-run(s) on ${pull.headSha} from ${[...new Set(foreign.map((c) => String(c.appSlug)))].join(', ')}, ` +
+        `which this session does not trust (it trusts ${trusted}); set AI_REVIEW_APP and AI_REVIEW_BOT_LOGINS to the repository's values`,
+    );
+  }
   // The verdict check-run on the reviewed commit.
-  const checks = review.checkRuns
-    .filter((c) => c.name === AI_REVIEW_CHECK_NAME && c.headSha === pull.headSha && c.appSlug === REVIEWER_APP_SLUG)
+  const checks = onHead
+    .filter((c) => appTrusted(c.appSlug))
     .sort((a, b) => (ms(b.completedAt) || 0) - (ms(a.completedAt) || 0));
   if (checks.length === 0) {
-    return deny('no-ai-review-check', `no ${AI_REVIEW_CHECK_NAME} check-run from ${REVIEWER_APP_SLUG} on ${pull.headSha}`);
+    return deny('no-ai-review-check', `no ${AI_REVIEW_CHECK_NAME} check-run from ${trusted} on ${pull.headSha}`);
   }
   if (checks[0].status !== 'completed' || checks[0].conclusion !== 'success') {
     return deny(
@@ -279,7 +357,7 @@ export function judgeHeadReviewPass(
 
   // The latest AI review comment, and the CI run it was posted inside.
   const reviews = review.comments
-    .filter((c) => c.login === REVIEWER_LOGIN && REVIEW_HEADING.test(c.body) && !Number.isNaN(ms(c.createdAt)))
+    .filter((c) => guard.isAuthorizedReviewer(c.login, reviewer.allowlist) && REVIEW_HEADING.test(c.body) && !Number.isNaN(ms(c.createdAt)))
     .sort((a, b) => ms(b.createdAt) - ms(a.createdAt) || b.id - a.id);
   if (reviews.length === 0) return deny('no-ai-review-comment', `#${pull.number} has no AI review comment`);
   const latest = reviews[0];
@@ -547,7 +625,8 @@ function main(): number {
   console.log(JSON.stringify(plan));
   if (!parsed.write) return 0;
 
-  writeLifecycle(repoRoot, abs, plan.record.act);
+  const changed = writeLifecycleHashNeutral(repoRoot, abs, plan.record.act);
+  if (changed !== undefined) return deny('lifecycle-changed-hash', changed);
   const sidecar = path.join(repoRoot, '.minspec', 'approvals', `${artifact}.json`);
   if (!fs.existsSync(path.join(repoRoot, '.minspec'))) {
     console.error('no .minspec/ at the repo root: this repo has not opted in');
@@ -572,6 +651,25 @@ export function specNotApprovable(repoRoot: string, abs: string, content?: strin
   const parsed = content === undefined ? readSpecFile(abs) : parseSpec(content);
   const status = parsed.frontmatter.status;
   if (isTerminalSpecStatus(status)) return `the spec is ${String(status)}, past the approval gate`;
+  // The approval hash covers the body, and the lifecycle write rewrites a body status word
+  // (setBodyStatusToken) to the derived status. A delegated approval must leave the body untouched (DR-081 s5:
+  // the exemption covers the record, never the approvable), so refuse up front.
+  const text = content ?? fs.readFileSync(abs, 'utf-8');
+  const body = bodyStatusToken(text, 'spec');
+  // The word the approval stamps is the approval-aware derived status (DR-069): usually
+  // `planning` for a pre-implement spec, `implementing` once implement has started - the
+  // same derivation advanceSpecToImplementing uses (spec.ts), so pre-check and write agree.
+  const target = deriveStatus(phasesForApproval(parsed.frontmatter.phases), 'approved', undefined);
+  // The writer stamps the CAPITALIZED word (setBodyStatusToken), so compare the raw word,
+  // case-sensitively: a lowercase `planning` line is still rewritten to `Planning`.
+  const written = target.charAt(0).toUpperCase() + target.slice(1);
+  const rawWord = body === null ? '' : (text.split('\n')[body.line - 1].match(/^\*\*Status:\*\*[ \t]*([A-Za-z]+)/)?.[1] ?? '');
+  if (body !== null && rawWord !== written) {
+    return (
+      `the body status line (line ${body.line}, "${body.token}") would be rewritten to "${target}" by the approval, ` +
+      `which changes the spec's hash; open a content pull request that removes that line, then retry`
+    );
+  }
   const result = validateSpec(parsed, loadConfig(repoRoot), {
     knownEpicRefs: epicRefSet(repoRoot),
     siblingShardFiles: readShardIdFiles(path.dirname(abs)),
@@ -589,11 +687,40 @@ export function specNotApprovable(repoRoot: string, abs: string, content?: strin
   return undefined;
 }
 
+/**
+ * `writeLifecycle`, then re-hash: if the write changed the artifact's canonical hash the
+ * recorded approval would be stale on arrival, so restore the original bytes and return the
+ * reason (undefined when the hash held). Only ever adds a refusal.
+ *
+ * Spec approvals only: a DR acceptance inherently rewrites the body `## Status` token
+ * (proposed -> accepted), which the hash retains, so it cannot be hash-neutral.
+ */
+export function writeLifecycleHashNeutral(repoRoot: string, abs: string, act: DelegatedAct): string | undefined {
+  if (act !== 'spec-approval') {
+    writeLifecycle(repoRoot, abs, act);
+    return undefined;
+  }
+  const before = fs.readFileSync(abs);
+  const hashBefore = specHash(before.toString('utf-8'));
+  try {
+    writeLifecycle(repoRoot, abs, act);
+  } catch (err) {
+    fs.writeFileSync(abs, before);
+    throw err;
+  }
+  if (specHash(fs.readFileSync(abs, 'utf-8')) === hashBefore) return undefined;
+  fs.writeFileSync(abs, before);
+  return `the lifecycle write changed the hash of ${path.relative(repoRoot, abs)}; restored, nothing recorded`;
+}
+
 /** The lifecycle half of the act, using the same writers the founder's commands use. */
 function writeLifecycle(repoRoot: string, abs: string, act: DelegatedAct): void {
   if (act === 'engineering-dr-acceptance') {
     setAdrStatus(abs, 'accepted');
     regenerateDrIndex(repoRoot);
+    // #581: the regen rebuilds every row from the working tree; keep only this DR's so an
+    // unrelated DR's uncommitted status change cannot ride into the approval commit.
+    scopeIndexToDr(repoRoot, path.join(path.dirname(abs), 'INDEX.md'), path.basename(abs, '.md'));
   } else {
     advanceSpecToImplementing(abs);
   }

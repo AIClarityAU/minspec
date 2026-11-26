@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-270-drain-persisted-settings/requirements.md",
+  "specHash": "bc17563ee64f50e1acaf9016933a53b5ad7c7568017fa2c00bf3fa1254908ee7",
+  "approvedAt": "2026-11-02T02:52:37.897Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-on-rec-1028",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3229#issuecomment-6541165991"
+}

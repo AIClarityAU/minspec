@@ -19,7 +19,7 @@ implements_reason: >-
 
 # MinSpec — Explain (?) affordance: a read-only, one-click "explain this to me" exit on the review surfaces (Requirements)
 
-> Materializes **[#914](https://github.com/AIClarityAU/minspec/issues/914)** (role:architect, Specify phase only). The Explain control was already folded into the two owning host specs as normative FRs — **[SPEC-014](../SPEC-014-review-webview/requirements.md) FR-18** (reviewer action bar, requirements.md:212-230) and **[SPEC-018](../SPEC-018-spec-custom-editor/requirements.md) FR-18** (per-section hover toolbar, requirements.md:257-283). This spec is the **coordinating** home for the *cross-cutting* parts those two FRs share and neither one owns: the Tier-0 routing seam, the queue request contract, and the honest-degrade floor. It deliberately does **not** re-own the host-side interaction requirements — those stay with SPEC-014 / SPEC-018.
+> Materializes **[#914](https://github.com/AIClarityAU/minspec/issues/914)** (role:architect, Specify phase only). The Explain control was already folded into the two owning host specs as normative FRs — **[SPEC-014](../SPEC-014-review-webview/requirements.md) FR-18** (reviewer action bar, requirements.md:229-247) and **[SPEC-018](../SPEC-018-spec-custom-editor/requirements.md) FR-18** (per-section hover toolbar, requirements.md:257-283). This spec is the **coordinating** home for the *cross-cutting* parts those two FRs share and neither one owns: the Tier-0 routing seam, the queue request contract, and the honest-degrade floor. It deliberately does **not** re-own the host-side interaction requirements — those stay with SPEC-014 / SPEC-018.
 
 ## Supersession record (Clarify, 2026-08-14)
 
@@ -43,12 +43,12 @@ Withdrawal was free and is reversible: this spec has **no approval sidecar**
   a visible "no explainer available" notice. That is a single criterion spanning both surfaces
   and binding them to one channel — which is what this spec's FR-1/FR-5 and AC-7 restate.
   Measured against the host FRs line by line, 5 of this spec's 7 FRs are restatements of
-  [SPEC-014:212-230](../SPEC-014-review-webview/requirements.md#L212) and
+  [SPEC-014:229-247](../SPEC-014-review-webview/requirements.md#L229) and
   [SPEC-018:257-283](../SPEC-018-spec-custom-editor/requirements.md#L257). Keeping it would
   make the Explain contract live in three documents with no gate checking they agree — the
   exact drift this spec's own R1 warns about.
 - **DQ-2 → parked, and not this spec's to answer.** The seam is
-  [SPEC-014 FR-OQ2](../SPEC-014-review-webview/requirements.md#L623) (requirements.md:623-626),
+  [SPEC-014 FR-OQ2](../SPEC-014-review-webview/requirements.md#L640) (requirements.md:640-643),
   still under `## Open questions` and ending *"(Open — plan phase.)"*. Independently confirmed
   by [SPEC-018 design.md:21-24](../SPEC-018-spec-custom-editor/design.md) ("its FR-OQ2,
   unresolved"). Note `.minspec/queue` is **not** among FR-OQ2's four candidates, so this spec's
@@ -56,10 +56,10 @@ Withdrawal was free and is reversible: this spec has **no approval sidecar**
   The park is bounded, not indefinite: `design.md:42` lists "SPEC-014 FR-OQ2 channel built" as
   a hard dependency of SPEC-018's Slice E, so an in-flight approved T4 spec is waiting on it.
 - **DQ-3 → no new DR.** SPEC-014 already ran the ADR filter on this exact seam and answered:
-  [SPEC-014:598](../SPEC-014-review-webview/requirements.md#L598) — *"No **new** DR is created
+  [SPEC-014:615-616](../SPEC-014-review-webview/requirements.md#L615) — *"No *new* DR is created
   (Context §: boundary recorded inline), but the decision is DR-bound, not a < 1-day reversible
-  call."* An earlier reading of :595-596 alone suggested the opposite; the sentence completes
-  at :598 and reverses it.
+  call."* An earlier reading of :610-614 alone suggested the opposite; the sentence completes
+  at :615-616 and reverses it.
 
 ### The one requirement that survives, and where it went
 
@@ -79,6 +79,26 @@ lives in a GitHub issue rather than in an approvable, so it is outside the SDD g
 forgotten. The mitigation is that #914 stays open and FR-OQ2 blocks SPEC-018 Slice E, so the
 moment anyone picks up that seam both threads are in front of them.
 
+### Re-verification on re-dispatch (2026-11-23, main `696dd202`)
+
+#914 was dispatched again for Specify. Before changing anything, each premise the supersession
+rests on was re-read on main. All of them still hold, so the decision stands and **no second
+spec id was minted**. Only line citations that had drifted were corrected:
+
+- **SPEC-014 FR-OQ2 is still open**: it is still under `## Open questions` (requirements.md:629)
+  and still ends *"(Open — plan phase.)"* (requirements.md:640-643, was 623-626). The trigger
+  for folding the residue into SPEC-018 AC-19 has therefore **not fired**.
+- **SPEC-018 AC-19 is unchanged** (requirements.md:406-412). Its text still spans both surfaces
+  and one channel, and it still does not pin a request schema. The residue stays on #914.
+- **SPEC-014 FR-18 has moved** to requirements.md:229-247 (was 212-230). Its content is unchanged.
+- **SPEC-014's ADR-filter ruling has moved** to requirements.md:610-616 (was 595-598). Its
+  content is unchanged, and it still ends in "No *new* DR is created".
+- **SPEC-018 design.md** still names FR-OQ2 as unresolved (:23). Slice E still lists
+  "SPEC-014 FR-OQ2 channel built" as a dependency (:42).
+- **Still no approval sidecar** for this spec: no `SPEC-056` entry exists under `.minspec/approvals/specs/minspec/`.
+
+No new DR is needed. This refresh decides nothing new; it re-confirms an existing decision.
+
 ## One-Sentence Scope
 
 Give a reviewer a read-only, one-click **`?` Explain** control — on both review surfaces (the SPEC-014 reviewer action bar at document scope, and the SPEC-018 per-section hover toolbar at section scope) — that requests a plain-language explanation of the artifact under review, routed **out of** the Tier-0 core (core enqueues a request and renders the reply, never calls an LLM), never mutating the document or its approval hash, and degrading honestly to a "no explainer available" notice when no consumer is present — so that *"I don't understand this"* becomes cheaper and more truthful than approving, without adding an "approve — not understood" button that would sanction rubber-stamping.
@@ -89,7 +109,7 @@ Grounded in the current code and specs, with `file:line` evidence. Every claim b
 
 ### The Explain FRs already exist in the two host specs — verified
 
-- **SPEC-014 FR-18** — "Explain — a read-only exit cheaper than approving": the review action bar exposes a `?` control at **document** scope; read-only; routes through the *single* AI seam SPEC-014's revision loop resolves (its FR-OQ2); degrades honestly ([SPEC-014 requirements.md:212-230](../SPEC-014-review-webview/requirements.md)).
+- **SPEC-014 FR-18** — "Explain — a read-only exit cheaper than approving": the review action bar exposes a `?` control at **document** scope; read-only; routes through the *single* AI seam SPEC-014's revision loop resolves (its FR-OQ2); degrades honestly ([SPEC-014 requirements.md:229-247](../SPEC-014-review-webview/requirements.md)).
 - **SPEC-018 FR-18** — "Explain — read-only, one-click preset of the chat channel": the per-**section** hover toolbar exposes the same `?`, a zero-typing preset of the FR-12/FR-16 chat channel; read-only; keyboard-first (revealed on section focus, two-key chord, hotkey in tooltip); degrades honestly ([SPEC-018 requirements.md:257-283](../SPEC-018-spec-custom-editor/requirements.md)).
 
 So the feature is **not un-specified** — it is specified twice, at two scopes, by two owning specs, and each already carries its own AC (SPEC-018 AC-19, requirements.md:406; T0 boundary row at :570). What is **not** consolidated anywhere is the *shared contract* the two rely on: what a read-only Explain request looks like on the wire, which seam carries it, and what the degrade floor must show. That gap is this spec's subject.
@@ -104,7 +124,7 @@ The [DR-057](../../../docs/decisions/DR-057.md) `.minspec/queue` producer is bui
 
 ### Both host surfaces are specified-but-not-built — Explain cannot ship before them
 
-SPEC-014 (`status: implementing`, requirements.md:3) has requirements only — no action-bar code; SPEC-018 (`status: implementing`) has 0/53 tasks and no custom-editor / hover-toolbar code. There is **no toolbar and no hover group** in code today to host a `?`. Explain **rides on** both, plus the DR-057 consumer; it is a small addition once they land and cannot precede them. This spec records that dependency; it does not attempt to unblock it.
+SPEC-014 (`status: implementing`, requirements.md:4) has requirements only — no action-bar code; SPEC-018 (`status: implementing`) has 0/53 tasks and no custom-editor / hover-toolbar code. There is **no toolbar and no hover group** in code today to host a `?`. Explain **rides on** both, plus the DR-057 consumer; it is a small addition once they land and cannot precede them. This spec records that dependency; it does not attempt to unblock it.
 
 ## Functional Requirements
 
@@ -144,7 +164,7 @@ SPEC-014 (`status: implementing`, requirements.md:3) has requirements only — n
 
 > Answered in the Supersession record above: DQ-1 → withdraw (SPEC-018 AC-19 already owns the
 > cross-surface guarantee) · DQ-2 → parked, and SPEC-014 FR-OQ2's to answer, not this spec's ·
-> DQ-3 → no new DR, per SPEC-014:598's own ruling on the same seam. The original wording is
+> DQ-3 → no new DR, per SPEC-014:615-616's own ruling on the same seam. The original wording is
 > kept below because two of the forks rest on premises measurement falsified, and a reader
 > reopening the question needs the option *and* why it did not survive.
 
@@ -187,7 +207,7 @@ These are genuine forks a human must settle before Plan. None is guessed here.
 ## Traceability
 
 - **Issue:** [#914](https://github.com/AIClarityAU/minspec/issues/914) — Explain (?) read-only one-click preset of the chat channel, in the reviewer toolbar + per-section hover toolbar.
-- **Owning host FRs (already folded in):** [SPEC-014](../SPEC-014-review-webview/requirements.md) FR-18 (requirements.md:212-230); [SPEC-018](../SPEC-018-spec-custom-editor/requirements.md) FR-18 (requirements.md:257-283), AC-19 (:406), T0 row (:570).
+- **Owning host FRs (already folded in):** [SPEC-014](../SPEC-014-review-webview/requirements.md) FR-18 (requirements.md:229-247); [SPEC-018](../SPEC-018-spec-custom-editor/requirements.md) FR-18 (requirements.md:257-283), AC-19 (:406), T0 row (:570).
 - **Tier-0 boundary:** [DR-004](../../../docs/decisions/DR-004.md); enforced by the same invariant tests SPEC-014 FR-17 / SPEC-018 FR-8 assert.
 - **Queue producer primitive:** `packages/minspec/src/lib/phase-advance-queue.ts:25-60` (`PhaseAdvanceSource`, `PhaseAdvanceRequest`, `enqueuePhaseAdvance`); [DR-057](../../../docs/decisions/DR-057.md) `.minspec/queue`.
 - **Consumer (not built):** #732 / #734 / #735.

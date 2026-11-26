@@ -58,6 +58,13 @@
 #   Bot:299695933    the pipeline's own App. REST shows it as `minspec-sdd[bot]` with
 #                    this id, and the id is the number in its commit address.
 #   User:4125483     the founder, `harvest316`.
+#   User:318474157   the founder's work account, `paulharveyf5`. Added 2026-11-04 AEDT
+#                    (2026-11-03 UTC) on the founder's decision (queue item in82, first
+#                    for #3568), with the cost he accepted: anyone controlling that
+#                    account, including the employer's admins, can start agents in this
+#                    repository. The founder's merge of the pull request that adds this
+#                    line is the record of that decision. `GET /users/paulharveyf5`
+#                    returned id 318474157, type User, on the same date.
 #
 # Read with `GET /users/<login>` (id, type) and confirmed against the GraphQL fields this
 # file compares (`__typename`, `databaseId`) on 2026-10-10. A login is carried along only
@@ -120,7 +127,7 @@
 # decide and describe; the launcher that calls them prints the refusal, naming the issue,
 # and chooses its exit.
 #
-# Sourced, not executed. It defines functions and does nothing else. The two functions
+# Sourced, not executed. It defines functions and does nothing else. The functions
 # that read from GitHub do so through gh_bot_graphql_read (lib/gh-bot.sh): a query, never
 # a mutation, and a missing reader is a refusal like any other unreadable answer.
 
@@ -166,7 +173,8 @@ _dispatch_graphql_read() {
 _dispatch_trusted_identities() {
   printf '%s\n' \
     'Bot:299695933' \
-    'User:4125483'
+    'User:4125483' \
+    'User:318474157'
 }
 
 # The list as a JSON array, for jq, which is where every comparison is made: one
@@ -255,6 +263,14 @@ GQL
 # well-formed view: a field that is missing, an account with no number, a history shorter
 # than its own count, a document that does not parse, two documents where one belongs, no
 # jq to parse it with. None of those is evidence about who wrote the issue, so none passes.
+# The ONE place the words of a real refusal ("an account is not on the list") are written.
+# The provenance check builds its refusal sentences from it and dispatch_issue_refusal_mark
+# recognises a real refusal by it, so rewording it moves both together and marking cannot
+# silently stop matching (#2694). It starts "is not on ..." so a "who " prefix reads on.
+_dispatch_not_listed_phrase() {
+  printf '%s' 'is not on the dispatch author list'
+}
+
 dispatch_issue_provenance_check() {
   local provenance="${1-}" view="${2-}" listed out
   if ! listed="$(_dispatch_trusted_identities_json 2>/dev/null)" || [[ -z "$listed" ]]; then
@@ -265,7 +281,7 @@ dispatch_issue_provenance_check() {
   # answer and one view, never two documents that together number two. Read from a file
   # descriptor, so neither meets the limit on the length of one argument.
   out=""
-  if ! out="$(jq -rn --argjson listed "$listed" --arg unreadable "$(_dispatch_unreadable)" \
+  if ! out="$(jq -rn --argjson listed "$listed" --arg unreadable "$(_dispatch_unreadable)" --arg notlisted "$(_dispatch_not_listed_phrase)" \
         --slurpfile answers <(printf '%s' "$provenance") --slurpfile views <(printf '%s' "$view") \
         "$(_dispatch_gate_jq_defs)"'
       def no($why): "no\t" + $why;
@@ -284,7 +300,7 @@ dispatch_issue_provenance_check() {
               elif ($i.author | key) == null
               then no("its author could not be read, and an author that cannot be read is never trusted")
               elif ($i.author | listed | not)
-              then no("its author \($i.author | shown) is not on the dispatch author list")
+              then no("its author \($i.author | shown) " + $notlisted)
               else $i.userContentEdits as $e | $i.timelineItems as $r
                 | if ($e | type) != "object" or ($e.totalCount | type) != "number" or ($e.nodes | type) != "array"
                      or ($r | type) != "object" or ($r.totalCount | type) != "number" or ($r.nodes | type) != "array"
@@ -302,11 +318,11 @@ dispatch_issue_provenance_check() {
                       elif any($editors[]; key == null)
                       then no("an account that edited its body could not be read, and what cannot be read is never trusted")
                       elif any($editors[]; listed | not)
-                      then no("its body was edited by \(first($editors[] | select(listed | not)) | shown), who is not on the dispatch author list")
+                      then no("its body was edited by \(first($editors[] | select(listed | not)) | shown), who " + $notlisted)
                       elif any($renamers[]; key == null)
                       then no("an account that changed its title could not be read, and what cannot be read is never trusted")
                       elif any($renamers[]; listed | not)
-                      then no("its title was changed by \(first($renamers[] | select(listed | not)) | shown), who is not on the dispatch author list")
+                      then no("its title was changed by \(first($renamers[] | select(listed | not)) | shown), who " + $notlisted)
                       else "ok\t\($i.author.login | tostring | printable) (\($i.author | key | sub(":"; " ")))"
                       end
                   end
@@ -343,6 +359,159 @@ dispatch_issue_gate() {
     return 1
   fi
   dispatch_issue_provenance_check "$provenance" "$view"
+}
+
+# dispatch_issue_refusal_mark <owner/repo> <issue-number> <reason> <issue-view-json>
+#
+# Make an author-gate refusal VISIBLE on the issue (#2694). A refusal is otherwise a line in
+# the drain's log, and an issue filed by an account that is not on the list (the daily
+# supply-chain scan files as `github-actions[bot]`) waits for a person with nothing telling
+# that person it is waiting. Leaving that account refused is decided; this makes the
+# refusal countable: one label, `author-refused`, and one comment naming the reason.
+#
+# ONCE PER ISSUE. The label is the marker: an issue that already carries it is left alone,
+# so a drain that refuses it every cycle writes nothing after the first.
+#
+# ONLY A REAL REFUSAL IS MARKED, that is a reason saying an account "is not on the dispatch
+# author list". An unreadable answer, an outage, or an issue edited mid-check is transient
+# and is offered again, so it is neither labelled nor commented.
+#
+# The reason is the gate's own sentence: its only quoted account name has been cut down to
+# the characters a login can have, so it is safe to post. Marking is best-effort ONLY in
+# that it never changes the refusal and never fails its caller (the refusal already
+# happened and is the gate); a write that fails is said on stderr, never swallowed.
+# Writes go through `gh`, which the launchers arm as the pipeline's App (lib/gh-bot.sh).
+# gh-bot.sh is sourced and armed INSIDE the writing function, not at file scope: this is a
+# library, and the verdict functions must stay usable without HOME or a token script (sourcing
+# gh-bot.sh reads $HOME), and must not shadow `gh` process-wide. gh_bot_init is idempotent
+# and offline (#1355).
+dispatch_issue_refusal_mark() {
+  local repo="${1-}" issue="${2-}" reason="${3-}" view="${4-}" label="author-refused" have phrase
+  if [[ "$repo" != */* || ! "$issue" =~ ^[0-9]+$ ]]; then
+    return 0
+  fi
+  phrase="$(_dispatch_not_listed_phrase)"
+  case "$reason" in
+    *"$phrase"*) ;;
+    *) return 0 ;;
+  esac
+  # The labels come from the issue view the caller already holds: no second read per
+  # refused issue per cycle. A view that cannot be read marks nothing and says so.
+  if ! have="$(printf '%s' "$view" | jq -r '[(.labels // [])[].name] | index("author-refused") != null' 2>/dev/null)" \
+     || [[ "$have" != "true" && "$have" != "false" ]]; then
+    echo "dispatch-author-gate: could not tell whether #${issue} is already marked ${label}; it was not marked this cycle." >&2
+    return 0
+  fi
+  [[ "$have" == "false" ]] || return 0
+  # shellcheck source=scripts/lib/gh-bot.sh
+  source "${BASH_SOURCE[0]%/*}/gh-bot.sh"
+  gh_bot_init   # arm bot attribution before this function's GitHub writes (#1355)
+  if ! gh label create "$label" --repo "$repo" --color d93f0b \
+        --description "Refused by the dispatch author gate (#2694); needs a person" >/dev/null 2>&1; then
+    : # already exists, or cannot be created: the add below says which
+  fi
+  if ! gh issue edit "$issue" --repo "$repo" --add-label "$label" >/dev/null 2>&1; then
+    echo "dispatch-author-gate: could not add ${label} to #${issue}; no comment was posted either, so it is tried again next cycle." >&2
+    return 0
+  fi
+  if ! gh issue comment "$issue" --repo "$repo" --body "Refused by the dispatch author gate: ${reason}. No triage or agent was started on it, and it will not be until a person picks it up, or it is filed again under an account on the list (scripts/lib/dispatch-author-gate.sh). This comment is posted once; the \`${label}\` label marks it." >/dev/null 2>&1; then
+    echo "dispatch-author-gate: added ${label} to #${issue} but could not post the explaining comment." >&2
+  fi
+  return 0
+}
+
+# dispatch_issue_label_events_query: the newest hundred label applications on an issue,
+# each with who made it. GitHub returns them oldest first, and `last` keeps the newest, so
+# an application older than those hundred is simply not an answer about the current one.
+dispatch_issue_label_events_query() {
+  cat <<GQL
+query(\$owner: String!, \$name: String!, \$number: Int!) {
+  repository(owner: \$owner, name: \$name) {
+    issue(number: \$number) {
+      timelineItems(itemTypes: [LABELED_EVENT], last: 100) {
+        totalCount
+        nodes { ... on LabeledEvent { createdAt label { name } actor { $(_dispatch_actor_fields) } } }
+      }
+    }
+  }
+}
+GQL
+}
+
+# dispatch_issue_label_applier_check <label-events-json> <label>
+#
+#   <label-events-json>  GitHub's answer to dispatch_issue_label_events_query.
+#   <label>              the label's exact name.
+#
+# Prints ONE line and returns:
+#   0  who applied it most recently, as "<login> (<kind> <id>)", who is on the list.
+#   1  why not, worded to follow "<label> is not honoured: ".
+#
+# The text gate above says nothing about labels: anyone GitHub lets apply a label can put
+# one on an issue a listed account wrote. So a label that widens what an agent may do is
+# only believed when the account that applied it is on the same list (DR-118). Only the
+# MOST RECENT application counts: removing a label and applying it again replaces whoever
+# applied it before, so an older application by a listed account vouches for nothing.
+#
+# Anything that is not one well-formed answer naming a listed account is a refusal.
+dispatch_issue_label_applier_check() {
+  local events="${1-}" label="${2-}" listed out unreadable='who applied it could not be read, and what cannot be read is never trusted'
+  if [[ -z "$label" ]] || ! listed="$(_dispatch_trusted_identities_json 2>/dev/null)" || [[ -z "$listed" ]]; then
+    printf '%s\n' "$unreadable"
+    return 1
+  fi
+  out=""
+  if ! out="$(jq -rn --argjson listed "$listed" --arg label "$label" --arg unreadable "$unreadable" \
+        --slurpfile answers <(printf '%s' "$events") \
+        "$(_dispatch_gate_jq_defs)"'
+      def no($why): "no\t" + $why;
+      if ($answers | length) != 1 then no($unreadable)
+      else $answers[0] as $p
+        | if ($p | type) != "object" or (($p | has("errors")) and $p.errors != null and $p.errors != []) then no($unreadable)
+          else (try $p.data.repository.issue.timelineItems catch null) as $t
+            | if ($t | type) != "object" or ($t.totalCount | type) != "number" or ($t.nodes | type) != "array"
+                 or ($t.nodes | length) != ([$t.totalCount, 100] | min)
+                 or any($t.nodes[]; type != "object" or ((try .label.name catch null) | type) != "string")
+              then no($unreadable)
+              else [ $t.nodes[] | select(.label.name == $label) ] as $m
+                | if ($m | length) == 0 then no("no application of it is among the newest label events")
+                  elif ($m[-1].actor | key) == null then no($unreadable)
+                  elif ($m[-1].actor | listed | not)
+                  then no("it was last applied by \($m[-1].actor | shown), who is not on the dispatch author list")
+                  else "ok\t\($m[-1].actor.login | tostring | printable) (\($m[-1].actor | key | sub(":"; " ")))"
+                  end
+              end
+          end
+      end' 2>/dev/null)"; then
+    out=""
+  fi
+  # Exactly one line, and one of the two answers. Anything else is not an answer.
+  if [[ "$out" == *$'\n'* ]]; then out=""; fi
+  case "$out" in
+    $'ok\t'*) printf '%s\n' "${out#$'ok\t'}"; return 0 ;;
+    $'no\t'*) printf '%s\n' "${out#$'no\t'}"; return 1 ;;
+  esac
+  printf '%s\n' "$unreadable"
+  return 1
+}
+
+# dispatch_issue_label_gate <owner/repo> <issue-number> <label>
+#
+# Was this label last applied by a listed account? Reads the label events from GitHub.
+# Prints one line and returns exactly as dispatch_issue_label_applier_check does. A read
+# that fails is a refusal that says so.
+dispatch_issue_label_gate() {
+  local repo="${1-}" issue="${2-}" label="${3-}" events
+  if [[ "$repo" != */* || ! "$issue" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' 'who applied it could not be read, and what cannot be read is never trusted'
+    return 1
+  fi
+  if ! events="$(_dispatch_graphql_read -f query="$(dispatch_issue_label_events_query)" \
+        -f owner="${repo%%/*}" -f name="${repo#*/}" -F number="$issue")"; then
+    printf '%s\n' 'who applied it could not be read from GitHub, and what cannot be read is never trusted'
+    return 1
+  fi
+  dispatch_issue_label_applier_check "$events" "$label"
 }
 
 # dispatch_pr_comments_query: the newest hundred comments on a pull request, each with

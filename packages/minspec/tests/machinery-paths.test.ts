@@ -39,6 +39,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import { createRequire } from 'module';
 import { AI_REVIEW_WORKFLOW } from '../src/lib/ci-review-templates';
 import { isBoundaryPath } from '../../../scripts/auto-merge-gate';
 import {
@@ -199,6 +200,25 @@ describe('#1758 all three machinery definitions are pinned to the canonical modu
   it('the canonical prefixes/files are non-empty (guards against a vacuously-true suite)', () => {
     expect(MACHINERY_DIR_PREFIXES.length).toBeGreaterThan(0);
     expect(MACHINERY_SINGLE_FILES.length).toBeGreaterThan(0);
+  });
+});
+
+describe('#3178 ai-review-guard.js carries the canonical machinery pattern', () => {
+  const guard = createRequire(__filename)('../../../.github/scripts/ai-review-guard.js');
+
+  it('MACHINERY_PATH_RE is the canonical pattern, character for character', () => {
+    expect(guard.MACHINERY_PATH_RE.source.replace(/\\\//g, '/')).toBe(
+      buildMachineryRegexSource().replace(/\\\//g, '/'),
+    );
+  });
+
+  it('classifies the shared path table like the canonical module (carve-outs refuse, never carry)', () => {
+    for (const p of ['.github/workflows/ai-review.yml', 'scripts/dispatch-issue.sh', '.githooks/pre-commit', 'packages/minspec/src/lib/machinery-paths.ts']) {
+      expect(guard.MACHINERY_PATH_RE.test(p), p).toBe(true);
+    }
+    for (const p of ['README.md', 'packages/minspec/src/lib/foo.ts', 'docs/decisions/DR-077.md']) {
+      expect(guard.MACHINERY_PATH_RE.test(p), p).toBe(false);
+    }
   });
 });
 

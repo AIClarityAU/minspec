@@ -77,14 +77,38 @@ if [[ -n "$MINSPEC_AGENT_SETTING_SOURCES" ]]; then
   AGENT_CONTEXT_ARGS=(--setting-sources "$MINSPEC_AGENT_SETTING_SOURCES")
 fi
 
-# ══ Caveman trial (queue item cav1, 2026-10-18 to 2026-10-25) ═══════════════
-# One-week trial of the caveman plugin's terse output style on AUTOMATED sessions only
+# ══ Lesson-hook pilot wiring (#3082) ═════════════════════════════════════════
+# `--setting-sources project,local` drops the USER-level PreToolUse lesson hook, so a
+# dispatched session never received a lesson at its trigger. `--settings <json>` loads
+# alongside `--setting-sources` (measured 2026-10-25 with `claude -p --model haiku`: a hook
+# given only via --settings fired), so the hook is passed inline, limited by LESSON_ONLY to
+# the ten hook-only-pilot lessons (five served by the hook alone, five as the control).
+# A second --settings flag REPLACES the first (measured), so a launcher that adds its own
+# must merge this entry into its JSON instead.
+# Kill-switch: MINSPEC_LESSON_HOOK=off. Skipped when the hook file is absent (CI, an adopter),
+# and when user scope is restored (the user-level hook then loads itself).
+MINSPEC_LESSON_HOOK_ONLY="f-rcdd-mech-not.md,f-conv-form-became-measurement.md,f-base-update-scope.md,f-chec-orig.md,f-refe-befo-stat.md,f-poll-revi.md,f-chec-back.md,f-load-suit.md,f-work-fals-gree.md,f-trace-both-arms.md"
+if [[ "${MINSPEC_LESSON_HOOK-on}" != "off" && -n "$MINSPEC_AGENT_SETTING_SOURCES" \
+      && "$MINSPEC_AGENT_SETTING_SOURCES" != *user* && -f "${HOME-}/.claude/hooks/lesson-hook.py" ]]; then
+  AGENT_CONTEXT_ARGS+=(--settings "{\"hooks\":{\"PreToolUse\":[{\"matcher\":\"Bash|Edit|Write\",\"hooks\":[{\"type\":\"command\",\"command\":\"LESSON_ONLY=${MINSPEC_LESSON_HOOK_ONLY} python3 -I \$HOME/.claude/hooks/lesson-hook.py --json\",\"timeout\":2}]}]}}")
+fi
+
+# ══ Caveman trial (queue item cav1, started 2026-10-18; ENDED 2026-11-02, default off) ══
+# Trial of the caveman plugin's terse output style on AUTOMATED sessions only
 # (the drain's build, fix and remediation agents). Interactive sessions and the
 # chief-of-staff proxy are untouched and stay on `lite`.
 #
-# THE SWITCH: MINSPEC_CAVEMAN_MODE, read here and nowhere else. Default `full`.
-#   MINSPEC_CAVEMAN_MODE=off      turn the trial off (also: empty string)
-#   MINSPEC_CAVEMAN_MODE=lite|ultra   run the trial at another level
+# THE TRIAL ENDED, FAILED ITS BAR (#3534): the bar set in advance was "revert if the
+# drain's `ai-review:changes` share is 6+ points worse than baseline over the whole
+# trial"; it was 10.8 points worse (10.6% baseline vs 21.4%, scored 2026-11-02 with
+# .cos-patches/caveman-rework-check.py). The cause is NOT established (the drain also
+# handled about twice the PRs, and its mix may have changed), so the style is off as
+# the counterfactual: re-run the script over the two weeks after this and, if the
+# changes share does not fall, the style can come back for its token saving.
+#
+# THE SWITCH: MINSPEC_CAVEMAN_MODE, read here and nowhere else. Default `off`.
+#   MINSPEC_CAVEMAN_MODE=off      the default (also: unset or empty string)
+#   MINSPEC_CAVEMAN_MODE=lite|full|ultra   run the trial again at a level
 #
 # WHY NOT THE PLUGIN ITSELF (measured 2026-10-18, throwaway `claude -p --model haiku`):
 #   * `--setting-sources project,local` (above) drops user scope, so the plugin's
@@ -102,7 +126,7 @@ fi
 AGENT_CAVEMAN_ARGS=()
 agent_caveman_init() {
   AGENT_CAVEMAN_ARGS=()
-  local mode="${MINSPEC_CAVEMAN_MODE-full}" hook cfg rules
+  local mode="${MINSPEC_CAVEMAN_MODE-off}" hook cfg rules
   case "$mode" in
     off|"") return 0 ;;
     lite|full|ultra) ;;
@@ -134,7 +158,7 @@ agent_caveman_init() {
   # cause: by the commit-msg gate, closes #N by the PR-body check), so name them.
   rules+=$'\n\nTRIAL EXCEPTION (machine-parsed text, never terse): keep these exact and in normal prose. A line that starts with `ESCALATE:`, `DEEPER:` or `Root cause:`; commit subjects (`type(#N): description`) and commit bodies; PR titles and bodies, including `Closes #N` lines. Caveman style applies to your running commentary only.'
   AGENT_CAVEMAN_ARGS=(--append-system-prompt "$rules")
-  echo "  Caveman trial: mode=$mode (MINSPEC_CAVEMAN_MODE=off to disable)" >&2
+  echo "  Caveman trial: mode=$mode (set MINSPEC_CAVEMAN_MODE=off to disable)" >&2
 }
 
 # ══ The agent's environment (#1203) ══════════════════════════════════════════

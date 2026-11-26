@@ -1,7 +1,7 @@
 ---
 id: SPEC-226
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - the same credential-boundary domain as SPEC-213 (agent location) and SPEC-037 (approver identity)
@@ -20,9 +20,9 @@ implements_reason: >-
   identity work (SPEC-213) also edits; owning them from this spec would freeze them for it.
 affects: [scripts/hooks/session-identity.sh, packages/minspec/tests/session-identity.test.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -307,7 +307,12 @@ All cases run in `identity-boundary-check.test.sh`'s hermetic sandbox (temp `HOM
 
 ## Decisions needed (Clarify)
 
+All 3 decisions are answered, not ratified: an agent session selected on 2026-10-25, for each, the option this document already recommended. No human chose them, and no delegation covers authoring Clarify answers. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted it. It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and that approval may overturn it. D-3 carries one condition: if Plan T0's candidate count shows option (a) cannot reach `PASS` within a few runs, Plan returns here instead of picking a cap that never holds.
+
 ### D-1: Where does the check's source of truth live?
+
+**Recorded selection: Option (a),** because keeping the check out of a repo agents open pull
+requests against stops an agent weakening its own guard through an auto-merged change.
 
 - **(a) Leave the check in the host-side claude-config repository, next to its test suite
   (rec).** The check polices agents, and keeping it out of a repo that agents open pull
@@ -322,6 +327,9 @@ All cases run in `identity-boundary-check.test.sh`'s hermetic sandbox (temp `HOM
 
 ### D-2: Is a dead token at rest a finding?
 
+**Recorded selection: Option (a),** because the property is whether an agent can obtain a
+live credential, and option (b) would make the check unable to pass in practice (INV-4).
+
 - **(a) No. It is `clean` for the verdict, and a `[note]` names the file (rec).** The
   property is "can an agent obtain a live user credential", and a token GitHub rejects
   cannot act. Cost: a revoked token left in a mode-`644` file never turns the banner red.
@@ -331,6 +339,9 @@ All cases run in `identity-boundary-check.test.sh`'s hermetic sandbox (temp `HOM
   good, so the check could never pass in practice. INV-4 forbids that.
 
 ### D-3: Session transcripts, and how many requests the sweep sends to GitHub
+
+**Recorded selection: Option (a),** because transcripts are agent-readable and option (b) would
+leave the biggest store of pasted secrets out of scope, which is the gap this issue is about.
 
 The sweep's roots include `~/.claude/projects/`, where every token ever printed in a session
 is kept. The candidate count there is unmeasured (see Measured).
@@ -388,10 +399,10 @@ applies. It does not change DR-066.
 - **Replacing the file copies with an environment indirection so the MCP server keeps
   working.** #2042 names this as separate.
 - **Stopping the harness from recording a secret inside a `permissions.allow` rule.**
-  This is prevention, not detection. *Unfiled follow-up: needs an issue number before
-  approval (see Traceability).*
+  This is prevention, not detection. *Follow-up recorded in `docs/backlog.md` (dated
+  2026-11-12; see Traceability).*
 - **Non-GitHub secrets in agent config** (other MCP servers' API keys). The check's
-  property is GitHub user identity. *Unfiled follow-up, as above.*
+  property is GitHub user identity. *Follow-up recorded in `docs/backlog.md`, as above.*
 - **The location witness.** SPEC-213.
 
 ## Alternatives considered and rejected
@@ -428,7 +439,6 @@ applies. It does not change DR-066.
   invariant 2). Isolation context: [DR-008](../../../docs/decisions/DR-008.md).
 - **Sibling spec:** SPEC-213 (an agent not provably in the container cannot act as the
   founder), in flight on `cos/spec-1816-1018`; it edits the same banner and relies on INV-5.
-- **Follow-ups:** two items under Out of Scope are **unfiled**, because this dispatch makes
-  no network call. Each needs an issue number, or a dated `docs/backlog.md` line under
-  DR-023, before this spec is approved.
+- **Follow-ups:** the two items under Out of Scope are recorded as dated lines in
+  `docs/backlog.md` (2026-11-12, lines 16-17, "source: SPEC-226, Out of Scope") under DR-023.
 - **DR for this spec:** none; see "Why no new DR".

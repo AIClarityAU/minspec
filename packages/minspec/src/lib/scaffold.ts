@@ -6,6 +6,7 @@ import {
   TEMPLATE_NAMES,
   TEMPLATE_OUTPUT_PATHS,
   MANAGED_REGION_TEMPLATES,
+  SELF_HOSTED_TEMPLATE_NAMES,
   MINSPEC_HOOKS_DIR,
   managedRegionStartMarker,
   managedRegionEndMarker,
@@ -160,9 +161,9 @@ export function buildTasksMdContent(requirementsRaw: string): string {
     '',
     `# ${idValue} — Task Breakdown`,
     '',
-    '<!-- MinSpec scaffolded this tasks.md (#225). Break the plan into ordered,',
+    '<!-- MinSpec scaffolded this tasks.md. Break the plan into ordered,',
     '     checkable tasks. Ticking a checkbox here is body-only — it never voids',
-    '     spec approval (DR-035). -->',
+    '     spec approval. -->',
     '',
     '## Tasks',
     '',
@@ -171,6 +172,18 @@ export function buildTasksMdContent(requirementsRaw: string): string {
   ];
 
   return fm.join('\n') + '\n' + body.join('\n');
+}
+
+/**
+ * Statuses at which the work is already underway or finished (#1118). A stub task list
+ * reading "Add the first task" with an unticked box on such a spec asserts the work has
+ * not started — a false signpost — so no tasks.md is scaffolded or offered for it.
+ */
+const BUILT_SPEC_STATUSES: readonly string[] = ['implementing', 'done'];
+
+/** True when a requirements.md's raw source carries a built (`implementing`/`done`) status. */
+function isBuiltSpec(requirementsRaw: string): boolean {
+  return BUILT_SPEC_STATUSES.includes(scalarValue(rawFrontmatterLine(requirementsRaw, 'status')));
 }
 
 /**
@@ -193,6 +206,8 @@ export function scaffoldTasksMd(dirPath: string): boolean {
   } catch {
     return false;
   }
+  // #1118: never stamp an empty stub onto a spec that is already being built / is built.
+  if (isBuiltSpec(prepareText(requirementsRaw))) return false;
 
   fs.writeFileSync(tasksPath, buildTasksMdContent(requirementsRaw), 'utf-8');
   return true;
@@ -265,6 +280,7 @@ export function findSpecDirsMissingTasksMd(rootDir: string): MissingTasksMdSpec[
           isSplit &&
           requiresTasks &&
           id &&
+          !isBuiltSpec(raw) &&
           !fs.existsSync(path.join(dir, 'tasks.md'))
         ) {
           found.push({ id, tier, dirPath: dir });
@@ -501,6 +517,28 @@ function writeScaffoldDefaults(rootDir: string): void {
 }
 
 /**
+ * True only when `rootDir` is itself the top level of a git work tree. A folder
+ * merely NESTED in some other repo (a monorepo subfolder, the e2e fixture under
+ * this repo's own checkout) resolves every `git` call to the ENCLOSING repo, so a
+ * scaffold write of `core.hooksPath` / the index would rewrite a repository the
+ * user never opted in (constitution invariant 3, #3566). Fails closed: any git
+ * error answers false and the caller skips its git write.
+ */
+export function isOwnGitRoot(rootDir: string): boolean {
+  try {
+    const top = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: rootDir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (!top) return false;
+    return fs.realpathSync(top) === fs.realpathSync(rootDir);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Untrack any path MinSpec declares machine-local that git is nonetheless tracking.
  *
  * WHY THIS EXISTS. Writing an entry into `.gitignore` does NOT make a file ignored —
@@ -527,6 +565,7 @@ export function untrackDeclaredMachineLocalPaths(rootDir: string): string[] {
   // All entries go in ONE invocation — per-entry calls meant a subprocess spawn
   // for each of the eight on every generate/refresh, for a list that is almost
   // always empty.
+  if (!isOwnGitRoot(rootDir)) return [];
   const pathspecs = MINSPEC_GITIGNORE_ENTRIES.map((e) => (e.endsWith('/') ? e.slice(0, -1) : e));
 
   let tracked = '';
@@ -978,6 +1017,7 @@ function recordExecutableBitInIndex(
   fullPath: string,
   addIfUntracked: boolean,
 ): ExecutableBitIndexChange | null {
+  if (!isOwnGitRoot(rootDir)) return null;
   try {
     // git pathspecs want forward slashes even when `path.relative` gives back
     // platform separators (backslashes on win32).
@@ -1091,6 +1131,7 @@ function migrateLegacyClaudeSlashCommandShims(rootDir: string): void {
  * gates such repos on push.
  */
 function ensureHooksPath(rootDir: string): void {
+  if (!isOwnGitRoot(rootDir)) return;
   try {
     let current = '';
     try {
@@ -1177,6 +1218,15 @@ function tryAutoHealManagedRegion(
 }
 
 /**
+ * True only in minspec's own monorepo, where the template source lives (#1166): the
+ * registry file that defines `SELF_HOSTED_TEMPLATE_NAMES` is on disk under `rootDir`.
+ * No other project has this path, so the exemption cannot leak to an adopter.
+ */
+function isMinspecSelfHostRepo(rootDir: string): boolean {
+  return fs.existsSync(path.join(rootDir, 'packages', 'minspec', 'src', 'lib', 'template-registry.ts'));
+}
+
+/**
  * Reconcile managed-region templates on Refresh (#249, DR-037).
  *
  * For each managed-region template, by parsing its markers — never a whole-file
@@ -1214,6 +1264,9 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
       kind: 'exec-bit-recorded',
     });
   };
+
+  const selfHosted = isMinspecSelfHostRepo(rootDir);
+  const selfHostedNames = new Set(SELF_HOSTED_TEMPLATE_NAMES);
 
   for (const tpl of MANAGED_REGION_TEMPLATES) {
     // Skip a tool-gated template whose tool the project does not use (#241): never
@@ -1254,6 +1307,13 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
     // not start. Every other managed file keeps its own endings (SPEC-095 FR-5(c), FR-3).
     const writeBack = (lf: string): string =>
       isLfPinnedPath(tpl.outputPath) ? lf : restoreLineEndings(lf, original);
+
+    if (!split && selfHosted && selfHostedNames.has(tpl.name)) {
+      // Minspec's OWN repo (#1166, DR-073): these files ARE the template source and are
+      // deliberately markerless; their freshness is gated by checkCiReviewTemplatesFresh.
+      // Auto-healing would marker-wrap them (or swap in a different body) — skip silently.
+      continue;
+    }
 
     if (!split) {
       // Markers missing/corrupted — cannot identify MinSpec's region by markers

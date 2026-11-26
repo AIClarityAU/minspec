@@ -1,7 +1,7 @@
 ---
 id: SPEC-231
 type: requirements
-status: specifying
+status: planning
 tier: T2
 product: minspec
 epic: EPIC-009  # Team Readiness - concurrent multi-session coordination
@@ -12,9 +12,9 @@ implements: none
 implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan, after Decision D1.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

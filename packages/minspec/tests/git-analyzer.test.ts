@@ -6,6 +6,7 @@ import { execFileSync } from 'child_process';
 import {
   analyzeGitDiff,
   buildConsequenceInput,
+  expandRenamePath,
   type ClassificationSignal,
 } from '../src/lib/git-analyzer';
 import type { ChangedFile, ConsequenceInput } from '../src/lib/consequence-analyzers';
@@ -1468,7 +1469,7 @@ describe('binary files', () => {
     expect(findSignal(signals, 'files_changed')!.value).toBe(2);
   }, 30000);
 
-  it.fails('SHOULD total the text side only — today it is NaN, which reads as T4', async () => {
+  it('totals the text side only — a binary file adds no lines (#1197)', async () => {
     const signals = await analyzeGitDiff(repoWithStagedBinary());
     const lines = findSignal(signals, 'lines_changed')!;
     expect(lines.value).toBe(2); // a.ts +1/-1; logo.png contributes no lines
@@ -1487,9 +1488,34 @@ describe('binary files', () => {
     expect(files.get('a.ts')!.insertions).toBe(1);
   }, 30000);
 
-  it.fails('SHOULD give a binary file numeric line counts — today they are undefined', async () => {
+  it('gives a binary file numeric zero line counts (#1197)', async () => {
     const file = byPath(await buildConsequenceInput(repoWithStagedBinary())).get('logo.png')!;
     expect(file.insertions).toBe(0);
     expect(file.deletions).toBe(0);
+  }, 30000);
+});
+
+describe('staged rename (#1188)', () => {
+  it('expandRenamePath expands braced, bare, and empty-side forms', () => {
+    expect(expandRenamePath('src/{a.ts => b.ts}')).toEqual({ from: 'src/a.ts', to: 'src/b.ts' });
+    expect(expandRenamePath('a.ts => b.ts')).toEqual({ from: 'a.ts', to: 'b.ts' });
+    expect(expandRenamePath('src/{ => sub}/f.ts')).toEqual({ from: 'src/f.ts', to: 'src/sub/f.ts' });
+    expect(expandRenamePath('src/plain.ts')).toBeNull();
+  });
+
+  it('reports a real git mv as renamed, under the destination path, with both contents', async () => {
+    const repo = makeTmpDir();
+    initRepo(repo);
+    write(repo, 'src/old-name.ts', 'l1\nl2\nl3\nl4\nl5\nl6\n');
+    runGit(['add', '-A'], repo);
+    runGit(['commit', '-m', 'init'], repo);
+    runGit(['mv', 'src/old-name.ts', 'src/new-name.ts'], repo);
+
+    const input = await buildConsequenceInput(repo);
+    expect(input.changedFiles.map((f) => f.path)).toEqual(['src/new-name.ts']);
+    const f = input.changedFiles[0];
+    expect(f.status).toBe('renamed');
+    expect(f.content).toBe('l1\nl2\nl3\nl4\nl5\nl6\n');
+    expect(f.oldContent).toBe('l1\nl2\nl3\nl4\nl5\nl6\n');
   }, 30000);
 });

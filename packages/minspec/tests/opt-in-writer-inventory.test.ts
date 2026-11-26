@@ -158,6 +158,14 @@ const INVENTORY: Readonly<Record<string, readonly AllowedCall[]>> = {
         'Parents of the approval files copied INTO that temp worktree. Not a workspace ' +
         'folder: the guard would (rightly) refuse to create .minspec/approvals there.',
     },
+    {
+      api: 'symlinkSync',
+      within: 'linkPrimaryNodeModules',
+      why:
+        'in97: links the primary checkout\'s node_modules into that same temp worktree so ' +
+        'the commit\'s pre-commit hooks resolve their toolchain. Creates one link at ' +
+        '<temp>/wt/node_modules; never a workspace folder, never .minspec/.',
+    },
   ],
   'packages/minspec/src/commands/push-docs-lane.ts': [
     {

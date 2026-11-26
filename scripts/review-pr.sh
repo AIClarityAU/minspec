@@ -4,7 +4,7 @@
 #
 # The missing runner that closes MinSpec's AI-review loop (#342): reviewer.md +
 # ready-to-merge.yml already exist, but nothing RAN the reviewer on a PR diff and
-# applied the `ai-review:*` label. This does.
+# applied the `ai-review:*` label. It did; since #4078 it is advisory (see below).
 #
 # Security model (mirrors triage-inbox.sh / DR-345): a PR diff is UNTRUSTED
 # (arbitrary contributor code + comments = a prompt-injection surface). The
@@ -17,6 +17,15 @@
 # Provenance (#397): ai-review:pass is hand-addable by anyone with write access,
 # so the label alone is forgeable. This runner always posts a findings COMMENT
 # alongside the label, so a green has an auditable review behind it.
+#
+# ADVISORY ONLY (#4078): this runs locally, as whatever identity the host's token
+# broker hands out - the builder App every agent session can obtain. A verdict from
+# that identity must not satisfy any gate, so this runner no longer writes any
+# `ai-review:*` label: it posts the findings comment and stops. The gating label,
+# status and check-run are written by ai-review.yml alone, as the reviewer App
+# (the same rule dispatch-issue.sh's advisory review follows since #600). A label
+# written here would also be reverted by ready-to-merge's provenance guard with an
+# audit comment, which is noise and not a review.
 
 set -euo pipefail
 
@@ -243,20 +252,16 @@ fi
 
 echo "  → #$PR: $LABEL"
 
-# Post the findings comment FIRST (provenance), then move the label.
+# Post the findings comment. It is the whole output: no label is written (#4078).
 gh pr comment "$PR" --repo "$REPO" --body "$(cat <<COMMENT
-## 🤖 AI review — \`${LABEL}\`
+## 🤖 Advisory AI review (local) — \`${LABEL}\`
 ${TRUNC_NOTICE}
 \`\`\`
 ${VERDICT_BLOCK}
 \`\`\`
 
-_Independent reviewer (\`review-pr.sh\`, fresh no-tools context over the diff); label enforced by the deterministic gate (\`review-decide.sh\`). The label is backed by this comment — verify provenance here, not the label alone (#397)._
+_Advisory local reviewer (\`review-pr.sh\`, fresh no-tools context over the diff); outcome decided by the deterministic gate (\`review-decide.sh\`). This comment gates nothing and no label was changed: the merge gate counts only the verdict ai-review.yml posts as the reviewer App (#4078)._
 COMMENT
 )" >/dev/null
 
-gh pr edit "$PR" --repo "$REPO" \
-  --remove-label "ai-review:pending" --remove-label "ai-review:changes" 2>/dev/null || true
-gh pr edit "$PR" --repo "$REPO" --add-label "$LABEL" >/dev/null
-
-echo "Review complete for #$PR → $LABEL"
+echo "Advisory review complete for #$PR → $LABEL (comment only; no label written, #4078)"

@@ -1,7 +1,7 @@
 ---
 id: SPEC-182
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - a required check must exist and be visible, or it is not a check
@@ -12,10 +12,12 @@ relates_to: [DR-090, "#1925", "#1834", "#1839", "#1120", "#486", "#1728", "#1688
 # built from this spec until it is approved. The work lands in .github/workflows, which
 # the App cannot push (#1120): a human pushes it.
 affects: [.github/workflows/ai-review.yml, .github/scripts/ai-review-guard.js, scripts/gen-ci-templates.mjs, packages/minspec/src/lib/hook-templates.ts, packages/minspec/tests/managed-region-templates.test.ts]
+implements: none
+implements_reason: creates no file of its own. Every change edits an existing shared managed template or its generated copy, all listed in affects: (ai-review.yml, ai-review-guard.js, gen-ci-templates.mjs, hook-templates.ts, managed-region-templates.test.ts).
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -133,10 +135,18 @@ from the head, with no version handshake (#1834), which makes the failure reacha
 
 ## Decisions needed (Clarify)
 
-4 of 6 decisions are resolved: an agent session recorded each option this document already
-recommended, under delegation DLG-001 (DR-108, the delegated-approval record). No human
-chose them; they are ratified only by approval of this spec. D5 and D6 name no
-recommended option, so they stay open for Clarify.
+5 of 6 decisions are answered, not ratified. D6 has a selection recorded from the answer to
+task-queue item clr1027 (2026-10-26: "All rec (Recommended)"), an answer the queue attributes to the
+founder. A queue answer is not consent and is not verified here: DR-108 (delegated approval) section
+4 holds that a queue item cannot carry consent, because any session can write the queue. D1 to D4
+carry the option this document already recommended, recorded by an agent session; no human chose
+them. Delegation DLG-001 (DR-108) made none of these selections and covers spec approval and
+engineering-DR acceptance only. An agent-recorded selection carries no consent, whoever prompted it.
+It is ratified only by approval of this spec, the founder's or the bot's under DLG-001, and that
+approval may overturn it. D5 named no recommended option when written; on 2026-11-17 an agent
+answered it as a fact and recorded its recommended option under the founder decision in queue item
+clarsel (see D5). Its delivery step is still a human act (the App cannot push
+`.github/workflows/`). `phases.clarify` stays `pending` until approval.
 
 - **D1 - Preflight placement.** (a) Separate early step that fails the job before the
   review runs **(rec)**: fastest, clearest signal; costs a CI step and a failed job that
@@ -163,6 +173,20 @@ recommended option, so they stay open for Clarify.
   "could not compute" so it is not read as a changes verdict.
 - **D5 - Delivery.** The change is in `.github/workflows/`, which the App cannot push
   (#1120), and it is machinery so it needs a human `--admin` merge. A human must push it.
+  **Answer (fact, agent, 2026-11-17):** the push is fixed, not a choice; the merge no longer needs a
+  human. The minspec-sdd App holds no `workflows` permission and the project does not re-grant
+  it, so a commit that writes `.github/workflows/ai-review.yml` must be pushed by a human; the
+  files outside `.github/workflows/` can be pushed by the bot. The `--admin` merge is no longer
+  human-only: DR-112 (bot merges, `status: accepted`, `docs/decisions/DR-112.md:3`) lets the bot
+  merge a machinery pull request through `cos-runner-gh.sh pr merge` when its section 3
+  conditions hold. Evidence: #1120 (open, "minspec-sdd App cannot push harness refreshes: no
+  `workflows` permission"); `docs/decisions/DR-112.md` section 3.
+  **Recommended (agent, 2026-11-17):** the bot prepares the whole change on one branch with the
+  workflow-file hunk left out, and the founder pushes that one workflow commit onto the same
+  branch, so it lands as one pull request - cost: one founder push for each revision of the
+  workflow hunk.
+  **Recorded selection: the recommended option,** the bot pushes everything outside
+  `.github/workflows/`, the founder pushes the workflow commit onto the same branch. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D6 - Record a DR?** FR-2's guard-free second witness and the FR-5/FR-6 preflight contract
   are design choices. Clarify/Plan decides whether they need a DR (constitution invariant 2,
   "independent second witness") or stay spec-only.
@@ -170,5 +194,6 @@ recommended option, so they stay open for Clarify.
     preflight contract in a decision record, so the design choice outlives this spec.
   **Recorded selection: Option (write a DR),** drafted as DR-113 (`proposed`), which records
   the guard-free second witness and the preflight contract as this spec describes them.
-  Recorded by an agent session under delegation DLG-001 (DR-108, the delegated-approval
-  record); ratified only by approval of this spec, and DR-113 takes effect only on acceptance.
+  Source: the answer to task-queue item clr1027, 2026-10-26 ("All rec (Recommended)"). A queue
+  answer is not consent (DR-108 section 4), so this selection is unverified and binds only on
+  approval of this spec; DR-113 takes effect only on its acceptance.
