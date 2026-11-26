@@ -26,6 +26,7 @@ const {
   verifyHeadPassStatus,
   verifyHeadPassCheckRun,
   verifyHeadPassWitness,
+  checkRunTime,
   PASS_STATUS_CONTEXT,
   HOLD_RE,
   decideStatus,
@@ -654,6 +655,60 @@ test('#810: a FAILING ai-review/pass status does not veto a genuine passing chec
 
 test('#810: headSha omitted → the check-run head_sha is not second-guessed (caller already queried by head ref)', () => {
   assert.equal(verifyHeadPassCheckRun({ checkRuns: [okCheckRun()], allowlist: BOTS }).verified, true);
+});
+
+// ── #870 — tie-break on identical timestamps: ambiguity DENIES, order-independent ──
+test('#870 head-status: on a tie (identical created_at) a failure beats a success in EITHER list order → not verified', () => {
+  const ok = okStatus({ state: 'success' });
+  const bad = okStatus({ state: 'failure' });
+  assert.equal(verifyHeadPassStatus({ statuses: [ok, bad], allowlist: BOTS }).verified, false);
+  assert.equal(verifyHeadPassStatus({ statuses: [bad, ok], allowlist: BOTS }).verified, false);
+});
+
+test('#870 head-status: a tie between two successes is still verified; a strictly newer success supersedes an older failure', () => {
+  assert.equal(verifyHeadPassStatus({ statuses: [okStatus(), okStatus()], allowlist: BOTS }).verified, true);
+  const older = okStatus({ state: 'failure', created_at: '2026-07-14T09:00:00Z' });
+  assert.equal(verifyHeadPassStatus({ statuses: [older, okStatus()], allowlist: BOTS }).verified, true);
+});
+
+test('#870 check-run: on a tie (identical completed_at) a non-success beats a success in EITHER list order → not verified', () => {
+  const ok = okCheckRun();
+  const bad = okCheckRun({ conclusion: 'failure' });
+  const run = okCheckRun({ status: 'in_progress', conclusion: null, completed_at: null, started_at: ok.completed_at });
+  for (const loser of [bad, run]) {
+    assert.equal(verifyHeadPassCheckRun({ checkRuns: [ok, loser], allowlist: BOTS, headSha: HEAD_SHA }).verified, false);
+    assert.equal(verifyHeadPassCheckRun({ checkRuns: [loser, ok], allowlist: BOTS, headSha: HEAD_SHA }).verified, false);
+  }
+});
+
+test('#870 check-run: a tie between two successes is still verified', () => {
+  assert.equal(
+    verifyHeadPassCheckRun({ checkRuns: [okCheckRun(), okCheckRun()], allowlist: BOTS, headSha: HEAD_SHA }).verified,
+    true,
+  );
+});
+
+test('#870 checkRunTime: completed_at preferred, started_at fallback, unparseable/missing → -Infinity', () => {
+  assert.equal(checkRunTime({ completed_at: '2026-07-14T10:00:00Z', started_at: '2026-07-14T09:00:00Z' }), Date.parse('2026-07-14T10:00:00Z'));
+  assert.equal(checkRunTime({ started_at: '2026-07-14T09:00:00Z' }), Date.parse('2026-07-14T09:00:00Z'));
+  assert.equal(checkRunTime({ completed_at: 'garbage' }), -Infinity);
+  assert.equal(checkRunTime({}), -Infinity);
+  assert.equal(checkRunTime(null), -Infinity);
+});
+
+test('#870 verifyHeadPassWitness: either channel verifying suffices; both failing → red with both reasons', () => {
+  assert.equal(
+    verifyHeadPassWitness({ statuses: [okStatus()], checkRuns: [], allowlist: BOTS, headSha: HEAD_SHA }).verified,
+    true,
+  );
+  const w = verifyHeadPassWitness({
+    statuses: [okStatus({ state: 'failure' })],
+    checkRuns: [okCheckRun({ conclusion: 'failure' })],
+    allowlist: BOTS,
+    headSha: HEAD_SHA,
+  });
+  assert.equal(w.verified, false);
+  assert.match(w.reason, /not bound to this head/);
 });
 
 // ── DR-063 / SPEC-031 FR-9a — awaiting-approval "your turn" queue signal ──────
@@ -2098,6 +2153,19 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
       const s = decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound });
       assert.equal(s.strip, true, `${JSON.stringify(headRound)} must still strip`);
       assert.equal(s.reason, real.reason);
+    }
+  });
+
+  test('#870 latestHeadRound: on identical timestamps a non-success round wins over a pass in EITHER list order (deny-on-tie)', () => {
+    const pass = round({ head_sha: H });
+    const failed = round({ head_sha: H, conclusion: 'failure', html_url: 'https://github.example/checks/2' });
+    const running = round({ head_sha: H, status: 'in_progress', conclusion: null, html_url: 'https://github.example/checks/3' });
+    for (const loser of [failed, running]) {
+      for (const runs of [[pass, loser], [loser, pass]]) {
+        const r = latestHeadRound({ listing: whole(runs), allowlist: ALLOW, headSha: H });
+        assert.equal(r.url, loser.html_url, 'the tied non-success run is the one that decides');
+        assert.notEqual(r.complete, true);
+      }
     }
   });
 

@@ -1028,7 +1028,8 @@ function latestHeadRound({ listing, allowlist, headSha } = {}) {
   const ours = checkRuns.filter((c) => c && c.name === CHECK_NAME && c.head_sha === headSha);
   if (ours.length === 0) return none(`no ${CHECK_NAME} round is recorded on ${short}`);
 
-  const latest = ours.reduce((a, b) => (checkRunTime(b) >= checkRunTime(a) ? b : a));
+  // Ties: see latestCheckRun (#870 — deny-on-tie, order-independent).
+  const latest = latestCheckRun(ours);
   const found = {
     found: true,
     complete: false,
@@ -1430,10 +1431,17 @@ function verifyHeadPassStatus({ statuses, allowlist } = {}) {
       reason: `no \`${PASS_STATUS_CONTEXT}\` status on the current head commit — the greenlight does not correspond to this SHA (#466)`,
     };
   }
-  // Most-recent by created_at (the API returns newest-first, but be explicit).
-  const latest = ours.reduce((a, b) =>
-    Date.parse(b.created_at) >= Date.parse(a.created_at) ? b : a,
-  );
+  // Most-recent by created_at. TIE-BREAK (#870, deliberate): on identical
+  // created_at, a NON-success status wins over a success one, whatever the list
+  // order — a same-instant success/failure is ambiguous, and an ambiguous
+  // greenlight must deny (fail closed), never depend on API ordering. Among
+  // equally-passing or equally-failing ties the choice is immaterial.
+  const latest = ours.reduce((a, b) => {
+    const ta = Date.parse(a.created_at);
+    const tb = Date.parse(b.created_at);
+    if (tb !== ta) return tb > ta ? b : a;
+    return a.state !== 'success' ? a : b;
+  });
   if (latest.state !== 'success') {
     return {
       verified: false,
@@ -1506,7 +1514,8 @@ function verifyHeadPassCheckRun({ checkRuns, allowlist, headSha } = {}) {
     };
   }
   // Most-recent wins, so a re-review that later FAILS supersedes an earlier pass.
-  const latest = ours.reduce((a, b) => (checkRunTime(b) >= checkRunTime(a) ? b : a));
+  // Ties: see latestCheckRun (#870 — deny-on-tie, order-independent).
+  const latest = latestCheckRun(ours);
   if (latest.status !== 'completed') {
     return {
       verified: false,
@@ -1537,6 +1546,24 @@ function verifyHeadPassCheckRun({ checkRuns, allowlist, headSha } = {}) {
 
 // Sort key for check-runs: completion time, falling back to start time so an
 // unfinished run still orders sensibly. Unparseable ⇒ -Infinity (never "latest").
+// #870 — the single "most recent check-run" selector shared by latestHeadRound and
+// verifyHeadPassCheckRun. TIE RULE (deliberate, order-independent): when several runs
+// share the latest timestamp, a run that is NOT a completed success wins over one that
+// is, whatever the array order. A same-instant success/failure is ambiguous, and an
+// ambiguous greenlight must deny (constitution invariant 2: fail closed) rather than
+// depend on GitHub's undocumented listing order. A missing/unparseable timestamp is
+// -Infinity, so it never beats a dated run. Cost: a legitimate success landing in the
+// very same second as a failure is denied until the next distinct-timestamp event.
+function latestCheckRun(runs) {
+  const isPass = (c) => c.status === 'completed' && c.conclusion === 'success';
+  return runs.reduce((a, b) => {
+    const ta = checkRunTime(a);
+    const tb = checkRunTime(b);
+    if (tb !== ta) return tb > ta ? b : a;
+    return !isPass(a) ? a : b;
+  });
+}
+
 function checkRunTime(c) {
   const t = Date.parse((c && (c.completed_at || c.started_at)) || '');
   return Number.isFinite(t) ? t : -Infinity;
@@ -2009,6 +2036,7 @@ module.exports = {
   verifyHeadPassStatus,
   verifyHeadPassCheckRun,
   verifyHeadPassWitness,
+  checkRunTime,
   PASS_STATUS_CONTEXT,
   CHECK_NAME,
   HOLD_RE,
