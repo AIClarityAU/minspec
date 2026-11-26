@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-353-test-completeness-gate/requirements.md",
+  "specHash": "bb590bd24cabe380efddb2de543d4481157231f46d4a4317b7d6ab1a4c1e1bcc",
+  "approvedAt": "2026-11-24T02:45:41.201Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:agent/issue-4019",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4025#issuecomment-7119712185"
+}

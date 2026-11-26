@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-409-core-validator-rules-24-28/requirements.md",
+  "specHash": "80b86ba2346f76491fddea06ddda5eedb1f4208aef4326a65722a612ac1f9330",
+  "approvedAt": "2026-11-23T22:07:01.968Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1123",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4024#issuecomment-7112005209"
+}
