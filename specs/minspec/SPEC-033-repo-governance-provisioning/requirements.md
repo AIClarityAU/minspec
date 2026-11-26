@@ -48,7 +48,7 @@ affects: [packages/minspec/src/lib/ruleset-advisor.ts, packages/minspec/src/lib/
 > unprotected branch.
 
 **Date:** 2026-07-07 (clarify refinements applied 2026-07-14; re-checked and corrected 2026-10-01 — both [#703](https://github.com/AIClarityAU/minspec/issues/703))
-**Status:** Specifying (the 2026-08-07 approval, #1367, was against the pre-correction bytes; D-11 answered by the founder 2026-11-26, no open decisions)
+**Status:** Specifying (the 2026-08-07 approval, #1367, was against the pre-correction bytes; D-11 answer recorded from the founder's words 2026-11-26, queue item in108, and ratified when he approves this spec)
 **Triggered by:** [#557](https://github.com/AIClarityAU/minspec/issues/557) — "provision repo governance (branch protection + ai-review) on init/refresh — detect & offer to fix."
 **Builds on:** [DR-037](../../../docs/decisions/DR-037.md) — the managed-region template mechanism this rides · [DR-050](../../../docs/decisions/DR-050.md) — shelling the user's own `gh` on consent (FR-3) · [DR-058](../../../docs/decisions/DR-058.md) + [DR-061](../../../docs/decisions/DR-061.md) — the two auto-merge decisions FR-7 rests on · the ai-review workflow set ([#342](https://github.com/AIClarityAU/minspec/issues/342) / [#428](https://github.com/AIClarityAU/minspec/issues/428) / [#480](https://github.com/AIClarityAU/minspec/issues/480)), propagated **unchanged**, not rewritten.
 **Relates:** [SPEC-024](../SPEC-024-auto-merge-eligibility/requirements.md) — the auto-merge gate that only becomes meaningful once the `ai-review:pass` label it consumes is actually produced on every repo, which today it is not.
@@ -394,11 +394,11 @@ finding: the gate checks the thing it happens to know about and is silent on the
 
 ## Decisions needed (Clarify — human-only)
 
-### Answered by the founder - D-11 (2026-11-26)
+### Founder's answer recorded - D-11 (2026-11-26, ratified at approval)
 
-- **D-11 - Answered by the founder (human-chosen, 2026-11-26, queue item in108).** The
-  founder chose this himself, in an AskUserQuestion put to him by the queue proxy; it is not
-  an agent's pick.
+- **D-11 - Founder's answer recorded (human-chosen, 2026-11-26, queue item in108; ratified
+  when he approves this spec).** The founder chose this himself, in an AskUserQuestion put
+  to him by the queue proxy; it is not an agent's pick.
   **Resolved: option (a), chosen by the founder.** His pick, verbatim:
 
   > "(a) Off, owner opts in (Recommended): deny on both auto-merge switches in a freshly scaffolded repo, no automatic flip; turning either on stays a deliberate per-repo act by its owner"
