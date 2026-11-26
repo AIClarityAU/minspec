@@ -55,7 +55,7 @@ export const PROPOSE_ACTION_LABEL = 'Propose draft';
 /** The command the deterministic offer-to-fix action runs (#320). */
 export const PROPOSE_COMMAND_ID = 'minspec.constitutionPropose';
 /** Label for the LLM-powered offer-to-fix action on the nudge. */
-export const PROPOSE_LLM_ACTION_LABEL = 'Generate with AI…';
+export const PROPOSE_LLM_ACTION_LABEL = 'Prepare AI prompt…';
 /** The command the LLM-powered offer-to-fix action runs. */
 export const PROPOSE_LLM_COMMAND_ID = 'minspec.constitutionShowPrompt';
 
