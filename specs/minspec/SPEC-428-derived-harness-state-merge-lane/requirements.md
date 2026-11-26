@@ -42,10 +42,20 @@ either they leave version control, or they get a narrow, CI-gated auto-merge lan
   `MINSPEC_GITIGNORE_ENTRIES` (`packages/minspec/src/lib/scaffold.ts:316-317`, with the comment
   "must be gitignored, never committed"; added by #221, pinned by #383's
   `missingGitignoreEntries`, `scripts/lib/gitignore-entries.ts`).
-- **So where do they get tracked?** Unverified, and the plan must establish it: I believe the
-  stranded copies in scrooge (scrooge#83) and sealbox (sealbox#21) exist because those repos were
+- **The untrack migration already exists.** `untrackDeclaredMachineLocalPaths()`
+  (`packages/minspec/src/lib/scaffold.ts:562-597`) runs `git rm --cached` over every
+  `MINSPEC_GITIGNORE_ENTRIES` path (both files included), keeps the working copies, is
+  idempotent, and no-ops outside an own git root. It is wired into refresh
+  (`ensureGitignoreEntries`, `scaffold.ts:625`) and init (`generateHarnessFiles`,
+  `scaffold.ts:1754`), and `packages/minspec/tests/untrack-machine-local.test.ts` already
+  asserts untrack-and-keep, idempotence, and the not-a-repo no-op. Added by #1146.
+  This spec therefore does **not** build a migration; option (a) below is "ship what exists
+  and confirm adopters run it".
+- **So where do they get tracked?** Unverified, and the plan must establish it: My leading hypothesis
+  (unverified): the stranded copies in scrooge (scrooge#83) and sealbox (sealbox#21) exist because those repos were
   initialised by a MinSpec version that predates #221, or were `git add`ed before the ignore
-  line landed. A `.gitignore` entry is inert for an already-tracked file.
+  line landed, and those repos run a MinSpec version older than #1146's reconcile, so they need
+  a refresh or version bump, not new code. A `.gitignore` entry is inert for an already-tracked file.
 - **The lane.** `.github/workflows/docs-lane.yml:100` allows
   `^(specs/|docs/|skills/.*\.md$|\.minspec/approvals/|[^/]+\.md$)`, mirrored in
   `packages/minspec/src/lib/docs-corpus.ts` and `scripts/lib/docs-corpus.sh`, which must stay
@@ -59,9 +69,10 @@ either they leave version control, or they get a narrow, CI-gated auto-merge lan
   that needs a bespoke PR (the outcome, whichever mechanism DQ-1 picks).
 - **FR-2** Whichever mechanism is chosen, it applies to repos where the files are already
   tracked (the stranded case), not only to fresh `init`s.
-- **FR-3** (if DQ-1 option A) A one-time, idempotent migration untracks the two files
-  (`git rm --cached`), keeps the working copies, and ensures the `.gitignore` entries exist. It
-  is opt-in per repo (`.minspec/` present), and never runs on a repo without `.minspec/`.
+- **FR-3** (if DQ-1 option A) The existing reconcile (`untrackDeclaredMachineLocalPaths`,
+  already built, see Current behaviour) is the mechanism. Remaining work is only to confirm it
+  fires for the two named files in the stranded repos (version/refresh), and to close any gap
+  found; no second migration is written. It stays opt-in per repo (`.minspec/` present).
 - **FR-4** (if DQ-1 option B) The lane corpus admits exactly the two named files, no
   `.minspec/*.json` wildcard, and `docs-lane.yml`, `docs-corpus.ts` and `docs-corpus.sh` change in
   lock step, with the existing pinning test extended.
@@ -85,7 +96,8 @@ either they leave version control, or they get a narrow, CI-gated auto-merge lan
 
 ## Acceptance Criteria
 
-- **AC-1** In a repo with both files tracked, running the migration yields a commit-able index
+- **AC-1** (already asserted by `untrack-machine-local.test.ts`; Plan adds a case only if
+  the two named files are not covered) In a repo with both files tracked, running the migration yields a commit-able index
   change deleting them from tracking, the working files still exist, and `git status` is clean
   after a subsequent template bump.
 - **AC-2** Running the migration twice changes nothing the second time.
@@ -104,7 +116,7 @@ either they leave version control, or they get a narrow, CI-gated auto-merge lan
   - (a) **(rec)** *Stop tracking them.* They are machine-local drift state already declared
     "never committed" (`scaffold.ts:312-315`); a baseline that differs per machine cannot be
     shared truth, so a merge lane for it only automates committing something that should not be
-    committed. Ship an untrack migration for already-tracked repos. Cost: touches the index of
+    committed. The untrack migration for already-tracked repos is already shipped (see Current behaviour); the work is verifying adopters run it. Cost: touches the index of
     every adopter repo once, and a fresh clone or worktree has no baseline, so first refresh
     there reports "absent" (already the documented behaviour, `scaffold.ts:872`) rather than
     comparing to a committed one.
@@ -114,15 +126,16 @@ either they leave version control, or they get a narrow, CI-gated auto-merge lan
     PR forever.
   - (c) A dedicated `harness-lane` label and workflow (the issue's option B). Cost: a new
     workflow surface to keep correct against invariant 2, for two files.
-- **DQ-2 Is the premise right for scrooge and sealbox?** Before Plan, confirm whether those
-  repos track the files because of a pre-#221 scaffold, or because something current still
+- **DQ-2 Is the premise right for scrooge and sealbox?** Before Plan, check those repos'
+  MinSpec version first (leading hypothesis: pre-#1146, needs a refresh), then confirm whether
+  they track the files because of a pre-#221 scaffold, or because something current still
   `git add`s them. If the latter, that producer is the root cause and DQ-1 changes.
   Recommended: **(rec)** check first (cost: one read-only look per repo); the alternative is
   building on an unverified premise.
 
 ## Test Plan (sketch)
 
-Migration idempotence and the no-`.minspec/` no-op as unit tests over a temp git repo; for
+Migration idempotence and the no-`.minspec/` no-op are already unit-tested over a temp git repo (`untrack-machine-local.test.ts`); Plan only adds missing cases; for
 option B, extend the corpus pinning test to reject sibling `.minspec/*.json`.
 
 ## Risks
