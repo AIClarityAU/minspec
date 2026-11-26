@@ -31,12 +31,12 @@ comment threads, checkout or sync. Link routing only.
 ## What exists today (verified against `origin/main`)
 
 - Detection pattern and the extension id: `GITHUB_PR_EXTENSION_ID` at
-  `packages/minspec/src/commands/init.ts:1035`; `vscode.extensions.getExtension(id)` at `init.ts:1115`.
+  `packages/minspec/src/commands/init.ts:1086`; `vscode.extensions.getExtension(id)` at `init.ts:1183`.
 - **The install offer is already built**: `offerGitHubPrExtensionAdvisory`
   (`init.ts` ~1100-1150) shows a declinable toast (Install / Not now / Learn more), consent is
   the click, silent when installed or not a git repo. So issue item 4 is mostly done; what is
   left is moving it into the #533 checklist (FR-6).
-- PR links opened externally today: `commit-on-approve.ts:621` (`OPEN_PR_ACTION`) and
+- PR links opened externally today: `commit-on-approve.ts:673` (`OPEN_PR_ACTION`) and
   `push-docs-lane.ts:455` (`result.prUrl`). `park.ts:256` opens an **issue** URL, not a PR,
   and is out of scope. No source file contains a literal `/pull/` string; PR URLs arrive at runtime.
 - I found no webview or signpost code that renders a `/pull/` link (grep of `packages/*/src`
