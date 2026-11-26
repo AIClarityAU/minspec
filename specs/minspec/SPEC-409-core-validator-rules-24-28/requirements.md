@@ -1,7 +1,7 @@
 ---
 id: SPEC-409
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the checks are the methodology; this closes the "no fourth validator" gap SPEC-136 left open
@@ -15,9 +15,9 @@ implements_reason: >-
   operation's validateSpec options) and their tests; possibly a move of
   scripts/lib/dr-closed-set.ts and scripts/lib/epic-id-collision.ts. None is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
