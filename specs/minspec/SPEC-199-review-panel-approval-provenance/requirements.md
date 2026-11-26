@@ -1,7 +1,7 @@
 ---
 id: SPEC-199
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - the AI review panel must judge a human sign-off on evidence, not on a guess
@@ -17,9 +17,9 @@ implements: [scripts/approval-provenance.py, packages/minspec/tests/approval-pro
 # `approval-provenance-script` entry) and is review machinery.
 affects: [scripts/review-branch.sh, packages/minspec/src/lib/template-registry.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -171,6 +171,8 @@ Boxes stay unticked until a reviewer has run the named test. "Exists today" mean
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 3 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 - **D-1: how FR-9 shows that the provenance helper failed.**
   - `a` **(rec)** Inject a short TRUSTED block, `provenance UNAVAILABLE: <cause>`, and print the
     cause to stderr. The review still runs. *Cost:* the panel then knows it is missing evidence and
@@ -181,16 +183,22 @@ Boxes stay unticked until a reviewer has run the named test. "Exists today" mean
     makes an advisory aid load-bearing, which is the job SPEC-069 is designing properly.
   - `c` Leave it as it is (silent omission). *Cost:* the #1025 false block comes back unseen
     whenever the helper breaks, and nobody can tell why.
+
+  **Recorded selection: the recommended option,** option `a`, inject a short trusted `provenance UNAVAILABLE: <cause>` block and print the cause to stderr, and the review still runs. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D-2: FR-10 for renames.**
   - `a` **(rec)** Read the base `specPath` from the base sidecar and compare against that path.
     *Cost:* one more branch in `report_for` that needs fixtures. A rename together with a content
     change still shows up only as "stale at base".
   - `b` Report "spec path changed: X to Y" as a fact and make no stale comparison. *Cost:* the
     panel goes back to guessing for renamed specs, which is a smaller version of #1025.
+
+  **Recorded selection: the recommended option,** option `a`, read the base `specPath` from the base sidecar and compare against that path. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D-3: does this spec stay separate or fold into SPEC-069?** `a` **(rec)** Keep it separate,
   because it is the contract for the advisory block, which SPEC-069 FR-4 already freezes. *Cost:*
   two specs touch one script, so a later edit has to read both. `b` Fold FR-9 and FR-10 into
   SPEC-069. *Cost:* that spec is already T4 and in `planning`, and it would grow again.
+
+  **Recorded selection: the recommended option,** option `a`, keep this spec separate from SPEC-069. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 ## Out of scope
 

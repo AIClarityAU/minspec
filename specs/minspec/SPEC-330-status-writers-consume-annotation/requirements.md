@@ -1,7 +1,7 @@
 ---
 id: SPEC-330
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a status writer that leaves a comment describing the old value is a false signpost
@@ -14,9 +14,9 @@ implements_reason: >-
   (`epic-manager.ts`), `setAdrStatus` (`adr-manager.ts`), one shared helper, tests, and three corpus edits.
   None of it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -86,15 +86,36 @@ Scanned frontmatter of every `.md` under `specs/`, `docs/decisions/`, `docs/epic
 - Writer logs only. Cost: invisible in the editor; recreates the "silent loss" the issue itself names as the cost of shipping the writer alone.
 - Writer refuses when an annotation is present. Cost: blocks approve on any annotated file (3 requirements files today); the issue rejected this.
 
+**Recorded selection: the recommended option,** the writer returns the removed lines and the approve/accept command shows a notification. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
+
 **D2 — Ratchet validator to `error` in this change?**
 - (rec) No: keep `warn`, ratchet in a follow-up once the corpus is clean. Cost: the warn window persists, so annotations written meanwhile are still removed on write (visibly, per D1).
 - Yes, after the corpus edit lands in the same PR. Cost: couples a writer semantics change to a gate flip; any annotated file on another open branch then fails validate.
+
+**Recorded selection: the recommended option,** no, keep `warn` and ratchet to `error` in a follow-up once the corpus is clean. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 
 **D3 — Fold the #1833 inversion guard into the spec/epic writers?**
 - (rec) No, separate issue. Cost: spec/epic writers keep no prose-inversion guard; this stays unguarded meanwhile. The issue did not ask for it, and it is scope expansion under the repo triage rules.
 - Yes, one shared guard. Cost: larger T3 surface and its own false-positive risk on spec bodies.
 
+**Recorded selection: the recommended option,** no, the #1833 inversion guard stays a separate issue. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
+
 **D4 — Which A1 files does Plan clean?** The issue says nine, this base measures three with a coarse scan. Plan must re-measure with the shipped predicate and clean whatever it reports; confirm no objection to deleting (not preserving) comments with no rationale.
+
+**Answer (fact, agent, 2026-11-17):** the project has already decided this. The convention is that the
+`status:` line carries a value and nothing else (#1900, merged: "Move SPEC-040's status rationale
+off the line the status writer owns"); #1879's corpus half deleted SPEC-062's orphaned comment
+outright; #1912's own fix, item 3, says to strip the comments and move any real rationale into
+body prose; and the writers already drop an inline status comment on every write today
+(`packages/minspec/src/lib/spec.ts:606`, `epic-manager.ts:318`, `adr-manager.ts:897`). The three
+comments measured on this base (SPEC-004, SPEC-011, SPEC-015) each carry build evidence, so
+under FR-7 they move into prose rather than being deleted.
+
+**Recommended (agent, 2026-11-17):** delete comments with no rationale; move any with rationale into
+body prose (FR-7) - cost: a deleted comment is recoverable only from git history.
+
+**Recorded selection: the recommended option,** delete comments with no rationale and move any
+with rationale into body prose. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 ## Rejected alternatives (DR-086 §4)
 

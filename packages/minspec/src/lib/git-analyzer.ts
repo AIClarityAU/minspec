@@ -1,4 +1,4 @@
-import type { SimpleGit } from 'simple-git';
+import type { DiffResult, SimpleGit } from 'simple-git';
 import { simpleGit } from 'simple-git';
 import * as path from 'path';
 
@@ -19,12 +19,14 @@ export interface GitAnalyzerOptions {
   git?: SimpleGit;
 }
 
-/** Parsed diff file entry from simple-git */
-interface DiffFile {
-  file: string;
-  insertions: number;
-  deletions: number;
-  binary: boolean;
+/**
+ * Line delta of a diff entry. simple-git types an entry as a union and the
+ * binary arm carries byte counts (`before`/`after`) with no `insertions` or
+ * `deletions` (#1197), so narrow on `binary` instead of asserting the union
+ * away: a binary file is still a changed file but contributes zero lines.
+ */
+function lineDelta(f: DiffResult['files'][number]): { insertions: number; deletions: number } {
+  return f.binary ? { insertions: 0, deletions: 0 } : { insertions: f.insertions, deletions: f.deletions };
 }
 
 /**
@@ -108,8 +110,8 @@ function getExtension(filePath: string): string {
  * Root-level files get '.' as their directory.
  */
 function getDirectory(filePath: string): string {
-  const dir = path.dirname(filePath);
-  return dir || '.';
+  // path.dirname never returns '' (root-level files yield '.').
+  return path.dirname(filePath);
 }
 
 /**
@@ -144,7 +146,7 @@ export async function analyzeGitDiff(
     return [];
   }
 
-  const files = diffSummary.files as DiffFile[];
+  const files = diffSummary.files;
 
   // No changes = no signals
   if (files.length === 0) {
@@ -153,7 +155,10 @@ export async function analyzeGitDiff(
 
   // Compute raw metrics
   const fileCount = files.length;
-  const totalLines = files.reduce((sum, f) => sum + f.insertions + f.deletions, 0);
+  const totalLines = files.reduce((sum, f) => {
+    const d = lineDelta(f);
+    return sum + d.insertions + d.deletions;
+  }, 0);
 
   const extensions = new Set<string>();
   const directories = new Set<string>();
@@ -335,7 +340,7 @@ export async function buildConsequenceInput(
   } catch {
     return empty;
   }
-  const files = diffSummary.files as DiffFile[];
+  const files = diffSummary.files;
   if (files.length === 0) return empty;
 
   // Classify status from `git status`.
@@ -369,7 +374,9 @@ export async function buildConsequenceInput(
     let content: string | undefined;
     let oldContent: string | undefined;
 
-    if (status !== 'deleted') {
+    // A binary blob decoded as UTF-8 is meaningless to the analyzers and can be
+    // large: keep the file (blast radius) but skip the content reads.
+    if (status !== 'deleted' && !file.binary) {
       // New/current content: the staged blob (`:path`) or, for working-tree
       // mode, the file on disk via the same `:path` falls back to HEAD; read the
       // working tree directly when not staged.
@@ -388,7 +395,7 @@ export async function buildConsequenceInput(
       }
     }
 
-    if (status !== 'added') {
+    if (status !== 'added' && !file.binary) {
       try {
         oldContent = await git.show([`HEAD:${oldPath}`]);
       } catch {
@@ -398,8 +405,7 @@ export async function buildConsequenceInput(
 
     changedFiles.push({
       path: filePath,
-      insertions: file.insertions,
-      deletions: file.deletions,
+      ...lineDelta(file),
       status,
       content,
       oldContent,
@@ -410,12 +416,12 @@ export async function buildConsequenceInput(
 }
 
 /** Best-effort UTF-8 file read; returns undefined on any failure. */
-async function fsReadFile(absPath: string): Promise<string | undefined> {
+export async function fsReadFile(absPath: string): Promise<string | undefined> {
   try {
     // Lazy import keeps fs out of the module's top-level surface; this is the IO
     // layer, so fs is permitted here (analyzers stay pure — INV-1).
     const fs = await import('fs');
-    return fs.promises.readFile(absPath, 'utf-8');
+    return await fs.promises.readFile(absPath, 'utf-8');
   } catch {
     return undefined;
   }

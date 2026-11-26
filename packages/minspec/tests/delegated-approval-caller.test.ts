@@ -439,6 +439,10 @@ describe('T0 - scope exclusions', () => {
     expect(by('specs/minspec/SPEC-902-x/requirements.md')).toBeUndefined();
     expect(by('specs/minspec/SPEC-903-x/requirements.md')).toBe('sidecar-unreadable');
     expect(by(SPEC)).toBe('in-open-pr');
+    // The skip names the open PR (#7) in detail; `pr` stays the merged content PR (#3927).
+    const skipped = report.results.find((r) => r.artifact === SPEC);
+    expect(skipped?.detail).toContain('#7');
+    expect(skipped?.pr).not.toBe(7);
     expect(rec.approve.map((c) => c.artifact)).toEqual([DR_ENG]);
   });
 

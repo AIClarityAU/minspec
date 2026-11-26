@@ -1,7 +1,7 @@
 ---
 id: SPEC-336
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the ai-review merge gate and the landing path (same epic as SPEC-293 and SPEC-322)
@@ -15,9 +15,9 @@ implements_reason: >-
   chief-of-staff runner (cos.py pr-drive), outside this repository. Which files this repository
   owns is decided at Plan, after Clarify Q1 picks where the trigger lives.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

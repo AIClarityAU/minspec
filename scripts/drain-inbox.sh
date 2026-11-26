@@ -47,6 +47,7 @@
 #   scripts/drain-inbox.sh --quota-cap                      # "open|closed 7d U% vs C%; 5h U% vs C% | <gate>", 0 / 42
 #   scripts/drain-inbox.sh --quota-sleep                    # secs to wait for the window
 #   scripts/drain-inbox.sh --quota-signal-sleep [<streak>]  # "<secs> <verdict> <meter>" after a TEXT signal
+#   scripts/drain-inbox.sh --quota-gate-sleep               # "<secs> <cleared|held> <meter>" after the gate deferred (#3466)
 #
 # Env knobs (all optional):
 #   MINSPEC_DRAIN_CONTINUOUS=0     — force pure one-shot even on --auto/--continuous
@@ -408,6 +409,10 @@ QUOTA_CONTRADICT_MAX="${MINSPEC_QUOTA_CONTRADICT_MAX:-1}"
 # child's text alone). QUOTA_CONTRADICTED_STREAK counts contradicted signals since the
 # last clean cycle.
 QUOTA_PAUSE_CAUSE=""
+# 1 once any child's usage-limit TEXT was seen this cycle, whatever QUOTA_PAUSE_CAUSE says: the
+# cause keeps an earlier `gate` (the `:-signal` assignments never overwrite it), so on its own
+# it cannot tell a gate hold from a gate hold PLUS a real limit notice. Reset at cycle start.
+QUOTA_TEXT_SEEN=0
 QUOTA_CONTRADICTED_STREAK=0
 # Neither configuration nor loop state: where _quota_cap and _quota_admit_wait leave
 # their answers. They are asked some twenty times in a row when the gate works out how
@@ -509,6 +514,10 @@ _DISPATCH_RC_STARTED=76
 # The dispatcher's own first `gh` call got a 401, before any claim (#3176). Told by status
 # alone, never by the dispatcher's output, which carries the build agent's prose (#2233).
 _DISPATCH_RC_AUTH_FAILED=78
+# The dispatcher's build was killed at its time bound while the quota meter said the window
+# was closed (#1713). A quota pause, never a failure: a build that waits out a usage limit
+# prints no notice for the text classifier, so the dispatcher answers by status.
+_DISPATCH_RC_QUOTA_PAUSED=79
 
 # _dispatch_own_status <dispatcher's status> [<status of each later stage>...]
 # Prints the one status to judge a dispatch by, from the PIPESTATUS of
@@ -546,6 +555,7 @@ _dispatch_outcome() {
   case "${1-}" in
     "$_DISPATCH_RC_DECLINED") printf 'declined' ;;
     "$_DISPATCH_RC_STARTED")  printf 'started' ;;
+    "$_DISPATCH_RC_QUOTA_PAUSED") printf 'quota' ;;
     0)                        printf 'unanswered' ;;
     *)                        printf 'failed' ;;
   esac
@@ -940,6 +950,29 @@ provision_run_dir_modules() {
   return 0
 }
 
+# scripts_tree_current <exec-root> (#3747): exit 0 iff every file under scripts/ in the
+# run dir's HEAD (origin/main once verified) has the same content under <exec-root>/scripts,
+# the tree this process sources its libs from and resolves sibling scripts against.
+# Comparing drain-inbox.sh alone missed a stale lib it sources. A file present only in
+# <exec-root> is not compared: nothing on main can reach it. A missing or unreadable file
+# makes hash-object fail, which counts as NOT current (fail closed). Read-only: no -w.
+scripts_tree_current() {
+  local exec_root="$1" listing want got
+  listing="$(git -C "$DRAIN_RUN_DIR" ls-tree -r HEAD -- scripts 2>/dev/null)" || return 1
+  [[ -n "$listing" ]] || return 1
+  want="$(awk '$2 == "blob" { print $3 }' <<<"$listing")"
+  got="$(awk -F'\t' -v root="$exec_root/" '{ split($1, m, " "); if (m[2] == "blob") print root $2 }' <<<"$listing" \
+    | git -C "$DRAIN_RUN_DIR" hash-object --no-filters --stdin-paths 2>/dev/null)" || return 1
+  [[ -n "$want" && "$want" == "$got" ]]
+}
+
+# RUN_DIR_RESTART (#3747): set by ensure_fresh_run_dir when THIS process executes from the
+# run dir and origin/main has moved past it. The run dir is then left untouched (a reset
+# would rewrite the files a running bash reads incrementally and the libs it sources), the
+# cycle is skipped and the loop ends, so drain-service.sh refreshes the run dir while no
+# drain runs from it and starts the new code.
+RUN_DIR_RESTART=false
+
 # ensure_fresh_run_dir (#773): guarantee the pipeline scripts we run this cycle are
 # CURRENT, by maintaining a dedicated worktree hard-synced to origin/main and
 # repointing TRIAGE/DISPATCH/REMEDIATE at ITS copies. This replaces the old
@@ -979,10 +1012,28 @@ ensure_fresh_run_dir() {
 
   GIT_TERMINAL_PROMPT=0 git -C "$PRIMARY_ROOT" fetch origin main -q 2>/dev/null || true
 
+  # Executing FROM the run dir (drain-service.sh starts it there, #3747): never create,
+  # reset or provision it under ourselves. Rejected alternative: a fresh versioned dir per
+  # refresh with an atomic switch, which costs an npm install per main commit and a
+  # cleanup sweep for dirs a running process may still hold. Here, behind origin/main
+  # means stop and let the supervisor refresh it between processes.
+  local executing_from_run_dir=false
+  [[ "$(readlink -m -- "$SCRIPT_DIR" 2>/dev/null)" == "${run_canon}/scripts" ]] && executing_from_run_dir=true
+  if $executing_from_run_dir; then
+    local here_head here_origin
+    here_head="$(git -C "$DRAIN_RUN_DIR" rev-parse HEAD 2>/dev/null || echo 'norun')"
+    here_origin="$(git -C "$PRIMARY_ROOT" rev-parse origin/main 2>/dev/null || echo 'noorigin')"
+    if [[ "$here_head" != "$here_origin" ]]; then
+      RUN_DIR_RESTART=true
+      echo "[drain] origin/main moved (run=${here_head:0:7} origin=${here_origin:0:7}) and this drain executes from the run dir — not refreshing it under the running script; ending the loop so drain-service.sh refreshes it and starts the new code (#3747)."
+      return 0
+    fi
+  fi
+
   # (Re)create the worktree if it is missing or not a usable checkout. Use git's own
   # worktree removal (not a blind rm) to unregister a stale/broken one; only rm a
   # leftover path when it is NOT a populated checkout, so we never nuke real content.
-  if [[ ! -e "${DRAIN_RUN_DIR}/scripts/drain-inbox.sh" ]]; then
+  if ! $executing_from_run_dir && [[ ! -e "${DRAIN_RUN_DIR}/scripts/drain-inbox.sh" ]]; then
     git -C "$PRIMARY_ROOT" worktree remove --force "$DRAIN_RUN_DIR" 2>/dev/null || true
     git -C "$PRIMARY_ROOT" worktree prune 2>/dev/null || true
     [[ -e "$DRAIN_RUN_DIR" && ! -d "${DRAIN_RUN_DIR}/scripts" ]] && rm -rf "$DRAIN_RUN_DIR" 2>/dev/null || true
@@ -1004,12 +1055,15 @@ ensure_fresh_run_dir() {
 
   # Hard-sync to origin/main — the self-heal. On any git error we do NOT trust the run
   # dir (see the verify-before-repoint below); we never die.
-  git -C "$DRAIN_RUN_DIR" reset --hard origin/main -q 2>/dev/null \
-    || echo "[drain] WARNING: could not resync run-dir to origin/main." >&2
+  # Skipped when executing from the run dir: it is already at origin/main (checked above).
+  if ! $executing_from_run_dir; then
+    git -C "$DRAIN_RUN_DIR" reset --hard origin/main -q 2>/dev/null \
+      || echo "[drain] WARNING: could not resync run-dir to origin/main." >&2
 
-  # node/tsx helpers (delegated-merge judge, auto-merge gate, ranker,
-  # render-review-signals) need the workspace's modules - see provision_run_dir_modules.
-  provision_run_dir_modules
+    # node/tsx helpers (delegated-merge judge, auto-merge gate, ranker,
+    # render-review-signals) need the workspace's modules - see provision_run_dir_modules.
+    provision_run_dir_modules
+  fi
 
   # VERIFY the run dir is ACTUALLY at origin/main before trusting it (#773 review,
   # MAJOR). Only then repoint children + tell them freshness is validated. If the reset
@@ -1024,7 +1078,17 @@ ensure_fresh_run_dir() {
     DISPATCH="${DRAIN_RUN_DIR}/scripts/dispatch-issue.sh"
     REMEDIATE="${DRAIN_RUN_DIR}/scripts/remediate-pr.sh"
     export MINSPEC_FRESHNESS_CHECKED=1
-    echo "[drain] run dir verified at origin/main (${run_head:0:7}) — pipeline scripts are current."
+    # The run dir is verified; the code THIS process runs is not necessarily it (#3747: the
+    # primary checkout, held behind main by an uncommitted approval). Say "current" only
+    # when the whole scripts/ tree this process runs from (itself and every lib it
+    # sources) matches origin/main's; otherwise say STALE.
+    local exec_root
+    exec_root="$(dirname -- "$SCRIPT_DIR")"
+    if scripts_tree_current "$exec_root"; then
+      echo "[drain] run dir verified at origin/main (${run_head:0:7}) — pipeline scripts are current; the executing scripts/ tree ($SCRIPT_DIR) matches origin/main."
+    else
+      echo "[drain] STALE: run dir verified at origin/main (${run_head:0:7}) but the executing scripts/ tree ($SCRIPT_DIR) differs from origin/main's — the drain's own logic or a lib it sources is NOT current; run it from the run dir (drain-service.sh does) (#3747)." >&2
+    fi
   else
     echo "[drain] WARNING: run dir NOT verified at origin/main (run=${run_head:0:7} origin=${origin_head:0:7}) — running in place; children re-check freshness (#481)." >&2
   fi
@@ -1649,7 +1713,7 @@ arm_delegated_spec_merges() {
     rc=1
     for attempt in 1 2; do
       if one_rows=$(gh pr list --repo "$REPO" --state open --label "$label" --limit "$limit" \
-           --json number,isDraft,autoMergeRequest,files 2>"$errfile"); then
+           --json number,isDraft,autoMergeRequest,headRefName,files 2>"$errfile"); then
         rc=0
         break
       fi
@@ -1731,6 +1795,10 @@ arm_delegated_spec_merges() {
   if [[ "$cursor" =~ ^[0-9]+$ ]]; then
     candidates=$(awk -v c="$cursor" '$1 > c' <<< "$candidates"; awk -v c="$cursor" '$1 <= c' <<< "$candidates")
   fi
+  # No dlg-approve ordering (#3949): every real approval PR changes the spec AND its
+  # `.minspec/approvals/<path>.json` sidecar, so the spec-only prefilter above never admits
+  # one, and the judge would refuse it (path-out-of-scope). Merging approval PRs belongs to
+  # the DR-119 lane (#3379), not this arm.
   while read -r pr; do
     [[ -n "$pr" ]] || continue
     if (( tried >= max )); then
@@ -1851,7 +1919,7 @@ sweep_open_prs() {
         fi
         if is_quota <<<"$rout"; then
           echo "[drain] Claude usage-limit signal while remediating PR #$pr — pausing this cycle (will back off, not fail)."
-          QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
+          QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"; QUOTA_TEXT_SEEN=1
           return 42
         fi
       done
@@ -2066,7 +2134,22 @@ _pending_specs() {
   _pend_prs=$(gh pr list --repo "$REPO" --state open --label hold:human --limit 1000 \
     --json title,body --jq "$_pend_jq") || _pend_rc=$?
   (( _pend_rc == 0 )) || return 1
-  _pend_held=$(printf '%s\n%s\n' "$_pend_issues" "$_pend_prs" | tr -d '\r' | awk '
+  # A spec whose delegated approval pull request (`dlg-approve/spec-NNN-*`) is auto-merge
+  # armed no longer waits for a human or for Clarify (#3825): it passed the delegation judge
+  # (or the founder armed it) and GitHub merges it once the branch is current. Counting it
+  # kept spec-writing paused for the ~65 minutes each serialized branch update takes. Only an
+  # ARMED one is left out: `ai-review:pass` alone is not a ruling by the judge. A disarmed PR
+  # or a moved head is counted again next cycle. A failed read pauses, like the holds above.
+  local _pend_armed
+  _pend_armed=$(gh pr list --repo "$REPO" --state open --limit 1000 \
+    --json headRefName,autoMergeRequest \
+    --jq '.[] | select(.autoMergeRequest != null) | .headRefName') || _pend_rc=$?
+  (( _pend_rc == 0 )) || return 1
+  _pend_armed=$(printf '%s\n' "$_pend_armed" | tr -d '\r' | awk '
+    match($0, /^dlg-approve\/spec-[0-9]+(-|$)/) {
+      t = substr($0, 18); sub(/[^0-9].*$/, "", t); print "SPEC-" t
+    }') || return 1
+  _pend_held=$(printf '%s\n%s\n%s\n' "$_pend_issues" "$_pend_prs" "$_pend_armed" | tr -d '\r' | awk '
     function emit(t,   r) {
       while (match(t, /SPEC-[0-9]+/)) { print substr(t, RSTART, RLENGTH); t = substr(t, RSTART + RLENGTH) }
     }
@@ -2270,6 +2353,9 @@ run_cycle() {
   # runs before ensure_fresh_run_dir so a deferred cycle costs nothing at all —
   # no git, no gh, no dispatch. Returning 42 reuses the existing quota-pause arm
   # in run_loop, which sleeps and retries rather than counting a failure.
+  # QUOTA_TEXT_SEEN is per-cycle: a text signal this cycle routes the rest to the
+  # #2233 path. Reset BEFORE the gate, so a gate hold never reads last cycle's value.
+  QUOTA_TEXT_SEEN=0
   if ! quota_verdict=$(quota_gate); then
     echo "[drain] $quota_verdict"
     QUOTA_PAUSE_CAUSE="gate"
@@ -2297,6 +2383,10 @@ run_cycle() {
   # CURRENT orchestration (self-heal, not die-on-stale). Never fatal — on failure it
   # falls back to in-place scripts and the cycle proceeds.
   ensure_fresh_run_dir
+  if $RUN_DIR_RESTART; then
+    echo "[drain] skipping this cycle: the run dir this drain executes from is behind origin/main (#3747)."
+    return 0
+  fi
 
   # Keep USER-FACING dormant shared checkouts current (gated; #168 / DR-051 §4a).
   # Runs every one-shot AND every continuous-loop iteration, which is the whole
@@ -2745,6 +2835,11 @@ run_cycle() {
     case "$what" in
       started) started_count=$(( started_count + 1 )) ;;
       failed)  dispatch_failures=$(( dispatch_failures + 1 )) ;;
+      quota)
+        # Killed at its bound with the window closed (#1713): neither work done nor a
+        # failure, so it is in neither count. The slot is spent; the caller pauses.
+        echo "[drain] dispatch of #$n was killed at its time bound with the quota window closed — a quota pause, not a failure (#1713)." >&2
+        ;;
       *)
         # No answer, or an outcome this function was never taught: both are "unknown".
         # Said here, by number, the moment it happens. The cycle's own summary is hours
@@ -2820,7 +2915,16 @@ run_cycle() {
       break
       done
       book_dispatch "$n" "$outcome" "${verdict:0:1}"
-      [[ "${verdict:1:1}" == "1" ]] && saw_quota=1
+      # Only a TEXT signal (the verdict's quota bit) marks the cycle text-seen (#3466), exactly
+      # as the parallel path does: a status-witness pause (#1713) is the meter's own word, so a
+      # cleared gate hold must not be re-routed onto the #2233 text-signal path by it.
+      if [[ "${verdict:1:1}" == "1" ]]; then
+        saw_quota=1
+        QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"; QUOTA_TEXT_SEEN=1
+      fi
+      # A dispatch that said, by status, that the window closed under it (#1713). The meter
+      # was the witness, so no text signal may shorten the rest.
+      if [[ "$outcome" == "quota" ]]; then saw_quota=1; QUOTA_PAUSE_CAUSE="gate"; fi
       if (( saw_quota )); then
         echo "[drain] Claude usage-limit signal while dispatching #$n — pausing this cycle (will back off, not fail)."
         QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
@@ -2940,8 +3044,9 @@ run_cycle() {
       book_dispatch "$n" "$outcome" "${verdict:0:1}"
       if [[ "${verdict:1:1}" == "1" ]]; then
         saw_quota=1
-        QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
+        QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"; QUOTA_TEXT_SEEN=1
       fi
+      if [[ "$outcome" == "quota" ]]; then saw_quota=1; QUOTA_PAUSE_CAUSE="gate"; fi
 
       # A quota signal or a tripped breaker stops us LAUNCHING more, but never
       # abandons work already in flight — an orphaned build would hold its claim
@@ -3832,6 +3937,47 @@ quota_signal_backoff_sleep() {
   esac
 }
 
+# quota_gate_sleep_decision: the rest after quota_gate itself deferred (#3466). Prints
+# "<secs> <cleared|held> <the meter's own verdict>". Pure: reads QUOTA_FILE only.
+#   cleared — the gate NOW admits (another producer refreshed the reading while in-flight
+#             work drained, e.g. after a defer:stale): the hold is over, rest QUOTA_SLEEP_MIN.
+#             Sleeping to the 5h reset here would be wrong: _quota_sleep_plan reads "room on
+#             the meter" as "a text signal sent us", which is only false when no usage-limit
+#             text was seen this cycle. With text seen (QUOTA_TEXT_SEEN=1 / $1=1) the verdict is
+#             `text-signal` and quota_gate_backoff_sleep hands the rest to the #2233 path.
+#   held    — the gate still defers, stale or missing included: quota_sleep_secs, as before.
+quota_gate_sleep_decision() {
+  local meter secs text_seen="${1:-0}"
+  if meter=$(_quota_meter_admits); then
+    if [[ "$text_seen" == "1" ]]; then
+      printf '0 text-signal %s\n' "$meter"
+      return 0
+    fi
+    secs="$QUOTA_SLEEP_MIN"
+    [[ "$secs" =~ ^[0-9]+$ ]] || secs=60
+    printf '%d cleared %s\n' "$secs" "$meter"
+  else
+    printf '%d held %s\n' "$(quota_sleep_secs)" "$meter"
+  fi
+}
+
+# quota_gate_backoff_sleep: the rc=42 rest when quota_gate itself deferred. The gate is
+# asked again first, because the reading can have moved during the wait for in-flight work.
+quota_gate_backoff_sleep() {
+  local decision secs verdict meter
+  decision=$(quota_gate_sleep_decision "$QUOTA_TEXT_SEEN")
+  read -r secs verdict meter <<<"$decision"
+  if [[ "$verdict" == "text-signal" ]]; then
+    echo "[drain] quota hold cleared (${meter}) but a usage-limit notice arrived this cycle — taking the text-signal path, not the short rest (#2233, #3466)."
+    quota_signal_backoff_sleep
+  elif [[ "$verdict" == "cleared" ]]; then
+    echo "[drain] quota hold already cleared (${meter}) — resting ${secs}s, not sleeping to the published reset (#3466)."
+    wait_interval "$secs"
+  else
+    quota_backoff_sleep
+  fi
+}
+
 # quota_health: one line, once per loop, saying whether admission control is actually
 # SEEING DATA. A STALE reading, or a MISSING one whose bootstrap allowance is
 # exhausted, correctly HOLDS the gate shut (defers every cycle, #1775) rather than
@@ -4149,6 +4295,9 @@ run_loop() {
     fi
 
     rc=0; run_cycle || rc=$?
+    if $RUN_DIR_RESTART; then
+      echo "[drain] RESTART-ON-MAIN-MOVE: run dir is behind origin/main and this loop executes from it — stopping so drain-service.sh refreshes the run dir and relaunches the new code in the same service start (#3747)."; break
+    fi
     case "$rc" in
       0)
         consec=0
@@ -4166,7 +4315,7 @@ run_loop() {
         if [[ "$QUOTA_PAUSE_CAUSE" == "signal" ]]; then
           quota_signal_backoff_sleep
         else
-          quota_backoff_sleep
+          quota_gate_backoff_sleep
         fi
         ;;
       *)
@@ -4249,6 +4398,11 @@ case "$1" in
     # "<secs> <contradicted|overruled|confirmed> <quota_gate's verdict>". Offline,
     # reads QUOTA_FILE only, and never spends a bootstrap admit.
     quota_signal_sleep_decision "${2:-0}"; exit 0
+    ;;
+  --quota-gate-sleep)
+    # Pure seam (#3466): the rest after quota_gate itself deferred. Prints
+    # "<secs> <cleared|held|text-signal> <quota_gate's verdict>"; optional arg <text_seen 0|1>. Offline, reads QUOTA_FILE only.
+    quota_gate_sleep_decision "${2:-0}"; exit 0
     ;;
   --session-alive)
     # Pure seam: is the session (or any pid) still alive?

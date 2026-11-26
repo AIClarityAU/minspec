@@ -42,6 +42,12 @@ ROLES_DIR="${SCRIPT_DIR}/roles"
 #                          may re-mint its credential and ask again (#3176). Said by status
 #                          only: the caller never reads this script's output for it, because
 #                          the build agent's prose travels on that output (#2233).
+#   DISPATCH_RC_QUOTA_PAUSED  the claim was won and the build agent was killed at its time bound
+#                          (exit 124/137) while the quota meter says the window is closed
+#                          (`drain-inbox.sh --quota-cap`). The kill is evidence of the quota
+#                          wall, not of bad code: a waiting `claude -p` emits no limit text
+#                          for the caller to read, so the meter is the witness (#1713).
+#                          The issue keeps `agent-ready` and gets no crash stamp.
 #   0                      NO ANSWER. An exit neither function below was called for. The
 #                          caller must read it as neither of the two.
 #   anything else          a failure, as before.
@@ -74,6 +80,7 @@ ROLES_DIR="${SCRIPT_DIR}/roles"
 DISPATCH_RC_DECLINED=75
 DISPATCH_RC_STARTED=76
 DISPATCH_RC_AUTH_FAILED=78
+DISPATCH_RC_QUOTA_PAUSED=79
 
 DISPATCH_STATUS_ASKED=0
 case "${MINSPEC_DISPATCH_OUTCOME_STATUS:-}" in
@@ -127,6 +134,15 @@ exit_auth_failed() {
   exit "$DISPATCH_RC_AUTH_FAILED"
 }
 
+# exit_quota_paused: leave, having won the claim, because the build timed out while the quota
+# window was closed (#1713). A caller that did not ask gets exit 0, as for every other end of a
+# run that won its claim.
+exit_quota_paused() {
+  (( DISPATCH_STATUS_ASKED && DISPATCH_CLAIMED )) || exit 0
+  DISPATCH_EXIT_AS="$DISPATCH_RC_QUOTA_PAUSED"
+  exit "$DISPATCH_RC_QUOTA_PAUSED"
+}
+
 # _dispatch_on_exit: the ONE exit trap of this script. It has two jobs.
 #
 # It gives the claim back (D6/D10). That used to be a trap of its own, set where the
@@ -154,7 +170,7 @@ _dispatch_on_exit() {
     lease_stop_renew_ticker; lease_release_all >/dev/null 2>&1 || true
   fi
   if (( DISPATCH_STATUS_ASKED )) \
-    && [[ "$rc" == "$DISPATCH_RC_DECLINED" || "$rc" == "$DISPATCH_RC_STARTED" || "$rc" == "$DISPATCH_RC_AUTH_FAILED" ]] \
+    && [[ "$rc" == "$DISPATCH_RC_DECLINED" || "$rc" == "$DISPATCH_RC_STARTED" || "$rc" == "$DISPATCH_RC_AUTH_FAILED" || "$rc" == "$DISPATCH_RC_QUOTA_PAUSED" ]] \
     && [[ "$rc" != "$DISPATCH_EXIT_AS" ]]; then
     echo "WARNING: #$ISSUE was ending on status $rc, which this script keeps for its own 'started' and 'refused' answers and did not choose here. Reported as a plain failure instead (#2641)." >&2
     exit 1
@@ -737,14 +753,21 @@ delegated_merge_handoffs_spent() {
 delegated_merge_human_claims() {
   local pr="$1" changed="${2-}" view="" head="" refs="" handoffs="" issue=""
   local marker="<!-- minspec-shepherd-handoff -->"
-  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments,author,body 2>/dev/null) \
+  if ! view=$(gh pr view "$pr" --repo "$REPO" --json headRefName,closingIssuesReferences,comments,author,body,labels 2>/dev/null) \
      || ! head=$(printf '%s' "$view" | jq -r '.headRefName' 2>/dev/null) \
      || ! refs=$(printf '%s' "$view" | jq -r '.closingIssuesReferences | if type == "array" then .[].number else error("no list") end' 2>/dev/null) \
      || ! handoffs=$(printf '%s' "$view" | jq -r --arg m "$marker" '.comments | if type == "array" then [.[] | select((.body // "") | contains($m))] | length else error("no list") end' 2>/dev/null); then
     printf 'pr-claims-unreadable\tcould not read PR #%s closing links and comments; failing closed\n' "$pr"
     return 1
   fi
-  if [[ "$handoffs" != "0" ]] && ! delegated_merge_handoffs_spent "$pr" "$marker"; then
+  # #4016: a handoff on an `agent-stuck` PR (no `hold:*` label) is an automation failure,
+  # not a founder decision (#3835 split the label off at the producer). It is not a human
+  # claim, so the PR returns to the agent path. Unreadable or absent labels keep the hold, and so
+  # does `needs-human-review`: remediate-pr.sh adds it at its retry cap without removing
+  # `agent-stuck`, and that escalation is a request for a human, so the handoff stays live.
+  local stuck=""
+  stuck=$(printf '%s' "$view" | jq -r '(.labels // []) | if type == "array" then ([.[] | .name // ""] | (any(. == "agent-stuck") and (any(startswith("hold:")) | not) and (any(. == "needs-human-review") | not))) else false end' 2>/dev/null) || stuck=false  # swallow-ok: unreadable labels leave the handoff live (fail closed)
+  if [[ "$handoffs" != "0" && "$stuck" != "true" ]] && ! delegated_merge_handoffs_spent "$pr" "$marker"; then
     printf 'handed-to-human\tPR #%s was handed to the founder by its creator (shepherd handoff comment); a bot merge would take his decision\n' "$pr"
     return 1
   fi
@@ -1251,17 +1274,18 @@ fi
 #
 # A refusal is "refused before starting" to a caller that asked (#2641, exit_declined),
 # so it uses no slot of the drain's queue limit, and exit 0 to one that did not. Nothing
-# is written to the issue: who wrote and edited it is visible on it, which makes this
-# one of the self-evident refusals, like a closed issue. The drain offers it again each
-# cycle and says so (NOTHING DISPATCHED, when that leaves nothing started) until its
-# ready label is removed or it is filed again by a listed account.
+# is changed by the refusal itself, but dispatch_issue_refusal_mark (#2694) then labels
+# `author-refused` and comments once, so a refused issue can be counted and found. The
+# drain offers it again each cycle and says so (NOTHING DISPATCHED, when that leaves
+# nothing started) until its ready label is removed or it is filed again by a listed account.
 AUTHOR_OK=0
 AUTHOR_REASON=""
 if AUTHOR_REASON="$(dispatch_issue_gate "$REPO" "$ISSUE" "$ISSUE_JSON")"; then
   AUTHOR_OK=1
 fi
 if [[ "$AUTHOR_OK" -ne 1 ]]; then
-  echo "Refusing #$ISSUE — ${AUTHOR_REASON:-who wrote it could not be checked}. Nothing was started: no claim, no label, no worktree and no agent. Remove its ready label, or file it again under an account on the list (scripts/lib/dispatch-author-gate.sh)."
+  echo "Refusing #$ISSUE — ${AUTHOR_REASON:-who wrote it could not be checked}. Nothing was started: no claim, no worktree and no agent (a real refusal is only labelled author-refused and commented once). Remove its ready label, or file it again under an account on the list (scripts/lib/dispatch-author-gate.sh)."
+  dispatch_issue_refusal_mark "$REPO" "$ISSUE" "$AUTHOR_REASON" "$ISSUE_JSON"
   exit_declined
 fi
 echo "Author: ${AUTHOR_REASON} — and everyone who edited its text is on the dispatch author list."
@@ -1445,24 +1469,6 @@ DISPATCH_CLAIMED=1
 # outlive and therefore nothing for ABS_MAX to protect.
 BUILD_DEADLINE="${BUILD_DEADLINE:-0}"
 
-# Label as running — a COSMETIC MIRROR of the claim only, applied AFTER a won claim,
-# never the authority (D8/FR-9/DR-066: a label is a single, overwritable, non-atomic
-# producer). No ownership decision ever reads it.
-# Both ready labels are cleared (#1169), not just the one this dispatch came in on: a
-# leftover `agent-ready-specify` beside a later plain `agent-ready` would leave the
-# issue wearing two ready classes that disagree about what is authorised.
-#
-# The label is CREATED first because `gh issue edit --remove-label` fails the WHOLE
-# request on a name the repo does not have — so on a repo that has never triaged a
-# T3/T4, removing it would also drop the `agent-running` add riding in the same call.
-gh label create "agent-ready-specify" --repo "$REPO" --color 0e8a16 \
-  --description "Auto-buildable T3/T4 — dispatch the SPECIFY phase only; the human approves the spec before any implementation (DR-076 / #1169)" \
-  2>/dev/null || true
-gh issue edit "$ISSUE" --repo "$REPO" \
-  --remove-label "agent-ready" \
-  --remove-label "agent-ready-specify" \
-  --add-label "agent-running" 2>/dev/null || true
-
 # Create worktree — CLAIM-UNIQUE path (D11/INV-7): ${BASE}/issue-N-<sessionId>, so two
 # same-host racers never share a directory and the cleanup below only ever touches THIS
 # session's own stale dir (pre-SPEC-044 used the shared ${BASE}/issue-N, where racer B
@@ -1519,6 +1525,28 @@ echo "Branch $BRANCH: $BRANCH_MODE (new = from origin/main, existing/track = ear
 # later git operation on the worktree names that directory (lib/agent-worktree.sh). A
 # worktree that cannot be pinned is not one to start an agent in, so this stops the run.
 agent_worktree_pin "$WORKTREE"
+
+# Label as running — a COSMETIC MIRROR of the claim only, applied AFTER a won claim AND after the worktree exists (#1652),
+# never the authority (D8/FR-9/DR-066: a label is a single, overwritable, non-atomic
+# producer). No ownership decision ever reads it.
+# Both ready labels are cleared (#1169), not just the one this dispatch came in on: a
+# leftover `agent-ready-specify` beside a later plain `agent-ready` would leave the
+# issue wearing two ready classes that disagree about what is authorised.
+#
+# The label is CREATED first because `gh issue edit --remove-label` fails the WHOLE
+# request on a name the repo does not have — so on a repo that has never triaged a
+# T3/T4, removing it would also drop the `agent-running` add riding in the same call.
+gh label create "agent-ready-specify" --repo "$REPO" --color 0e8a16 \
+  --description "Auto-buildable T3/T4 — dispatch the SPECIFY phase only; the human approves the spec before any implementation (DR-076 / #1169)" \
+  2>/dev/null || true
+gh issue edit "$ISSUE" --repo "$REPO" \
+  --remove-label "agent-ready" \
+  --remove-label "agent-ready-specify" \
+  --add-label "agent-running" 2>/dev/null || true
+# Placed here, not before provisioning (#1652): `set -e` aborts at `worktree add`, and the EXIT
+# trap releases the lease but never the label, so an earlier flip left `agent-running` set with
+# `agent-ready` already removed - nothing retried it.
+
 
 echo "Launching $ROLE agent for: $ISSUE_TITLE"
 
@@ -1786,6 +1814,38 @@ post_advisory_review() {
 }
 # <<< post-advisory-review
 
+# >>> ensure-branch-pr
+# ensure_branch_pr — find or create the PR for $BRANCH; result in $ENSURED_PR_NUM ("" when
+# there is none). Sets a GLOBAL rather than printing: the re-mint inside it must happen in
+# THIS shell, and a command substitution would throw the fresh token away (#4062).
+#
+# A 401 here used to degrade to a WARNING and `return 0`, stranding a finished branch with
+# no PR (#4061). The age-based gh_bot_refresh cannot see a token the broker handed back
+# already dead inside its headroom (#2114), so on an OBSERVED failure (empty result after
+# the create) force ONE re-mint via gh_bot_reauth_read and retry — the same shape as the
+# lease read (#3735). Non-zero from reauth means no different credential: do not retry.
+ensure_branch_pr() {
+  ENSURED_PR_NUM=""
+  local n
+  n=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty falls through to the create + re-query + re-auth retry below
+  if [[ -z "$n" ]]; then
+    gh pr create --repo "$REPO" --base main --head "$BRANCH" \
+      --title "$ISSUE_TITLE" --body "$BODY" 2>/dev/null || true  # swallow-ok: success is judged by the re-query below, never by this exit status
+    n=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: this IS the re-query; empty triggers the re-auth retry below
+  fi
+  if [[ -z "$n" ]] && gh_bot_reauth_read; then
+    echo "ensure_branch_pr: no PR for $BRANCH — retrying once after a forced token re-mint (#4062)." >&2
+    n=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty is reported by the caller as a failed dispatch
+    if [[ -z "$n" ]]; then
+      gh pr create --repo "$REPO" --base main --head "$BRANCH" \
+        --title "$ISSUE_TITLE" --body "$BODY" 2>/dev/null || true  # swallow-ok: success is judged by the re-query below
+      n=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty is reported by the caller as a failed dispatch
+    fi
+  fi
+  ENSURED_PR_NUM="$n"
+}
+# <<< ensure-branch-pr
+
 run_reviewer_stage() {
   local base="origin/main"   # the pre-push fetch point this branch forked from
   local decide="${SCRIPT_DIR}/review-decide.sh"
@@ -1876,15 +1936,12 @@ run_reviewer_stage() {
   #    this branch to ever land. Reuse the already-built $BODY (do not rebuild the
   #    summary) and the issue title for the PR.
   local pr_num
-  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty is handled on the next line, which retries the create and re-queries; if it is still empty the caller warns and returns without merging
+  ensure_branch_pr
+  pr_num="$ENSURED_PR_NUM"
   if [[ -z "$pr_num" ]]; then
-    gh pr create --repo "$REPO" --base main --head "$BRANCH" \
-      --title "$ISSUE_TITLE" --body "$BODY" 2>/dev/null || true
-    pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: this IS the re-query after the create; if it is still empty the check below warns and returns 0 without posting a verdict or merging
-  fi
-  if [[ -z "$pr_num" ]]; then
-    echo "WARNING: no PR for $BRANCH (create failed?) — AI review verdict: $combined (not posted)" >&2
-    return 0
+    echo "WARNING: no PR for $BRANCH after a re-auth retry — AI review verdict: $combined (not posted); the branch is pushed with no PR, so this dispatch counts as FAILED (#4062)" >&2
+    PR_STRANDED=1
+    return 1
   fi
 
   # 6a. VERIFY the `Closes #$ISSUE` trailer (added above, #1322) actually LINKED
@@ -2145,6 +2202,39 @@ hold_specify_scope() {
   echo "Specify-only dispatch for #$ISSUE produced out-of-scope changes — NOT published. Worktree left at: $WORKTREE"
 }
 
+# WORKFLOW-PUSH GUARD (#1120, #1269) — one predicate for EVERY publish path.
+# Prints the workflow files this branch changes and returns 0 when the push must NOT
+# happen: the forge rejects a workflow push unless the App holds `workflows: write`, and
+# it does so AFTER the build was spent. Returns 1 (nothing to refuse) when the operator
+# opted out, the capability probe CONFIRMS the grant (#1120 — same answer as the
+# pre-push hook; fails closed when the probe cannot answer), or the diff touches no
+# workflow file. The diff is three-dot (merge-base..branch): what this push introduces.
+workflow_publish_blocked() {
+  local wf
+  workflow_push_allowed && return 1
+  workflow_permission_granted && return 1
+  wf=$(agent_worktree_git diff --name-only origin/main..."$BRANCH" 2>/dev/null \
+       | grep -E "$WORKFLOW_PATH_RE" || true)  # swallow-ok: pre-flight advisory only; the real gate is server-side, which rejects a workflow push regardless of what this sees
+  [[ -n "$wf" ]] || return 1
+  printf '%s\n' "$wf"
+}
+
+hold_workflow_push() {
+  local wf="$1"
+  echo "🛑 workflow-push guard: NOT publishing #$ISSUE (role: $ROLE) — $BRANCH changes CI workflow files" >&2
+  echo "  and the App 'workflows' permission is not confirmed (AIClarityAU/minspec#1120):" >&2
+  printf '%s\n' "$wf" | sed 's/^/      /' >&2
+  gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
+    --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
+  gh issue edit "$ISSUE" --repo "$REPO" \
+    --remove-label "agent-running" \
+    --add-label "needs-human-review" 2>/dev/null || true
+  gh issue comment "$ISSUE" --repo "$REPO" \
+    --body "$(printf '## ⏸ Publish held — the diff touches CI workflow files\n\nThe build finished but **nothing was pushed**: the capability probe could not confirm the GitHub App holds `workflows: write` (#1120), so the forge may reject the push.\n\n```\n%s\n```\n\nThe worktree is left at `%s` (branch `%s`) — land it with a human credential carrying the `workflow` scope, or grant the permission (#1120).' \
+      "$wf" "$WORKTREE" "$BRANCH")" 2>/dev/null || true
+  echo "Workflow-touching dispatch for #$ISSUE — NOT published. Worktree left at: $WORKTREE"
+}
+
 # ── SPEC-044 Slice 2 — creator-owned PR shepherding (FR-4, FR-12, INV-5) ─────
 # The session that OPENED the PR drives it to merge instead of handing it to the drain.
 # Why: the drain's fresh remediator re-clones and starts near the context limit — the
@@ -2169,15 +2259,34 @@ SHEPHERD_MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"
 
 # Stop automating and make the dead end VISIBLE. Idempotent: the comment is posted at
 # most once per PR, so a poll loop can never spam it.
+#
+# shepherd_hand_off <pr> <reason> [human|stuck]   (#3835)
+#   human — the reason NAMES a human decision (e.g. a merge conflict): `needs-human-review`.
+#   stuck — the shepherd's OWN automation gave up (ceiling, attempt cap, rebase or fix that
+#           produced nothing): `agent-stuck`, NOT `needs-human-review`, so no consumer reads
+#           it as a human decision. Anything but the literal "human" fails closed to stuck.
+#           The delegated-merge lane reads it (#4016): a handoff on an `agent-stuck` PR with no `hold:*` label and no `needs-human-review` label is not a human claim (either label keeps the hold).
+#           Any later retry comes from the label-agnostic drain sweep (drain-inbox.sh
+#           `gh pr list --state open`), NOT from this label; remediate-pr.sh may still
+#           relabel `needs-human-review` when ITS own cap is hit.
 shepherd_hand_off() {
-  local pr_num="$1" reason="$2" already
-  gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
-    --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
-  gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+  local pr_num="$1" reason="$2" kind="${3:-stuck}" already label desc tail
+  if [[ "$kind" == "human" ]]; then
+    label="needs-human-review"
+    desc="Automated gate failed closed — a human must resolve"
+    tail='It is labelled `needs-human-review`; a human decision is needed and the creator will make no further automated attempts.'
+  else
+    label="agent-stuck"
+    desc="Automation gave up — a failure marker, not a human decision (read only by the delegated-merge lane, #4016)"
+    tail='It is labelled `agent-stuck`: this is an automation failure rather than a human decision. The delegated-merge lane reads this label, to treat the handoff as not a human claim; a later drain sweep may retry it, and the remediation drain may escalate it to `needs-human-review` if it hits its own cap. The creator will make no further automated attempts.'
+  fi
+  gh label create "$label" --repo "$REPO" --color fbca04 \
+    --description "$desc" 2>/dev/null || true
+  gh pr edit "$pr_num" --repo "$REPO" --add-label "$label" 2>/dev/null || true
   already=$(gh pr view "$pr_num" --repo "$REPO" --json comments \
               --jq "[.comments[]? | select(.body | contains(\"$SHEPHERD_HANDOFF_MARKER\"))] | length" 2>/dev/null || echo 0)
   if [[ "${already:-0}" -eq 0 ]]; then
-    gh pr comment "$pr_num" --repo "$REPO" --body "$(printf '## 🫱 Creator-shepherd handed off\n\nThe session that opened this PR drove it as far as it could, then stopped because %s.\n\nIt is labelled `needs-human-review`; the creator will make no further automated attempts. %s' "$reason" "$SHEPHERD_HANDOFF_MARKER")" 2>/dev/null || true
+    gh pr comment "$pr_num" --repo "$REPO" --body "$(printf '## 🫱 Creator-shepherd handed off\n\nThe session that opened this PR drove it as far as it could, then stopped because %s.\n\n%s %s' "$reason" "$tail" "$SHEPHERD_HANDOFF_MARKER")" 2>/dev/null || true
   fi
 }
 
@@ -2198,9 +2307,7 @@ shepherd_publish() {
   #
   # Unconditional: this path always pushes with the App installation token, so unlike
   # the hook there is no credential to probe.
-  if ! workflow_push_allowed; then
-    wf=$(agent_worktree_git diff --name-only origin/main.."$BRANCH" 2>/dev/null \
-         | grep -E "$WORKFLOW_PATH_RE" || true)  # swallow-ok: pre-flight advisory only; the real gate is server-side, which rejects a workflow push regardless of what this sees
+  if wf=$(workflow_publish_blocked); then
     if [[ -n "$wf" ]]; then
       echo "  NOT publishing — $BRANCH changes CI workflow files and the App token"
       echo "  has no 'workflows' permission, so the push would be rejected server-side:"
@@ -2372,15 +2479,13 @@ shepherd_own_pr() {
       [ .statusCheckRollup[]? | select((.name // "") != "ai-review") | (.conclusion // "") ]
       | map(select(. == "FAILURE" or . == "ERROR" or . == "TIMED_OUT" or . == "CANCELLED"))
       | if length > 0 then "yes" else "no" end' <<<"$pr_json")
-    ai_review_bad=$(jq -r '
-      [ .statusCheckRollup[]? | select((.name // "") == "ai-review") | (.conclusion // "") ]
-      | map(select(. == "FAILURE" or . == "ERROR"))
-      | if length > 0 then "yes" else "no" end' <<<"$pr_json")
+    # #4052: same shared predicate as the drain (label OR red check, de-duplicated checks).
+    # A derivation failure is treated as bad, never as a silent "no".
+    ai_review_bad=$("${SCRIPT_DIR}/remediate-pr.sh" --derive-ai-review-bad <<<"$pr_json" 2>/dev/null) || ai_review_bad=yes
     ai_review_pending=$(jq -r '
       [ .statusCheckRollup[]? | select((.name // "") == "ai-review") | (.status // "") ]
       | map(select(. == "QUEUED" or . == "IN_PROGRESS" or . == "PENDING" or . == "WAITING"))
       | if length > 0 then "yes" else "no" end' <<<"$pr_json")
-    [[ ",$labels_csv," == *",ai-review:changes,"* ]] && ai_review_bad=yes
 
     # Is anything ASYNCHRONOUS still able to change the outcome? Without this the
     # shepherd would poll the whole ceiling on a healthy PR whose only remaining gate
@@ -2450,7 +2555,7 @@ shepherd_own_pr() {
       stop-capped)
         shepherd_hand_off "$pr_num" "the shared automated-attempt cap (${SHEPHERD_MAX_ATTEMPTS}) was reached without clearing the gate"; return 0 ;;
       stop-conflict)
-        shepherd_hand_off "$pr_num" "the branch conflicts with \`main\`, and resolving a conflict is a human's merge decision"; return 0 ;;
+        shepherd_hand_off "$pr_num" "the branch conflicts with \`main\`, and resolving a conflict is a human's merge decision" human; return 0 ;;
       stop-not-automation)
         echo "  PR #$pr_num is outside the automation scope — leaving it alone."; return 0 ;;
       stop-awaiting-human)
@@ -2654,6 +2759,10 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude
     # having passed both. Only armed in specify-only mode; a full build is unaffected.
     elif [[ "$SPECIFY_ONLY" == "1" ]] && SPECIFY_STRAYS=$(specify_scope_report); then
       hold_specify_scope "$SPECIFY_STRAYS"
+    # WORKFLOW-PUSH GUARD (#1269) — same `if`, same property: the main publish path is
+    # unreachable without passing it, exactly like the shepherd path.
+    elif WORKFLOW_STRAYS=$(workflow_publish_blocked); then
+      hold_workflow_push "$WORKFLOW_STRAYS"
     else
     # Credentialed/network ops happen HERE in the parent, never in the agent.
     # Push the branch the agent committed locally, then post its summary.
@@ -2948,13 +3057,23 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude
       # verdict (independent reviewer #342, forgery-guarded by #410). Absent /
       # pending / failing ⇒ HOLD. This is what stops the on-switch from merging on
       # gate-eligibility ALONE.
+      #
+      # #4078: "SUCCESS" means a `ready-to-merge` status posted by GitHub Actions
+      # (`github-actions[bot]`) — the one writer a session token cannot impersonate.
+      # The combined-status read this replaced took ANY creator's latest status, so
+      # the builder App (which every agent session holds) could post a success here
+      # and steer the merge decision. See scripts/lib/ready-witness.sh.
       READY_STATE="missing"
       if [[ -n "$PR_NUM" ]]; then
         PR_HEAD_SHA=$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo "")
         if [[ -n "$PR_HEAD_SHA" ]]; then
-          READY_STATE=$(gh api "repos/${REPO}/commits/${PR_HEAD_SHA}/status" \
-            --jq '[.statuses[] | select(.context=="ready-to-merge")] | (.[0].state // "missing")' \
-            2>/dev/null || echo "error")
+          # shellcheck source=lib/ready-witness.sh
+          source "${SCRIPT_DIR}/lib/ready-witness.sh"
+          case "$(ready_to_merge_witnessed "$REPO" "$PR_HEAD_SHA")" in
+            yes) READY_STATE="success" ;;
+            no)  READY_STATE="not-witnessed-by-github-actions" ;;
+            *)   READY_STATE="error" ;;
+          esac
         else
           READY_STATE="error"
         fi
@@ -3121,6 +3240,33 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" bash "$AGENT_LAUNCH_ENV" claude
     fi  # end egress guard: clean-publish branch (quarantine handled above)
   fi
 else
+  # The build's own status: in an `else` branch `$?` is the condition's, and under `pipefail`
+  # that is `timeout`'s 124 (SIGTERM at the ceiling) or 137 (SIGKILL from --kill-after) when
+  # the ceiling killed it. Read FIRST, before anything below changes it.
+  AGENT_RC=$?
+  # #1713 — a build killed at its ceiling is not evidence of a code failure. A `claude -p`
+  # that WAITS out a usage limit (rather than erroring at it) prints no limit notice, so the
+  # drain's text classifier cannot see it, and this path used to stamp it `agent-crashed` +
+  # `needs-human-review`: a quota condition filed as a harness crash. Ask the meter. A closed
+  # window is the witness that the kill was quota. `--quota-cap` fails CLOSED when it cannot
+  # read the meter (`closed unknown | defer:stale|no-reading|no-scratch|no-verdict|bad-config`,
+  # exit 42): that is a BLIND meter, not an observed closed window, so it is not a witness and
+  # the crash path below keeps it. Anything else (open, blind) leaves the crash path exactly as
+  # it was, so this can only RECLASSIFY a timeout on an observed closed window, never hide one.
+  QUOTA_TIMEOUT_VERDICT=""
+  if [[ "$AGENT_RC" == "124" || "$AGENT_RC" == "137" ]] \
+     && ! QUOTA_TIMEOUT_VERDICT=$(bash "${SCRIPT_DIR}/drain-inbox.sh" --quota-cap 2>/dev/null) \
+     && [[ "$QUOTA_TIMEOUT_VERDICT" == closed* ]] \
+     && [[ "$QUOTA_TIMEOUT_VERDICT" != "closed unknown"* ]] \
+     && [[ "$QUOTA_TIMEOUT_VERDICT" != *"defer:stale"* && "$QUOTA_TIMEOUT_VERDICT" != *"defer:no-"* \
+           && "$QUOTA_TIMEOUT_VERDICT" != *"defer:bad-config"* ]]; then
+    # Readiness is KEPT (no needs-human-review, no agent-crashed): the issue is retried once the
+    # window reopens. Only the running stamp comes off.
+    gh issue edit "$ISSUE" --repo "$REPO" --remove-label "agent-running" 2>/dev/null || true  # swallow-ok: the claim release on exit is the load-bearing step; a stale agent-running label is cleared by the next claim
+    echo "Build for #$ISSUE was killed at its time bound (exit $AGENT_RC) while the quota window is closed: $QUOTA_TIMEOUT_VERDICT"
+    echo "Classified as a QUOTA PAUSE, not a code failure — #$ISSUE stays agent-ready and will be retried when the window reopens (#1713). Log: $LOG"
+    exit_quota_paused
+  fi
   # #1307 — a CRASH raises the human gate, exactly as a deliberate escalation does.
   #
   # This path stamped `agent-escalated` alone while the DR-355 escalation path above
@@ -3166,4 +3312,11 @@ done
 # ends on 0 for a caller that did not ask. A caller that asked is answered "started".
 # Keep this the LAST statement: an exit added above it that means the same thing must
 # call exit_started too, or it answers nothing and the caller says so.
+#
+# A finished branch left with no PR (#4062) is a failure, not a quiet success (invariant 2).
+# It exits 1, the plain failure every caller already counts; the exit trap still releases
+# the claim.
+if [[ "${PR_STRANDED:-0}" == "1" ]]; then
+  exit 1
+fi
 exit_started

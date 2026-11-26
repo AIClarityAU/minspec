@@ -1,7 +1,7 @@
 ---
 id: SPEC-368
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute - the dev-time autonomous build/merge pipeline; same epic as SPEC-044 / SPEC-062
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Expected surface: `scripts/drain-inbox.sh` (owned by SPEC-044, modified here,
   not owned), the session-start banner script, and hermetic tests. None of it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -114,14 +114,22 @@ Fixing the original hang's trigger (the quota-crash path around #1328) beyond bo
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 3 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 1. **Per-cycle bound default.** Options: (a) `MINSPEC_DRAIN_CYCLE_MAX` default 3600s **(rec)** —
    covers a long dispatch, caps a wedge to an hour; cost: a legitimately longer build is killed
    and retried. (b) Equal to remaining lifetime only — no new knob; cost: a wedge still holds the
    drain up to 8h.
+
+   **Recorded selection: the recommended option,** option (a), `MINSPEC_DRAIN_CYCLE_MAX` defaulting to 3600s. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 2. **Stale window.** (a) Derived formula in FR-5 **(rec)** — self-tuning; cost: ~2h default, so a
    wedge can idle that long before reclaim. (b) A fixed 30 min — fast recovery; cost: a long quota
    backoff chain risks a false reclaim.
+
+   **Recorded selection: the recommended option,** option (a), the derived formula in FR-5. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 3. **Reclaiming a live PID.** (a) Kill-and-reclaim **(rec)** — actually restores auto-drain; cost:
    a wrong match could kill a healthy driver (mitigated by FR-5 identity check). (b) Report only in
    the banner, leave to the human — safe; cost: auto-drain stays down until the founder acts,
    against tenet 1.
+
+   **Recorded selection: the recommended option,** option (a), kill-and-reclaim. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.

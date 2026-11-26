@@ -145,6 +145,11 @@ gracefully (never hard-error) when the local tool (`gh` CLI) they delegate to is
 These are open per the issue's own "Design considerations" section and need a human answer
 before Plan phase can commit to a mechanism:
 
+Under the founder decision, queue item clarsel (2026-11-17), recorded in DR-123, that human
+answer on a T3 spec is sign-off: each question below carries an agent-recorded pick of its
+recommended option, and approving this spec ratifies them. No question here is reserved for
+the founder.
+
 1. **Where does classification run?** Options: (a) VS Code extension on test-task completion
    (interactive surfacing, Tier 0 only — matches DR-006's existing detect-and-offer pattern);
    (b) a git hook (e.g. extending `.githooks/pre-push`); (c) the agent-dispatch scripts
@@ -155,12 +160,18 @@ before Plan phase can commit to a mechanism:
    unattended agent dispatch**, which is where the issue was actually triggered from (DR-362 +
    uncommitted spec-tree-provider work during an *agent* session). A git-hook-only approach is
    not recommended: pre-push is too late in the loop to be useful feedback.
+
+   **Recorded selection: the recommended option,** (a) plus (c): extension surfacing for interactive classification, plus dispatch-script integration for agent runs; no git-hook-only path. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-26; sign-off ratifies it.
+
 2. **What triggers Tier 1 filing — automatic on every new-unrelated classification, or does the
    developer/agent still confirm per-occurrence?** **(rec) automatic once the opt-in setting is
    on — cost: a misconfigured opt-in could file more issues than intended if the dedup gate
    (FR-5) has a bug, so FR-5's dedup fingerprint needs to be solid before this ships**, versus
    requiring per-occurrence confirmation, which reintroduces exactly the manual
    disentangling-by-hand burden #35 was filed to remove.
+
+   **Recorded selection: the recommended option,** automatic filing once the opt-in setting is on, with FR-5's dedup fingerprint solid before it ships. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-26; sign-off ratifies it.
+
 3. **`.minspec/known-failures.json` shape and lifecycle** — who writes it (manual curation vs.
    auto-captured from the first "standing" classification), and how entries age out when the
    underlying failure is actually fixed elsewhere. **(rec) auto-captured, with a periodic
@@ -168,10 +179,25 @@ before Plan phase can commit to a mechanism:
    never gets re-checked could mask a real regression that happens to match an old
    fingerprint**, versus manual curation, which is more precise but adds exactly the ceremony
    DR-065/DR-076 (solo-mode ceremony cut) are trying to remove.
+
+   **Recorded selection: the recommended option,** auto-captured entries, with a periodic "is this still failing?" re-check that prunes fixed ones. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-26; sign-off ratifies it.
+
 4. **Priority-scoring integration (FR-6)** — does a WSJF/backlog-scoring mechanism already
    exist to hook into, or does this spec need to specify a minimal placeholder? A repo-wide
    search during this Specify pass found no `wsjf`/backlog-priority scoring module; Plan phase
    should re-check (code can land between Specify and Plan) before deciding.
+
+   **Answer (fact, agent, 2026-11-17):** yes, one exists, and the Specify search missed it. The backlog
+   module scores and labels issues: `calculateWsjf` (`packages/minspec/src/lib/backlog.ts:80`),
+   `applyWsjfToIssue` (`:399`), `setPriority` (`:477`) and `PRIORITY_LABELS` = `P1`/`P2`/`P3`
+   (`:70`), exposed as the command `minspec.scoreWsjf` (`packages/minspec/src/extension.ts:472`).
+   Its WSJF dimensions come from a user QuickPick (`packages/minspec/src/commands/backlog.ts:83`),
+   so an automatic filer can call `setPriority` but has no WSJF inputs of its own.
+   **Recommended (agent, 2026-11-17):** FR-6 hooks into `backlog.ts` (`setPriority` with a
+   `PRIORITY_LABELS` value) and no placeholder is specified - cost: the level it sets is still a
+   fixed choice made by Plan, because nothing scores an auto-filed issue without a human's WSJF
+   inputs.
+   **Recorded selection: the recommended option,** FR-6 hooks into `backlog.ts` (`setPriority` with a `PRIORITY_LABELS` value); no placeholder is specified. This replaces the 2026-11-17 note that left it for sign-off: that note predates DR-123. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-26; sign-off ratifies it.
 
 ## Out of scope
 

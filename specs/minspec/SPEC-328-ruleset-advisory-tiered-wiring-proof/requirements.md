@@ -1,7 +1,7 @@
 ---
 id: SPEC-328
 type: requirements
-status: specifying
+status: planning
 tier: T2
 product: minspec
 epic: EPIC-009  # Team Readiness - guardrails a shared repo must carry
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Expected surface: tests only (`packages/minspec/tests/ruleset-advisor.test.ts`); the
   production wiring already exists (see Finding). None of the test work is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -58,4 +58,8 @@ So the production wiring is done; #620's stated work is already delivered. The r
 ## Decisions needed (Clarify)
 
 1. **Scope of #620.** Options: (a) **(rec)** this tests-only spec, close #620 as delivered by #796 - costs a small test PR for something that already works, but closes the exact proof gap; (b) close #620 as already done with no further work - zero cost, but leaves the positive path unproven end-to-end, so a probe regression would ship silently; (c) re-open design of the wiring - not supported by the evidence above.
+
+   **Recorded selection: the recommended option,** (a), this tests-only spec; close #620 as delivered by #796. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123 (written for T3; a T2 spec has no required Clarify phase, so the same recorded form is used), recorded 2026-11-23; sign-off ratifies it.
 2. **Verify the premise before building.** I believe the wiring is complete from reading `init.ts` and the test fixtures; I did not run the suite on this dispatch (specify only). The implementer should run FR-1 first: if it passes unmodified, the work is tests only.
+
+   **Recorded selection: no choice to make - this is an implementation step: FR-1 runs first, and if it passes unmodified the work is tests only. Recorded by agent 2026-11-23 under founder decision, queue item clarsel (2026-11-17), DR-123; sign-off ratifies it.**

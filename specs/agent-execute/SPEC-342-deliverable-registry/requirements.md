@@ -1,17 +1,19 @@
 ---
 id: SPEC-342
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: agent-execute
 epic: EPIC-007  # Agent Execute Extension
 aspects: [autopilot, spec-gate, deliverables, no-silent-gate]
 relates_to: [DR-036, DR-012, DR-031, SPEC-038]
 affects: [scripts/hooks/spec-gate.py]  # gains a third ownership signal (deliverable_paths)
+implements: none
+implements_reason: creates no file this spec can name yet. FR-2 to FR-5 extend the shared scripts/hooks/spec-gate.py (already in affects), FR-7 extends the shared spec-validator.ts and its ownership-path-rules.ts parity, and the FR-6 startup check lands in an Autopilot runner that does not exist in this repo yet, so its path is a Plan decision. Declaring the shared files would freeze them for every other session until approval.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -77,16 +79,26 @@ A2 external pipeline-state file (#234), A3 forged-approval guard (#235), A4 prot
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 4 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 - **D-1 — New key vs reuse `implements:`.**
   - **(rec) New `deliverable_paths:` key** (as the issue specifies): keeps SPEC-038's code-ownership edge pure and lets deliverables skip the source-extension filter and phase scoping. Cost: a second ownership list for authors to maintain and a third signal in the gate to keep in parity with the TypeScript ownership rules (`ownership-path-rules.ts` parity test).
   - Reuse `implements:` with relaxed rules: one list, but loosens a gate that is currently precision-tuned for code, risking over-blocking source edits.
+
+  **Recorded selection: the recommended option,** a new `deliverable_paths:` key. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D-2 — Directory prefixes allowed?**
   - **(rec) Yes, trailing-`/` prefixes only**: generated trees cannot enumerate unborn files. Cost: a coarse prefix can over-block (e.g. `config/` freezes unrelated config); mitigated by FR-7 rejecting the repo root and approval store, but authors must declare narrowly.
   - Explicit files only: precise, but unguardable for generated sets — leaves A1 open for Autopilot.
+
+  **Recorded selection: the recommended option,** yes, trailing-`/` prefixes only. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D-3 — How does the startup check learn "paths the product generates" (FR-6a)?** The source of truth is undefined today.
   - **(rec) A repo-level `.minspec/config.json` list of generated-output roots** the runner diffs against the registry. Cost: one more config key that must be kept honest, and a human-authored list can under-declare (the check proves coverage of what is listed, not completeness).
   - Infer from a dry-run write log: catches under-declaration, but requires running the generator before the gate exists and is nondeterministic.
+
+  **Recorded selection: the recommended option,** a repo-level `.minspec/config.json` list of generated-output roots. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D-4 — Strictness on stale approval for deliverables:** (rec) identical to code (stale denies). Cost: any spec wording edit re-locks deliverable writes until re-approval, which Autopilot must handle by pausing at `human-needed` (DR-036).
+
+  **Recorded selection: the recommended option,** identical to code (stale denies). Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 ## Follow-ups (tracked)
 

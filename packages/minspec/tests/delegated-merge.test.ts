@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { type Delegation } from '../../../scripts/lib/autonomy';
-import { type ReviewEvidence } from '../../../scripts/lib/delegated-approval';
+import { REVIEWER_APP_SLUG, REVIEWER_LOGIN, type ReviewEvidence } from '../../../scripts/lib/delegated-approval';
 import {
   gatherMergeInput,
   parseMergeArgs,
@@ -51,13 +51,13 @@ function review(over: Partial<ReviewEvidence> = {}, headSha = HEAD): ReviewEvide
       {
         id: 111,
         url: VERDICT_URL,
-        login: 'minspec-sdd[bot]',
+        login: REVIEWER_LOGIN,
         body: '## 🤖 AI review — `ai-review:pass`\n\nLooks right.',
         createdAt: '2026-10-21T01:00:30Z',
       },
     ],
     checkRuns: [
-      { name: 'ai-review', status: 'completed', conclusion: 'success', appSlug: 'minspec-sdd', headSha, completedAt: '2026-10-21T01:01:00Z' },
+      { name: 'ai-review', status: 'completed', conclusion: 'success', appSlug: REVIEWER_APP_SLUG, headSha, completedAt: '2026-10-21T01:01:00Z' },
     ],
     workflowRuns: [
       {
@@ -411,6 +411,21 @@ describe('gathering: every read failure becomes a denial, never a pass', () => {
 
   it('a gh failure on the pull request denies', () => {
     expect(plan(deps({ gh: () => { throw new Error('HTTP 401'); } }))).toMatchObject({ arm: false, reason: 'pr-unreadable' });
+  });
+
+  it('an added file reads as no base content, not as unreadable files', () => {
+    const p = plan(deps());
+    expect(p).toMatchObject({ arm: true });
+  });
+
+  it('an unreadable file list denies fail-closed and names the cause in the hold reason', () => {
+    const gh = (a: readonly string[]) => {
+      if (a[a.length - 1].startsWith(`repos/${REPO}/pulls/${PR}/files`)) throw new Error('HTTP 502 bad gateway');
+      return okGh(a);
+    };
+    const p = plan(deps({ gh }));
+    expect(p).toMatchObject({ arm: false, reason: 'files-unreadable' });
+    expect((p as { detail: string }).detail).toContain('HTTP 502 bad gateway');
   });
 
   it('a gh failure on the comments denies', () => {

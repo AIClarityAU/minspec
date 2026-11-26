@@ -1,16 +1,18 @@
 ---
 id: SPEC-259
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a decision or epic whose frontmatter block cannot be parsed reads as `proposed`, so the signpost names an accepted decision as the next task
 aspects: [frontmatter, unreadable-state, overloaded-null, adr, epic, artifact-graph, silent-gate, tier-0]
 relates_to: [SPEC-095, DR-003, "#2468", "#2397", "#2404", "#968"]
+implements: none
+implements_reason: creates no file the spec names. FR-1 to FR-6 change existing shared modules (adr-manager.ts, epic-manager.ts, artifact-graph.ts and every consumer of the status type), and where the shared FR-1 predicate lives is a Plan decision. Declaring those shared files would freeze them for every other session until approval.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -112,7 +114,11 @@ Nothing rejects the second case, so the tree offers to accept an already-accepte
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 2 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 ### DQ-1 - How is the third state represented?
+
+**Recorded selection: the recommended option,** Option A, a new status value `unreadable` on `AdrStatus` and the epic status. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 - **Option A - new status value `unreadable` on `AdrStatus` / epic status (rec).** One field,
   exhaustive checks find every consumer. *Cost:* widens a type that file-facing code also uses
@@ -122,6 +128,8 @@ Nothing rejects the second case, so the tree offers to accept an already-accepte
   compiler does not force handling.
 
 ### DQ-2 - Tolerate leading blank lines as well?
+
+**Recorded selection: the recommended option,** Option A, a blank line before `---` is unreadable. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 - **Option A - no; a blank line before `---` is unreadable (rec).** Keeps "what parses" single
   and equal to every other consumer of the block (spec gate, validators). *Cost:* a harmless

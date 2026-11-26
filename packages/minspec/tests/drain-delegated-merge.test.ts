@@ -41,6 +41,7 @@ interface Row {
   number: number;
   isDraft?: boolean;
   autoMergeRequest?: unknown;
+  head?: string;
   files: string[];
 }
 
@@ -71,6 +72,7 @@ function run(
             number: r.number,
             isDraft: r.isDraft ?? false,
             autoMergeRequest: r.autoMergeRequest ?? null,
+            headRefName: r.head ?? `agent/issue-${r.number}`,
             files: r.files.map((p) => ({ path: p })),
           })),
         );
@@ -136,7 +138,7 @@ describe('Step 0c hands held spec-only PRs to the seam, and nothing else', () =>
   it('reads the held list with a limit and the fields the prefilter needs', () => {
     const r = run([]);
     expect(r.list[0]).toContain('pr list --repo AIClarityAU/minspec --state open --label needs-human-review --limit 500');
-    expect(r.list[0]).toContain('number,isDraft,autoMergeRequest,files');
+    expect(r.list[0]).toContain('number,isDraft,autoMergeRequest,headRefName,files');
     // #3123: a spec PR opened outside the drain is held as awaiting-approval, not
     // needs-human-review; `--label` ANDs, so each hold signal is its own read.
     expect(r.list[1]).toContain('pr list --repo AIClarityAU/minspec --state open --label awaiting-approval --limit 500');
@@ -290,6 +292,15 @@ describe('the cap rotates, so held PRs cannot starve the ones behind them', () =
     expect(judged(r)).toEqual([1, 2]);
     expect(r.stderr).toContain('could not record');
     expect(r.stdout).toContain('rc=0');
+  });
+});
+
+describe('#3949: approval PRs are not this arm\'s lane', () => {
+  it('a real dlg-approve PR (spec + approval sidecar) is never judged', () => {
+    const rows = [
+      { number: 9, head: 'dlg-approve/spec-9-x', files: [spec(9), '.minspec/approvals/specs/minspec/SPEC-9-x/spec.md.json'] },
+    ];
+    expect(run(rows).seamCalls).toEqual([]);
   });
 });
 

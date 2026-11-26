@@ -1,7 +1,7 @@
 ---
 id: SPEC-119
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the rule scopes SPEC-001 Invariant 5, which lives in that epic
@@ -13,9 +13,9 @@ implements: [packages/minspec/tests/blocking-scope-crossref.test.ts, packages/mi
 # Modified, not owned: the two specs that gain a one-sentence pointer (FR-4, FR-5).
 affects: [specs/minspec/requirements.md, specs/agent-execute/SPEC-019-execution-substrate/requirements.md]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -310,7 +310,7 @@ below are written under its recommended option.
   it and failing on a wrong verdict - is work in the SealBox repository and is out of scope
   here. This spec requires only that it is tracked: a SealBox issue that names the case file,
   its `schemaVersion`, and the two expected results, linked from #147 and from this spec's
-  Follow-ups. This dispatch could not file it (no network); see
+  Follow-ups. It is filed as AIClarityAU/sealbox#55; see
   [Follow-ups](#follow-ups-tracked).
 
 ## Acceptance Criteria
@@ -370,6 +370,8 @@ below are written under its recommended option.
   different repository's product. It would also be the first constitution invariant that
   restates other documents instead of adding a rule.
 
+**Recorded selection: the recommended option,** Option A, the rule lives in this spec and both specs point to it; no new decision record. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
+
 ### DQ-2 - Does the list include the core's own commit-time refusals?
 
 The issue asks for two semantics. The code has a third (row B-2).
@@ -382,6 +384,8 @@ The issue asks for two semantics. The code has a third (row B-2).
   then stand in a normative document while `template-registry.ts:1200`, `:1431` and `:1459`
   refuse commits, and the seeded test case would teach a reviewer to accept a sentence the
   code contradicts. Under this option FR-3 and FR-4 lose their B-2 clause.
+
+**Recorded selection: the recommended option,** Option A, include row B-2. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 
 ### DQ-3 - How much of SPEC-001 and SPEC-019 changes?
 
@@ -396,6 +400,8 @@ The issue asks for two semantics. The code has a third (row B-2).
   but the issue's "SPEC-001 + SPEC-019 cross-reference it" is not met, and a reader of either
   spec alone still meets the bare sentence. This is the zero-sign-off option.
 
+**Recorded selection: the recommended option,** Option A, append one sentence to each of SPEC-001 and SPEC-019 (FR-4, FR-5). Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
+
 ### DQ-4 - Where does the test case live?
 
 - **Option A (rec) - in this repository, under `packages/minspec/tests/fixtures/cross-spec/`,
@@ -407,11 +413,24 @@ The issue asks for two semantics. The code has a third (row B-2).
   repository pins it, the work cannot be done from here, and the frozen excerpts would sit
   away from the specs they quote.
 
+**Recorded selection: the recommended option,** Option A, the case lives in this repository under `packages/minspec/tests/fixtures/cross-spec/`, pinned by a test here. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
+
 ### DQ-5 - Is #147 the SPEC-016 reality-check reviewer?
 
 Not a choice between designs - a fact I could not read. Confirm that #147 tracks SPEC-016's
 Slice 2 (independent adversarial second reviewer). If it tracks a different reviewer, FR-7 to
 FR-10 retarget to that reviewer and the rest of this spec stands.
+
+**Answer (fact, agent, 2026-11-17):** yes. #147 (open, "feat: inter-spec cross-check as a Slice 2 AI
+check") proposes the inter-spec cross-check as a lens inside SPEC-016's Slice 2 reality-check
+reviewer (EPIC-007); its Links section names "Slice 2 owner: SPEC-016 reality-check". So nothing
+retargets. Evidence: issue #147 body, sections "Proposal" and "Links", read 2026-11-17.
+
+**Recommended (agent, 2026-11-17):** keep FR-7 to FR-10 aimed at SPEC-016's Slice 2 reviewer, tracked
+by #147, as written - cost: #147 is a proposal with no built lens yet, so the case waits for it.
+
+**Recorded selection: the recommended option,** nothing retargets: FR-7 to FR-10 stay aimed at
+SPEC-016's Slice 2 reviewer, tracked by #147. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 
 ### DQ-6 - How does the edit get past the approval-race commit gate?
 
@@ -444,6 +463,8 @@ from the repository root is my reading of its docstring, unverified by running i
   normalises an agent using a gate's bypass. Not recommended.
 - **Option D - DQ-3 Option C (edit neither spec).** *Cost:* as stated under DQ-3; it makes
   this question moot.
+
+**Recorded selection: the recommended option,** Option A, revoke: the commit stages deletion of the two `requirements.md` sidecars with the edits, and the human approves both specs again afterwards. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-20; sign-off ratifies it.
 
 ## Why no new DR
 
@@ -492,11 +513,10 @@ number comes from the collision gate, not from the files on disk.
 
 ## Follow-ups (tracked)
 
-Neither item below has an issue number yet: this dispatch has no network and could not file
-them. Both must be filed before this spec is approved, and the numbers written here.
+Both items below are filed (2026-11-23) and carry the issue numbers written here.
 
-- **Consume the case in the reviewer's evaluation** (FR-10) - SealBox repository, linked from #147.
-- **Does Invariant 5's last sentence need rewording, given row B-2?** - this repository. Raised
+- **Consume the case in the reviewer's evaluation** (FR-10) - SealBox repository, AIClarityAU/sealbox#55, linked from #147.
+- **Does Invariant 5's last sentence need rewording, given row B-2?** - this repository, #3979. Raised
   by DQ-2 Option A; a separate decision from scoping, and a separate re-approval.
 
 ## Traceability
