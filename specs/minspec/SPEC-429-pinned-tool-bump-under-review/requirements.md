@@ -1,5 +1,5 @@
 ---
-id: SPEC-137
+id: SPEC-429
 type: requirements
 status: specifying
 tier: T3
@@ -16,7 +16,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-137: Pinned tool dependencies are checked for newer upstream versions on a schedule and bumped only through a reviewed pull request
+# SPEC-429: Pinned tool dependencies are checked for newer upstream versions on a schedule and bumped only through a reviewed pull request
 
 Triggered by: #658 (recurring pinned-dependency update task). Design rests on DR-005
 (Pre-Publish Supply-Chain Inventory Gate) - specifically its rule that "bumping the pin is a
