@@ -7,6 +7,7 @@
     { "path": "specs/minspec/SPEC-033-repo-governance-provisioning/requirements.md", "reason": "edited after approval by #3610 (clarify refinements re-checked); awaiting re-approval." },
     { "path": "specs/minspec/SPEC-042-onboarding-checklist/requirements.md", "reason": "edited after approval by #3573 (FR-12/AC-10 dropped); awaiting re-approval." },
     { "path": "specs/minspec/SPEC-023-consequence-screen/requirements.md", "reason": "edited after approval by #3837 (FR-9/AC-16 affirmative low-blast signal documented, DR-058/#490); awaiting re-approval." },
-    { "path": "specs/minspec/SPEC-060-build-provenance-stamp/requirements.md", "reason": "edited after approval by #1528 (FR-7/AC-10/AC-11 dirty-build stamp resolution formalized); awaiting re-approval." }
+    { "path": "specs/minspec/SPEC-060-build-provenance-stamp/requirements.md", "reason": "edited after approval by #1528 (FR-7/AC-10/AC-11 dirty-build stamp resolution formalized); awaiting re-approval." },
+    { "path": "specs/minspec/SPEC-268-review-app-secrets-optional/requirements.md", "reason": "edited after approval by this PR (D2 selection and AC2 amended to both-arm re-evaluation, the founder's 2026-11-26 choice of option (b), after the ai-review changes verdict on #4079); delegated re-approval (DLG-001) follows the merge." }
   ]
 }

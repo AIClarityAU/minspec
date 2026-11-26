@@ -162,8 +162,10 @@ with the identity consequence.
   `ai-review:pass` label, `ai-review` check-run and `ai-review/pass` status are posted by
   `github-actions[bot]`; `ready-to-merge` turns `success` without any human label action.
 - **AC2 (App arm, unchanged).** With all three secrets set, the posted artifacts, actors, and
-  `ready-to-merge` outcomes are identical to base `118548be` on the same PR fixtures; the FR7
-  trigger posts no `ready-to-merge` status of its own in this arm unless D1 resolves otherwise.
+  `ready-to-merge` outcomes are identical to base `118548be` on the same PR fixtures. The FR7
+  trigger also re-evaluates in this arm and may post `ready-to-merge` (D2, option (b)); that
+  post carries the same verdict the `labeled`/`synchronize` run would have posted for the same
+  head and base, so the outcome is unchanged, only the number of identical writes.
 - **AC3 (fallback is the mutating arm — tested explicitly).** Tests drive the Actions arm
   directly: guard output `identity=actions` for (none set), (ID only), (key only); each write step
   resolves to `GITHUB_TOKEN`; the ready-to-merge allowlist gains `github-actions[bot]` only in
@@ -230,7 +232,7 @@ with the identity consequence.
 - (b) It re-evaluates in both arms. A redundant second evaluation could rescue a missed
   `labeled` event, but it changes App-arm behaviour, which the issue asked to keep identical.
 
-**Recorded selection: the recommended option,** (a), the trigger fires in both arms but exits early, posting nothing, when the App secrets are present. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+**Selection: option (b), chosen by the founder on 2026-11-27** (chief-of-staff question "Spec matches code", after review of PR #4079 found the plan had departed from the earlier agent pick of (a)). Why (a) was dropped: this workflow shares one per-PR concurrency group, and GitHub keeps only one pending run per group, replacing the older pending run with the newer one. An App-arm `workflow_run` that exits early posting nothing could therefore replace a queued `labeled`/`synchronize` run and leave `ready-to-merge` unwritten (design R3). Re-evaluating in both arms removes that failure. Cost: App repos get one extra, identical status write per completed review. The earlier agent-recorded pick of (a) (2026-11-22, under DR-123) is superseded.
 
 **D3 — Record the trust change as a new DR or as an amendment to DR-054?**
 - **(a) New DR-115, `proposed`, citing DR-054 as amended (rec; drafted in this PR).** A
