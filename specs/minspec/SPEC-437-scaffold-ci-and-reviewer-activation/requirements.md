@@ -1,5 +1,5 @@
 ---
-id: SPEC-137
+id: SPEC-437
 type: requirements
 status: specifying
 tier: T3
@@ -9,7 +9,7 @@ aspects: [ci, scaffold, required-checks, rulesets, reviewer-activation, consent,
 relates_to: [SPEC-033, SPEC-071, DR-050, DR-066, DR-037, DR-054, "#564", "#557", "#559", "#560", "#562", "#561"]
 ---
 
-# SPEC-137: Finish #564 — scaffold `ci.yml` (Tier B) and offer reviewer activation (secrets + App)
+# SPEC-437: Finish #564 — scaffold `ci.yml` (Tier B) and offer reviewer activation (secrets + App)
 
 > Materializes [#564](https://github.com/AIClarityAU/minspec/issues/564) — "scaffold the FULL
 > required-check CI stack on init, two-tier". **Most of #564 already shipped**; this spec
@@ -30,7 +30,7 @@ install are still missing, so a scaffolded `ai-review` gate can actually go live
 |---|---|---|
 | 1 — ai-review.yml, ready-to-merge.yml, ai-review-retry.yml + reviewer scripts/roles as managed files | **Built** | `template-registry.ts:2583` `CI_REVIEW_STACK_TEMPLATES` (workflows `:2586-2599`, scripts `:2628-2636`, roles `:2683-2701`, guard `:2707`); spread into the registry at `:2754`, `:2797` |
 | 2 — ruleset advisor requires Tier A (`ai-review`, `ready-to-merge`) once scaffolded | **Built** | `ruleset-advisor.ts:350-353` check constants; `:428` resolver builds from `DEFAULT_REQUIRED_CHECK_CONTEXTS`; wired in `init.ts:797-803` |
-| 3a — read-only probe: are all three reviewer secrets set? | **Built** | `ruleset-advisor.ts:712` `REVIEWER_SECRETS` (single source of truth), `:790` `probeReviewerConfigured` (names only, never values) |
+| 3a — read-only probe: are all three reviewer secrets set? | **Built, boolean-only — extended by FR-4/FR-8, see FR-9** | `ruleset-advisor.ts:712` `REVIEWER_SECRETS` (single source of truth), `:768` `probeReviewerConfigured` declaration (returns at `:790`; names only, never values). It returns a plain `boolean`: every error path (non-zero `gh` exit, bad JSON, non-array) collapses to `false`, and it exposes no set of present names |
 | 4a — code-check detection from `package.json` scripts | **Built** | `ruleset-advisor.ts:378` `detectCodeChecks`; consumed `init.ts:802` |
 
 ## Remaining gap (the two slices this spec owns)
@@ -55,16 +55,25 @@ install are still missing, so a scaffolded `ai-review` gate can actually go live
   pass-by-absence of the check — when `package.json` has no such script**. A skipped
   job still reports its context, so the check is always *produced*.
   *(Open: DQ-1 — whether skipped-green is acceptable.)*
-- **FR-2 — Tier B stays gated by detection.** `lint`/`test`/`build` enter the ruleset's
-  required set only when `detectCodeChecks` finds the script **and** `ci.yml` is scaffolded
-  (new input, mirroring the existing `aiReviewScaffolded` boolean). Scaffolding `ci.yml`
-  alone never adds a required check. Absence of a script ⇒ not required (the #559 rule).
+- **FR-2 — Tier B is gated by detection AND a producer, never weakened for hand-owned CI.**
+  New resolver input `ciWorkflow: 'scaffolded' | 'hand-owned' | 'absent'` (mirrors
+  `aiReviewScaffolded`). `lint`/`test`/`build` enter the required set as follows:
+  - `scaffolded` (MinSpec wrote the managed `ci.yml`): only when `detectCodeChecks` finds the
+    script (and FR-3 confirms the job exists).
+  - `hand-owned` (an unmarked pre-existing `ci.yml` was skipped per DQ-3 (A)): **today's
+    behaviour is preserved** — `detectCodeChecks` alone decides. The repo's own `ci.yml` is the
+    producer; Init/Refresh must never remove a required check a repo already has (no gate
+    weakening). Repos like this one or sealbox keep their lint/test/build requirements.
+  - `absent` (no `ci.yml` at all, e.g. user opted out of the template): Tier B is **not**
+    required, since nothing produces the contexts (the #559 deadlock class). This is the only
+    case that is stricter than today, and it removes a requirement that could never be met.
+  Scaffolding `ci.yml` alone never adds a required check. Absence of a script ⇒ not required.
 - **FR-3 — Intersect with what CI reports.** Before adding a Tier B context, the resolver
   must confirm the scaffolded `ci.yml` actually defines a job of that name (read from the
   template's own job list, one shared constant — never a second hand-kept list).
 - **FR-4 — Name the missing activation prerequisites.** After the existing reviewer probe,
   if not configured, show **one non-modal** notice listing exactly the missing names from
-  `REVIEWER_SECRETS` (diff the probe's set, not the full list) plus "install the
+  `REVIEWER_SECRETS` (from the FR-9 `present` set; only when `status: 'ok'`) plus "install the
   `minspec-sdd` GitHub App on this repo". Items render **unchecked** — never reported as
   done (SPEC-033 FR-4). The list is derived from `REVIEWER_SECRETS`, not duplicated.
 - **FR-5 — Consent-gated `gh secret set` (optional action, values never held).** The
@@ -77,9 +86,17 @@ install are still missing, so a scaffolded `ai-review` gate can actually go live
   (needs GitHub admin OAuth); it deep-links the install page. No MinSpec token custody.
 - **FR-7 — Idempotent, drift-managed.** Re-running Init/Refresh yields one copy of each
   file, no duplicate prompts once configured (inherits the managed-region contract, DR-037).
+- **FR-9 — Probe returns a result, not a boolean.** Replace the boolean return of
+  `probeReviewerConfigured` with a discriminated result:
+  `{ status: 'ok'; present: readonly string[] } | { status: 'error'; reason: string }`.
+  `configured` is derived (`ok` and every `REVIEWER_SECRETS` name present); the missing set for
+  FR-4 is `REVIEWER_SECRETS` minus `present`. Existing callers keep their fail-safe (`error` ⇒
+  not configured ⇒ Tier A not required). Names only, never values; this is the one change to
+  the otherwise-built probe and its tests are updated, not skipped.
 - **FR-8 — Failure is visible.** A failed probe, `gh secret set`, or ruleset update surfaces
-  its error; none is swallowed (DR-066 / invariant 2). An errored probe leaves the check
-  **not required** and says so — it never silently proceeds as "configured".
+  its error; none is swallowed (DR-066 / invariant 2). An errored probe (FR-9 `status: 'error'`) leaves the check
+  **not required**, says so with the reason, and **never** renders the FR-4 missing-secrets list
+  (an auth/network failure must not falsely claim all three secrets are missing) — it never silently proceeds as "configured".
 
 ## Invariants (must not break)
 
@@ -93,13 +110,19 @@ install are still missing, so a scaffolded `ai-review` gate can actually go live
 
 ## Acceptance criteria
 
-- **AC-1** Init on a repo with `package.json` scripts `lint`+`build` only: `ci.yml` is
-  written; required set = `MinSpec SDD validation` + `lint` + `build`; `test` absent.
+- **AC-1** Init on a repo with `package.json` scripts `lint`+`build` only, and the reviewer
+  **not** configured (so Tier A is out): `ci.yml` is written; required set =
+  `MinSpec SDD validation` + `lint` + `build`; `test` absent. (With the reviewer configured,
+  `ai-review` + `ready-to-merge` are additionally required — AC-4.)
 - **AC-2** Init on a repo with no `package.json` (sealbox-shaped, pre-CI): `ci.yml`
   written; required set unchanged from today; no permanent-pending check.
 - **AC-3** Reviewer secrets partially set (`CLAUDE_CODE_OAUTH_TOKEN` only): notice names
   exactly `MINSPEC_APP_ID` and `MINSPEC_APP_PRIVATE_KEY` plus the App install.
 - **AC-4** All three set: no activation notice; `ai-review`/`ready-to-merge` required (existing behaviour, regression-pinned).
+- **AC-7** Repo with a hand-owned unmarked `ci.yml` and `lint`/`test`/`build` scripts: `ci.yml`
+  untouched + warned; required set still includes `lint`/`test`/`build` (no regression, FR-2).
+- **AC-8** Probe errors (`gh` auth failure): no secrets list shown; notice states the error;
+  Tier A not required (FR-8/FR-9).
 - **AC-5** `gh` missing: advisory with manual commands; nothing mutated, nothing thrown.
 - **AC-6** A `ci.yml` job rename without updating the shared constant fails a test (FR-3 drift pin).
 
@@ -125,7 +148,7 @@ propagation (SPEC-033 FR-6/FR-7); the autolink advisor (#561).
 - **DQ-3 — `ci.yml` collision.** Repos like sealbox already hand-own a `ci.yml`. Managed-region
   markers preserve outside content, but a differing existing file may surprise. Options:
   (A) **(rec)** skip + warn when an unmarked `ci.yml` exists (never clobber); cost: such repos
-  get no Tier B automation. (B) append a managed region; cost: two sources of truth in one file.
+  get no scaffolded `ci.yml`, though their existing Tier B requirements are preserved (FR-2 `hand-owned`). (B) append a managed region; cost: two sources of truth in one file.
 - **DQ-4 — Tier tier.** Predicted T3 (new template + resolver input + UI notice). If DQ-2 (B)
   is chosen, raise to T4 (credential handling).
 
