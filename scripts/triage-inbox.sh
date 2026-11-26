@@ -361,11 +361,22 @@ CONTENT
   CURRENT_LABELS=$(echo "$ISSUE_JSON" | jq -r '[.labels[].name] | join(",")')
   for h in human tier specify info built-spec unknown; do
     [[ "hold:${h}" == "$HOLD_LABEL" ]] && continue
-    [[ ",${CURRENT_LABELS}," == *",hold:${h},"* ]] || continue
     SUPERSEDED="${SUPERSEDED},hold:${h}"
   done
 
-  if ! gh issue edit "$ISSUE" --repo "$REPO" --remove-label "$SUPERSEDED" >/dev/null 2>&1; then
+  # Removing a label the issue does not carry is a no-op, not a failure (#4097):
+  # `agent-crashed` and friends do not exist repo-wide, so naming them made `gh`
+  # reject the request and the retry warn "could not clear" on every release.
+  # Keep only the labels this issue actually wears; a present label that then
+  # fails to clear still warns below.
+  local _kept="" _l
+  IFS=',' read -r -a _cand <<< "$SUPERSEDED"
+  for _l in "${_cand[@]}"; do
+    [[ ",${CURRENT_LABELS}," == *",${_l},"* ]] && _kept+="${_kept:+,}${_l}"
+  done
+  SUPERSEDED="$_kept"
+
+  if [[ -n "$SUPERSEDED" ]] && ! gh issue edit "$ISSUE" --repo "$REPO" --remove-label "$SUPERSEDED" >/dev/null 2>&1; then
     # `gh` resolves label NAMES against the repo's label set and fails the whole
     # request if any one of them does not exist there — which would leave EVERY
     # superseded label in place, `inbox` included, re-triaging this issue forever.
