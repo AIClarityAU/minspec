@@ -69,6 +69,8 @@ function recordingRun() {
   const calls: Array<{ cmd: string; args: string[]; input?: string }> = [];
   const run = (cmd: string, args: string[], opts: { input?: string } = {}) => {
     calls.push({ cmd, args, input: opts.input });
+    // `gh label list` is the preflight probe; every repo has the labels by default.
+    if (args.includes('label')) return '[{"name":"idea"},{"name":"inbox"}]';
     // `gh issue list` is the dedupe probe; default to "not filed before".
     if (args.includes('list')) return '[]';
     return 'https://github.com/AIClarityAU/minspec/issues/999\n';
@@ -307,6 +309,7 @@ describe('tooling radar — filing behaviour', () => {
     const calls: Array<{ args: string[] }> = [];
     const run = (_cmd: string, args: string[]) => {
       calls.push({ args });
+      if (args.includes('label')) return '[{"name":"idea"},{"name":"inbox"}]';
       return args.includes('list') ? '[{"number": 1183}]' : 'https://example.com/1\n';
     };
     const logs: string[] = [];
@@ -337,6 +340,36 @@ describe('tooling radar — filing behaviour', () => {
     expect(() =>
       runMain([validFinding(), validFinding({ key: 'ok-two', category: 'nope' })]),
     ).toThrow(/unknown category/);
+  });
+
+  it('files nothing when a target repo lacks a label, instead of failing mid-batch', () => {
+    const calls: Array<{ args: string[] }> = [];
+    const run = (_cmd: string, args: string[]) => {
+      calls.push({ args });
+      if (args.includes('label')) {
+        return args.includes('AIClarityAU/sealbox')
+          ? '[{"name":"inbox"}]'
+          : '[{"name":"idea"},{"name":"inbox"}]';
+      }
+      return args.includes('list') ? '[]' : 'https://example.com/1\n';
+    };
+    const sealboxCategory = Object.entries(CATEGORY_REPO).find(
+      ([, repo]) => repo === 'AIClarityAU/sealbox',
+    )![0];
+    expect(() =>
+      main(['findings.json'], {
+        run,
+        log: () => {},
+        warn: () => {},
+        readFile: () =>
+          findingsFile([
+            validFinding(),
+            validFinding({ key: 'seal-tool', category: sealboxCategory }),
+          ]),
+        tokenCmd: '/bin/false',
+      }),
+    ).toThrow(/AIClarityAU\/sealbox has no 'idea' label.*gh label create idea --repo AIClarityAU\/sealbox/);
+    expect(calls.some((c) => c.args.includes('create') && c.args.includes('issue'))).toBe(false);
   });
 
   it('refuses to fall back to the ambient gh credential when the App token fails', () => {
