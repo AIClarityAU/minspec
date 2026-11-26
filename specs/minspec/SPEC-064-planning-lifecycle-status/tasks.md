@@ -5,8 +5,8 @@ type: tasks
 # document is read by spec-gate.py as a second, unapproved spec. (SPEC-064 is T3.)
 # status and phases here carry the current phase state. requirements.md is approved and
 # edits to it are held back (approval sidecar under .minspec/approvals/; the hash strips status
-# and phases, so the lag is not hash-driven), so its own phases lag until task 6. This file has no approval record of its own, so its status is what deriveStatus
-# computes for an unsigned file with these phases.
+# and phases, so the lag is not hash-driven), so its own phases lag until task 6. This file has no approval record of its own, so `status` mirrors requirements.md's
+# literal (#972; Rule 28 fails when a sibling lags it). It is descriptive, never a seal.
 status: planning
 product: minspec
 epic: EPIC-002  # Signpost Integrity - an approved-but-unbuilt spec must not read 'implementing'

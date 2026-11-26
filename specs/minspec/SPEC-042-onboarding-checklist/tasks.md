@@ -7,9 +7,9 @@ type: tasks
 # requirements.md — so this doc omits it. (SPEC-042 is T3.)
 # Mirrors requirements.md's status. This doc has NO approval record of its own — only
 # requirements.md is signed — so the field is descriptive, never a seal; read the sidecar for
-# the real state. Kept ONLY because spec-validator.ts:525 marks `status` required
-# UNCONDITIONALLY (unlike `tier`:529, which is requiredWhen: isPrimarySpec). Dropping it here
-# is the right end-state (#972) but needs that schema change first — a code fix, not a doc edit.
+# the real state. Kept because spec-validator.ts:525 marks `status` required UNCONDITIONALLY
+# (unlike `tier`:529, which is requiredWhen: isPrimarySpec), so it cannot be dropped without a
+# schema change. Until then Rule 28 (#972) requires it not to lag requirements.md.
 status: planning
 product: minspec
 epic: EPIC-003

@@ -1870,6 +1870,13 @@ export function validateStatusClaims(
 // validator checked each file's frontmatter in isolation and never that the files
 // of one spec-set agree (the validator-asymmetry class). Compares RAW frontmatter
 // `status:` tokens; unranked values (archived, unknown) are skipped.
+//
+// Why RAW and ERROR, unlike validateStatusMonotonicity (#277, derived + warning): #277
+// guards a parent vs child *derived* lag, a legitimate mid-authoring state. Here the
+// question is what the sibling file ADVERTISES: design/tasks carry no approval record,
+// so their derived status is always `specifying` and says nothing; the literal is the
+// signpost a reader sees, and it is hand-mirrored from requirements.md (see each
+// sibling's frontmatter comment). A lagging literal is the false signpost #972 names.
 
 export interface SiblingStatusFile {
   /** Display path of the file, for the message. */
