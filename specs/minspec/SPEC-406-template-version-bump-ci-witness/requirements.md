@@ -1,7 +1,7 @@
 ---
 id: SPEC-406
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain
@@ -14,9 +14,9 @@ implements_reason: >-
   job or step in `.github/workflows/`, a change to `scripts/lib/template-version-bump.ts`, and
   tests. None of it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
