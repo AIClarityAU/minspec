@@ -1,7 +1,7 @@
 ---
 id: SPEC-313
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # approval integrity - an accepted record must be checked against its witness, not trusted
@@ -15,7 +15,7 @@ implements_reason: >-
 phases:
   specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
