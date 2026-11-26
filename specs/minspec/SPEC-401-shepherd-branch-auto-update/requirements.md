@@ -6,6 +6,10 @@ tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness — concurrent multi-session coordination
 relates_to: [SPEC-044, SPEC-032, SPEC-024, DR-033, DR-061]
+implements: none
+implements_reason: >-
+  Documentation-only disposition spec: AC-3 says no packages/, scripts/ or tests/ file is
+  touched by this spec or its approval, and DQ-1's recorded Option A closes #181 with no code change.
 ---
 
 # MinSpec — Keep auto-built PR branches mergeable as base advances (Requirements)
@@ -134,6 +138,8 @@ custom driver.
     bidirectional (`CLAUDE.md` Traceability Convention) without a second ratification
     surface for the same amendment.
 
+  **Recorded selection: the recommended option,** Option A, close #181 as resolved by the shipped baseline, with a comment on #181 linking this spec and naming SPEC-044 Amendment A as where the remaining stretch goal is tracked. Agent pick of the recommended option, no human chose it. Recorded by agent 2026-11-25 under founder decision, queue item clarsel (2026-11-17), DR-123; sign-off ratifies it.
+
 - **DQ-2 — Does this spec need its own Decision Record?**
   - **Option A — no (rec).** No new mechanism, store, or consent surface is introduced;
     this document only traces existing code and existing spec text and asks the human to
@@ -142,6 +148,8 @@ custom driver.
   - **Option B — yes, superseding nothing.** *Cost:* a DR that records "we decided to link
     an issue to an existing spec" is ceremony with no future reader value, and
     `docs/decisions/INDEX.md` already has no entry for this question to supersede.
+
+  **Recorded selection: the recommended option,** Option A, no Decision Record for this spec. Agent pick of the recommended option, no human chose it. Recorded by agent 2026-11-25 under founder decision, queue item clarsel (2026-11-17), DR-123; sign-off ratifies it.
 
 ## Functional Requirements (conditional on DQ-1)
 
