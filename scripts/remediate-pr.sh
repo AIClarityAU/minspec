@@ -50,7 +50,7 @@
 # Testable pure seams (no gh/git/claude):
 #   scripts/remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> \
 #       <labels_csv> <failing_non_review:yes|no> <ai_review_bad:yes|no> \
-#       [<live_nonself_claim:yes|no>]
+#       [<live_nonself_claim:yes|no> [<sweep_defer_pass:yes|no> [<pass_witnessed:yes|no>]]]
 #     → prints ONE action token: skip-not-automation | skip-live-owned | skip-conflict |
 #       agent-remediate-checks | agent-remediate-review | dlg-rerun | rebase-only | retry-unknown |
 #       skip-clean | skip-unhandled-state
@@ -180,6 +180,10 @@ classify_pr() {
   # is already ai-review:pass is left for its one-at-a-time merge-time refresh instead
   # of being merged-into on every cycle (which restarts CI on every green PR).
   local sweep_defer_pass="${8:-no}"
+  # #4078: is the pass WITNESSED — a `ready-to-merge` success posted by GitHub Actions on
+  # this head (scripts/lib/ready-witness.sh)? The bare `ai-review:pass` label is writable
+  # by the builder App every agent session holds, so it no longer steers the sweep.
+  local pass_witnessed="${9:-no}"
 
   # 1. Scope gate — only automation branches (and, #3036, delegated-approval branches,
   #    which are limited to mechanical actions below).
@@ -226,7 +230,7 @@ classify_pr() {
     # BEHIND + ai-review:pass PR is only waiting for its merge turn. Under strict
     # required checks every merge re-BEHINDs the rest, so refreshing it now is wasted
     # CI; it is refreshed one at a time at merge time.
-    if [[ "$sweep_defer_pass" == "yes" && ",$labels_csv," == *",ai-review:pass,"* ]]; then
+    if [[ "$sweep_defer_pass" == "yes" && "$pass_witnessed" == "yes" ]]; then
       echo "skip-awaiting-merge-turn"; return 0
     fi
     echo "rebase-only"; return 0
@@ -696,12 +700,13 @@ if [[ "${1:-}" == "--classify" ]]; then
   shift
   # Require 6 or 7 positional args, but allow empties (labels_csv is often "") — so
   # validate the COUNT, not each value (a `${n:?}` would reject an empty label). The
-  # 7th (live_nonself_claim) is optional so the creator's 6-arg contract is unchanged.
-  if [[ $# -lt 6 || $# -gt 8 ]]; then
-    echo "Usage: remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> <labels_csv> <failing_non_review> <ai_review_bad> [<live_nonself_claim> [<sweep_defer_pass>]]" >&2
+  # 7th (live_nonself_claim) is optional so the creator's 6-arg contract is unchanged;
+  # 8th (sweep_defer_pass) and 9th (pass_witnessed, #4078) are optional too.
+  if [[ $# -lt 6 || $# -gt 9 ]]; then
+    echo "Usage: remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> <labels_csv> <failing_non_review> <ai_review_bad> [<live_nonself_claim> [<sweep_defer_pass> [<pass_witnessed>]]]" >&2
     exit 2
   fi
-  classify_pr "$1" "$2" "$3" "$4" "$5" "$6" "${7:-no}" "${8:-no}"
+  classify_pr "$1" "$2" "$3" "$4" "$5" "$6" "${7:-no}" "${8:-no}" "${9:-no}"
   exit 0
 fi
 if [[ "${1:-}" == "--derive-failing" ]]; then
@@ -879,7 +884,7 @@ _PR_FETCH_ERR=$(mktemp)
 gh_bot_warm_read
 _fetch_pr_json() {
   gh pr view "$PR" --repo "$REPO" \
-    --json number,state,isDraft,headRefName,headRepository,headRepositoryOwner,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>"$_PR_FETCH_ERR"
+    --json number,state,isDraft,headRefName,headRefOid,headRepository,headRepositoryOwner,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>"$_PR_FETCH_ERR"
 }
 if ! PR_JSON=$(_fetch_pr_json); then
   echo "WARNING: fetch of PR #$PR failed: $(tr '\n' ' ' <"$_PR_FETCH_ERR")" >&2
@@ -940,7 +945,7 @@ if [[ "$MERGE_STATE" == "UNKNOWN" ]]; then
   # as health — and say out loud that the look itself failed.
   RETRY_RC=0
   RETRY_JSON=$(gh pr view "$PR" --repo "$REPO" \
-    --json number,state,isDraft,headRefName,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>/dev/null) || RETRY_RC=$?
+    --json number,state,isDraft,headRefName,headRefOid,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>/dev/null) || RETRY_RC=$?
   if (( RETRY_RC != 0 )); then
     echo "  the re-poll of PR #$PR FAILED (gh exited $RETRY_RC) — keeping mergeStateStatus UNKNOWN rather than treating an unreadable answer as an answer." >&2
   elif [[ -z "$RETRY_JSON" ]]; then
@@ -998,7 +1003,18 @@ if [[ -n "$ITEM" && "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
   fi
 fi
 
-ACTION=$(classify_pr "$BRANCH" "$MERGEABLE" "$MERGE_STATE" "$LABELS_CSV" "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD" "$LIVE_NONSELF_CLAIM" yes)
+# #4078: the sweep defers a BEHIND pull request only on a WITNESSED pass (a
+# `ready-to-merge` success from GitHub Actions on this head), never on the bare label.
+# Read only when it can matter. A failed read is "no": the PR is refreshed, the safe
+# side, since a refresh costs CI and never merges anything.
+PASS_WITNESSED=no
+if [[ "$MERGE_STATE" == "BEHIND" ]]; then
+  # shellcheck source=lib/ready-witness.sh
+  source "${SCRIPT_DIR}/lib/ready-witness.sh"
+  _head_sha=$(jq -r '.headRefOid // ""' <<<"$PR_JSON" 2>/dev/null || true)  # swallow-ok: an empty sha makes ready_to_merge_witnessed print error, which is not yes
+  [[ "$(ready_to_merge_witnessed "$REPO" "$_head_sha")" == "yes" ]] && PASS_WITNESSED=yes
+fi
+ACTION=$(classify_pr "$BRANCH" "$MERGEABLE" "$MERGE_STATE" "$LABELS_CSV" "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD" "$LIVE_NONSELF_CLAIM" yes "$PASS_WITNESSED")
 # #3036: updating a RED delegated PR restarts CI and a paid review, and it stays red if main
 # did not hold the fix. While main keeps moving it would be BEHIND again on every sweep, so
 # this update, unlike a green one, is charged to the attempt budget below.
