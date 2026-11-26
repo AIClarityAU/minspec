@@ -9,7 +9,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { type Delegation } from '../../../scripts/lib/autonomy';
-import { type ReviewEvidence } from '../../../scripts/lib/delegated-approval';
+import { REVIEWER_APP_SLUG, REVIEWER_LOGIN, type ReviewEvidence } from '../../../scripts/lib/delegated-approval';
 import {
   gatherMergeInput,
   parseMergeArgs,
@@ -51,13 +51,13 @@ function review(over: Partial<ReviewEvidence> = {}, headSha = HEAD): ReviewEvide
       {
         id: 111,
         url: VERDICT_URL,
-        login: 'minspec-sdd[bot]',
+        login: REVIEWER_LOGIN,
         body: '## 🤖 AI review — `ai-review:pass`\n\nLooks right.',
         createdAt: '2026-10-21T01:00:30Z',
       },
     ],
     checkRuns: [
-      { name: 'ai-review', status: 'completed', conclusion: 'success', appSlug: 'minspec-sdd', headSha, completedAt: '2026-10-21T01:01:00Z' },
+      { name: 'ai-review', status: 'completed', conclusion: 'success', appSlug: REVIEWER_APP_SLUG, headSha, completedAt: '2026-10-21T01:01:00Z' },
     ],
     workflowRuns: [
       {
