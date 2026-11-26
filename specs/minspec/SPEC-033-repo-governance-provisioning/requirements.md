@@ -6,6 +6,8 @@ tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness — guardrails a shared repo must carry
 relates_to: [SPEC-024, SPEC-030, SPEC-034, SPEC-063, DR-058, DR-061]  # SPEC-024 auto-merge gate consumes the `ai-review:pass` label this propagates · SPEC-030 is the init-time non-modal offer pattern this reuses · SPEC-034 (OIDC broker, not yet shipped) will shrink FR-4's checklist once live · SPEC-063 (clean uninstall) mirrors this spec's inventory and must stay in lockstep · DR-058 + DR-061 are the two auto-merge decisions FR-7 now rests on
+implements: [packages/minspec/src/commands/check-repo-governance.ts, packages/minspec/tests/check-repo-governance.test.ts]  # greenfield: the `MinSpec: Check Repo Governance` command (FR-2) and its fixture-repo test (AC-2); both new, so no other spec owns them
+affects: [packages/minspec/src/lib/ruleset-advisor.ts, packages/minspec/src/lib/template-registry.ts, packages/minspec/src/commands/init.ts]  # modified in place, never owned: shared files whose owner or sibling specs list them under affects: only
 ---
 
 # MinSpec — Repo Governance Provisioning (ai-review + branch protection on init/refresh) — Requirements
