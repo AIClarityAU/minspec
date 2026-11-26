@@ -212,14 +212,16 @@ describe('scripts/lib/dispatch-author-gate.sh: the list is accounts, by kind and
   it('the library reads no variable it did not set itself', () => {
     // The behavioural test above can only try the names somebody thought of. This is the
     // rule that makes the rest unnecessary: every variable the library reads is a
-    // lowercase local or a positional, so there is no name to set from outside.
+    // lowercase local or a positional, so there is no name to set from outside. The one
+    // exception is BASH_SOURCE: bash re-assigns it on every call, so a caller's value never
+    // survives to be read (it locates gh-bot.sh beside this library, #1355).
     const code = fs
       .readFileSync(AUTHOR_GATE_LIB, 'utf-8')
       .split('\n')
       .filter((l) => !/^\s*#/.test(l))
       .join('\n');
     expect(code).toContain('dispatch_issue_provenance_check');
-    expect(code.match(/\$\{?[A-Z][A-Za-z0-9_]*/g) ?? []).toEqual([]);
+    expect((code.match(/\$\{?[A-Z][A-Za-z0-9_]*/g) ?? []).filter((v) => !/^\$\{?BASH_SOURCE$/.test(v))).toEqual([]);
   });
 
   it('what is printed about a refused account is cut down to the characters a login can have', () => {
@@ -483,25 +485,25 @@ const cutShort = (i: Record<string, unknown>) => ({
   ...i,
   userContentEdits: { ...(i.userContentEdits as object), totalCount: 140 },
 });
-const REFUSED: { name: string; issue: IssueFixture; says: RegExp }[] = [
-  { name: 'opened by a stranger', issue: { author: STRANGER }, says: /^Refusing #4242 — its author 'some-stranger' \(User 900000001\) is not on the dispatch author list\. /m },
-  { name: 'opened by a collaborator who is not on the list', issue: { author: COLLABORATOR }, says: /^Refusing #4242 — its author 'outside-collab' \(User 900000002\) is not on the dispatch author list\. /m },
+const REFUSED: { name: string; issue: IssueFixture; says: RegExp; marked: boolean }[] = [
+  { name: 'opened by a stranger', issue: { author: STRANGER }, says: /^Refusing #4242 — its author 'some-stranger' \(User 900000001\) is not on the dispatch author list\. /m, marked: true },
+  { name: 'opened by a collaborator who is not on the list', issue: { author: COLLABORATOR }, says: /^Refusing #4242 — its author 'outside-collab' \(User 900000002\) is not on the dispatch author list\. /m, marked: true },
   // Stays refused: issues filed by a workflow's own token wait for a person.
-  { name: "opened by GitHub's Actions App", issue: { author: ACTIONS_APP }, says: /^Refusing #4242 — its author 'github-actions' \(Bot 41898282\) is not on the dispatch author list\. /m },
-  { name: "opened by a person holding the App's login", issue: { author: user('minspec-sdd', 900000010) }, says: /^Refusing #4242 — its author 'minspec-sdd' \(User 900000010\) is not on the dispatch author list\. /m },
-  { name: "opened by an App holding the founder's login", issue: { author: bot('harvest316', 900000011) }, says: /^Refusing #4242 — its author 'harvest316' \(Bot 900000011\) is not on the dispatch author list\. /m },
-  { name: "opened by an account shown with the founder's login and number, of another kind", issue: { author: bot('harvest316', 4125483) }, says: /^Refusing #4242 — its author 'harvest316' \(Bot 4125483\) is not on the dispatch author list\. /m },
-  { name: 'opened by an account that has since been deleted', issue: { author: null }, says: /^Refusing #4242 — its author could not be read, and an author that cannot be read is never trusted\. /m },
-  { name: 'opened by an account GitHub gave no number for', issue: { author: { __typename: 'User', login: 'harvest316' } }, says: /^Refusing #4242 — its author could not be read/m },
-  { name: "the founder's, with its body edited by a collaborator", issue: { bodyEditors: [COLLABORATOR] }, says: /^Refusing #4242 — its body was edited by 'outside-collab' \(User 900000002\), who is not on the dispatch author list\. /m },
-  { name: "the founder's, edited by a collaborator and then by the founder", issue: { bodyEditors: [COLLABORATOR, FOUNDER] }, says: /^Refusing #4242 — its body was edited by 'outside-collab' \(User 900000002\), who is not on/m },
-  { name: "the App's, with its title changed by a collaborator", issue: { author: APP, titleChangers: [COLLABORATOR] }, says: /^Refusing #4242 — its title was changed by 'outside-collab' \(User 900000002\), who is not on the dispatch author list\. /m },
-  { name: "the founder's, with an edit history that did not come back in full", issue: { bodyEditors: [FOUNDER], provenance: cutShort }, says: /^Refusing #4242 — who edited its body could not be read in full \(140 edit\(s\) recorded, 2 returned\)/m },
-  { name: "the founder's, edited between the two reads", issue: { provenance: (i) => ({ ...i, body: `${String(i.body)}\nAnd one more thing.` }) }, says: /^Refusing #4242 — its title or body changed while it was being checked, so the text that was judged is not the text that would be used\. /m },
-  { name: "the founder's, renamed between the two reads", issue: { provenance: (i) => ({ ...i, title: `${String(i.title)} (and more)` }) }, says: /^Refusing #4242 — its title or body changed while it was being checked/m },
-  { name: "the founder's, when the read of who wrote it fails", issue: { provenanceFails: true }, says: /^Refusing #4242 — who wrote and edited it could not be read from GitHub, and what cannot be read is never trusted\. /m },
-  { name: "the founder's, when the answer is not JSON", issue: { provenanceRaw: 'not json' }, says: /^Refusing #4242 — who wrote and edited it could not be read, and what cannot be read is never trusted\. /m },
-  { name: "the founder's, when the answer is empty", issue: { provenanceRaw: '' }, says: /^Refusing #4242 — who wrote and edited it could not be read, and what cannot be read is never trusted\. /m },
+  { name: "opened by GitHub's Actions App", issue: { author: ACTIONS_APP }, says: /^Refusing #4242 — its author 'github-actions' \(Bot 41898282\) is not on the dispatch author list\. /m, marked: true },
+  { name: "opened by a person holding the App's login", issue: { author: user('minspec-sdd', 900000010) }, says: /^Refusing #4242 — its author 'minspec-sdd' \(User 900000010\) is not on the dispatch author list\. /m, marked: true },
+  { name: "opened by an App holding the founder's login", issue: { author: bot('harvest316', 900000011) }, says: /^Refusing #4242 — its author 'harvest316' \(Bot 900000011\) is not on the dispatch author list\. /m, marked: true },
+  { name: "opened by an account shown with the founder's login and number, of another kind", issue: { author: bot('harvest316', 4125483) }, says: /^Refusing #4242 — its author 'harvest316' \(Bot 4125483\) is not on the dispatch author list\. /m, marked: true },
+  { name: 'opened by an account that has since been deleted', issue: { author: null }, says: /^Refusing #4242 — its author could not be read, and an author that cannot be read is never trusted\. /m, marked: false },
+  { name: 'opened by an account GitHub gave no number for', issue: { author: { __typename: 'User', login: 'harvest316' } }, says: /^Refusing #4242 — its author could not be read/m, marked: false },
+  { name: "the founder's, with its body edited by a collaborator", issue: { bodyEditors: [COLLABORATOR] }, says: /^Refusing #4242 — its body was edited by 'outside-collab' \(User 900000002\), who is not on the dispatch author list\. /m, marked: true },
+  { name: "the founder's, edited by a collaborator and then by the founder", issue: { bodyEditors: [COLLABORATOR, FOUNDER] }, says: /^Refusing #4242 — its body was edited by 'outside-collab' \(User 900000002\), who is not on/m, marked: true },
+  { name: "the App's, with its title changed by a collaborator", issue: { author: APP, titleChangers: [COLLABORATOR] }, says: /^Refusing #4242 — its title was changed by 'outside-collab' \(User 900000002\), who is not on the dispatch author list\. /m, marked: true },
+  { name: "the founder's, with an edit history that did not come back in full", issue: { bodyEditors: [FOUNDER], provenance: cutShort }, says: /^Refusing #4242 — who edited its body could not be read in full \(140 edit\(s\) recorded, 2 returned\)/m, marked: false },
+  { name: "the founder's, edited between the two reads", issue: { provenance: (i) => ({ ...i, body: `${String(i.body)}\nAnd one more thing.` }) }, says: /^Refusing #4242 — its title or body changed while it was being checked, so the text that was judged is not the text that would be used\. /m, marked: false },
+  { name: "the founder's, renamed between the two reads", issue: { provenance: (i) => ({ ...i, title: `${String(i.title)} (and more)` }) }, says: /^Refusing #4242 — its title or body changed while it was being checked/m, marked: false },
+  { name: "the founder's, when the read of who wrote it fails", issue: { provenanceFails: true }, says: /^Refusing #4242 — who wrote and edited it could not be read from GitHub, and what cannot be read is never trusted\. /m, marked: false },
+  { name: "the founder's, when the answer is not JSON", issue: { provenanceRaw: 'not json' }, says: /^Refusing #4242 — who wrote and edited it could not be read, and what cannot be read is never trusted\. /m, marked: false },
+  { name: "the founder's, when the answer is empty", issue: { provenanceRaw: '' }, says: /^Refusing #4242 — who wrote and edited it could not be read, and what cannot be read is never trusted\. /m, marked: false },
 ];
 
 /** Passes: every account that wrote the text is listed. */
@@ -521,15 +523,48 @@ describe('T0: the real scripts/triage-inbox.sh triages only an issue whose text 
     expect(r.out).not.toContain('Refusing #4242');
   });
 
-  it.each(REFUSED)('an issue $name is refused: no model is started and nothing is written', ({ issue, says }) => {
+  it.each(REFUSED)('an issue $name is refused: no model is started, and only a real refusal is marked', ({ issue, says, marked }) => {
     const r = runTriage({ issues: { '4242': issue }, only: '4242' });
     expect(r.stdout).toMatch(says);
     // A refusal is a decision, not a fault: the drain must not report it as a failed triage.
     expect(r.status, r.out).toBe(0);
     expect(r.launches).toEqual([]);
-    expect(r.ghWrites).toEqual([]);
-    // The read that fetched the issue and the one that asked who wrote it. Nothing after.
-    expect(r.ghCalls).toEqual(['issue view 4242', 'api graphql issue:4242']);
+    if (marked) {
+      // A real refusal (an account not on the list) is made visible once (#2694): the
+      // `author-refused` label and one comment, written as the App, and nothing else.
+      expect(r.ghWrites).toEqual(['label create token=present', 'issue edit token=present', 'issue comment token=present']);
+      // No second read of the issue: the labels come from the view the launcher holds.
+      expect(r.ghCalls).toEqual(['issue view 4242', 'api graphql issue:4242', 'label create author-refused', 'issue edit 4242', 'issue comment 4242']);
+    } else {
+      // Anything unreadable or transient is not marked: it is offered again.
+      expect(r.ghWrites).toEqual([]);
+      // The read that fetched the issue and the one that asked who wrote it. Nothing after.
+      expect(r.ghCalls).toEqual(['issue view 4242', 'api graphql issue:4242']);
+    }
+  });
+
+  it('a refusal is made visible once: the label and one comment naming the reason, and an already-marked issue is left alone (#2694)', () => {
+    const first = runTriage({ issues: { '4242': { author: ACTIONS_APP } }, only: '4242' });
+    expect(first.ghWrites).toEqual(['label create token=present', 'issue edit token=present', 'issue comment token=present']);
+    expect(first.posted).toHaveLength(1);
+    // The marker reads `.labels` from the launcher's own issue view, so that view must ask
+    // for them: the stub returns only the fields a read names, as GitHub does (#2694).
+    expect(first.issueViewFields).toEqual(['body,title,labels']);
+    expect(first.posted[0]).toContain("its author 'github-actions' (Bot 41898282) is not on the dispatch author list");
+    // The next cycle: the label is the marker, so nothing more is written.
+    const again = runTriage({ issues: { '4242': { author: ACTIONS_APP, labels: ['inbox', 'author-refused'] } }, only: '4242' });
+    expect(again.stdout).toMatch(/^Refusing #4242 — /m);
+    expect(again.ghWrites).toEqual([]);
+    expect(again.posted).toEqual([]);
+  });
+
+  it('the refusal sentence the log prints is the one marking recognises: one definition (#2694)', () => {
+    const lib = fs.readFileSync(AUTHOR_GATE_LIB, 'utf-8');
+    // Marking matches the shared phrase, and the refusal sentences are built from it.
+    expect(lib).toContain('_dispatch_not_listed_phrase');
+    // Count CODE lines only: a comment that quotes the phrase must not break this.
+    const code = lib.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+    expect(code.match(/is not on the dispatch author list/g) ?? []).toHaveLength(2);
   });
 
   it('who wrote it is asked with a credential: with none to present, the issue is refused and not passed', () => {
@@ -601,7 +636,7 @@ describe('T0: the real scripts/dispatch-issue.sh dispatches only an issue whose 
     expect(r.status, r.out).toBe(dispatchStatus('DISPATCH_RC_STARTED'));
   });
 
-  it.each(REFUSED)('a ready issue $name is refused before anything is started', ({ issue, says }) => {
+  it.each(REFUSED)('a ready issue $name is refused before anything is started', ({ issue, says, marked }) => {
     // Ready in every other respect: open, labelled, and backed by a fresh verdict record
     // from the bot. That is the issue the readiness gate lets through.
     const r = runDispatch({ issue, ask: true });
@@ -610,8 +645,21 @@ describe('T0: the real scripts/dispatch-issue.sh dispatches only an issue whose 
     expect(r.status, r.out).toBe(DECLINED);
     expect(r.launches).toEqual([]);
     expect(r.claims).toEqual([]);
-    expect(r.ghWrites).toEqual([]);
+    // Only a real refusal (an account not on the list) is made visible, and only by the
+    // `author-refused` label and one comment (#2694); an unreadable one writes nothing.
+    if (marked) {
+      expect(r.ghWrites).toEqual(['label create token=present', 'issue edit token=present', 'issue comment token=present']);
+    } else {
+      expect(r.ghWrites).toEqual([]);
+    }
     expect(r.worktreeMade).toBe(false);
+  });
+
+  it('an already-marked refusal is left alone by dispatch-issue.sh as well (#2694)', () => {
+    const r = runDispatch({ issue: { author: STRANGER, labels: ['agent-ready', 'author-refused'] }, ask: true });
+    expect(r.stdout).toMatch(/^Refusing #4242 — its author 'some-stranger'/m);
+    expect(r.status, r.out).toBe(DECLINED);
+    expect(r.ghWrites).toEqual([]);
   });
 
   it('a caller that did not ask gets exit 0 for the same refusal, as for every other one', () => {
@@ -714,7 +762,8 @@ describe('T0: through the real drain, an issue refused for who wrote it uses no 
     expect(r.log).toMatch(/\[drain\] NOTHING DISPATCHED this cycle: 1 issue\(s\) ready, 1 refused by the dispatcher before any work started/);
     expect(r.log).toContain('[drain] cycle done. No dispatch was confirmed: see NOTHING DISPATCHED above.');
     expect(r.launches).toEqual([]);
-    expect(r.ghWrites).toEqual([]);
+    // The refusal is made visible once (#2694): the label and one comment, as the App, nothing else.
+    expect(r.ghWrites).toEqual(['label create token=present', 'issue edit token=present', 'issue comment token=present']);
   });
 });
 
