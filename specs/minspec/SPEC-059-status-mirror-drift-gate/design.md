@@ -6,7 +6,7 @@ type: design
 # phases mirror requirements.md. This file has no approval record of its own, so its
 # status is what deriveStatus computes for an unsigned file with these phases
 # (specifying) - the value the corpus rule this plan adds reads as clean.
-status: specifying
+status: planning
 product: minspec
 epic: EPIC-002  # Signpost Integrity
 relates_to: [SPEC-022, SPEC-061, SPEC-014, SPEC-018, DR-034, DR-069, DR-108, "#1807", "#1513", "#917"]

@@ -7,7 +7,7 @@ type: tasks
 # approved hash (approval sidecar under .minspec/approvals/), so its own phases lag. This file
 # has no approval record of its own, so its status is what deriveStatus computes for an
 # unsigned file with these phases.
-status: specifying
+status: planning
 product: minspec
 epic: EPIC-002  # Signpost Integrity
 relates_to: [DR-034, DR-069, DR-088, SPEC-059, SPEC-070, "#95", "#116", "#898", "#1513", "#1668"]

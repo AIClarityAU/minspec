@@ -1,7 +1,7 @@
 ---
 id: SPEC-064
 type: design
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — an approved-but-unbuilt spec must not read 'implementing'

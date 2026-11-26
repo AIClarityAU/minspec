@@ -1861,3 +1861,47 @@ export function validateStatusClaims(
 
   return violations;
 }
+
+// ─── Sibling status lag (#972) ────────────────────────────────────────────────
+//
+// Approve writes `status:` to the approved artifact (requirements.md) only, so
+// every approval left design.md/tasks.md advertising an older status than the
+// authoritative file — the answer then depended on which file you opened. The
+// validator checked each file's frontmatter in isolation and never that the files
+// of one spec-set agree (the validator-asymmetry class). Compares RAW frontmatter
+// `status:` tokens; unranked values (archived, unknown) are skipped.
+
+export interface SiblingStatusFile {
+  /** Display path of the file, for the message. */
+  readonly file: string;
+  /** The file's `type:` frontmatter, lowercased. */
+  readonly type: string;
+  /** The file's raw frontmatter `status:` value, if present. */
+  readonly status?: string;
+}
+
+/** Siblings (design/tasks) whose status ranks below the requirements.md status. */
+export function validateSiblingStatusLag(
+  files: readonly SiblingStatusFile[],
+): ValidationViolation[] {
+  const rankOf = (raw: string | undefined): number | undefined => {
+    const token = (raw ?? '').trim().split(/\s+/)[0]?.replace(/#.*$/, '').toLowerCase() ?? '';
+    return LIFECYCLE_RANK[token as SpecStatus];
+  };
+  const parent = files.find((f) => f.type === 'requirements');
+  const parentRank = parent ? rankOf(parent.status) : undefined;
+  if (!parent || parentRank === undefined) return [];
+  const violations: ValidationViolation[] = [];
+  for (const f of files) {
+    if (f.type !== 'design' && f.type !== 'tasks') continue;
+    const rank = rankOf(f.status);
+    if (rank === undefined || rank >= parentRank) continue;
+    violations.push({
+      rule: 'status.sibling.lag',
+      severity: 'error',
+      message: `${f.file}: \`status: ${(f.status ?? '').trim()}\` lags requirements.md \`status: ${(parent.status ?? '').trim()}\` in the same spec-set.`,
+      fixHint: `Approval writes status to requirements.md only. Advance ${f.file} to at least "${(parent.status ?? '').trim()}" (or remove its status). A spec-set whose files disagree is a false signpost (#972).`,
+    });
+  }
+  return violations;
+}

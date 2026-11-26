@@ -4,7 +4,7 @@ type: design
 # No tier here: requirements.md is the single tier-carrying approvable. This file has no
 # approval record of its own, so its status is what deriveStatus computes for an unsigned
 # file with these phases (FR-4, INV-4). The earlier literal `implementing` was hand-set.
-status: specifying
+status: planning
 product: minspec
 epic: EPIC-002  # Signpost Integrity
 phases:
