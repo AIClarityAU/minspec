@@ -1,5 +1,5 @@
 ---
-id: SPEC-137
+id: SPEC-448
 type: requirements
 status: specifying
 tier: T3
@@ -20,12 +20,18 @@ phases:
   specify: in-progress
 ---
 
-# SPEC-137: A capability index the model reads on demand - the whole skill and agent roster is findable without loading it, and nothing is hidden from the model
+# SPEC-448: A capability index the model reads on demand - the whole skill and agent roster is findable without loading it, and nothing is hidden from the model
 
 Triggered by: #638 (search_capabilities index skill - defer, never strip).
 Rests on: DR-073 (additive, never-clobbering writes into a foreign tool's config), DR-074
 (blast radius is the project with `.minspec/` at its root). No new decision record yet - see
 "Decision records" below.
+
+> **Renumbered.** The first draft of this spec (commit 9b6efdaaf) took spec number 137,
+> which `origin/main` (0274f0a9) has since given to the error-log diagnostics spec
+> (`specs/minspec/SPEC-137-error-log-diagnostics/`). A duplicate id is fatal, so this spec
+> now carries the id reserved for this dispatch, SPEC-448. Nothing else in the repo pointed
+> at the old number for this spec.
 
 ## In plain terms
 
@@ -71,6 +77,12 @@ in with `.minspec/`.
   tool with `defer_loading: true` on tool definitions, and Claude Code exposes an MCP tool
   search setting. I have not verified the exact Claude Code setting name or its default in
   the version in use; Plan must read the current docs before writing any config (FR-11).
+- **No `.claude/skills/` or `.claude/agents/` directory exists yet** on `origin/main`
+  (0274f0a9) - only `.claude/commands/` (the eight `minspec-*` commands), `.claude/hooks/`
+  and `.claude/settings.json`. So the index skill is this repo's first project skill, and
+  nothing on main already provides a capability index (searched specs, docs and the
+  constitution for `search-capabilities`, `capability index`, `defer_loading`,
+  `tool search`, `#638`).
 - **This repo already runs `UserPromptSubmit` hooks** - `.claude/settings.json:25-29`
   (`scope-check.sh`, `session-title.sh`). DR-073 is the record that governs adding one.
 - **Measurement is pending.** SCR#49 (context-bloat measurement, scroogellm repo) is the
