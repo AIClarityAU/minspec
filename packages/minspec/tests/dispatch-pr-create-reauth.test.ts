@@ -137,6 +137,28 @@ echo "GraphQL: API rate limit already exceeded" >&2; exit 1
     expect(r.calls.filter((c) => c.startsWith('pr create'))).toHaveLength(6);
   });
 
+  it('masks tokens in the echoed gh stderr, and a stderr notice does not corrupt a found PR number (#4120)', () => {
+    const GHT = `#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$GH_STUB_STATE/calls.log"
+if [ "$2" = "list" ]; then
+  echo "notice: a new gh release is available" >&2
+  if [ -f "$GH_STUB_STATE/pr" ]; then cat "$GH_STUB_STATE/pr"; exit 0; fi
+  echo "rate limit: https://x-access-token:ghs_AAAAAAAA@github.com/O/R failed; Bearer bearerAAAA; github_pat_BBBB" >&2; exit 1
+fi
+if [ "$2" = "create" ]; then
+  if [ "$(grep -c '^pr create' "$GH_STUB_STATE/calls.log")" -ge 2 ]; then echo 99 > "$GH_STUB_STATE/pr"; exit 0; fi
+  echo "rate limit hit; Token: ghs_AAAAAAAA" >&2; exit 1
+fi
+exit 0
+`;
+    const r = run(true, GHT, 'live');
+    expect(r.stdout).toContain('PR=[99]');
+    expect(r.stderr).toContain('<redacted>');
+    expect(r.stderr).not.toContain('ghs_AAAAAAAA');
+    expect(r.stderr).not.toContain('bearerAAAA');
+    expect(r.stderr).not.toContain('github_pat_BBBB');
+  });
+
   it('the caller turns an empty PR into a non-zero dispatch exit, not a quiet return 0', () => {
     expect(content).toMatch(/PR_STRANDED=1\n\s+return 1/);
     expect(content).toMatch(/if \[\[ "\$\{PR_STRANDED:-0\}" == "1" \]\]; then\n\s+exit 1\nfi\nexit_started/);

@@ -1836,10 +1836,21 @@ post_advisory_review() {
 # blamed the token). gh's stderr is therefore CAPTURED and echoed to the dispatch log, and a
 # rate-limit refusal backs off and retries (no re-mint) up to PR_RATE_LIMIT_RETRIES times,
 # PR_RATE_LIMIT_WAIT seconds apart, before the empty result fails the dispatch.
-_ensure_pr_query() {  # sets _EPR_N (number or "") and _EPR_ERR (gh's stderr text)
-  local out
-  out=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>&1 || true)  # swallow-ok: a non-number result is kept in _EPR_ERR and logged by the caller
-  if [[ "$out" =~ ^[0-9]+$ ]]; then _EPR_N="$out"; _EPR_ERR=""; else _EPR_N=""; _EPR_ERR="$out"; fi
+_epr_redact() {  # one line, capped, token-shaped text masked (same filter as the merge path, #3748)
+  printf '%s' "$1" | tr '\r\n\t' '   ' \
+    | sed -E -e 's/(gh[pousr]_|github_pat_)[A-Za-z0-9_]+/<redacted>/g' \
+             -e 's/(x-access-token|Bearer|[Tt]oken)([:= ]+)[^ @]+/\1\2<redacted>/g' \
+             -e 's/  +/ /g; s/^ //; s/ $//' \
+    | cut -c1-400
+}
+_ensure_pr_query() {  # sets _EPR_N (number or "") and _EPR_ERR (redacted gh stderr text)
+  local out errf err
+  errf=$(mktemp)
+  # stdout and stderr stay separate so a non-fatal gh notice cannot corrupt the number
+  out=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>"$errf" || true)  # swallow-ok: a non-number result is kept in _EPR_ERR and logged by the caller
+  err=$(cat "$errf" 2>/dev/null || true)  # swallow-ok: an unreadable stderr file only loses diagnostics; the empty result still fails the dispatch
+  rm -f "$errf"
+  if [[ "$out" =~ ^[0-9]+$ ]]; then _EPR_N="$out"; _EPR_ERR=""; else _EPR_N=""; _EPR_ERR=$(_epr_redact "${err:-$out}"); fi
 }
 _ensure_pr_attempt() {  # find, else create + re-query; success is the re-query, never create's exit
   local cerr=""
@@ -1848,6 +1859,7 @@ _ensure_pr_attempt() {  # find, else create + re-query; success is the re-query,
     local qerr="$_EPR_ERR"
     cerr=$(gh pr create --repo "$REPO" --base main --head "$BRANCH" \
       --title "$ISSUE_TITLE" --body "$BODY" 2>&1 >/dev/null || true)  # swallow-ok: success is judged by the re-query below, never by this exit status
+    cerr=$(_epr_redact "$cerr")
     _ensure_pr_query
     if [[ -z "$_EPR_N" ]]; then _EPR_ERR="${qerr}${qerr:+ | }${cerr}${cerr:+ | }${_EPR_ERR}"; fi
   fi
