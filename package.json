@@ -46,6 +46,9 @@
     "typescript": "^5.5.0",
     "vitest": "^4.1.11"
   },
+  "overrides": {
+    "serialize-javascript": "^7.1.4"
+  },
   "engines": {
     "node": ">=22.0.0",
     "npm": ">=11.0.0"
