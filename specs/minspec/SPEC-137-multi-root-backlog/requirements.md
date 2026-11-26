@@ -7,7 +7,7 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - the fan-out multiplies a network action, so SPEC-085's consent model is the governing constraint
 aspects: [backlog, multi-root, gh-cli, consent, network, silent-gate]
 relates_to: [SPEC-085, DR-004, DR-050, "#573", "#549"]
-affects: [packages/minspec/src/views/backlog-view.ts, packages/minspec/src/extension.ts, packages/minspec/tests/backlog-view.test.ts, packages/minspec/tests/backlog-consent.test.ts]
+affects: [packages/minspec/src/views/backlog-view.ts, packages/minspec/src/extension.ts, packages/minspec/package.json, packages/minspec/tests/backlog-view.test.ts, packages/minspec/tests/backlog-consent.test.ts]
 phases:
   specify: in-progress
 ---
@@ -36,7 +36,7 @@ without ever contacting GitHub outside the user's Backlog gesture (SPEC-085).
 - The provider holds a single `BacklogLoadState` (`not-loaded | loading | failed | loaded`) and
   a single `inFlight` promise, so there is nowhere to hold "folder A loaded, folder B failed".
 - `SpecTreeProvider` / `AdrTreeProvider` already enumerate folders through
-  `allWorkspaceRoots()` (`lib/resolve-folder.ts:106`) and render a folder tier only when more
+  `allWorkspaceRoots()` (`packages/minspec/src/lib/resolve-folder.ts:106`) and render a folder tier only when more
   than one root exists (`spec-tree-provider.ts:363-378`, `SpecFolderNode`, #549).
 - `onDidChangeWorkspaceFolders` already calls `backlogTreeProvider.refreshIfStale()`
   (`extension.ts:253-257`), which only re-renders and starts no `gh` (SPEC-085 FR-1/FR-4).
@@ -52,7 +52,9 @@ repo while others succeed); (3) several folders that may map to the same reposit
 - **FR-1 - Every folder is read.** The provider obtains its folder set from
   `allWorkspaceRoots()` at load and render time, not from a constructor-captured string. A
   folder added or removed after construction is honoured by the next gesture and render
-  (mirrors the live-roots behaviour of the Specs/DRs providers).
+  (mirrors the live-roots behaviour of the Specs/DRs providers). A fetch still in flight for a
+  folder that is removed mid-load is discarded when it lands: its result must not recreate that
+  folder's row or state.
 
 - **FR-2 - Single-root is byte-identical.** With exactly one workspace folder the panel renders
   and behaves exactly as it does today: no folder tier, same rows, same states, same single
@@ -103,7 +105,11 @@ repo while others succeed); (3) several folders that may map to the same reposit
 - [ ] Before any gesture, with three folders, zero `gh` processes are started by render,
       visibility, focus and `onDidChangeWorkspaceFolders`. (FR-4)
 - [ ] A folder added after load shows a not-loaded row and starts no process until the next
-      gesture; a removed folder's state is dropped. (FR-1, FR-4)
+      gesture; a removed folder's state is dropped, including when its fetch resolves after removal.
+      (FR-1, FR-4)
+- [ ] If DQ-1(a) is chosen, the command title/tooltip and the not-loaded row state the folder
+      count ("lists issues for N workspace folders from GitHub using `gh`"); a test pins the
+      wording so the consent disclosure cannot drift. (FR-4)
 - [ ] A second gesture during an in-flight multi-folder load starts no additional processes.
       (FR-6)
 - [ ] With epic grouping on, each folder resolves epics from its own root. (FR-7)
