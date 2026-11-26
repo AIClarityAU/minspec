@@ -398,7 +398,8 @@ finding: the gate checks the thing it happens to know about and is silent on the
 
 - **D-11 - Answered by the founder (human-chosen, 2026-11-26, queue item in108).** The
   founder chose this himself, in an AskUserQuestion put to him by the queue proxy; it is not
-  an agent's pick. His pick, verbatim:
+  an agent's pick.
+  **Resolved: option (a), chosen by the founder.** His pick, verbatim:
 
   > "(a) Off, owner opts in (Recommended): deny on both auto-merge switches in a freshly scaffolded repo, no automatic flip; turning either on stays a deliberate per-repo act by its owner"
 
@@ -450,15 +451,27 @@ D-1, D-2, D-4 and D-5 below were in this form when the spec was approved on 2026
 observation only: D-2's recommended shape (advise by default, write only on an explicit
 confirm) is what `ruleset-advisor.ts` does today (see *What exists*).
 
+*Added 2026-11-26.* The repo's Clarify check (`scripts/lib/clarify-open.ts`) reads D-1, D-2,
+D-4, D-5 and D-7 as still open, because none of them carries a recorded selection. So each
+now carries one. D-1, D-2 and D-4 use the form DR-123 sets for a T3 spec: an agent copied the
+option the item recommends, no human chose it, and approving this spec ratifies the pick (the
+approver may change it first). D-5 names no option, so no agent pick is possible; it is
+answered by an accepted decision record it already cites, the way D-3 is. D-7 is closed by
+the founder's D-11 answer.
+
 
 - **D-1 — Tier: T3 or T4?** Half (A) is T3-shaped (files + one command). Half (B) adds a
   GitHub-API **write** with a repo-admin credential — a new external-integration boundary
   that arguably makes the feature T4 and warrants a security review of the protection-write
   path. *Recommendation:* keep (A) T3; treat (B) as its own security-reviewed slice.
+  **Recorded selection: the recommendation** (keep (A) T3; treat (B) as its own
+  security-reviewed slice). An agent copied it (DR-123); no human chose it.
 - **D-2 — Branch protection: ever write, or advise-only?** Does the extension actually call
   `gh api` to set protection (needs admin), or does it **only** ever surface the steps? This
   is an authority question, not just UX. *Recommendation:* advise-only by default; opt-in
   write behind explicit confirm + present-token check.
+  **Recorded selection: the recommendation** (advise-only by default; opt-in write behind an
+  explicit confirm and a present-token check). An agent copied it (DR-123); no human chose it.
 - **D-3 — Secret-name convention. → RESOLVED (2026-07-12) by DR-054/SPEC-034, not by this
   spec.** `CLAUDE_CODE_OAUTH_TOKEN` stays a fixed, per-repo customer secret (Tier-1 model
   credential, DR-054 §2 — untouched by the identity question). The GitHub-identity secrets
@@ -474,10 +487,17 @@ confirm) is what `ruleset-advisor.ts` does today (see *What exists*).
   `packages/**` changes (a monorepo-ism). Ship as-is (harmless no-op elsewhere) or
   generalize to a configurable path glob? *Recommendation:* ship as-is now; generalize later
   if a consuming repo needs it.
+  **Recorded selection: the recommendation** (ship as-is now; generalize later if a consuming
+  repo needs it). An agent copied it (DR-123); no human chose it.
 - **D-5 — Tier-0 positioning.** ai-review runs `claude -p` **in CI**, not in the extension
   runtime. Confirm this is consistent with MinSpec's Tier-0/air-gapped stance
   ([DR-004](../../../docs/decisions/DR-004.md)) — inference lives in the repo's CI, which the
   user owns, not inside the shipped extension.
+  **Resolved: consistent, by [DR-004](../../../docs/decisions/DR-004.md) (accepted), not by a
+  new choice.** DR-004's Tier 0 rule is that no code in `packages/minspec` or
+  `packages/shared` imports a networking module; a workflow file scaffolded into the user's
+  own CI is not extension code, and the extension still makes no call of its own. No agent
+  picked an option here: D-5 names none.
 - **D-6 — Triage/drain/dispatch scope-fit. → RESOLVED (2026-07-12, Paul Harvey): new FR-6 in
   this spec**, not a separate spec — same epic (EPIC-009), same "propagate minspec's own
   automation" concern as FR-1. Accepted that this is a bigger lift than FR-1 (a portability
@@ -493,6 +513,7 @@ confirm) is what `ruleset-advisor.ts` does today (see *What exists*).
   follow-up once those close. A per-repo override still wins in either direction (INV-9).
   **→ Condition since met and overtaken by DR-061; the flip is re-opened as D-11
   (2026-10-01). The `pr-gate`-by-default half stands and is what FR-7 ships.**
+  **→ Resolved: closed by the founder's D-11 answer (2026-11-26, option (a)).**
 - **D-10 — Collapse the two init/refresh palette commands into one? → RESOLVED (2026-07-14,
   Paul Harvey, #703): yes — one state-detecting command (FR-9).** `initCommand` (first-run +
   onboarding) and `initRefreshCommand` (merge-preserving) do genuinely different things, but
