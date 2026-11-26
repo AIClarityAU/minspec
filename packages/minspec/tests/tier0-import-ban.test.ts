@@ -2,7 +2,8 @@
  * T0 invariant — INV — Tier-0 network-import ban, repo-wide (SPEC-017 Slice 6,
  * FR-10, AC-9; scope widened per #1511).
  *
- * Assert: NO `http`, `https`, `fetch`, or `net` import appears anywhere in a
+ * Assert: NO `http`, `https`, `fetch`, or `net` import — and (#2248) no bare global
+ * `fetch(` / `XMLHttpRequest` / `WebSocket` / `EventSource` usage — appears anywhere in a
  * workspace package's `src/` tree that has been classified Tier-0 below.
  *
  * ORIGINAL BUG (#1511): this gate's root was hardcoded to
@@ -126,6 +127,22 @@ function collectTsFiles(dir: string): string[] {
 const BANNED_IMPORT_RE =
   /(?:^|\s)(?:import\s[\s\S]*?from\s+|import\s*\()\s*['"](?:node:)?(?:http|https|fetch|net)['"]/m;
 
+/**
+ * Global network APIs that need NO import (#2248): a bare `fetch(`, a
+ * `globalThis|global|window|self.fetch`, or `new XMLHttpRequest|WebSocket|EventSource`.
+ * Import-only scanning let these through, silently breaking invariant 1.
+ * Comment-only lines are skipped; a `.fetch(` on some other object is not matched.
+ * No exemption exists in Tier-0 roots: the sanctioned local-tool-delegation path
+ * (DR-004 Tier 1) lives outside them.
+ */
+const BANNED_GLOBAL_RE =
+  /(?<![\w$.])fetch\s*\(|\b(?:globalThis|global|window|self)\s*\.\s*fetch\b|\bnew\s+(?:XMLHttpRequest|WebSocket|EventSource)\b/;
+
+function isCommentLine(line: string): boolean {
+  const t = line.trim();
+  return t.startsWith('//') || t.startsWith('*') || t.startsWith('/*');
+}
+
 /** Scan every .ts file under `srcRoot` and return one description string per violating line. */
 function scanForBannedImports(srcRoot: string): string[] {
   const violations: string[] = [];
@@ -134,7 +151,7 @@ function scanForBannedImports(srcRoot: string): string[] {
     const lines = content.split('\n');
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      if (BANNED_IMPORT_RE.test(line)) {
+      if (BANNED_IMPORT_RE.test(line) || (!isCommentLine(line) && BANNED_GLOBAL_RE.test(line))) {
         violations.push(`${path.relative(srcRoot, filePath)}:${i + 1}: ${line.trim()}`);
       }
     }
@@ -189,6 +206,29 @@ describe('INV — Tier-0 network-import ban covers every classified workspace sr
       ).toHaveLength(0);
     });
   }
+
+  it('planted global fetch / XMLHttpRequest / WebSocket usages are detected (#2248)', () => {
+    const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'tier0-global-ban-canary-'));
+    try {
+      const cases = [
+        'await fetch("https://api.github.com");',
+        'const r = globalThis.fetch(u);',
+        'const x = new XMLHttpRequest();',
+        'const w = new WebSocket(url);',
+      ];
+      fs.writeFileSync(path.join(fixtureRoot, 'c.ts'), cases.join('\n') + '\n', 'utf-8');
+      expect(scanForBannedImports(fixtureRoot)).toHaveLength(cases.length);
+
+      fs.writeFileSync(
+        path.join(fixtureRoot, 'c.ts'),
+        '// fetch(x) in a comment\nconst a = cache.fetch(k);\nconst s = "WebSocket server";\n',
+        'utf-8',
+      );
+      expect(scanForBannedImports(fixtureRoot)).toHaveLength(0);
+    } finally {
+      fs.rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  });
 
   // Negative control: prove `scanForBannedImports` actually detects a planted
   // violation. This must NOT write into a live, git-tracked `packages/*/src`
