@@ -7,6 +7,7 @@ import {
   analyzeGitDiff,
   buildConsequenceInput,
   expandRenamePath,
+  fsReadFile,
   type ClassificationSignal,
 } from '../src/lib/git-analyzer';
 import type { ChangedFile, ConsequenceInput } from '../src/lib/consequence-analyzers';
@@ -1518,4 +1519,27 @@ describe('staged rename (#1188)', () => {
     expect(f.content).toBe('l1\nl2\nl3\nl4\nl5\nl6\n');
     expect(f.oldContent).toBe('l1\nl2\nl3\nl4\nl5\nl6\n');
   }, 30000);
+});
+
+describe('fsReadFile', () => {
+  it('resolves undefined (does not reject) on an unreadable path', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fsrf-'));
+    try {
+      await expect(fsReadFile(dir)).resolves.toBeUndefined();
+      await expect(fsReadFile(path.join(dir, 'missing.ts'))).resolves.toBeUndefined();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns file content when readable', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fsrf-'));
+    try {
+      const f = path.join(dir, 'a.txt');
+      fs.writeFileSync(f, 'hi');
+      await expect(fsReadFile(f)).resolves.toBe('hi');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

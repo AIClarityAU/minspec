@@ -45,8 +45,8 @@ describe('shepherd_hand_off label split (#3835)', () => {
     expect(run(`7 'x' bogus`).labels).toEqual(['agent-stuck']);
   });
 
-  it('labels a named human decision needs-human-review', () => {
-    expect(run(`7 'conflict' human`).labels).toEqual(['needs-human-review']);
+  it('labels a named human decision needs-human-review plus human-escalated (#4061)', () => {
+    expect(run(`7 'conflict' human`).labels).toEqual(['needs-human-review,human-escalated']);
   });
 
   it('only the conflict call site passes human', () => {

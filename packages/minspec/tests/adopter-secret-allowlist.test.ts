@@ -107,6 +107,8 @@ describe('RECURRENCE GATE: adopters need only the Claude secret (#2982)', () => 
     }
   });
 
+  const exact = (l: string) => new RegExp(`^\\s*${l.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+
   it('an identity secret only chooses the identity: guard env, App-token mint, or a != \'\' boolean', () => {
     const allowed = [
       /^\s*APP_ID: \$\{\{ secrets\.MINSPEC_APP_ID \}\}$/,
@@ -114,6 +116,10 @@ describe('RECURRENCE GATE: adopters need only the Claude secret (#2982)', () => 
       /^\s*app-id: \$\{\{ secrets\.MINSPEC_APP_ID \}\}$/,
       /^\s*private-key: \$\{\{ secrets\.MINSPEC_APP_PRIVATE_KEY \}\}$/,
       /^\s*[A-Z_]+: \$\{\{ secrets\.(MINSPEC_APP_ID|MINSPEC_APP_PRIVATE_KEY) != '' \}\}$/,
+      // #4078: the mint picks the builder or the review App by mode, each mode reading
+      // only its own secrets. Exact lines, so any other use still fails.
+      exact(`app-id: \${{ (steps.guard.outputs.mode == 'review' && secrets.MINSPEC_REVIEW_APP_ID) || (steps.guard.outputs.mode == 'builder' && secrets.MINSPEC_APP_ID) || '' }}`),
+      exact(`private-key: \${{ (steps.guard.outputs.mode == 'review' && secrets.MINSPEC_REVIEW_APP_PRIVATE_KEY) || (steps.guard.outputs.mode == 'builder' && secrets.MINSPEC_APP_PRIVATE_KEY) || '' }}`),
     ];
     let seen = 0;
     for (const t of scaffoldedWorkflows) {

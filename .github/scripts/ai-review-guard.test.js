@@ -4126,3 +4126,168 @@ test('readFailureReason: a rate-limited read says so and names the re-run; any o
     assert.equal(r, 'could not read the head commit — provenance unverifiable until it can be read');
   }
 });
+
+// ─── #4078 — a verdict written with the BUILDER App's token must not count ──────
+//
+// T0. #2589 decided that a second GitHub App, used only by AI review, writes the
+// verdicts, because the builder App (`minspec-sdd`) is handed to every agent session
+// and so anyone holding a session could post a pass. This composes the three
+// witnesses ready-to-merge.yml reads - the label's last applier, the `ai-review/pass`
+// commit status and the `ai-review` check-run - through the same guard functions in
+// the same order, then asks decideStatus whether the head is ready.
+//
+// MUTATION CONTROL (run by hand when this was written, #4078): put this repo back on
+// the single-App config - REVIEW_MODE to '' and REVIEW_LOGINS to 'minspec-sdd[bot]' -
+// and the builder-token case goes green, so the rejection below is the allowlist's
+// doing and not an accident of the fixture. With only REVIEW_LOGINS swapped (mode left
+// at `review`) it stays red, through resolveReviewerAllowlist's builder refusal.
+{
+  const g = require('./ai-review-guard.js');
+  const REVIEW_MODE = 'review';
+  const REVIEW_LOGINS = 'aiclarity-minspec-review[bot]';
+  const HEAD = 'a'.repeat(40);
+  const COMMITTED = '2026-11-26T00:00:00Z';
+  const APPLIED = '2026-11-26T00:10:00Z';
+
+  const headFixture = (slug) => ({
+    labelActor: `${slug}[bot]`,
+    statuses: [
+      {
+        context: g.PASS_STATUS_CONTEXT,
+        state: 'success',
+        created_at: APPLIED,
+        creator: { login: `${slug}[bot]` },
+      },
+    ],
+    checkRuns: [
+      {
+        name: g.CHECK_NAME,
+        head_sha: HEAD,
+        status: 'completed',
+        conclusion: 'success',
+        completed_at: APPLIED,
+        app: { slug },
+      },
+    ],
+  });
+
+  // The same sequence ready-to-merge.yml runs on a `labeled` ai-review:pass event.
+  const decideReady = ({ mode, raw, fixture }) => {
+    const resolved = g.resolveReviewerAllowlist({ mode, raw });
+    if (resolved.fault) return { state: 'failure', description: resolved.fault };
+    const allowlist = resolved.allowlist;
+    const provenance = g.decideProvenanceRevert({
+      action: 'labeled',
+      labelName: g.PASS,
+      senderLogin: fixture.labelActor,
+      allowlist,
+    });
+    const passProvenance = g.verifyPassProvenance({
+      labelActor: fixture.labelActor,
+      labelAppliedAt: APPLIED,
+      headCommittedAt: COMMITTED,
+      allowlist,
+    });
+    const headStatus = g.verifyHeadPassWitness({
+      statuses: fixture.statuses,
+      checkRuns: fixture.checkRuns,
+      allowlist,
+      headSha: HEAD,
+    });
+    return g.decideStatus({
+      labels: [g.PASS],
+      provenanceRevert: provenance.revert,
+      stalenessStrip: false,
+      passProvenance,
+      headStatus,
+    });
+  };
+
+  test('#4078 T0: a pass written entirely by the builder App (label, status, check-run) is NOT ready', () => {
+    const s = decideReady({ mode: REVIEW_MODE, raw: REVIEW_LOGINS, fixture: headFixture('minspec-sdd') });
+    assert.equal(s.state, 'failure');
+  });
+
+  test('#4078 T0: each builder-written witness is refused on its own, not only in combination', () => {
+    const allowlist = g.resolveReviewerAllowlist({ mode: REVIEW_MODE, raw: REVIEW_LOGINS }).allowlist;
+    const f = headFixture('minspec-sdd');
+    assert.equal(
+      g.verifyPassProvenance({ labelActor: f.labelActor, labelAppliedAt: APPLIED, headCommittedAt: COMMITTED, allowlist }).verified,
+      false,
+    );
+    assert.equal(g.verifyHeadPassStatus({ statuses: f.statuses, allowlist }).verified, false);
+    assert.equal(g.verifyHeadPassCheckRun({ checkRuns: f.checkRuns, allowlist, headSha: HEAD }).verified, false);
+    assert.equal(
+      g.decideProvenanceRevert({ action: 'labeled', labelName: g.PASS, senderLogin: f.labelActor, allowlist }).revert,
+      true,
+    );
+  });
+
+  test('#4078 T0: the same fixture written by the review App IS ready', () => {
+    const s = decideReady({ mode: REVIEW_MODE, raw: REVIEW_LOGINS, fixture: headFixture('aiclarity-minspec-review') });
+    assert.equal(s.state, 'success');
+  });
+
+  test('#4078: unset AI_REVIEW_APP keeps the shipped single-App default (DR-054 scaffold impact)', () => {
+    const r = g.resolveReviewerAllowlist({ mode: undefined, raw: 'minspec-sdd[bot]' });
+    assert.deepEqual(r, { mode: 'builder', allowlist: ['minspec-sdd[bot]'], fault: '' });
+    assert.equal(g.SHIPPED_REVIEWER_LOGIN, 'minspec-sdd[bot]');
+    // ...and on that default the builder-written fixture is a valid pass, exactly as before.
+    assert.equal(decideReady({ mode: '', raw: 'minspec-sdd[bot]', fixture: headFixture('minspec-sdd') }).state, 'success');
+  });
+
+  test('#4078: review mode refuses an allowlist that still names the builder App, in either spelling', () => {
+    for (const raw of ['minspec-sdd[bot]', 'aiclarity-minspec-review[bot], minspec-sdd', 'MINSPEC-SDD[BOT]']) {
+      const r = g.resolveReviewerAllowlist({ mode: 'review', raw });
+      assert.deepEqual(r.allowlist, [], raw);
+      assert.match(r.fault, /still names the builder App/, raw);
+    }
+  });
+
+  test('#4078: review mode with an empty allowlist is a named fault, not a quiet empty list', () => {
+    const r = g.resolveReviewerAllowlist({ mode: 'review', raw: '  ' });
+    assert.deepEqual(r.allowlist, []);
+    assert.match(r.fault, /is empty/);
+  });
+
+  test('#4078: an unknown AI_REVIEW_APP value fails closed and never falls back to the builder', () => {
+    for (const mode of ['reveiw', 'both', 'true']) {
+      const r = g.resolveReviewerAllowlist({ mode, raw: 'minspec-sdd[bot]' });
+      assert.deepEqual(r.allowlist, [], mode);
+      assert.match(r.fault, /neither `review` nor unset/, mode);
+    }
+    assert.equal(
+      decideReady({ mode: 'reveiw', raw: 'minspec-sdd[bot]', fixture: headFixture('minspec-sdd') }).state,
+      'failure',
+    );
+  });
+
+  test('#4078: mode is matched case- and space-insensitively', () => {
+    const r = g.resolveReviewerAllowlist({ mode: ' Review ', raw: REVIEW_LOGINS });
+    assert.equal(r.fault, '');
+    assert.deepEqual(r.allowlist, ['aiclarity-minspec-review[bot]']);
+  });
+
+  test('#4078: resolveReviewerFromEnv applies the workflows\' own default, then the same rule', () => {
+    // The workflows pass `vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]'`: unset and
+    // EMPTY both take the default; a caller outside a workflow must get the same answer.
+    for (const env of [{}, { AI_REVIEW_BOT_LOGINS: '' }, { AI_REVIEW_APP: 'builder' }, undefined]) {
+      assert.deepEqual(g.resolveReviewerFromEnv(env), { mode: 'builder', allowlist: ['minspec-sdd[bot]'], fault: '' });
+    }
+    const configs = [
+      { AI_REVIEW_APP: 'review', AI_REVIEW_BOT_LOGINS: REVIEW_LOGINS },
+      { AI_REVIEW_APP: 'review' },
+      { AI_REVIEW_APP: 'review', AI_REVIEW_BOT_LOGINS: 'minspec-sdd[bot]' },
+      { AI_REVIEW_APP: 'reveiw', AI_REVIEW_BOT_LOGINS: REVIEW_LOGINS },
+    ];
+    for (const env of configs) {
+      assert.deepEqual(
+        g.resolveReviewerFromEnv(env),
+        g.resolveReviewerAllowlist({ mode: env.AI_REVIEW_APP, raw: env.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]' }),
+        JSON.stringify(env),
+      );
+    }
+    // Review mode with the logins variable unset is refused (the default names the builder).
+    assert.deepEqual(g.resolveReviewerFromEnv({ AI_REVIEW_APP: 'review' }).allowlist, []);
+  });
+}

@@ -101,7 +101,7 @@ function stepLines(source: string, stepName: string): string[] {
 }
 
 /** Runs the ai-review.yml guard step with the given secrets; returns its outputs + log. */
-function runGuardStep(secrets: { oauth?: string; appId?: string; appKey?: string }) {
+function runGuardStep(secrets: { oauth?: string; appId?: string; appKey?: string; mode?: string; reviewAppId?: string; reviewAppKey?: string }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'identity-guard-'));
   scratch.push(dir);
   const out = path.join(dir, 'out');
@@ -113,6 +113,9 @@ function runGuardStep(secrets: { oauth?: string; appId?: string; appKey?: string
       OAUTH_TOKEN: secrets.oauth ?? '',
       APP_ID: secrets.appId ?? '',
       APP_KEY: secrets.appKey ?? '',
+      REVIEW_APP_MODE: secrets.mode ?? '',
+      REVIEW_APP_ID: secrets.reviewAppId ?? '',
+      REVIEW_APP_KEY: secrets.reviewAppKey ?? '',
     },
     encoding: 'utf-8',
   });
@@ -133,6 +136,8 @@ async function runCtx(o: {
   eventName: 'pull_request' | 'workflow_run';
   hasAppId: boolean;
   hasAppKey: boolean;
+  /** The evaluated `vars.AI_REVIEW_APP == '' || == 'builder'` boolean (#4078); default builder. */
+  builderMode?: boolean;
   runPrs?: Array<{ number: number }>;
   prRead?: Record<string, unknown> | Error;
 }) {
@@ -177,7 +182,7 @@ async function runCtx(o: {
       failed = m;
     },
   };
-  const proc = { env: { HAS_APP_ID: String(o.hasAppId), HAS_APP_KEY: String(o.hasAppKey) } };
+  const proc = { env: { HAS_APP_ID: String(o.hasAppId), HAS_APP_KEY: String(o.hasAppKey), REVIEW_BUILDER_MODE: String(o.builderMode ?? true) } };
   const fn = new AsyncFunction('github', 'context', 'core', 'process', stepScalar(RTM, CTX_STEP, 'script'));
   await fn(github, context, core, proc);
   return { log, outputs, notices, warnings, failed: failed as string | null };
@@ -327,6 +332,33 @@ describe('R1 parity - ready-to-merge ctx decides the same identity as the ai-rev
     const ctx = await runCtx({ eventName: 'pull_request', hasAppId, hasAppKey });
     expect(ctx.outputs.identity).toBe(guard.outputs.identity);
     expect(ctx.outputs).toMatchObject({ proceed: 'true', pr_number: '7', base_sha: BASE });
+  });
+
+  // #4078 review mode: the review App always posts (or the run fails), so neither side may
+  // ever pick the GITHUB_TOKEN arm there, whatever the builder App secrets are.
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])('AI_REVIEW_APP=review, builder appId=%s appKey=%s -> app on both sides', async (hasAppId, hasAppKey) => {
+    const guard = runGuardStep({
+      oauth: SHAPE,
+      mode: 'review',
+      reviewAppId: '9',
+      reviewAppKey: SHAPE,
+      appId: hasAppId ? '1' : '',
+      appKey: hasAppKey ? SHAPE : '',
+    });
+    const ctx = await runCtx({ eventName: 'pull_request', hasAppId, hasAppKey, builderMode: false });
+    expect(guard.outputs.identity).toBe('app');
+    expect(ctx.outputs.identity).toBe('app');
+  });
+
+  it('AI_REVIEW_APP=review without the review secrets fails the guard red, never the GITHUB_TOKEN arm', () => {
+    const guard = runGuardStep({ oauth: SHAPE, mode: 'review' });
+    expect(guard.code).not.toBe(0);
+    expect(guard.outputs.identity).toBeUndefined();
   });
 });
 

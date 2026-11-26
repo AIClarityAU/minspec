@@ -66,9 +66,23 @@
 # the PR is from this repository (never a fork), it touches no machinery path
 # (`.github/`, `scripts/`, … — the guard's MACHINERY_PATH_RE, so a PR cannot add a
 # workflow that posts a fake pass), its file list was read in full, and
-# `AI_REVIEW_BOT_LOGINS` is unset (an explicit list is used as written). A label
+# `AI_REVIEW_BOT_LOGINS` is unset (an explicit list is used as written), and
+# `AI_REVIEW_APP` is not `review` (the review-only App below never widens). A label
 # made with GITHUB_TOKEN triggers no `labeled` run, so the `workflow_run` trigger
 # below re-evaluates the gate when a review completes.
+#
+# ── OPTIONAL — a review-only App (#4078) ─────────────────────────────────────
+# By default the App that posts the verdicts is the same one your build agents use,
+# so anything holding that App's token can post a pass. To close that, create a
+# second App used ONLY by ai-review.yml, put its id and key in the Actions secrets
+# `MINSPEC_REVIEW_APP_ID` / `MINSPEC_REVIEW_APP_PRIVATE_KEY`, then set BOTH variables:
+#   - `AI_REVIEW_BOT_LOGINS` = that App's login alone, e.g. `my-review-app[bot]`
+#   - `AI_REVIEW_APP` = `review`
+# With `AI_REVIEW_APP=review` this gate refuses an allowlist that still names
+# `minspec-sdd[bot]` (red, with the reason), and ai-review.yml fails visibly if the
+# review secrets are missing - it never falls back to the builder App. If your branch
+# ruleset pins the required `ai-review` check to an App, re-pin it to the review App
+# in the same sitting, or every pull request waits on a check no App can now post.
 #
 # ── REQUIRED MANUAL STEP 2 — make the gate enforcing ─────────────────────────
 # A workflow file cannot make itself gating. Add `ready-to-merge` as a *required
@@ -153,7 +167,8 @@ jobs:
       # `pull_request`: straight from the payload. `workflow_run` (FR7): the PR named by
       # the completed review run, read fresh from the API so the gate evaluates its
       # CURRENT head against its CURRENT base. Identity mirrors ai-review.yml's guard
-      # step (a test binds the two): both App secrets set → `app`, otherwise `actions`.
+      # step (a test binds the two): review mode, or both App secrets set → `app`,
+      # otherwise `actions`.
       # Only booleans reach this step, never a secret value. Every later step runs only
       # when `proceed` is true.
       - name: Resolve the pull request and reviewer identity
@@ -162,10 +177,18 @@ jobs:
         env:
           HAS_APP_ID: ${{ secrets.MINSPEC_APP_ID != '' }}
           HAS_APP_KEY: ${{ secrets.MINSPEC_APP_PRIVATE_KEY != '' }}
+          REVIEW_BUILDER_MODE: ${{ vars.AI_REVIEW_APP == '' || vars.AI_REVIEW_APP == 'builder' }}
         with:
           script: |
+            // #4078: any AI_REVIEW_APP other than unset/`builder` is never the GITHUB_TOKEN
+            // arm (ai-review.yml uses the review App or fails), so it reads as `app`.
+            // (an expression boolean, not the variable itself; anything unexpected reads
+            // as not-builder, which is the strict side: never the widening arm).
+            const builderMode = process.env.REVIEW_BUILDER_MODE === 'true';
             const identity =
-              process.env.HAS_APP_ID === 'true' && process.env.HAS_APP_KEY === 'true' ? 'app' : 'actions';
+              !builderMode || (process.env.HAS_APP_ID === 'true' && process.env.HAS_APP_KEY === 'true')
+                ? 'app'
+                : 'actions';
             core.setOutput('identity', identity);
             core.setOutput('proceed', 'false');
             const { owner, repo } = context.repo;
@@ -262,6 +285,11 @@ jobs:
           AI_REVIEW_BOT_LOGINS_VAR_SET: ${{ vars.AI_REVIEW_BOT_LOGINS != '' }}
           REVIEW_IDENTITY: ${{ steps.ctx.outputs.identity }}
           PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
+          # #4078 - which App writes the verdicts. Unset = the shipped single-App default
+          # above. `review` = a second App used only by ai-review.yml; the guard then
+          # REFUSES an allowlist that still names `minspec-sdd[bot]` and fails this gate
+          # closed with that reason (guard.resolveReviewerAllowlist).
+          AI_REVIEW_APP: ${{ vars.AI_REVIEW_APP }}
         with:
           script: |
             const path = require('path');
@@ -325,13 +353,53 @@ jobs:
             // The just-added label (labeled events) and the actor who added it.
             const addedLabel = context.payload.label && context.payload.label.name;
             const senderLogin = context.payload.sender && context.payload.sender.login;
+            // #4078 - resolve WHO may write a verdict. A misconfiguration (review mode
+            // with the builder App still allowlisted, an empty list, or an unknown
+            // AI_REVIEW_APP value) is posted red with its reason and stops here: the
+            // gate fails closed and visibly, never on a guessed allowlist. A base guard
+            // that predates #4078 cannot honour review mode, so a request for it fails
+            // closed too rather than silently trusting the builder.
+            const failClosed = async (why) => {
+              core.error(`ready-to-merge: ${why}`);
+              await github.rest.repos.createCommitStatus({
+                owner,
+                repo,
+                sha: pr.head.sha,
+                state: 'failure',
+                context: 'ready-to-merge',
+                description: why.length > 140 ? `${why.slice(0, 139)}…` : why,
+              });
+            };
+            let allowlist;
+            if (typeof guard.resolveReviewerAllowlist === 'function') {
+              const resolved = guard.resolveReviewerAllowlist({
+                mode: process.env.AI_REVIEW_APP,
+                raw: process.env.AI_REVIEW_BOT_LOGINS,
+              });
+              if (resolved.fault) {
+                await failClosed(resolved.fault);
+                return;
+              }
+              allowlist = resolved.allowlist;
+            } else {
+              const mode = String(process.env.AI_REVIEW_APP || '').trim().toLowerCase();
+              if (mode !== '' && mode !== 'builder') {
+                await failClosed(
+                  'AI_REVIEW_APP is set but the base guard predates #4078 and cannot resolve it',
+                );
+                return;
+              }
+              allowlist = guard.parseAllowlist(process.env.AI_REVIEW_BOT_LOGINS);
+            }
             // ── SPEC-268 FR5/FR6 — the reviewer allowlist ─────────────────────
             // Without the MinSpec App, reviews post as github-actions[bot]. The trusted
             // base guard widens the list to that login only for a same-repo PR that
             // touches no machinery path, and only while AI_REVIEW_BOT_LOGINS is unset.
             // A base guard that predates SPEC-268 has no effectiveAllowlist: the list
             // stays exactly as configured (strict, never loose).
-            let allowlist = guard.parseAllowlist(process.env.AI_REVIEW_BOT_LOGINS);
+            // Runs AFTER the #4078 resolution above, so a misconfigured review mode has
+            // already failed closed; in review mode ctx reports identity `app`, so this
+            // never widens there.
             if (typeof guard.effectiveAllowlist === 'function' && process.env.REVIEW_IDENTITY === 'actions') {
               const headRepo = pr.head && pr.head.repo && pr.head.repo.full_name;
               let touchesMachinery; // undefined ⇒ unknown ⇒ never widens
@@ -759,7 +827,8 @@ jobs:
                   `allowlisted reviewer identity re-applies it after a real review.\n\n` +
                   `Owner: the allowlist defaults to \`minspec-sdd[bot]\`. If you run ` +
                   `your own review App, set the \`AI_REVIEW_BOT_LOGINS\` Actions variable ` +
-                  `to its login (see \`.github/workflows/ready-to-merge.yml\`).`,
+                  `to its login and \`AI_REVIEW_APP\` to \`review\` ` +
+                  `(see \`.github/workflows/ready-to-merge.yml\`).`,
               );
               await removePass();
             } else if (staleness.strip) {

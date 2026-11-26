@@ -2,7 +2,8 @@
 #
 # Runs the credential-free independent reviewer over a PR's diff and posts the
 # verdict + applies the `ai-review:pass` / `ai-review:changes` label AS THE
-# `minspec-sdd[bot]` GitHub App — giving the label bot-PROVENANCE, the root that
+# reviewer GitHub App (`minspec-sdd[bot]` by default; a review-only App when the
+# AI_REVIEW_APP variable is `review`, #4078) — giving the label bot-PROVENANCE, the root that
 # makes auto-merge-on-`ai-review:pass` safe (#428). This is the "dedicated
 # reviewer identity" the ready-to-merge.yml header calls out as the missing piece:
 # until now the label was applied by a human account, so its provenance could only
@@ -164,6 +165,17 @@
 #      else is `failure` and actually blocks — the runner's own
 #      `ai-review-runner` job is not the signal). Deliberately NOT done here
 #      (ruleset config is a human/HITL action, not this workflow's).
+#   4. OPTIONAL, a review-only App (#4078): the builder App's token reaches every
+#      agent session, so with one App anything holding a session can post a pass.
+#      Create a second App with Checks / Commit statuses / Issues / Pull requests
+#      read-and-write and nothing else, put its id and RAW PEM in the secrets
+#      `MINSPEC_REVIEW_APP_ID` / `MINSPEC_REVIEW_APP_PRIVATE_KEY`, then in ONE sitting:
+#      set `AI_REVIEW_BOT_LOGINS` to that App's login alone, set `AI_REVIEW_APP` to
+#      `review`, and re-pin the required `ai-review` check in the ruleset to the new
+#      App's id (read-modify-write the whole ruleset). Between the variable and the
+#      re-pin no pull request can pass `ai-review`, so keep that gap to seconds, and
+#      re-run ai-review on open pull requests afterwards: their old verdicts were
+#      written by the builder App and no longer count.
 
 # NOTE — why this workflow is `ai-review-runner`, not `ai-review`:
 # GitHub Actions posts one implicit check-run per JOB, named after the job, whose
@@ -216,30 +228,56 @@ jobs:
       # never a failure. Keeps this workflow safe to merge before the credentials
       # exist and safe against fork PRs.
       #
-      # SPEC-268 (#2982): ONLY the Claude secret gates the review. The two MinSpec App
-      # secrets choose the identity the review writes with, decided here once:
-      #   identity=app      both App secrets set → every write uses the App token and
-      #                     posts as minspec-sdd[bot], exactly as before.
-      #   identity=actions  otherwise → every write uses the built-in GITHUB_TOKEN and
-      #                     posts as github-actions[bot]. Exactly one App secret set is
-      #                     a half-configured App: reported with a warning, never
-      #                     silently treated as configured.
-      # ready-to-merge.yml decides the same mode in its `ctx` step; a test binds the two.
+      # SPEC-268 (#2982): ONLY the Claude secret gates the review. Which identity the
+      # review writes with is decided here once, in two steps.
+      #
+      # #4078 — WHICH App. `vars.AI_REVIEW_APP` unset (or `builder`) is the shipped
+      # single-App default: the builder App's `MINSPEC_APP_*` secrets. `review` selects a
+      # second App used ONLY here (`MINSPEC_REVIEW_APP_*`), so the builder App every agent
+      # session can obtain can no longer post a verdict that counts. In `review` mode a
+      # missing review secret is a visible FAILURE, never a skip and never a fall-back to
+      # the builder App or to GITHUB_TOKEN (constitution invariant 2); an unknown
+      # AI_REVIEW_APP value fails the same way.
+      #
+      # SPEC-268 — App or GITHUB_TOKEN, in builder mode only:
+      #   identity=app      review mode, or both builder App secrets set → every write
+      #                     uses the App token (minspec-sdd[bot] in builder mode).
+      #   identity=actions  builder mode without both App secrets → every write uses the
+      #                     built-in GITHUB_TOKEN and posts as github-actions[bot]. Exactly
+      #                     one App secret set is a half-configured App: reported with a
+      #                     warning, never silently treated as configured.
+      # ready-to-merge.yml decides the same identity in its `ctx` step; a test binds the two.
       - name: Check reviewer is configured (skip cleanly if not)
         id: guard
         env:
           OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          REVIEW_APP_MODE: ${{ vars.AI_REVIEW_APP }}
           APP_ID: ${{ secrets.MINSPEC_APP_ID }}
           APP_KEY: ${{ secrets.MINSPEC_APP_PRIVATE_KEY }}
+          REVIEW_APP_ID: ${{ secrets.MINSPEC_REVIEW_APP_ID }}
+          REVIEW_APP_KEY: ${{ secrets.MINSPEC_REVIEW_APP_PRIVATE_KEY }}
         run: |
           set -eu
+          mode="$(printf '%s' "${REVIEW_APP_MODE:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+          case "$mode" in
+            ''|builder) mode=builder ;;
+            review) ;;
+            *)
+              echo "::error title=AI reviewer misconfigured::The AI_REVIEW_APP variable is '${mode}', which is neither 'review' nor unset. Refusing to guess which App posts the verdict (#4078)."
+              exit 1 ;;
+          esac
+          if [ "$mode" = "review" ] && { [ -z "${REVIEW_APP_ID}" ] || [ -z "${REVIEW_APP_KEY}" ]; }; then
+            echo "::error title=Review App not configured::AI_REVIEW_APP is 'review' but the MINSPEC_REVIEW_APP_ID / MINSPEC_REVIEW_APP_PRIVATE_KEY secrets are not both set. The verdict is never posted with the builder App or GITHUB_TOKEN instead (#4078); add the secrets or unset AI_REVIEW_APP."
+            exit 1
+          fi
+          echo "mode=${mode}" >> "$GITHUB_OUTPUT"
           if [ -z "${OAUTH_TOKEN}" ]; then
             echo "::notice title=AI reviewer not configured::Add the CLAUDE_CODE_OAUTH_TOKEN repo secret to activate the independent AI reviewer (the MinSpec App secrets are optional). Skipping — this is NOT a failure."
             echo "configured=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "configured=true" >> "$GITHUB_OUTPUT"
-          if [ -n "${APP_ID}" ] && [ -n "${APP_KEY}" ]; then
+          if [ "$mode" = "review" ] || { [ -n "${APP_ID}" ] && [ -n "${APP_KEY}" ]; }; then
             echo "identity=app" >> "$GITHUB_OUTPUT"
           else
             if [ -n "${APP_ID}" ]; then
@@ -252,16 +290,23 @@ jobs:
             echo "identity=actions" >> "$GITHUB_OUTPUT"
           fi
 
-      # Mint the App installation token → the actor for every post/label below is
-      # `minspec-sdd[bot]`. Needs the RAW PEM in MINSPEC_APP_PRIVATE_KEY. Only in the
-      # App arm (SPEC-268); the Actions arm writes with github.token instead.
+      # STEP NAMES that say `as minspec-sdd[bot]` are kept verbatim: gate manifests and
+      # tests address these steps by name. They mean "as the reviewer App", which is
+      # `minspec-sdd[bot]` unless AI_REVIEW_APP=review (#4078).
+      # Mint the App installation token → the actor for every post/label below is the
+      # reviewer App: `minspec-sdd[bot]` by default, the review-only App when
+      # AI_REVIEW_APP=review (#4078). Needs the RAW PEM in the private-key secret. Only
+      # in the App arm (SPEC-268); the Actions arm writes with github.token instead.
+      # Each mode reads ONLY its own secrets: the expression has no `||` path from a
+      # missing review secret to the builder's, so an empty review secret mints
+      # nothing and fails this step (the guard above already refused it).
       - name: Mint GitHub App token (post as minspec-sdd[bot])
         id: app-token
         if: steps.guard.outputs.identity == 'app'
         uses: actions/create-github-app-token@f2acddfb5195534d487896a656232b016a682f3c # v1.9.0
         with:
-          app-id: ${{ secrets.MINSPEC_APP_ID }}
-          private-key: ${{ secrets.MINSPEC_APP_PRIVATE_KEY }}
+          app-id: ${{ (steps.guard.outputs.mode == 'review' && secrets.MINSPEC_REVIEW_APP_ID) || (steps.guard.outputs.mode == 'builder' && secrets.MINSPEC_APP_ID) || '' }}
+          private-key: ${{ (steps.guard.outputs.mode == 'review' && secrets.MINSPEC_REVIEW_APP_PRIVATE_KEY) || (steps.guard.outputs.mode == 'builder' && secrets.MINSPEC_APP_PRIVATE_KEY) || '' }}
 
       # TOCTOU guard (partial). `cancel-in-progress` means a superseded
       # `ai-review:pass` from an earlier commit can linger while this run re-reviews
@@ -383,6 +428,9 @@ jobs:
           # Same default as ready-to-merge.yml (DR-054): the reviewer identity is a
           # product constant, the variable an enterprise override.
           AI_REVIEW_BOT_LOGINS: ${{ vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]' }}
+          # #4078 — resolved through the guard, so review mode never carries a round
+          # the builder App posted (a refused allowlist carries nothing: full review).
+          AI_REVIEW_APP: ${{ vars.AI_REVIEW_APP }}
         run: |
           # No `-e`, on purpose: see FAIL TOWARD REVIEWING above.
           set +e
@@ -446,7 +494,9 @@ jobs:
                 lsTree: read("tree.txt"),
                 coverage: process.env.AI_REVIEW_COVERAGE || "",
                 checkRunsJson: read("checks.json"),
-                allowlistRaw: process.env.AI_REVIEW_BOT_LOGINS || "",
+                allowlistRaw: typeof g.resolveReviewerAllowlist === "function"
+                  ? g.resolveReviewerAllowlist({ mode: process.env.AI_REVIEW_APP, raw: process.env.AI_REVIEW_BOT_LOGINS }).allowlist.join(",")
+                  : (String(process.env.AI_REVIEW_APP || "").trim() === "" ? (process.env.AI_REVIEW_BOT_LOGINS || "") : ""),
               });
             }
             const carry = plan.carry === true && typeof plan.comment === "string" && plan.comment !== "";
@@ -1002,7 +1052,7 @@ jobs:
                 echo "</details>"
               fi
               echo
-              echo "_Posted by \`minspec-sdd[bot]\`. Transient/quota failures are surfaced as \`ai-review:blocked\` (distinct from \`ai-review:changes\`) so a token outage never masquerades as a code-review verdict._"
+              echo "_Posted by the reviewer App. Transient/quota failures are surfaced as \`ai-review:blocked\` (distinct from \`ai-review:changes\`) so a token outage never masquerades as a code-review verdict._"
             else
               if [ "$SELF_EDIT" = "yes" ]; then
                 if [ "$SELF_EDIT_KIND" = "machinery" ]; then
@@ -1091,7 +1141,7 @@ jobs:
                 COVERAGE_NOTE="⚠️ **Reduced coverage** — \`AI_REVIEW_COVERAGE=$COVERAGE\`. Voters that ran: **$RAN_VOTERS**.$SKIPPED_NOTE A \`pass\` here is weaker evidence than a full-panel pass; unset the repo variable to restore the \`panel\` default."
               fi
               # <<< coverage-disclosure
-              echo "_Independent fresh-context reviewers (\`scripts/review-branch.sh\`, no-tools agents reading the diff as untrusted data); each label decided by the deterministic fail-closed gate (\`scripts/review-decide.sh\`). Posted by \`minspec-sdd[bot]\` from CI — provenance is the App identity, verified here, not the label alone (#428, #342). $COVERAGE_NOTE The combined verdict fails toward \`changes\` if ANY voter requests changes._"
+              echo "_Independent fresh-context reviewers (\`scripts/review-branch.sh\`, no-tools agents reading the diff as untrusted data); each label decided by the deterministic fail-closed gate (\`scripts/review-decide.sh\`). Posted by the reviewer App from CI — provenance is the App identity, verified here, not the label alone (#428, #342). $COVERAGE_NOTE The combined verdict fails toward \`changes\` if ANY voter requests changes._"
             fi
           } > "$BODY"
           echo "body-file=$BODY" >> "$GITHUB_OUTPUT"
@@ -1267,7 +1317,7 @@ jobs:
           # POST the check-run on the PR head SHA as the bot. Best-effort: a failure
           # (e.g. the App lacks `checks: write`) must NOT red the run.
           if ! gh api -X POST "repos/$REPO/check-runs" --input "$BODY" >/dev/null; then
-            echo "::warning title=ai-review check not posted::Posting the ai-review verdict check-run failed (grant the minspec-sdd App \`checks: write\`). The label/comment remain authoritative."
+            echo "::warning title=ai-review check not posted::Posting the ai-review verdict check-run failed (grant the reviewer App \`checks: write\`). The label/comment remain authoritative."
           fi
           exit 0
 
@@ -1335,7 +1385,7 @@ jobs:
           # POST as the bot. Best-effort: a failure (e.g. missing `checks: write`) must
           # NOT red the run — ready-to-merge independently holds a machinery PR.
           if ! gh api -X POST "repos/$REPO/check-runs" --input "$BODY" >/dev/null; then
-            echo "::warning title=machinery-review-required check not posted::Posting failed (grant the minspec-sdd App \`checks: write\`). \`ready-to-merge\` remains the load-bearing hold."
+            echo "::warning title=machinery-review-required check not posted::Posting failed (grant the reviewer App \`checks: write\`). \`ready-to-merge\` remains the load-bearing hold."
           fi
           exit 0
 
@@ -1434,7 +1484,7 @@ jobs:
             -f state="$PASS_STATE" \
             -f context="ai-review/pass" \
             -f description="$PASS_DESC" >/dev/null 2>&1; then
-            echo "::warning title=ai-review/pass status not posted::Could not post the \`ai-review/pass\` commit status on $PR_HEAD_SHA (usually a missing \`statuses: write\` permission on the minspec-sdd App installation — grant it). The SHA-bound pass witness now falls back to the \`ai-review\` check-run (#810); the gate is not a false green either way."
+            echo "::warning title=ai-review/pass status not posted::Could not post the \`ai-review/pass\` commit status on $PR_HEAD_SHA (usually a missing \`statuses: write\` permission on the reviewer App installation — grant it). The SHA-bound pass witness now falls back to the \`ai-review\` check-run (#810); the gate is not a false green either way."
           fi
 
           # >>> verdict-label-coherence
@@ -1630,7 +1680,7 @@ jobs:
             echo "::error::App token unavailable (mint failed) — cannot post as the bot. Failing red; no spurious pass."
             exit 1
           fi
-          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$(printf '## 🤖 AI review — `ai-review:changes` (fail-closed)\n\nThe AI review workflow errored before producing a clean verdict, so it is requesting changes. This is a fail-closed default — an error must never yield a green. See the [workflow run](%s).\n\n_Posted by minspec-sdd[bot]._' "$RUN_URL")"
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$(printf '## 🤖 AI review — `ai-review:changes` (fail-closed)\n\nThe AI review workflow errored before producing a clean verdict, so it is requesting changes. This is a fail-closed default — an error must never yield a green. See the [workflow run](%s).\n\n_Posted by the reviewer App._' "$RUN_URL")"
           gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "ai-review:changes"
           # #1468 — clear EVERY other verdict label, not just pass + pending. A PR
           # sitting on `ai-review:blocked` when the workflow errored used to keep that
