@@ -133,7 +133,13 @@
 #   1. Add the `CLAUDE_CODE_OAUTH_TOKEN` repo secret (`claude setup-token`) — a
 #      genuine-CLI subscription OAuth token, per DR-052 (NOT the Agent SDK, NOT a
 #      broker). Until it exists, this workflow SKIPS with a notice (never reds).
-#   2. Confirm `MINSPEC_APP_PRIVATE_KEY` is the RAW PEM (create-github-app-token
+#      That is the ONLY required secret (SPEC-268, #2982).
+#   2. OPTIONAL — the MinSpec App. With NEITHER `MINSPEC_APP_ID` nor
+#      `MINSPEC_APP_PRIVATE_KEY` set, every write below uses the built-in
+#      GITHUB_TOKEN and posts as `github-actions[bot]`; ready-to-merge.yml trusts that
+#      identity only in a repo without the App, only on same-repo, non-machinery PRs,
+#      and only while `AI_REVIEW_BOT_LOGINS` is unset (DR-115). With BOTH set:
+#      confirm `MINSPEC_APP_PRIVATE_KEY` is the RAW PEM (create-github-app-token
 #      needs raw, not base64), and the App is installed on the repo with
 #      `pull-requests: write` + `issues: write` (labels/comments use the issues
 #      API) + `checks: write` (the honest `ai-review` verdict check-run) +
@@ -178,11 +184,19 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
-# Least privilege for the workflow's OWN token: it only needs to read code to
-# check out. All PR posting/labelling uses the App token (steps.app-token), never
-# this GITHUB_TOKEN — that is what gives the label its bot provenance.
+# The workflow's OWN token. In the App arm (both MinSpec App secrets set) every PR
+# post/label uses the App token (steps.app-token), never this GITHUB_TOKEN — that is
+# what gives the label its minspec-sdd[bot] provenance. In the Actions arm (SPEC-268,
+# no App) the same writes use this token, so it carries exactly the scopes they need.
+# Every write step selects its token through ONE expression:
+#   steps.guard.outputs.identity == 'actions' && github.token || steps.app-token.outputs.token
+# so the App arm never silently falls back to this token.
 permissions:
   contents: read
+  pull-requests: write
+  issues: write
+  checks: write
+  statuses: write
 
 # One review in flight per PR; a new push supersedes the previous run.
 concurrency:
@@ -201,6 +215,16 @@ jobs:
       # output. Empty (unset secret, or a fork PR) → skip the rest with a NOTICE,
       # never a failure. Keeps this workflow safe to merge before the credentials
       # exist and safe against fork PRs.
+      #
+      # SPEC-268 (#2982): ONLY the Claude secret gates the review. The two MinSpec App
+      # secrets choose the identity the review writes with, decided here once:
+      #   identity=app      both App secrets set → every write uses the App token and
+      #                     posts as minspec-sdd[bot], exactly as before.
+      #   identity=actions  otherwise → every write uses the built-in GITHUB_TOKEN and
+      #                     posts as github-actions[bot]. Exactly one App secret set is
+      #                     a half-configured App: reported with a warning, never
+      #                     silently treated as configured.
+      # ready-to-merge.yml decides the same mode in its `ctx` step; a test binds the two.
       - name: Check reviewer is configured (skip cleanly if not)
         id: guard
         env:
@@ -209,18 +233,31 @@ jobs:
           APP_KEY: ${{ secrets.MINSPEC_APP_PRIVATE_KEY }}
         run: |
           set -eu
-          if [ -z "${OAUTH_TOKEN}" ] || [ -z "${APP_ID}" ] || [ -z "${APP_KEY}" ]; then
-            echo "::notice title=AI reviewer not configured::Add the CLAUDE_CODE_OAUTH_TOKEN and MINSPEC_APP_ID / MINSPEC_APP_PRIVATE_KEY repo secrets to activate the independent AI reviewer. Skipping — this is NOT a failure."
+          if [ -z "${OAUTH_TOKEN}" ]; then
+            echo "::notice title=AI reviewer not configured::Add the CLAUDE_CODE_OAUTH_TOKEN repo secret to activate the independent AI reviewer (the MinSpec App secrets are optional). Skipping — this is NOT a failure."
             echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+          if [ -n "${APP_ID}" ] && [ -n "${APP_KEY}" ]; then
+            echo "identity=app" >> "$GITHUB_OUTPUT"
           else
-            echo "configured=true" >> "$GITHUB_OUTPUT"
+            if [ -n "${APP_ID}" ]; then
+              echo "::warning title=MinSpec App half-configured::MINSPEC_APP_PRIVATE_KEY is missing, so the App cannot be used. Reviews post with GITHUB_TOKEN as github-actions[bot]."
+            elif [ -n "${APP_KEY}" ]; then
+              echo "::warning title=MinSpec App half-configured::MINSPEC_APP_ID is missing, so the App cannot be used. Reviews post with GITHUB_TOKEN as github-actions[bot]."
+            else
+              echo "::notice title=Reviewing with GITHUB_TOKEN::App secrets absent: using GITHUB_TOKEN (reviews post as github-actions[bot])."
+            fi
+            echo "identity=actions" >> "$GITHUB_OUTPUT"
           fi
 
       # Mint the App installation token → the actor for every post/label below is
-      # `minspec-sdd[bot]`. Needs the RAW PEM in MINSPEC_APP_PRIVATE_KEY.
+      # `minspec-sdd[bot]`. Needs the RAW PEM in MINSPEC_APP_PRIVATE_KEY. Only in the
+      # App arm (SPEC-268); the Actions arm writes with github.token instead.
       - name: Mint GitHub App token (post as minspec-sdd[bot])
         id: app-token
-        if: steps.guard.outputs.configured == 'true'
+        if: steps.guard.outputs.identity == 'app'
         uses: actions/create-github-app-token@f2acddfb5195534d487896a656232b016a682f3c # v1.9.0
         with:
           app-id: ${{ secrets.MINSPEC_APP_ID }}
@@ -238,7 +275,7 @@ jobs:
       - name: Clear stale pass at run start (mark pending) as minspec-sdd[bot]
         if: steps.guard.outputs.configured == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.guard.outputs.identity == 'actions' && github.token || steps.app-token.outputs.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
@@ -334,7 +371,7 @@ jobs:
         if: steps.guard.outputs.configured == 'true'
         continue-on-error: true
         env:
-          CARRY_GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          CARRY_GH_TOKEN: ${{ steps.guard.outputs.identity == 'actions' && github.token || steps.app-token.outputs.token }}
           REPO: ${{ github.repository }}
           # GitHub-assigned values, passed as data. Never PR-controlled text.
           EVENT_ACTION: ${{ github.event.action }}
@@ -1090,7 +1127,7 @@ jobs:
       - name: Post honest `ai-review` verdict check-run as minspec-sdd[bot]
         if: always() && steps.guard.outputs.configured == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.guard.outputs.identity == 'actions' && github.token || steps.app-token.outputs.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           # Our own gate's output (`ai-review:pass` / `ai-review:changes`), NOT any
@@ -1241,7 +1278,7 @@ jobs:
       - name: Post `machinery-review-required` human-gate check as minspec-sdd[bot]
         if: always() && steps.guard.outputs.configured == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.guard.outputs.identity == 'actions' && github.token || steps.app-token.outputs.token }}
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           # Our own gate's machinery predicate (SELF_EDIT_KIND == "machinery"), reused
@@ -1295,7 +1332,7 @@ jobs:
       - name: Post verdict + apply label as minspec-sdd[bot]
         if: steps.guard.outputs.configured == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.guard.outputs.identity == 'actions' && github.token || steps.app-token.outputs.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           # #466 — the EXACT SHA this review evaluated, for the SHA-bound pass status.
@@ -1568,7 +1605,7 @@ jobs:
       - name: Fail closed — request changes as minspec-sdd[bot] on any error
         if: failure() && steps.guard.outputs.configured == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.guard.outputs.identity == 'actions' && github.token || steps.app-token.outputs.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

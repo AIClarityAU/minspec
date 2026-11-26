@@ -26,7 +26,7 @@ import {
   probeGhAvailability,
   resolveCheckContexts,
   listRequiredCheckContexts,
-  probeReviewerConfigured,
+  probeReviewerIdentity,
   updateRulesetRequiredChecks,
   resolveTieredRequiredChecks,
   detectCodeChecks,
@@ -787,12 +787,13 @@ export function resolveRequiredChecks(): string[] {
  * Probe the repo + resolve the FULL producible required-check set for it (#564 /
  * SPEC-033 FR-3). Never requires a check the repo cannot yet produce (the #559
  * deadlock): Tier-A (`ai-review`/`ready-to-merge`) only when their workflow files
- * are scaffolded AND ALL the reviewer secrets are configured; Tier-B (`lint`/`test`/
+ * are scaffolded AND the reviewer's gating secret is configured (SPEC-268: the
+ * Claude secret only; the App secrets choose the posting identity); Tier-B (`lint`/`test`/
  * `build`) only when `package.json` has a runnable script; plus the user's
  * `minspec.ruleset.requiredChecks` extras.
  *
  * Network posture (Tier-0): the fs reads are local; the reviewer-secret-NAMES
- * probe ({@link probeReviewerConfigured}) is an AUTONOMOUS read-only GET of the
+ * probe ({@link probeReviewerIdentity}) is an AUTONOMOUS read-only GET of the
  * repo's OWN Actions-secret NAMES (never values) — the same read-only-config
  * class as the rulesets probe, egressing nothing. It runs here in the detection
  * path with NO consent toast in front of it, on the same basis as
@@ -805,7 +806,7 @@ async function resolveWantedChecks(
   owner: string,
   repo: string,
   run: CommandRunner,
-): Promise<string[]> {
+): Promise<{ wanted: string[]; reviewerNote: string }> {
   const hasWorkflow = (file: string): boolean =>
     fs.existsSync(path.join(folder, '.github', 'workflows', file));
   let scripts: Record<string, unknown> | null = null;
@@ -815,14 +816,28 @@ async function resolveWantedChecks(
   } catch {
     scripts = null;
   }
-  const reviewerConfigured = await probeReviewerConfigured(owner, repo, run);
-  return resolveTieredRequiredChecks({
+  // ONE secret-NAMES read answers both questions (SPEC-268 FR8): may the Tier-A checks
+  // be required, and which identity will the review post as.
+  const reviewer = await probeReviewerIdentity(owner, repo, run);
+  const wanted = resolveTieredRequiredChecks({
     aiReviewWorkflowScaffolded: hasWorkflow('ai-review.yml'),
     readyToMergeWorkflowScaffolded: hasWorkflow('ready-to-merge.yml'),
-    reviewerConfigured,
+    reviewerConfigured: reviewer.configured,
     codeChecks: detectCodeChecks(scripts),
     userChecks: resolveRequiredChecks(),
   });
+  return { wanted, reviewerNote: reviewer.configured ? reviewer.sentence : '' };
+}
+
+/**
+ * Append the reviewer identity sentence (SPEC-268 FR8) to a ruleset message when the
+ * checks it names include a Tier-A review check, so the user reads which identity the
+ * gate will trust. Absence of the App is reported, never a failure.
+ */
+function withReviewerNote(message: string, checks: readonly string[], note: string): string {
+  if (!note) return message;
+  if (!checks.some((c) => c === AI_REVIEW_CHECK || c === READY_TO_MERGE_CHECK)) return message;
+  return `${message} ${note}`;
 }
 
 /**
@@ -906,7 +921,7 @@ async function linkRulesetDocs(
  *
  * Why the probes are autonomous: `probeGhAvailability`, `hasRequiredChecksRuleset`
  * / `listRequiredCheckContexts`, and the
- * reviewer-secret-NAMES probe ({@link probeReviewerConfigured}, via
+ * reviewer-secret-NAMES probe ({@link probeReviewerIdentity}, via
  * {@link resolveWantedChecks}) are all read-only capability probes + GETs of the
  * repo's OWN configuration — they egress no user artifacts, spec content, secret
  * VALUES, or telemetry (the same class as MinSpec shelling `git fetch`). Per
@@ -996,9 +1011,10 @@ export async function offerRulesetAdvisory(
     // The WANTED producible check set. `deps.requiredChecks` overrides (tests /
     // explicit set); else probe the repo + resolve the tiered set (#564) so we
     // only ever require checks the repo can actually PRODUCE (no #559 deadlock).
-    const wanted = deps.requiredChecks
-      ? [...deps.requiredChecks]
+    const resolved = deps.requiredChecks
+      ? { wanted: [...deps.requiredChecks], reviewerNote: '' }
       : await resolveWantedChecks(folder, owner, name, run);
+    const wanted = resolved.wanted;
 
     // AUTO-PROBE (read-only config GET) — runs autonomously, NO consent toast.
     // A GET of the repo's OWN rulesets egresses no user data (same class as
@@ -1016,8 +1032,12 @@ export async function offerRulesetAdvisory(
       // No ruleset at all → offer to CREATE with the full wanted set. The click
       // IS the consent for the mutation (DR-050).
       const choice = await vscode.window.showInformationMessage(
-        `MinSpec: ${repo} has no branch ruleset requiring CI checks ` +
-          `(${wanted.join(' + ')}) on its default branch. Create one?`,
+        withReviewerNote(
+          `MinSpec: ${repo} has no branch ruleset requiring CI checks ` +
+            `(${wanted.join(' + ')}) on its default branch. Create one?`,
+          wanted,
+          resolved.reviewerNote,
+        ),
         RULESET_CREATE_ACTION,
         RULESET_DECLINE_ACTION,
         RULESET_LEARN_MORE_ACTION,
@@ -1051,8 +1071,12 @@ export async function offerRulesetAdvisory(
       ? 'so a PR could merge without the AI-review gate'
       : 'so a PR could merge without full CI coverage';
     const choice = await vscode.window.showInformationMessage(
-      `MinSpec: ${repo}'s branch ruleset does not require ${missing.join(' + ')}` +
-        ` — ${consequence}. Add ${missing.length === 1 ? 'it' : 'them'}?`,
+      withReviewerNote(
+        `MinSpec: ${repo}'s branch ruleset does not require ${missing.join(' + ')}` +
+          ` — ${consequence}. Add ${missing.length === 1 ? 'it' : 'them'}?`,
+        missing,
+        resolved.reviewerNote,
+      ),
       RULESET_ADD_ACTION,
       RULESET_DECLINE_ACTION,
       RULESET_LEARN_MORE_ACTION,

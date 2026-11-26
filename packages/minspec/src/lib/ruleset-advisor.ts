@@ -413,12 +413,13 @@ export interface TieredRequiredCheckInputs {
   readonly readyToMergeWorkflowScaffolded: boolean;
   /**
    * The reviewer pipeline is OPERATIONAL — ALL of {@link REVIEWER_SECRETS}
-   * (CLAUDE_CODE_OAUTH_TOKEN + the App's id AND private key) are configured, so
-   * ai-review.yml/ready-to-merge.yml actually post their checks/verdict. Defaults to
+   * (since SPEC-268, only CLAUDE_CODE_OAUTH_TOKEN; the App secrets choose the posting
+   * identity, not whether it posts) are configured, so ai-review.yml/ready-to-merge.yml
+   * actually post their checks/verdict. Defaults to
    * FALSE (fail-safe): a Tier-A check is never made required until the caller affirms
    * the repo can produce a pass, so a naive caller can never mint a deadlocking
    * ruleset. The affirmation comes from {@link probeReviewerConfigured} (secret NAMES
-   * only, all three), which the init/refresh caller runs AUTONOMOUSLY in the detection
+   * only, the whole gating set), which the init/refresh caller runs AUTONOMOUSLY in the detection
    * path — a read-only GET of the repo's OWN config, authorised by DR-050 (Amendment
    * 2026-07-16), on the same basis as the autonomous rulesets probe.
    */
@@ -719,23 +720,33 @@ export async function listRequiredCheckContexts(
 /**
  * The repo Actions secrets the scaffolded `ai-review.yml` requires before it will
  * run the independent reviewer and post the `ai-review` check. Its guard step
- * (`if [ -z "$OAUTH_TOKEN" ] || [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]`) skips the
- * WHOLE workflow — posting a NOTICE and NO check-run — unless ALL THREE are set:
+ * (`if [ -z "${OAUTH_TOKEN}" ]`) skips the WHOLE workflow — posting a NOTICE and NO
+ * check-run — unless it is set:
  *
  *   - `CLAUDE_CODE_OAUTH_TOKEN` — the inference credential for `claude -p`.
- *   - `MINSPEC_APP_ID`          — the GitHub App that posts/labels as the bot.
- *   - `MINSPEC_APP_PRIVATE_KEY` — the App's PEM; the token mint fails without it.
+ *
+ * SPEC-268 (#2982): the MinSpec App secrets no longer gate the review; they only
+ * choose the identity it writes with — see {@link REVIEWER_IDENTITY_SECRETS}.
  *
  * Kept as the SINGLE SOURCE OF TRUTH so {@link probeReviewerConfigured} can never
  * drift from the workflow's guard again — the #559 deadlock this whole probe exists
  * to prevent (see the regression test). If `ai-review.yml`'s required secrets ever
- * change, change them HERE.
+ * change, change them HERE. The adopter-secret allowlist test fails if anything
+ * beyond the Claude secret is added.
  */
-export const REVIEWER_SECRETS = [
-  'CLAUDE_CODE_OAUTH_TOKEN',
-  'MINSPEC_APP_ID',
-  'MINSPEC_APP_PRIVATE_KEY',
-] as const;
+export const REVIEWER_SECRETS = ['CLAUDE_CODE_OAUTH_TOKEN'] as const;
+
+/**
+ * Secrets that choose the reviewer's GitHub IDENTITY, never whether it runs
+ * (SPEC-268 FR2/FR8). Both set → the App token, posting as `minspec-sdd[bot]`.
+ * Otherwise → the built-in `GITHUB_TOKEN`, posting as `github-actions[bot]`; exactly
+ * one set is a half-configured App, reported by name.
+ *
+ * Deliberately NOT part of {@link REVIEWER_SECRETS}: folding them back in would make
+ * every adopter without the App read as "reviewer not configured" and drop the Tier-A
+ * checks from the required set, the regression #2982 removes.
+ */
+export const REVIEWER_IDENTITY_SECRETS = ['MINSPEC_APP_ID', 'MINSPEC_APP_PRIVATE_KEY'] as const;
 
 /**
  * Secrets `ai-review.yml` REFERENCES but does not GATE on — present, the reviewer
@@ -764,9 +775,10 @@ export const REVIEWER_OPTIONAL_SECRETS = ['ANTHROPIC_API_KEY'] as const;
 /**
  * Is the reviewer pipeline OPERATIONAL on the repo — are the secrets that make
  * `ai-review.yml`/`ready-to-merge.yml` actually post a pass present? Checks that
- * EVERY secret in {@link REVIEWER_SECRETS} (`CLAUDE_CODE_OAUTH_TOKEN`,
- * `MINSPEC_APP_ID`, AND `MINSPEC_APP_PRIVATE_KEY`) is present in the repo's Actions
- * secrets (NAMES only — never values). This is the {@link
+ * EVERY secret in {@link REVIEWER_SECRETS} (today only `CLAUDE_CODE_OAUTH_TOKEN`,
+ * SPEC-268) is present in the repo's Actions secrets (NAMES only — never values).
+ * The MinSpec App secrets do not count: without them the review posts with
+ * `GITHUB_TOKEN` and the merge gate trusts that identity (DR-115). This is the {@link
  * TieredRequiredCheckInputs.reviewerConfigured} guard: never require a Tier-A check
  * the repo cannot yet produce (the #559 deadlock). Fail-safe: any read failure ⇒
  * `false` ⇒ the Tier-A checks stay OUT of the required set.
@@ -775,7 +787,10 @@ export const REVIEWER_OPTIONAL_SECRETS = ['ANTHROPIC_API_KEY'] as const;
  * bug) reported "configured" while `MINSPEC_APP_PRIVATE_KEY` was still absent — so
  * `ai-review` was made a REQUIRED check, but the workflow's own guard skipped and
  * NEVER posted it, blocking every merge. The check set here MUST equal the
- * workflow's guard set, hence the shared {@link REVIEWER_SECRETS} constant.
+ * workflow's guard set, hence the shared {@link REVIEWER_SECRETS} constant. Since
+ * SPEC-268 that guard set is the Claude secret alone, and the scaffolded workflows
+ * post with GITHUB_TOKEN when the App secrets are absent, so a repo without the App
+ * CAN produce the checks.
  *
  * NETWORK POSTURE — AUTONOMOUS read-only config probe. This is a `gh api GET
  * repos/{owner}/{repo}/actions/secrets` read of the repo's OWN secret NAMES (never
@@ -792,24 +807,83 @@ export async function probeReviewerConfigured(
   repo: string,
   run: CommandRunner,
 ): Promise<boolean> {
+  return (await probeReviewerIdentity(owner, repo, run)).configured;
+}
+
+/** Which identity the scaffolded review writes with (SPEC-268 FR2). */
+export type ReviewerIdentity = 'app' | 'actions' | 'unknown';
+
+/** What one read of the repo's secret NAMES says about the reviewer (SPEC-268 FR8). */
+export interface ReviewerProbe {
+  /** Every {@link REVIEWER_SECRETS} name is present: the review runs. */
+  readonly configured: boolean;
+  /** `unknown` only when the names could not be read. */
+  readonly identity: ReviewerIdentity;
+  /** The {@link REVIEWER_IDENTITY_SECRETS} names absent from a half-configured App. */
+  readonly missingIdentitySecrets: readonly string[];
+  /** The identity mode in words, for the user; empty when it could not be read. */
+  readonly sentence: string;
+}
+
+/**
+ * Pure: the reviewer state a set of secret NAMES implies. Mirrors the scaffolded
+ * `ai-review.yml` guard step exactly (a test runs both over the same states).
+ */
+export function describeReviewerSecrets(names: ReadonlySet<string>): ReviewerProbe {
+  const configured = REVIEWER_SECRETS.every((name) => names.has(name));
+  const present = REVIEWER_IDENTITY_SECRETS.filter((name) => names.has(name));
+  const missing = REVIEWER_IDENTITY_SECRETS.filter((name) => !names.has(name));
+  if (missing.length === 0) {
+    return {
+      configured,
+      identity: 'app',
+      missingIdentitySecrets: [],
+      sentence: 'MinSpec App configured: reviews post as minspec-sdd[bot].',
+    };
+  }
+  if (present.length === 0) {
+    return {
+      configured,
+      identity: 'actions',
+      missingIdentitySecrets: [],
+      sentence: 'App secrets absent: using GITHUB_TOKEN (reviews post as github-actions[bot]).',
+    };
+  }
+  return {
+    configured,
+    identity: 'actions',
+    missingIdentitySecrets: missing,
+    sentence: `${missing.join(', ')} missing: App half-configured, using GITHUB_TOKEN (reviews post as github-actions[bot]).`,
+  };
+}
+
+/**
+ * ONE read-only `gh api` GET of the repo's Actions secret NAMES (never values),
+ * answering both "does the review run" and "which identity does it post as". Same
+ * network posture as {@link probeReviewerConfigured}, which is a view of this.
+ * Fail-safe: any read failure ⇒ `configured: false`, `identity: 'unknown'`.
+ */
+export async function probeReviewerIdentity(
+  owner: string,
+  repo: string,
+  run: CommandRunner,
+): Promise<ReviewerProbe> {
+  const unknown: ReviewerProbe = { configured: false, identity: 'unknown', missingIdentitySecrets: [], sentence: '' };
   const res = await runSafe(run, 'gh', [
     'api',
     `repos/${owner}/${repo}/actions/secrets`,
     '--jq',
     '[.secrets[].name]',
   ]);
-  if (res.code !== 0) return false;
+  if (res.code !== 0) return unknown;
   let names: unknown;
   try {
     names = JSON.parse(res.stdout);
   } catch {
-    return false;
+    return unknown;
   }
-  if (!Array.isArray(names)) return false;
-  const set = new Set(names.filter((n): n is string => typeof n === 'string'));
-  // ALL THREE secrets the ai-review.yml guard requires must be present, or the
-  // workflow skips (posts a NOTICE, no `ai-review` check) — see REVIEWER_SECRETS.
-  return REVIEWER_SECRETS.every((name) => set.has(name));
+  if (!Array.isArray(names)) return unknown;
+  return describeReviewerSecrets(new Set(names.filter((n): n is string => typeof n === 'string')));
 }
 
 /** Outcome of adding missing contexts to an existing ruleset. */

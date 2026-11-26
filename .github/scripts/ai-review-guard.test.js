@@ -22,6 +22,9 @@ const {
   wholeCheckRunListing,
   CHECK_RUNS_PAGE_SIZE,
   parseAllowlist,
+  effectiveAllowlist,
+  FALLBACK_REVIEWER_LOGIN,
+  pathsTouchMachinery,
   isAuthorizedReviewer,
   decideProvenanceRevert,
   decideStalenessStrip,
@@ -75,6 +78,40 @@ test('parseAllowlist: unset/empty yields an empty list (authorizes nobody)', () 
   assert.deepEqual(parseAllowlist(undefined), []);
   assert.deepEqual(parseAllowlist(''), []);
   assert.deepEqual(parseAllowlist('   , \n '), []);
+});
+
+// ── SPEC-268: effectiveAllowlist + pathsTouchMachinery ───────────────────────
+test('effectiveAllowlist: widens with github-actions[bot] only for a no-App, same-repo, non-machinery PR with no operator list', () => {
+  const ok = { raw: 'minspec-sdd[bot]', identity: 'actions', varSet: false, isFork: false, touchesMachinery: false };
+  const r = effectiveAllowlist(ok);
+  assert.equal(FALLBACK_REVIEWER_LOGIN, 'github-actions[bot]');
+  assert.deepEqual(r.allowlist, ['minspec-sdd[bot]', 'github-actions[bot]']);
+  assert.equal(r.widened, true);
+  for (const delta of [
+    { identity: 'app' },
+    { identity: undefined },
+    { varSet: true },
+    { varSet: undefined },
+    { isFork: true },
+    { isFork: undefined },
+    { touchesMachinery: true },
+    { touchesMachinery: undefined },
+  ]) {
+    const n = effectiveAllowlist({ ...ok, ...delta });
+    assert.deepEqual(n.allowlist, ['minspec-sdd[bot]'], JSON.stringify(delta));
+    assert.equal(n.widened, false);
+  }
+  assert.deepEqual(effectiveAllowlist().allowlist, []);
+});
+
+test('pathsTouchMachinery: same MACHINERY_PATH_RE as the diff predicate, failing toward true', () => {
+  assert.equal(pathsTouchMachinery(['src/a.ts', 'docs/b.md'], 2), false);
+  assert.equal(pathsTouchMachinery(['src/a.ts', '.github/workflows/x.yml'], 2), true);
+  assert.equal(pathsTouchMachinery(['scripts/x.sh']), true);
+  assert.equal(pathsTouchMachinery([]), true);
+  assert.equal(pathsTouchMachinery(undefined), true);
+  assert.equal(pathsTouchMachinery(['src/a.ts'], 3), true);
+  assert.equal(pathsTouchMachinery(['src/a.ts', null]), true);
 });
 
 // ── isAuthorizedReviewer ─────────────────────────────────────────────────────

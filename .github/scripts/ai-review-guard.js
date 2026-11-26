@@ -1197,6 +1197,60 @@ function inputTouchesMachinery(inputText) {
 }
 
 /**
+ * Does a pull request's changed-file list touch machinery? (SPEC-268 FR6) The same
+ * MACHINERY_PATH_RE as {@link inputTouchesMachinery}, applied to the file names the
+ * pulls API returns, so there is one predicate, not a second hand-written copy.
+ *
+ * FAIL TOWARD "yes": a missing or empty list, a non-string entry, or a list shorter than
+ * `expectedCount` (the API caps the listing; `pr.changed_files` says how many there are)
+ * is machinery, because a gate that cannot see every path must not widen anything.
+ */
+function pathsTouchMachinery(paths, expectedCount) {
+  if (!Array.isArray(paths) || paths.length === 0) return true;
+  if (typeof expectedCount === 'number' && paths.length < expectedCount) return true;
+  for (const p of paths) {
+    if (typeof p !== 'string' || p === '') return true;
+    if (MACHINERY_PATH_RE.test(p)) return true;
+  }
+  return false;
+}
+
+// SPEC-268 - the identity GITHUB_TOKEN writes carry: labels, statuses, comments as this
+// login, check-runs under the `github-actions` App slug (matched by `slug[bot]`).
+const FALLBACK_REVIEWER_LOGIN = 'github-actions[bot]';
+
+/**
+ * The reviewer allowlist the merge gate applies (SPEC-268 FR5/FR6).
+ *
+ * The parsed AI_REVIEW_BOT_LOGINS list, widened by {@link FALLBACK_REVIEWER_LOGIN} ONLY
+ * when every one of these holds; anything else (including a missing or unexpected value)
+ * leaves the list exactly as configured:
+ *   - `identity === 'actions'`   the repo has no MinSpec App, so reviews post as
+ *                                github-actions[bot];
+ *   - `varSet === false`         no operator-set AI_REVIEW_BOT_LOGINS (an explicit list is
+ *                                never widened behind its owner's back);
+ *   - `isFork === false`         a fork run reads every secret as empty, which would
+ *                                otherwise read as `actions`;
+ *   - `touchesMachinery === false` a PR touching `.github/` or `scripts/` could add a
+ *                                workflow that posts a fake pass as github-actions.
+ */
+function effectiveAllowlist({ raw, identity, varSet, isFork, touchesMachinery } = {}) {
+  const allowlist = parseAllowlist(raw);
+  let reason;
+  if (identity !== 'actions') reason = 'reviewer identity is not the GITHUB_TOKEN fallback';
+  else if (varSet !== false) reason = 'AI_REVIEW_BOT_LOGINS is set explicitly; it is used as written';
+  else if (isFork !== false) reason = 'fork pull request (or head repository unknown)';
+  else if (touchesMachinery !== false) reason = 'the pull request touches machinery paths, or its file list could not be read in full';
+  if (reason) return { allowlist, widened: false, reason };
+  if (!allowlist.includes(FALLBACK_REVIEWER_LOGIN)) allowlist.push(FALLBACK_REVIEWER_LOGIN);
+  return {
+    allowlist,
+    widened: true,
+    reason: `no MinSpec App configured: reviews post as ${FALLBACK_REVIEWER_LOGIN}, so it is trusted for this pull request`,
+  };
+}
+
+/**
  * May the verdict on the previous head be carried to this one? (#1688)
  *
  * Deny by default: every path that is not the one carry returns `{ carry: false,
@@ -2229,6 +2283,7 @@ module.exports = {
   latestHeadRound,
   decideVerdictCarry,
   inputTouchesMachinery,
+  pathsTouchMachinery,
   MACHINERY_PATH_RE,
   renderCarriedComment,
   carriedLabelFault,
@@ -2241,6 +2296,8 @@ module.exports = {
   renderVerdictBlock,
   parseCliVerdict,
   parseAllowlist,
+  effectiveAllowlist,
+  FALLBACK_REVIEWER_LOGIN,
   isAuthorizedReviewer,
   decideProvenanceRevert,
   decideStalenessStrip,

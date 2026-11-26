@@ -30,6 +30,7 @@ import * as path from 'node:path';
 import {
   REVIEWER_SECRETS,
   REVIEWER_OPTIONAL_SECRETS,
+  REVIEWER_IDENTITY_SECRETS,
   probeReviewerConfigured,
   type CommandRunner,
 } from '../src/lib/ruleset-advisor';
@@ -67,7 +68,9 @@ describe('ENFORCE: reviewer-secret set — probe ⟷ ai-review.yml cannot drift 
   // so the binding is against the union. The anti-drift property is unchanged: an
   // undeclared `secrets.X` still fails here. What changed is that declaring one now
   // forces an explicit choice between "gating" and "optional".
-  const expected = [...REVIEWER_SECRETS, ...REVIEWER_OPTIONAL_SECRETS].sort();
+  // SPEC-268: the MinSpec App secrets are a third declared category, identity - they
+  // choose who the review posts as, never whether it runs.
+  const expected = [...REVIEWER_SECRETS, ...REVIEWER_OPTIONAL_SECRETS, ...REVIEWER_IDENTITY_SECRETS].sort();
 
   it('ai-review.yml consumes EXACTLY the declared secrets (bidirectional — the 2-of-3 guard)', () => {
     // If the workflow ADDS a gating secret, the probe must gain it (else false-positive
@@ -76,9 +79,9 @@ describe('ENFORCE: reviewer-secret set — probe ⟷ ai-review.yml cannot drift 
     expect(secretsReferenced(workflow)).toEqual(expected);
   });
 
-  it('the gating and optional sets are DISJOINT, and the probe ignores the optional one', () => {
+  it('the gating, optional and identity sets are DISJOINT, and the probe ignores the non-gating ones', () => {
     const gating = new Set<string>(REVIEWER_SECRETS);
-    for (const opt of REVIEWER_OPTIONAL_SECRETS) {
+    for (const opt of [...REVIEWER_OPTIONAL_SECRETS, ...REVIEWER_IDENTITY_SECRETS]) {
       // Not merely "the current value is absent" — this is the invariant that keeps an
       // optional secret from silently becoming a producibility precondition.
       expect(gating.has(opt)).toBe(false);

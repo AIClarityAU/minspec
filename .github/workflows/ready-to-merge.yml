@@ -58,6 +58,18 @@
 # Until this variable is set, the allowlist is empty and EVERY `ai-review:pass`
 # is treated as unverifiable → never green (fail closed).
 #
+# ── NO MINSPEC APP (SPEC-268, #2982, DR-115) ─────────────────────────────────
+# The MinSpec App secrets (`MINSPEC_APP_ID`, `MINSPEC_APP_PRIVATE_KEY`) are
+# OPTIONAL; `CLAUDE_CODE_OAUTH_TOKEN` is the only required secret. Without both App
+# secrets, ai-review.yml posts with the built-in GITHUB_TOKEN as
+# `github-actions[bot]`, and this gate trusts that login too, but ONLY when all hold:
+# the PR is from this repository (never a fork), it touches no machinery path
+# (`.github/`, `scripts/`, … — the guard's MACHINERY_PATH_RE, so a PR cannot add a
+# workflow that posts a fake pass), its file list was read in full, and
+# `AI_REVIEW_BOT_LOGINS` is unset (an explicit list is used as written). A label
+# made with GITHUB_TOKEN triggers no `labeled` run, so the `workflow_run` trigger
+# below re-evaluates the gate when a review completes.
+#
 # ── REQUIRED MANUAL STEP 2 — make the gate enforcing ─────────────────────────
 # A workflow file cannot make itself gating. Add `ready-to-merge` as a *required
 # status check* in Settings → Branches → branch protection for `main`. Until
@@ -66,14 +78,15 @@
 #
 # ── SECURITY ─────────────────────────────────────────────────────────────────
 # SELF-FORGE DEFENCE (load-bearing): the checkout is pinned to the TRUSTED BASE
-# commit (`pull_request.base.sha`), NOT the PR head/merge ref. The step below
+# commit (`pull_request.base.sha`, or under `workflow_run` the PR's current base read
+# from the API by the `ctx` step), NOT the PR head/merge ref. The step below
 # `require`s `.github/scripts/ai-review-guard.js` from the checked-out tree and
 # that module IS the security decision — so if it were taken from the PR's own
 # tree, a same-repo PR (which gets a read-write GITHUB_TOKEN) could edit the guard
 # to always return success and self-post a green `ready-to-merge`, a strictly
 # easier forge than the label trick this guard exists to block. Pinning to the
 # base runs the base branch's guard, immune to any edit the PR makes. The job
-# fails closed if `pull_request.base.sha` is absent, or if the base guard cannot
+# fails closed if the base SHA is absent, or if the base guard cannot
 # be loaded (e.g. before the branch that introduces the module is merged).
 #
 # No untrusted input (label names, actor logins, timestamps, PR title/body/branch)
@@ -94,6 +107,19 @@ on:
     # Every `pull_request` event carries `pull_request.base.sha`, which the
     # self-forge defence pins the checkout to (see SECURITY above).
     types: [opened, synchronize, reopened, labeled, unlabeled]
+  # SPEC-268 FR7 (#2982): re-evaluate when a review finishes. In a repo without the
+  # MinSpec App the reviewer labels with GITHUB_TOKEN, and GitHub creates no workflow
+  # run for a token-made event, so the `labeled` trigger above never fires after a
+  # pass. `workflow_run` is the documented exception path: it runs from the DEFAULT
+  # branch's copy of this file, never the PR's. It re-evaluates in BOTH arms, reading
+  # the PR fresh from the API: it shares the per-PR concurrency group below, where
+  # GitHub cancels an older PENDING run when a newer one queues, so a run here that
+  # posted nothing in the App arm could cancel a queued `labeled`/`synchronize` run
+  # and leave the status unwritten (SPEC-268 design R3, D2). Caveat: it fires only
+  # once this file is on the default branch.
+  workflow_run:
+    workflows: [ai-review-runner]
+    types: [completed]
 
 # ── CONCURRENCY (#1973) ──────────────────────────────────────────────────────
 # This workflow is the SINGLE writer of the `ready-to-merge` status (see above),
@@ -109,7 +135,7 @@ on:
 # guaranteed to re-trigger. Queueing costs latency on a busy PR; cancelling can
 # strand it. Fail-closed means the status must always get written.
 concurrency:
-  group: ready-to-merge-${{ github.event.pull_request.number }}
+  group: ready-to-merge-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
   cancel-in-progress: false
 
 permissions:
@@ -123,6 +149,71 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
+      # SPEC-268 — which pull request, which trusted base, which reviewer identity.
+      # `pull_request`: straight from the payload. `workflow_run` (FR7): the PR named by
+      # the completed review run, read fresh from the API so the gate evaluates its
+      # CURRENT head against its CURRENT base. Identity mirrors ai-review.yml's guard
+      # step (a test binds the two): both App secrets set → `app`, otherwise `actions`.
+      # Only booleans reach this step, never a secret value. Every later step runs only
+      # when `proceed` is true.
+      - name: Resolve the pull request and reviewer identity
+        id: ctx
+        uses: actions/github-script@v7
+        env:
+          HAS_APP_ID: ${{ secrets.MINSPEC_APP_ID != '' }}
+          HAS_APP_KEY: ${{ secrets.MINSPEC_APP_PRIVATE_KEY != '' }}
+        with:
+          script: |
+            const identity =
+              process.env.HAS_APP_ID === 'true' && process.env.HAS_APP_KEY === 'true' ? 'app' : 'actions';
+            core.setOutput('identity', identity);
+            core.setOutput('proceed', 'false');
+            const { owner, repo } = context.repo;
+
+            if (context.eventName !== 'workflow_run') {
+              const pr = context.payload.pull_request;
+              core.setOutput('pr_number', String(pr.number));
+              core.setOutput('base_sha', (pr.base && pr.base.sha) || '');
+              core.setOutput('proceed', 'true');
+              return;
+            }
+
+            // Both arms re-evaluate (design R3): this run may have cancelled a queued
+            // `labeled`/`synchronize` run in the shared group, so it must write.
+            const run = context.payload.workflow_run || {};
+            const named = Array.isArray(run.pull_requests) ? run.pull_requests : [];
+            if (named.length === 0) {
+              core.notice(
+                'The completed ai-review run names no pull request in this repository (fork, or not a PR run); nothing to re-evaluate.',
+              );
+              return;
+            }
+            const number = named[0].number;
+            let pr;
+            try {
+              ({ data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number }));
+            } catch (e) {
+              const description = `could not read PR #${number} to re-evaluate after review — fail closed`;
+              await github.rest.repos.createCommitStatus({
+                owner,
+                repo,
+                sha: run.head_sha,
+                state: 'failure',
+                context: 'ready-to-merge',
+                description,
+              });
+              core.setFailed(`${description}: ${e.message}`);
+              return;
+            }
+            const headRepo = pr.head && pr.head.repo && pr.head.repo.full_name;
+            if (pr.state !== 'open' || headRepo !== `${owner}/${repo}`) {
+              core.notice(`PR #${number} is ${pr.state === 'open' ? 'from a fork' : pr.state}; nothing to re-evaluate.`);
+              return;
+            }
+            core.setOutput('pr_number', String(number));
+            core.setOutput('base_sha', (pr.base && pr.base.sha) || '');
+            core.setOutput('proceed', 'true');
+
       # ── Fail closed if we cannot pin the checkout to a trusted base commit ──
       # The guard script is `require`d from the checked-out tree and IS the
       # security decision, so it must come from the trusted base — never the PR's
@@ -132,8 +223,9 @@ jobs:
       # (not interpolated into the script body) — injection-safe, and it is a
       # GitHub-assigned commit id, not attacker free-text.
       - name: Require a trusted base commit
+        if: steps.ctx.outputs.proceed == 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ steps.ctx.outputs.base_sha }}
         run: |
           if [ -z "$BASE_SHA" ]; then
             echo "::error::No pull_request.base.sha to pin the checkout — refusing to run the guard against an unpinned tree (fail closed)."
@@ -145,11 +237,13 @@ jobs:
       # file cannot influence its own gate (self-forge defence, see SECURITY).
       # persist-credentials:false keeps the token out of git config (never pushes).
       - uses: actions/checkout@v5
+        if: steps.ctx.outputs.proceed == 'true'
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ steps.ctx.outputs.base_sha }}
           persist-credentials: false
 
       - name: Enforce ai-review label integrity and reflect the merge gate
+        if: steps.ctx.outputs.proceed == 'true'
         uses: actions/github-script@v7
         env:
           # Built-in token; scoped by the permissions block above.
@@ -164,11 +258,21 @@ jobs:
           # is retained ONLY as the enterprise override, for a customer running their
           # own App under their own bot login.
           AI_REVIEW_BOT_LOGINS: ${{ vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]' }}
+          # SPEC-268 FR5: an operator-set list is used as written, never widened.
+          AI_REVIEW_BOT_LOGINS_VAR_SET: ${{ vars.AI_REVIEW_BOT_LOGINS != '' }}
+          REVIEW_IDENTITY: ${{ steps.ctx.outputs.identity }}
+          PR_NUMBER: ${{ steps.ctx.outputs.pr_number }}
         with:
           script: |
             const path = require('path');
-            const pr = context.payload.pull_request;
             const { owner, repo } = context.repo;
+            // SPEC-268 FR7: under `workflow_run` there is no PR in the payload; read it
+            // fresh so the gate evaluates the CURRENT head, labels and body. A failed
+            // read throws: the run goes red and the PR keeps its last (red) status.
+            const reevaluate = context.eventName === 'workflow_run';
+            const pr = reevaluate
+              ? (await github.rest.pulls.get({ owner, repo, pull_number: Number(process.env.PR_NUMBER) })).data
+              : context.payload.pull_request;
 
             // ── Load the guard from the TRUSTED BASE tree (self-forge defence) ─
             // If it is missing/unreadable — e.g. before the branch that adds the
@@ -214,12 +318,54 @@ jobs:
                     })
                 : (what, fn) => fn();
 
-            const action = context.payload.action;
+            // `reevaluate` matches no provenance-revert or staleness rule: a finished
+            // review is not a label event and not a push.
+            const action = reevaluate ? 'reevaluate' : context.payload.action;
             const labels = (pr.labels || []).map((l) => l.name);
             // The just-added label (labeled events) and the actor who added it.
             const addedLabel = context.payload.label && context.payload.label.name;
             const senderLogin = context.payload.sender && context.payload.sender.login;
-            const allowlist = guard.parseAllowlist(process.env.AI_REVIEW_BOT_LOGINS);
+            // ── SPEC-268 FR5/FR6 — the reviewer allowlist ─────────────────────
+            // Without the MinSpec App, reviews post as github-actions[bot]. The trusted
+            // base guard widens the list to that login only for a same-repo PR that
+            // touches no machinery path, and only while AI_REVIEW_BOT_LOGINS is unset.
+            // A base guard that predates SPEC-268 has no effectiveAllowlist: the list
+            // stays exactly as configured (strict, never loose).
+            let allowlist = guard.parseAllowlist(process.env.AI_REVIEW_BOT_LOGINS);
+            if (typeof guard.effectiveAllowlist === 'function' && process.env.REVIEW_IDENTITY === 'actions') {
+              const headRepo = pr.head && pr.head.repo && pr.head.repo.full_name;
+              let touchesMachinery; // undefined ⇒ unknown ⇒ never widens
+              try {
+                const files = await withRetry('changed files read', () =>
+                  github.paginate(github.rest.pulls.listFiles, {
+                    owner,
+                    repo,
+                    pull_number: pr.number,
+                    per_page: 100,
+                  }),
+                );
+                const paths = [];
+                for (const f of files) {
+                  paths.push(f.filename);
+                  if (f.previous_filename) paths.push(f.previous_filename);
+                }
+                touchesMachinery = guard.pathsTouchMachinery(
+                  paths,
+                  typeof pr.changed_files === 'number' ? pr.changed_files : undefined,
+                );
+              } catch (e) {
+                core.warning(`could not read the changed files of #${pr.number}: ${e.message} — not trusting ${guard.FALLBACK_REVIEWER_LOGIN}`);
+              }
+              const eff = guard.effectiveAllowlist({
+                raw: process.env.AI_REVIEW_BOT_LOGINS,
+                identity: process.env.REVIEW_IDENTITY,
+                varSet: process.env.AI_REVIEW_BOT_LOGINS_VAR_SET === 'true',
+                isFork: headRepo !== `${owner}/${repo}`,
+                touchesMachinery,
+              });
+              allowlist = eff.allowlist;
+              core.info(`REVIEWER IDENTITY: ${eff.widened ? 'widened' : 'not widened'} — ${eff.reason}`);
+            }
 
             // ── Active-cleanup decisions (pure) ────────────────────────────
             const provenance = guard.decideProvenanceRevert({
