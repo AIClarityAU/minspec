@@ -231,7 +231,9 @@ describe('scripts/lib/agent-context.sh: the allowlist itself', () => {
   function namesGiven(env: Record<string, string>): string[] {
     const r = launch(['bash', '-c', 'while IFS= read -r -d "" kv; do printf "%s\\n" "${kv%%=*}"; done < /proc/$$/environ'], env);
     expect(r.status, r.stderr).toBe(0);
-    return r.stdout.split('\n').filter(Boolean).sort();
+    // The headless marker (#1914) is stamped by the launch program itself and is not on
+    // the list, so it is not an "inherited" name. It has its own test below.
+    return r.stdout.split('\n').filter(Boolean).filter((n) => n !== 'MINSPEC_HEADLESS_AGENT').sort();
   }
   function allowlist(): string[] {
     const r = launch(['--names']);
@@ -292,6 +294,14 @@ describe('scripts/lib/agent-context.sh: the allowlist itself', () => {
     expect(given.filter((n) => !allowed.has(n))).toEqual([]);
     // And it is not empty: the names the launcher had and the list has did arrive.
     for (const n of ['PATH', 'HOME', ...Object.keys(NEEDED)]) expect(given, n).toContain(n);
+  });
+
+  it('stamps the headless marker itself on every launch, and the launcher cannot override it (#1914)', () => {
+    const read = (env: Record<string, string>) =>
+      launch(['bash', '-c', 'printf %s "${MINSPEC_HEADLESS_AGENT-unset}"'], env).stdout;
+    expect(read({})).toBe('1');
+    expect(read({ MINSPEC_HEADLESS_AGENT: '0' })).toBe('1');
+    expect(allowlist()).not.toContain('MINSPEC_HEADLESS_AGENT');
   });
 
   it('does not invent a name the launcher did not have', () => {

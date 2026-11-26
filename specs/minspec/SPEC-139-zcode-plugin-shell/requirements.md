@@ -1,7 +1,7 @@
 ---
 id: SPEC-139
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the same phase commands and checks, reachable from inside ZCode
@@ -25,8 +25,8 @@ implements: [packages/zcode-plugin/src/plugin-table.ts, packages/zcode-plugin/sr
 affects: [package.json]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: in-progress
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

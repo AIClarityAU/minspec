@@ -87,7 +87,7 @@ const COMMIT_ANYWAY_ACTION = 'Commit here anyway';
  * persists the coverage choice into it; CI/vitest read it) and the epic registry's
  * marker-bounded `docs/epics/INDEX.md` (writeEpicIndex, at the DEFAULT `epicsDir`
  * a fresh init uses; a custom `epicsDir` is rarer and the existsSync filter simply
- * skips the miss) — are listed here EXPLICITLY (as files), so they ride the
+ * skips the miss — a known limit, #2684) — are listed here EXPLICITLY (as files), so they ride the
  * scaffold commit without sweeping a directory. Omitting them left MinSpec-written,
  * non-gitignored files untracked after "Commit them" (#610).
  *
@@ -202,8 +202,13 @@ export interface ScaffoldCommitter {
    * project, and one ignored path must never fail the whole commit.
    */
   add(paths: readonly string[]): Promise<void>;
-  /** Create a single commit with `message` (staged content only). */
-  commit(message: string): Promise<void>;
+  /**
+   * Create a single commit with `message`. When `paths` is given the commit is
+   * SCOPED to them (`git commit -m msg -- paths`), so unrelated content the user
+   * had already staged is never folded into the dedicated scaffold commit (#347).
+   * Omitted = whole index (legacy; only stubs rely on it).
+   */
+  commit(message: string, paths?: readonly string[]): Promise<void>;
   /**
    * The branch this commit would land on, and the repo's default branch — or
    * `null` when either cannot be determined (detached HEAD, no origin/HEAD).
@@ -279,8 +284,24 @@ export async function defaultCommitter(folder: string): Promise<ScaffoldCommitte
       if (stageable.length === 0) return;
       await git.add(stageable);
     },
-    async commit(message) {
-      await git.commit(message);
+    async commit(message, paths) {
+      if (!paths) {
+        await git.commit(message);
+        return;
+      }
+      // Same ignore-filter as add(): a pathspec naming an ignored, unstaged file
+      // makes `git commit -- <paths>` fail. Scope to exactly what add() staged.
+      let scoped = [...paths];
+      try {
+        const ignored = new Set(await git.checkIgnore([...paths]));
+        if (ignored.size > 0) scoped = scoped.filter((p) => !ignored.has(p));
+      } catch {
+        // optimisation only — let git decide
+      }
+      // Never fall back to an unscoped commit: with nothing in scope, an
+      // unscoped `git commit` would sweep the whole index.
+      if (scoped.length === 0) throw new Error('nothing to commit in the scaffold paths');
+      await git.commit(message, scoped);
     },
     async branchInfo() {
       // Delegate to the SAME destination-resolution `approve-commit.ts` uses
@@ -540,7 +561,7 @@ async function commitOrWarn(
 ): Promise<void> {
   try {
     await committer.add(paths);
-    await committer.commit(message);
+    await committer.commit(message, paths);
     vscode.window.showInformationMessage(`MinSpec: committed ${committedNoun} ("${message}").`);
   } catch (err) {
     vscode.window.showWarningMessage(
@@ -612,7 +633,7 @@ const RULESET_LEARN_MORE_ACTION = 'Learn more';
  * charset locally — right where the value reaches `gh` — keeps the safety
  * property co-located with its use rather than relying on a distant regex.
  */
-const REPO_SLUG_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+const REPO_SLUG_RE = /^(?![.-])(?!.*\.\.)[A-Za-z0-9._-]+\/(?![.-])[A-Za-z0-9._-]+$/;
 
 /**
  * VS Code setting id for the configurable required-status-check contexts the
@@ -824,10 +845,11 @@ async function resolveWantedChecks(
  * phrase when GitHub said nothing quotable — an unexplained failure is an honest
  * report; an invented explanation is not.
  */
-function describeRulesetFailure(outcome: {
+export function describeRulesetFailure(outcome: {
   forbidden: boolean;
   planLimited: boolean;
   reason: string | null;
+  detail?: string;
 }): string {
   if (outcome.planLimited) {
     return (
@@ -837,6 +859,11 @@ function describeRulesetFailure(outcome: {
   }
   if (outcome.reason) return `GitHub said: ${outcome.reason}`;
   if (outcome.forbidden) return 'the request was refused — your gh token may lack repo-admin scope';
+  // The outcome's own `detail` is the only evidence of what happened (a local
+  // parse failure, a missing rule, a raw non-403 body) — quote it, bounded, and
+  // keep the non-committal phrase only for the genuinely empty case.
+  const detail = (outcome.detail ?? '').replace(/\s+/g, ' ').trim();
+  if (detail) return detail.length > 200 ? `${detail.slice(0, 200)}…` : detail;
   return 'the request failed';
 }
 
@@ -1245,8 +1272,8 @@ export async function offerCoverageThresholdPrompt(folder: string): Promise<void
         prompt: 'Minimum coverage percentage (whole number, 0-100)',
         value: String(recommended),
         validateInput: (v) => {
-          const n = Number(v);
-          return Number.isInteger(n) && n >= 0 && n <= 100 ? undefined : 'Enter a whole number 0-100';
+          // Validate the TEXT: Number() coerces '', whitespace, hex and exponent forms.
+          return /^\d{1,3}$/.test(v) && Number(v) <= 100 ? undefined : 'Enter a whole number 0-100';
         },
       });
       if (input === undefined) return; // dismissed
@@ -1264,6 +1291,53 @@ export async function offerCoverageThresholdPrompt(folder: string): Promise<void
   }
 }
 
+/** Quick-pick label for the multi-root "initialize every folder" choice (#294). */
+export const INIT_ALL_LABEL = 'All uninitialized folders';
+
+/**
+ * Multi-root target selection for Initialize SDD Structure (#294). Only engages when
+ * the workspace has 2+ folders AND 2+ of them lack `.minspec/config.json` — otherwise
+ * returns `undefined` and the caller falls through to the usual single-folder
+ * resolution. When engaged it ALWAYS asks (the active editor's folder is listed
+ * first, not silently chosen), so a focused file can no longer steer init at a
+ * folder the user did not mean. Returns the folders to initialize, or 'cancelled'.
+ */
+async function pickInitTargets(): Promise<string[] | 'cancelled' | undefined> {
+  const folders = vscode.workspace?.workspaceFolders;
+  if (!folders || folders.length < 2) return undefined;
+  const paths = folders.map((f) => f.uri.fsPath);
+  const uninitialized = paths.filter(
+    (p) => !fs.existsSync(path.join(p, '.minspec', 'config.json')),
+  );
+  if (uninitialized.length < 2) return undefined;
+
+  const active = vscode.window.activeTextEditor?.document.uri.fsPath;
+  const activeFolder = active
+    ? paths
+        .filter((p) => active === p || active.startsWith(p.endsWith('/') ? p : p + '/'))
+        .sort((a, b) => b.length - a.length)[0]
+    : undefined;
+  const ordered = [...paths].sort(
+    (a, b) => Number(b === activeFolder) - Number(a === activeFolder),
+  );
+  const items = [
+    ...ordered.map((p) => ({
+      label: workspaceFolderLabel(p),
+      description: uninitialized.includes(p) ? p : `${p} (already initialized)`,
+      folders: [p],
+    })),
+    {
+      label: INIT_ALL_LABEL,
+      description: `${uninitialized.length} folders`,
+      folders: uninitialized,
+    },
+  ];
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: 'MinSpec: select the project to initialize',
+  });
+  return picked ? picked.folders : 'cancelled';
+}
+
 export async function initCommand(
   folderArg?: string,
   deps?: OfferScaffoldCommitDeps & {
@@ -1272,6 +1346,17 @@ export async function initCommand(
     githubPrExt?: GitHubPrExtAdvisoryDeps;
   },
 ): Promise<void> {
+  if (folderArg === undefined) {
+    const choice = await pickInitTargets();
+    if (choice === 'cancelled') return;
+    if (choice) {
+      // "All uninitialized folders": run the full per-folder init for each, in
+      // workspace order. A failure in one folder is surfaced by that folder's own
+      // run and never stops the rest.
+      for (const target of choice) await initCommand(target, deps);
+      return;
+    }
+  }
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
   // Onboarding only makes sense the FIRST time a project gets a config.json —
@@ -1283,12 +1368,13 @@ export async function initCommand(
   // drift detector then reports false drift). Catch any failure, surface exactly
   // what went wrong, and do NOT report a misleading "Initialized" success (#153).
   let untrackedOnInit: string[] = [];
+  const indexNoticesOnInit: ManagedRegionWarning[] = [];
   try {
     scaffold(folder);
     // `?? []` — a stubbed generateHarnessFiles (several suites mock it) returns
     // undefined, and an un-iterable here would turn a reporting nicety into an
     // init-breaking TypeError. Reporting must never be able to fail the command.
-    untrackedOnInit = generateHarnessFiles(folder) ?? [];
+    untrackedOnInit = generateHarnessFiles(folder, indexNoticesOnInit) ?? [];
   } catch (err) {
     vscode.window.showErrorMessage(
       `MinSpec: Initialization failed — ${describeError(err)}. ` +
@@ -1308,6 +1394,22 @@ export async function initCommand(
       outputPath,
       message: untrackedNoticeMessage(outputPath),
       kind: 'untracked',
+    });
+  }
+  // Hooks init staged into the index as 100755 (#2399) — same notice refresh shows.
+  // A first init stages every executable template at once, so ONE notice names them
+  // all — a dialog per file would be a 7-9 dismissal storm on the onboarding path.
+  if (indexNoticesOnInit.length === 1) {
+    await surfaceManagedRegionWarning(folder, indexNoticesOnInit[0]);
+  } else if (indexNoticesOnInit.length > 1) {
+    const paths = indexNoticesOnInit.map((n) => n.outputPath);
+    await surfaceManagedRegionWarning(folder, {
+      outputPath: paths[0],
+      outputPaths: paths,
+      message:
+        `${paths.length} hooks/scripts were recorded in the git index as executable (100755) ` +
+        `so they run on every checkout: ${paths.join(', ')}. Commit them with the rest of the scaffold.`,
+      kind: 'exec-bit-recorded',
     });
   }
   if (isFirstInit) {
@@ -1378,7 +1480,7 @@ export async function surfaceManagedRegionWarning(
   // "Re-scaffold" would be meaningless (nothing was scaffolded) and actively
   // misleading, so this kind gets its own surface: state what changed to the index
   // and offer the place to review and commit it (#1146).
-  if (w.kind === 'untracked') {
+  if (w.kind === 'untracked' || w.kind === 'exec-bit-recorded') {
     const choice = await vscode.window.showInformationMessage(
       `[${label}] ${w.message}`,
       SHOW_SCM_ACTION,

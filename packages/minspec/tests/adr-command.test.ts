@@ -49,6 +49,7 @@ vi.mock('../src/lib/adr-manager', () => ({
   // Default true → existing applyStatus tests (frontmatter files) skip the modal.
   adrHasFrontmatter: vi.fn(() => true),
   regenerateDrIndex: vi.fn(),
+  validatePendingDrAmendments: vi.fn(() => []),
   ADR_STATUS_VALUES: ['proposed', 'accepted', 'deprecated', 'superseded'],
 }));
 
@@ -84,6 +85,7 @@ import {
   setAdrStatus,
   adrHasFrontmatter,
   regenerateDrIndex,
+  validatePendingDrAmendments,
 } from '../src/lib/adr-manager';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -471,6 +473,31 @@ describe('applyStatus — inner regenerateDrIndex failure is swallowed', () => {
     );
     // the index regen error must NOT surface to the user
     expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// applyStatus — refuses acceptance while an amendment target is unprepared (#3106)
+// =============================================================================
+
+describe('applyStatus — pending amendment refusal (#3106)', () => {
+  it('refuses to accept, writes nothing, and names the unprepared target', async () => {
+    setActiveEditor(DR1);
+    vi.mocked(listAdrs).mockReturnValueOnce([
+      { id: 'DR-001', title: 'Use PG', status: 'proposed', date: '2026-05-27', filePath: DR1 },
+    ]);
+    vi.mocked(validatePendingDrAmendments).mockReturnValueOnce([
+      { source: 'DR-001', target: 'DR-070', relation: 'supersedes_partial', message: 'm' },
+      { source: 'DR-009', target: 'DR-071', relation: 'amends', message: 'other source' },
+    ]);
+
+    await acceptAdrCommand(undefined);
+
+    expect(setAdrStatus).not.toHaveBeenCalled();
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledTimes(1);
+    const msg = String(vi.mocked(vscode.window.showErrorMessage).mock.calls[0][0]);
+    expect(msg).toContain('DR-070');
+    expect(msg).not.toContain('DR-071');
   });
 });
 

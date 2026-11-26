@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-097-watcher-config-source/requirements.md",
+  "specHash": "47b583dbacd9a5dfe31b06478c77d65ac115e32a4f19e1453f91efe862356942",
+  "approvedAt": "2026-11-12T20:01:54.894Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "20a02d9887bebae61f6456628911e9069ad9015a"
+}

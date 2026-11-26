@@ -424,7 +424,7 @@ Issue #74 confirmed against Anthropic's official Legal-and-compliance docs that 
 *Status: accepted · Date: 2026-07-12*
 
 <!-- dr-summary:DR-053 auto=0000000000000000 -->
-Per-repo-local SDD ids stay unprefixed (DR-027 separate registers); a reference that SPANS projects carries the target project's short prefix from the committed table `.minspec/project-prefixes.md` — SDD refs `<PREFIX>-<ID>` (MS-SPEC-019, SC-DR-007), issue/PR refs `<PREFIX>#<N>` (MS#500, SC#26). Unknown prefix is advisory, never fatal. Ships the Tier-0 core (`@aiclarity/shared` project-prefix module: parsePrefixTable/resolveRef/formatCrossRef/suggestPrefixDeterministic) + seed table + CLAUDE.md convention; Tier-1 validate-advisory + toast deferred to #614.
+Per-repo-local SDD ids stay unprefixed (DR-027 separate registers); every approvable item and its typed paragraphs gets a short, typeable, slash-joined id `PROJECT/APPROVABLE/PARAGRAPH` (v2, accepted 2026-07-14) — `MIN/SP19/FR3`, with 3-letter project codes from the committed table `.minspec/project-prefixes.md` and left-to-right elision when context implies a segment (`SP19/FR3`, `FR3`). Supersedes the v1 dash grammar (`MS-SPEC-019`, `MS#500`). Unknown project code is advisory, never fatal. Ships the Tier-0 core (`@aiclarity/shared` project-prefix module) + seed table + CLAUDE.md convention; corpus migration and the v2 emitter are tracked in #679 and #681, Tier-1 validate-advisory + toast in #614.
 <!-- /dr-summary:DR-053 -->
 
 ## [DR-054 — Reframe the network posture — data-sovereignty + bring-your-own-LLM (incl. local) + deterministic core supersede "air-gapped" as the product identity; adopt one shared GitHub App (minspec-sdd[bot]) + an OIDC token-broker as the reviewer-identity seam, with customer-own-app as the enterprise override](DR-054.md)
@@ -803,6 +803,22 @@ MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull req
 The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, and asked on 2026-10-01 for the extension to be published just before the visualiser work, about a week out. The constitution puts a Marketplace publish in Phase 2 and says Phase 2 work may not displace unfinished Phase 1 work, so publishing now needs a recorded exception, with its scope and preconditions stated.
 <!-- /dr-summary:DR-100 -->
 
+## [DR-101 — Walking-skeleton completion is a deterministic tie-break term, declared by an epic's `skeleton:` list - read by the resolver, never inferred](DR-101.md)
+
+*Status: accepted · Date: 2026-10-01*
+
+<!-- dr-summary:DR-101 auto=c33940de233c -->
+Triggered by: #297 (vertical-slice completion as a priority signal). DR-019 (deterministic next-task ordering) ranks pending human tasks by severity class and then by a within-class order, which DR-039 (goals drive priority) widened to (epic.order, goal-rank, priority, artifact-id). The code is compareRanked at packages/shared/src/next-task.ts:1045-1051. Every term before artifact-id is a human weight; artifact-id is an arbitrary deterministic pick.
+<!-- /dr-summary:DR-101 -->
+
+## [DR-102 — Checkbox state leaves the canonical approval hash - a ticked task-list item records progress, and the hash covers the contract](DR-102.md)
+
+*Status: accepted · Date: 2026-10-04*
+
+<!-- dr-summary:DR-102 auto=d9ecefef75dc -->
+DR-035 (normalize checkbox state before hashing) made this decision on 2026-06-19 and was accepted. It was never built. It named hashContent() in approval.ts and sha() in spec-gate.py; approval hashing shipped instead through DR-034 (approval foundation) and SPEC-022 (its spec) as canonicalizeSpec() / specHash(), which has no checkbox step (packages/shared/src/canonical.ts:89-123, scripts/hooks/canonical.py:56-80). On 2026-07-12 a documentation-honesty pass (commit 0e7b1d67) changed DR-035's status from accepted to superseded because its body claimed an implementation that did not exist. No record superseded it. The register…
+<!-- /dr-summary:DR-102 -->
+
 ## [DR-103 — New MinSpec versions reach the Marketplace through a release workflow that holds no stored credential - automatic to the pre-release channel, the founder's approval for everyone else](DR-103.md)
 
 *Status: accepted · Date: 2026-10-07*
@@ -827,6 +843,14 @@ main requires a pull request to be up to date before it merges, and the stalenes
 scripts/ holds the dev-time automation that starts headless agents: issue dispatch, triage, the review scripts, pull request remediation and the tooling radar. DR-008 (dispatch security) decided, for that automation, that credentials are kept out of the agent's reach, and that unattended runs are for issues whose text is trusted. Neither was held by code. This record decides how far each is now held, and names what is not.
 <!-- /dr-summary:DR-105 -->
 
+## [DR-106 — Two ranked core tenets head the constitution - make the founder's job smaller first, minimise tokens counting rework second - with a 2%-of-weekly-budget tie-break](DR-106.md)
+
+*Status: proposed · Date: 2026-10-17*
+
+<!-- dr-summary:DR-106 auto=ed677406570b -->
+On 2026-10-17 the founder asked for a review of the constitution, rules, memory, principles and decision records against two priorities, in this order (queue item in2): The core-tenets review (2026-10-17, run outside this repository) found the corpus leaning toward over-specification. The figures, and where each can be checked:
+<!-- /dr-summary:DR-106 -->
+
 ## [DR-107 — Decision records split in two - direction records the founder accepts, engineering records accepted on an AI review pass and listed in a weekly digest](DR-107.md)
 
 *Status: accepted · Date: 2026-10-17*
@@ -837,7 +861,7 @@ DR-086 §2.2 (the approval-or-acceptance stop class) makes every DR acceptance a
 
 ## [DR-108 — Agents may approve under a delegation the founder gives once, recorded under the bot's own name and never his - impersonation stays banned, delegation is allowed](DR-108.md)
 
-*Status: proposed · Date: 2026-10-17*
+*Status: accepted · Date: 2026-10-17*
 
 <!-- dr-summary:DR-108 auto=9ca2b32c25d7 -->
 The approval-or-acceptance stop class (DR-086 §2.2) says, in code (scripts/lib/autonomy.ts, STOP_CLASSES): "The agent cannot sign these without forging the human." That is true only while the approval record has no field for *who acted, on whose delegation*. The rules-consent review (rules-consent-review-1017) separated two acts:
@@ -845,7 +869,7 @@ The approval-or-acceptance stop class (DR-086 §2.2) says, in code (scripts/lib/
 
 ## [DR-109 — The AI review panel scales by risk, but specs are never the low tier - specs get at least the machinery voter count, and one voter is allowed only for non-spec prose](DR-109.md)
 
-*Status: proposed · Date: 2026-10-17*
+*Status: accepted · Date: 2026-10-17*
 
 <!-- dr-summary:DR-109 auto=01ee89682199 -->
 The core-tenets review proposed one voter for docs and T1, and four for machinery and T3/T4 (DR-033 §6, DR-047), to save tokens under core tenet 2. The founder accepted it with an amendment: specs are "the pointy end, where you have to get it right, as everything downstream depends on it". The recommendation also said to measure voter disagreement before landing it.
@@ -853,9 +877,113 @@ The core-tenets review proposed one voter for docs and T1, and four for machiner
 
 ## [DR-110 — The ai-review verdict carry ignores where the base put the change - text hunks lose their blob ids and start line numbers, binary files keep theirs](DR-110.md)
 
-*Status: proposed · Date: 2026-10-18*
+*Status: accepted · Date: 2026-10-18*
 
 <!-- dr-summary:DR-110 auto=be6169d668c2 -->
 The verdict-carry record ("A pass is carried across a push that changes nothing the voters are given", accepted 2026-10-13, #2701; it is the record named in this one's supersedes_partial:, and bodies here do not spell local ids of that range out, per the parent-register reference gate, #2148) carries an ai-review pass across a push when the bytes the voters are given are identical, and it explicitly rejected a position-insensitive identity.
 <!-- /dr-summary:DR-110 -->
+
+## [DR-111 — A pull request that carries only the founder's own editor approval is merged by the bot - the approval is the keystroke, and a fail-closed check refuses anything else](DR-111.md)
+
+*Status: accepted · Date: 2026-10-22*
+
+<!-- dr-summary:DR-111 auto=5e69cbb62816 -->
+The constitution's merge-gate conservation rule (DR-070 §4) says no unit of work ever reaches main with zero human keystrokes. For agent-built work the keystroke is the founder's merge. For an editor approval, the founder's keystroke already happened: Alt-A in the editor is the explicit human act DR-012 defines approval to be, recorded under his identity (DR-056 refuses an agent identity at record time). The pull request that carries it adds no new content for him to judge, so asking for…
+<!-- /dr-summary:DR-111 -->
+
+## [DR-112 — The bot merges a pull request once CI is green, a second independent AI review agrees, and the merge is pinned to the reviewed commit - including machinery, by admin bypass, where only the self-certification gates are red](DR-112.md)
+
+*Status: accepted · Date: 2026-10-24*
+
+<!-- dr-summary:DR-112 auto=fb18ca00a43a -->
+The rule being lifted: on 2026-07-28 the founder made --admin human-only: "Never use the App token to bypass branch protection or a required check. A PR that needs --admin waits for the human merge keystroke." It is restated in ~/.claude/CLAUDE.md, in DR-086 (section 2.1 and its Amendment A: "--admin remains human-only and no failing check may be bypassed"), in DR-070 section 4 ("No unit of work ever has zero human keystrokes"), and in the chief-of-staff-runner skill. GitHub enforces it today…
+<!-- /dr-summary:DR-112 -->
+
+## [DR-113 — The required ai-review check-run has a guard-free second producer, and a preflight checks the head workflow's guard calls against the base guard's exports](DR-113.md)
+
+*Status: accepted · Date: 2026-10-27*
+
+<!-- dr-summary:DR-113 auto=1a2f25486902 -->
+The step "Post honest ai-review verdict check-run" (.github/workflows/ai-review.yml) treats the check-run as best-effort, yet the check-run is the required, server-attested witness (#397). A required witness whose producer can disappear while the producer shows green is a silent gate (constitution invariant 2, DR-066).
+<!-- /dr-summary:DR-113 -->
+
+## [DR-114 — The host drain service runs the drain at concurrency 8 by default; drain-inbox.sh keeps its own default of 1](DR-114.md)
+
+*Status: accepted · Date: 2026-10-27*
+
+<!-- dr-summary:DR-114 auto=5fb445350927 -->
+scripts/drain-inbox.sh defaults to concurrency 1 and carries a caveat (around lines 407-411): two queued issues touching the same file still produce competing pull requests, because each agent branches from origin/main and cannot see an unmerged sibling, so "keep the default at 1 until same-file serialisation exists, and de-duplicate the queue first". That caveat was written for the session-start drain.
+<!-- /dr-summary:DR-114 -->
+
+## [DR-115 — The MinSpec App secrets are optional in the scaffolded review stack; without them the review posts with GITHUB_TOKEN as github-actions[bot]](DR-115.md)
+
+*Status: accepted · Date: 2026-10-28*
+
+<!-- dr-summary:DR-115 auto=f4b6ddc36218 -->
+ai-review.yml refuses to run unless CLAUDE_CODE_OAUTH_TOKEN, MINSPEC_APP_ID and MINSPEC_APP_PRIVATE_KEY are all set (.github/workflows/ai-review.yml:204-215), and the setup probe mirrors that (packages/minspec/src/lib/ruleset-advisor.ts:734-738). DR-054 intended consumer repos not to hold the App key (the shared broker, SPEC-034, is still in planning). Until the broker exists, every new repo needs the two App secrets set by hand, and the founder could not get review on a new work-PC repo without them.
+<!-- /dr-summary:DR-115 -->
+
+## [DR-116 — MinSpec has a machine-facing command line (the headless core's), for hooks, workflows and agents only - no MinSpec text tells a person to type it, and its result schema minspec-core/0 is unstable](DR-116.md)
+
+*Status: accepted · Date: 2026-10-28*
+
+<!-- dr-summary:DR-116 auto=95db563f243b -->
+SPEC-136 (headless core, status: planning, T4) packages the checks MinSpec already has into one editor-free program with two ways in: a command line (FR-9) and a stdio tool server (FR-10), both generated from one table of operations (FR-11). The founder allowed the command line on 2026-10-13, for hooks, workflows and agents only (FR-12); this record writes that answer down before any code depends on it.
+<!-- /dr-summary:DR-116 -->
+
+## [DR-117 — The ZCode container boundary - git through GitHub is the only bridge between ZCode's container and the host (BND-1 to BND-6), and measurement 12 checks the running container matches](DR-117.md)
+
+*Status: accepted · Date: 2026-10-28*
+
+<!-- dr-summary:DR-117 auto=f3bf57334586 -->
+ZCode (Z.ai's editor) runs apart from the host so that the host's editor and agents are never "infected" by reading what ZCode wrote; SPEC-136 set six boundary rules for that and said they outlive the spec and need a decision record. This is that record.
+<!-- /dr-summary:DR-117 -->
+
+## [DR-118 — Issues labelled pipeline-blocker skip spec-first and route straight to a full build, decided inside the triage gate](DR-118.md)
+
+*Status: accepted · Date: 2026-10-30*
+
+<!-- dr-summary:DR-118 auto=3aa38b3fb488 -->
+DR-076 (solo mode, accepted 2026-08-01) keeps "genuinely human moments", the first of which reads: "**T3/T4 spec approval.** Reading a spec before building from it is where one human-hour has the highest leverage." #1169 implemented that in the triage gate (scripts/triage-decide.sh): an auto-buildable T3/T4 resolves to agent-ready-specify / hold specify, so an agent may write the spec but nothing is built until the spec is approved.
+<!-- /dr-summary:DR-118 -->
+
+## [DR-119 — A pull request that carries only one delegated spec approval is merged from main by a fail-closed check, one at a time, with no founder keystroke, no runner turn and no admin bypass](DR-119.md)
+
+*Status: accepted · Date: 2026-10-30*
+
+<!-- dr-summary:DR-119 auto=601a0bb6ac6e -->
+The bot records delegated spec approvals, and no rule lets anything but the founder merge them, so they queue on a keystroke the delegation was meant to remove. | Count | Pull requests | Outcome under section 1 | |---|---|---| | 16 | #3154, #3155, #3244, #3356, #3358 to #3361, #3363 to #3365, #3370 to #3374 | Eligible once brought up to date | | 1 | #3357 | Refused: test failed on its head. All test files passed and…
+<!-- /dr-summary:DR-119 -->
+
+## [DR-120 — MinSpec owns minspec-ci-parity.yml as a managed template - the first file it claims that adopters wrote by hand, taken over only with consent, and changed afterwards only through a human-pushed refresh](DR-120.md)
+
+*Status: accepted · Date: 2026-10-31*
+
+<!-- dr-summary:DR-120 auto=71d14efeb889 -->
+Adopters check MinSpec's review files with a workflow MinSpec does not ship, so the check rejects what a sanctioned refresh writes and its file list falls behind what MinSpec scaffolds.
+<!-- /dr-summary:DR-120 -->
+
+## [DR-121 — Plan artifacts merge on AI review once their spec is approved, through the delegated lane, under the delegated-approval merge lane's pins](DR-121.md)
+
+*Status: accepted · Date: 2026-11-06*
+
+<!-- dr-summary:DR-121 auto=a299007d3188 -->
+_No summary available._
+<!-- /dr-summary:DR-121 -->
+
+## [DR-123 — On a T3 spec, an agent's recorded pick of each Clarify question's recommended option closes Clarify, and approving the spec ratifies the picks](DR-123.md)
+
+*Status: accepted · Date: 2026-11-17*
+
+<!-- dr-summary:DR-123 auto=76071625ecdd -->
+The founder answered this as runner queue item clarsel on 2026-11-17 (words in triggered_by). The delegated-approval record says in its section 4 that a queue item cannot carry consent, because any session can write the queue. So the answer is not binding until it sits in a committed record the founder accepts. This is that record. **It binds nothing until he accepts it.**
+<!-- /dr-summary:DR-123 -->
+
+## [DR-124 — Approving a document commits it - commit-on-approve is default on, commits only the approval's own files, never pushes, and minspec.commitOnApprove is the opt-out](DR-124.md)
+
+*Status: accepted · Date: 2026-11-19*
+
+<!-- dr-summary:DR-124 auto=b3c6f8a249ed -->
+SPEC-022 FR-1 (specs/minspec/SPEC-022-approval-foundation/requirements.md:77) says approval ground truth is **committed** to the repo. Before #576 the approval record was only git-*tracked*: written to disk and left in the working tree. Nothing committed it. So an approval could sit uncommitted indefinitely, be lost to a checkout or a reset, or be swept into an unrelated commit by another session. "Committed ground truth" was a claim the code did not keep.
+<!-- /dr-summary:DR-124 -->
 <!-- minspec:dr-index:end -->

@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-295-approval-pr-author-can-be-approved/requirements.md",
+  "specHash": "0a6c2f503a3b9f589840d726e0433f3ad8eda0f0256c263d483030efde3bb316",
+  "approvedAt": "2026-11-12T04:38:29.304Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-pile-1112a-signpost",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3629#issuecomment-6814507333"
+}

@@ -108,7 +108,7 @@ for a in "$@"; do
   [[ "$prev" == "--label" && "$a" == "agent-ready" ]] && { printf '901\\n'; exit 0; }
   prev="$a"
 done
-[[ "$1" == "pr" && "$2" == "list" && " $* " == *" --state open "* ]] && { printf '2226\\n'; exit 0; }
+[[ "$1" == "pr" && "$2" == "list" && " $* " == *" --state open "* ]] && { printf '2226 false\\n'; exit 0; }
 exit 0
 `, { mode: 0o755 });
   const plays = Array.isArray(o.dispatch) ? o.dispatch : [o.dispatch];

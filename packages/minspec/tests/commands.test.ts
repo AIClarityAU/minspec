@@ -61,6 +61,7 @@ vi.mock('../src/lib/adr-manager', () => ({
   setAdrStatus: vi.fn(),
   adrHasFrontmatter: vi.fn(() => true),
   regenerateDrIndex: vi.fn(),
+  validatePendingDrAmendments: vi.fn(() => []),
   ADR_STATUS_VALUES: ['proposed', 'accepted', 'deprecated', 'superseded'],
 }));
 
@@ -331,6 +332,7 @@ describe('commands', () => {
       expect(scaffold).toHaveBeenCalledWith('/tmp/test-workspace');
       expect(generateHarnessFiles).toHaveBeenCalledWith(
         '/tmp/test-workspace',
+        [],
       );
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
         'MinSpec: Initialized .minspec/ and generated harness files.',

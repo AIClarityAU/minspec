@@ -29,6 +29,14 @@ import {
   createRequiredChecksRuleset,
   type CommandRunner,
 } from '../src/lib/ruleset-advisor';
+import { describeRulesetFailure } from '../src/commands/init';
+
+vi.mock('vscode', () => ({ window: {}, workspace: {} }));
+vi.mock('../src/lib/scaffold', () => ({
+  scaffold: vi.fn(),
+  generateHarnessFiles: vi.fn(),
+  refreshHarnessFiles: vi.fn(() => []),
+}));
 
 /** The verbatim body GitHub returns for a private repo on the free plan. */
 const PLAN_403 =
@@ -101,5 +109,30 @@ describe('createRequiredChecksRuleset() classifies the failure it saw', () => {
     const ok: CommandRunner = vi.fn(async () => ({ code: 0, stdout: '{}', stderr: '' }));
     const out = await createRequiredChecksRuleset('o', 'r', ok);
     expect(out).toMatchObject({ created: true, forbidden: false, planLimited: false, reason: null });
+  });
+});
+
+describe('describeRulesetFailure() last arm quotes the outcome detail (#1725)', () => {
+  const base = { forbidden: false, planLimited: false, reason: null };
+
+  it('does not say "the request failed" for a local parse failure', () => {
+    const why = describeRulesetFailure({ ...base, detail: 'could not parse the existing ruleset' });
+    expect(why).toBe('could not parse the existing ruleset');
+  });
+
+  it('quotes the missing-rule detail', () => {
+    const why = describeRulesetFailure({ ...base, detail: 'ruleset has no required_status_checks rule' });
+    expect(why).toContain('no required_status_checks rule');
+  });
+
+  it('quotes a raw non-quotable body, bounded and single-line', () => {
+    const why = describeRulesetFailure({ ...base, detail: `{"a":\n"${'x'.repeat(500)}"}` });
+    expect(why).not.toContain('\n');
+    expect(why.length).toBeLessThanOrEqual(201);
+  });
+
+  it('keeps the non-committal phrase only when there is no detail', () => {
+    expect(describeRulesetFailure({ ...base, detail: '' })).toBe('the request failed');
+    expect(describeRulesetFailure(base)).toBe('the request failed');
   });
 });

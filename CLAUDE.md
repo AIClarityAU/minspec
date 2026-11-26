@@ -4,6 +4,15 @@
 
 minspec-monorepo, managed with MinSpec SDD methodology.
 
+## Core tenets
+
+Ranked; every rule in this file must trace to one (`.minspec/constitution.md`; its decision record, the core-tenets record, is proposed).
+
+1. **Make the founder's job smaller** - minimise human involvement. A human gate names the error only it catches, and is retired once rubber-stamped.
+2. **Minimise tokens, counting rework** - spend on ceremony only where it is cheaper than the expected fix.
+
+Tenet 1 wins a conflict unless it costs more than 2% of the weekly budget per decision; then tenet 2 wins and the decision record says so.
+
 ## Invariants
 
 These rules must never be violated. All changes must preserve them.
@@ -67,6 +76,10 @@ Report the state you already observed; re-reading it from the git host is ordina
 
 A session here never offers `m` merge on its own pull request: report the observed state and stop (keys: `c` close, `d` diff, `r` re-review). Your job is unchanged - drive your PR to greenlit, then stop.
 Full rule, rationale and the stopgap caveat (#2056): `docs/claude-md-details.md#merge-funnel`; funnel spec: SPEC-044 FR-4b.
+
+## Workflow files are founder-push only
+
+An agent cannot push any change under `.github/workflows/` (no `workflows` permission, by design). Commit the fix on a branch and hand the push to the founder as one step. Detail: `docs/claude-md-details.md#workflows-permission-boundary`; DR-097, DR-103.
 
 ## Commands and locations
 
@@ -212,6 +225,29 @@ agent dispatch does NOT ship inside MinSpec (Tier 0 / air-gapped) — it ships a
 DR-008 dispatch security.
 
 Triage agent auto-dispatches T1-T2 issues (`agent-ready`). T3-T4 get `needs-review` — human approves spec/plan before agent starts. Per SDD FR-2: Clarify phase required for T3-T4.
+
+**Who closes Clarify on a T3 spec** (DR-123, accepted: the founder decision from runner queue
+item clarsel, 2026-11-17, in a committed record because a queue item alone cannot carry
+consent). An agent's recorded pick of the option
+the spec marks recommended closes that question. The pick is written in the "answered, not
+ratified" form from #3399 (Clarify settled on 23 specs): a `Recorded selection:` line that
+names the (rec) option and says an agent copied it and no human chose it. When every question
+carries one, `phases.clarify: done` is a true claim, and approving the spec ratifies the picks.
+Reviewers do not block `clarify: done` because the picks are agent-recorded or because the text
+says the approver may change them. They still block it when a question has no recorded
+selection, names no recommended option, or the spec's own text keeps it open on purpose
+(SPEC-225 for the founder, SPEC-255 until a new DR). Which phase field records a closed
+Clarify is SPEC-320's open question (#3414); SPEC-320 Decisions item 2 already records that its
+validator will refuse the `specify: in-progress` pair (see below). This rule settles only who closes it. This decision covers T3 only; it is not a delegation (#3411).
+
+**Interim tolerance for the `specify: in-progress, clarify: done` pair.** SPEC-320 (Clarify-done
+freeze) records that its validator rule will refuse this pair once built. Until that rule ships,
+reviewers do not block a spec pull request for carrying the pair. No spec on main carries it
+today (checked on main 13e7bb28: none of the 28 specs at `specify: in-progress` has `clarify: done`); spec pull requests drafted before the rule ships may. The current cases are #3800
+(SPEC-311, accept amendment in accepted DR) and #3801 (SPEC-305, symmetric prose-link linter).
+The tolerance ends when
+SPEC-320's validator rule merges, not when SPEC-320 is approved. Nothing here approves a spec
+or changes what approval sets.
 
 Roles: `scripts/roles/` — triage, dev, architect, security, reviewer.
 Dispatch: `scripts/dispatch-issue.sh <N>` — reads `role:X` label, loads role prompt.

@@ -254,6 +254,51 @@ describe('hasRequiredChecksRuleset()', () => {
     });
     expect(await hasRequiredChecksRuleset('o', 'r', run)).toBe(false);
   });
+
+  it('ignores evaluate-mode (dry-run) rulesets even when the detail is fully configured (#369)', async () => {
+    const { run } = makeRunner((_c, args) => {
+      const p = apiPath(args);
+      if (p === 'repos/o/r/rulesets') {
+        return ok(JSON.stringify([{ id: 9, target: 'branch', enforcement: 'evaluate' }]));
+      }
+      // Identical to the detail that yields `true` for an active ruleset, so
+      // only the enforcement check can make this false.
+      if (p === 'repos/o/r/rulesets/9') {
+        return ok(
+          JSON.stringify({
+            conditions: { ref_name: { include: ['~DEFAULT_BRANCH'] } },
+            rules: [
+              {
+                type: 'required_status_checks',
+                parameters: { required_status_checks: [{ context: 'lint' }, { context: 'test' }] },
+              },
+            ],
+          }),
+        );
+      }
+      return undefined;
+    });
+    expect(await hasRequiredChecksRuleset('o', 'r', run)).toBe(false);
+  });
+
+  it('ignores an active ruleset that targets only a non-default branch (#369)', async () => {
+    const { run } = makeRunner((_c, args) => {
+      const p = apiPath(args);
+      if (p === 'repos/o/r/rulesets') {
+        return ok(JSON.stringify([{ id: 5, target: 'branch', enforcement: 'active' }]));
+      }
+      if (p === 'repos/o/r/rulesets/5') {
+        return ok(
+          JSON.stringify({
+            conditions: { ref_name: { include: ['refs/heads/release'] } },
+            rules: [{ type: 'required_status_checks' }],
+          }),
+        );
+      }
+      return undefined;
+    });
+    expect(await hasRequiredChecksRuleset('o', 'r', run)).toBe(false);
+  });
 });
 
 // =============================================================================
@@ -1251,8 +1296,12 @@ describe('ENFORCE: check-name constants bound to producers (#820)', () => {
     ].map((m) => m[1]);
     // The script's purpose depends on singling out the reviewer's own check, so it
     // MUST contain at least one such filter; every one must name AI_REVIEW_CHECK.
-    expect(nameFilterLiterals.length).toBeGreaterThan(0);
-    for (const lit of new Set(nameFilterLiterals)) expect(lit).toBe(AI_REVIEW_CHECK);
+    expect(nameFilterLiterals).toContain(AI_REVIEW_CHECK);
+    // #3023: the failing-check derivation also excludes the `ready-to-merge` merge gate
+    // (no commit can turn it green), so that name is the one other legitimate literal.
+    for (const lit of new Set(nameFilterLiterals)) {
+      expect([AI_REVIEW_CHECK, READY_TO_MERGE_CHECK]).toContain(lit);
+    }
   });
 });
 

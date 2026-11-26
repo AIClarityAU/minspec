@@ -234,9 +234,12 @@ export function readAutonomy(repoRoot: string, env: NodeJS.ProcessEnv = process.
 // it. `.minspec/delegations.json` is also a boundary path in
 // `scripts/auto-merge-gate.ts`, so no edit to it can auto-merge.
 //
-// NOT YET CONSUMED. No caller asks this today: the approval record does not yet
-// carry an actor/basis field (DR-012 Amendment, tracked in DR-108's follow-ups).
-// Until it is wired, the approval-or-acceptance class still stops every time.
+// CONSUMED BY (#2854). The approval record carries `actor` / `basis` (DR-012
+// Amendment): `scripts/lib/approval-actor.ts` judges a bot record with this function,
+// `scripts/approval-integrity.ts` runs that judgement on every approval sidecar, and
+// `scripts/lib/delegated-approval.ts` is the only path that writes a bot record (after
+// an independent AI review pass). The repeat-fix share comes from
+// `scripts/lib/repeat-fix-share.ts`.
 
 /** The only actor a delegation admits. Exact match: no trimming, no casing. */
 export const BOT_ACTOR = 'minspec-sdd[bot]';
@@ -439,14 +442,33 @@ function isDelegation(x: unknown): x is Delegation {
  * unknown act in `covers` must never widen what an entry grants.
  */
 export function readDelegations(repoRoot: string): Delegation[] {
-  let raw: unknown;
+  let text: string;
   try {
-    raw = JSON.parse(fs.readFileSync(path.join(repoRoot, '.minspec', 'delegations.json'), 'utf8'));
+    text = fs.readFileSync(path.join(repoRoot, '.minspec', 'delegations.json'), 'utf8');
   } catch {
     return [];
   }
-  const doc = raw as { version?: unknown; delegations?: unknown };
-  if (doc?.version !== 1 || !Array.isArray(doc.delegations)) return [];
+  return parseDelegations(text) ?? [];
+}
+
+/**
+ * Parse the TEXT of `.minspec/delegations.json`, for callers that read it from somewhere
+ * other than the working tree (the merge base, in `scripts/approval-integrity.ts`).
+ *
+ * Returns `undefined` when the document itself is unreadable (malformed JSON, unknown
+ * version, no `delegations` array), so a caller can tell "the witness is missing" from
+ * "the witness grants nothing". Entries that fail validation are dropped, as in
+ * `readDelegations`.
+ */
+export function parseDelegations(text: string): Delegation[] | undefined {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  const doc = raw as { version?: unknown; delegations?: unknown } | null;
+  if (doc?.version !== 1 || !Array.isArray(doc.delegations)) return undefined;
   return doc.delegations.filter(isDelegation);
 }
 

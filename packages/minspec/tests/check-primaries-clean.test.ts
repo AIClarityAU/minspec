@@ -207,3 +207,102 @@ describe('check-primaries-clean.sh: LANDED-ON-BRANCH vs ORPHAN (#2068)', () => {
     }
   });
 });
+
+describe('check-primaries-clean.sh: untracked DIRECTORY classification (#1650)', () => {
+  /** Land `files` (relative to repo root) on main from another clone; primary fetches but does not pull. */
+  function landOnMain(root: string, origin: string, primary: string, files: Record<string, string>): void {
+    const lander = path.join(root, 'lander');
+    git(root, 'clone', origin, lander);
+    for (const [rel, content] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(lander, rel)), { recursive: true });
+      fs.writeFileSync(path.join(lander, rel), content);
+    }
+    git(lander, 'add', '.');
+    git(lander, 'commit', '-m', 'land dir');
+    git(lander, 'push', 'origin', 'main');
+    git(primary, 'fetch', 'origin');
+  }
+
+  function writeLocal(primary: string, files: Record<string, string>): void {
+    for (const [rel, content] of Object.entries(files)) {
+      fs.mkdirSync(path.dirname(path.join(primary, rel)), { recursive: true });
+      fs.writeFileSync(path.join(primary, rel), content);
+    }
+  }
+
+  const FILES = { 'newdir/a.json': '{"a":1}\n', 'newdir/sub/b.json': '{"b":2}\n' };
+
+  it('directory whose files are all byte-identical to origin/main is REDUNDANT, with no cmp error', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'check-primaries-dir-red-'));
+    try {
+      const { origin, primary } = setupPrimary(root);
+      landOnMain(root, origin, primary, FILES);
+      writeLocal(primary, FILES);
+      const { out } = run(primary);
+      expect(out).toContain('REDUNDANT  newdir/');
+      expect(out).not.toMatch(/ORPHAN\s+newdir\//);
+      expect(out).not.toContain('Is a directory');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('BASE regression proof: the pre-fix script reports the same directory ORPHAN', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'check-primaries-dir-base-'));
+    try {
+      const { origin, primary } = setupPrimary(root);
+      landOnMain(root, origin, primary, FILES);
+      writeLocal(primary, FILES);
+      fs.copyFileSync(BASE_SCRIPT, path.join(primary, 'scripts', 'check-primaries-clean.sh'));
+      const { out } = run(primary);
+      expect(out).toMatch(/ORPHAN\s+newdir\//);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('directory with one altered file is ORPHAN', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'check-primaries-dir-orph-'));
+    try {
+      const { origin, primary } = setupPrimary(root);
+      landOnMain(root, origin, primary, FILES);
+      writeLocal(primary, { ...FILES, 'newdir/sub/b.json': '{"b":999}\n' });
+      const { out } = run(primary);
+      expect(out).toMatch(/ORPHAN\s+newdir\//);
+      expect(out).not.toContain('REDUNDANT  newdir/');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('directory with an extra file absent on origin/main is ORPHAN', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'check-primaries-dir-extra-'));
+    try {
+      const { origin, primary } = setupPrimary(root);
+      landOnMain(root, origin, primary, FILES);
+      writeLocal(primary, { ...FILES, 'newdir/extra.json': 'new\n' });
+      const { out } = run(primary);
+      expect(out).toMatch(/ORPHAN\s+newdir\//);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('a comparison that cannot run reports UNKNOWN, not ORPHAN', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'check-primaries-dir-unk-'));
+    try {
+      const { origin, primary } = setupPrimary(root);
+      landOnMain(root, origin, primary, FILES);
+      writeLocal(primary, FILES);
+      // A FIFO inside the directory is not a regular file: it cannot be hashed.
+      execFileSync('mkfifo', [path.join(primary, 'newdir', 'pipe')]);
+      const { status, out } = run(primary);
+      expect(out).toMatch(/UNKNOWN\s+newdir\/.*could not compare.*non-regular entry newdir\/pipe/);
+      expect(out).not.toMatch(/ORPHAN\s+newdir\//);
+      expect(out).not.toContain('REDUNDANT  newdir/');
+      expect(status).toBe(1);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
