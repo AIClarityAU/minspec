@@ -366,6 +366,53 @@ describe('sync_shared_checkouts: gated fast-forward (rule #8 / #168)', () => {
     }
   });
 
+  describe('parked primary is reported loudly (#1901)', () => {
+    const syncStderr = (primary: string): string =>
+      spawnSync('bash', [path.join(primary, 'scripts', 'drain-inbox.sh'), '--sync-checkouts'], {
+        encoding: 'utf-8',
+        env: { ...process.env, MINSPEC_DRAIN_SELF_REFRESH: '0', MINSPEC_DRAIN_RUN_DIR: path.join(primary, '..', 'norun') },
+      }).stderr;
+
+    it('names the branch, the recovery command, and stranded=no for a branch with no unique content', () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parked-clean-'));
+      try {
+        const { primary } = buildRepo(root); // primary is parked on 'host' at C1 (behind origin/main)
+        const out = syncStderr(primary);
+        expect(out).toContain('PARKED PRIMARY');
+        expect(out).toContain("'host'");
+        expect(out).toContain('Stranded work: no');
+        expect(out).toContain(`switch main`);
+        expect(git(primary, 'rev-parse', '--abbrev-ref', 'HEAD'), 'report-only: HEAD not moved').toBe('host');
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('reports stranded=yes when the parked branch holds content absent from origin/main', () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parked-stranded-'));
+      try {
+        const { primary } = buildRepo(root);
+        fs.writeFileSync(path.join(primary, 'unique.txt'), 'only here\n');
+        git(primary, 'add', 'unique.txt');
+        git(primary, 'commit', '-m', 'unique');
+        expect(syncStderr(primary)).toContain('Stranded work: yes');
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    it('is silent when the primary is on the default branch', () => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parked-none-'));
+      try {
+        const { primary } = buildRepo(root);
+        git(primary, 'checkout', '-q', '-B', 'main', 'origin/main');
+        expect(syncStderr(primary)).not.toContain('PARKED PRIMARY');
+      } finally {
+        fs.rmSync(root, { recursive: true, force: true });
+      }
+    });
+  });
+
   it('kill-switch MINSPEC_DRAIN_GATED_FF=0 disables all ff (dormant sibling stays stale)', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gatedff-killswitch-'));
     try {
