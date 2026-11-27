@@ -10,6 +10,7 @@ bear on a near-term decision, file it as an issue and strike it here with the is
 
 Newest first.
 
+- 2026-11-28 - point the four scroogellm-stopped comment sites (file-findings.mjs, radar-prompt.md, tooling-radar README.md, check-primaries-clean.sh) at the scroogellm-automation-stopped record once its number is settled; comment-only sweep (source: #2065)
 - 2026-11-16 - `git-analyzer.ts:188-210` reads a version bump as a new dependency and a failed diff as "none"; decide whether classification should use SPEC-114 FR-11's dependency count instead (source: SPEC-114, #133)
 - 2026-11-16 - once ten specs have passed through SPEC-114 FR-3 (seam-contract check), measure how many answered `contracts: none` (source: SPEC-114, #133)
 - 2026-11-12 - move the byte-order-mark fix into the shared spec-hash code once the Windows BOM spec-gate fix lands; measured: `canonical.py --hash` and `specHash` agree on a BOM-prefixed spec, so nothing is wrong today (source: PR #3437, BOM fix)

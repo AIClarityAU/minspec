@@ -986,4 +986,12 @@ The founder answered this as runner queue item clarsel on 2026-11-17 (words in t
 <!-- dr-summary:DR-124 auto=b3c6f8a249ed -->
 SPEC-022 FR-1 (specs/minspec/SPEC-022-approval-foundation/requirements.md:77) says approval ground truth is **committed** to the repo. Before #576 the approval record was only git-*tracked*: written to disk and left in the working tree. Nothing committed it. So an approval could sit uncommitted indefinitely, be lost to a checkout or a reset, or be swept into an unrelated commit by another session. "Committed ground truth" was a claim the code did not keep.
 <!-- /dr-summary:DR-124 -->
+
+## [DR-125 — MinSpec's automation no longer targets AIClarityAU/scroogellm - work on that repo stopped on 2026-09-22, and restarting it is a new decision, not a repair](DR-125.md)
+
+*Status: proposed · Date: 2026-11-28*
+
+<!-- dr-summary:DR-125 auto=1eee001ae1bb -->
+On 2026-09-22 the founder told the agents, verbally, to stop building ScroogeLLM and to remove it from the drain. #2064 acted on that: the tooling radar no longer files into AIClarityAU/scroogellm, and the primaries-clean report no longer inspects its checkout. The instruction left no committed record, so four code comments carry the date with nothing to cite. This record is that citation. It changes no code.
+<!-- /dr-summary:DR-125 -->
 <!-- minspec:dr-index:end -->
