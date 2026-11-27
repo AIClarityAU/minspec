@@ -126,6 +126,17 @@ describe('issue_branch_holder_plan: every other holder state', () => {
     expect(fields[2]).toMatch(/outside/);
   });
 
+  it('a holder named like a dispatch worktree but outside the base is still deferred (D3)', () => {
+    const elsewhere = path.join(tmp, 'elsewhere');
+    fs.mkdirSync(elsewhere);
+    const lookalike = path.join(elsewhere, 'issue-7-sid-111-222');
+    git(repo, 'worktree', 'remove', holder);
+    git(repo, 'worktree', 'add', '-q', lookalike, BR);
+    const { fields } = plan();
+    expect(fields.slice(0, 2)).toEqual(['defer', lookalike]);
+    expect(fields[2]).toMatch(/outside/);
+  });
+
   it('a holder whose folder is gone but sits outside the base is deferred, not pruned', () => {
     const human = path.join(tmp, 'human-checkout');
     git(repo, 'worktree', 'remove', holder);
