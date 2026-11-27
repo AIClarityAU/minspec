@@ -82,4 +82,42 @@ describe('enqueuePhaseAdvance() — LLM-free request write (DR-057 §2 / #733)',
     const parsed = JSON.parse(fs.readFileSync(p, 'utf-8'));
     expect(parsed.specPath).toBe('specs/minspec/SPEC-009-bar/requirements.md');
   });
+
+  describe('dedup by spec path + upstream specHash (#731)', () => {
+    const read = () => JSON.parse(fs.readFileSync(queueRequestPath(tmp, SPEC_REL), 'utf-8'));
+
+    it('records the upstream hash and reports "enqueued" on first write', () => {
+      expect(enqueuePhaseAdvance(tmp, SPEC_REL, 'alt-a-toast', 'hash-A')).toBe('enqueued');
+      expect(read().upstreamHash).toBe('hash-A');
+    });
+
+    it('a request already queued for the same upstream hash is a no-op', () => {
+      enqueuePhaseAdvance(tmp, SPEC_REL, 'alt-a-toast', 'hash-A');
+      const p = queueRequestPath(tmp, SPEC_REL);
+      fs.writeFileSync(p, JSON.stringify({ ...read(), requestedAt: 'sentinel' }));
+      expect(enqueuePhaseAdvance(tmp, SPEC_REL, 'alt-a-toast', 'hash-A')).toBe('duplicate');
+      expect(read().requestedAt).toBe('sentinel');
+    });
+
+    it('a re-approval after an edit (new hash) replaces the stale request', () => {
+      enqueuePhaseAdvance(tmp, SPEC_REL, 'alt-a-toast', 'hash-A');
+      expect(enqueuePhaseAdvance(tmp, SPEC_REL, 'alt-a-toast', 'hash-B')).toBe('enqueued');
+      expect(read().upstreamHash).toBe('hash-B');
+      expect(fs.readdirSync(path.dirname(queueRequestPath(tmp, SPEC_REL)))).toHaveLength(1);
+    });
+
+    it('without a hash nothing is deduped, and a corrupt file is rewritten', () => {
+      enqueuePhaseAdvance(tmp, SPEC_REL, 'alt-a-toast');
+      expect(enqueuePhaseAdvance(tmp, SPEC_REL, 'alt-a-toast', null)).toBe('enqueued');
+      fs.writeFileSync(queueRequestPath(tmp, SPEC_REL), '{not json');
+      expect(enqueuePhaseAdvance(tmp, SPEC_REL, 'alt-a-toast', 'hash-A')).toBe('enqueued');
+      expect(read().upstreamHash).toBe('hash-A');
+    });
+
+    it('still refuses in a folder that has not opted in', () => {
+      fs.rmSync(path.join(tmp, '.minspec'), { recursive: true });
+      expect(() => enqueuePhaseAdvance(tmp, SPEC_REL, 'alt-a-toast', 'h')).toThrow();
+      expect(fs.existsSync(path.join(tmp, '.minspec'))).toBe(false);
+    });
+  });
 });

@@ -112,6 +112,8 @@ vi.mock('../src/lib/approval', async (importOriginal) => {
     // a human identity (the mocked gitConfigEmail above) passes the approver gate.
     checkApprover: actual.checkApprover,
     parseAgentIdentities: actual.parseAgentIdentities,
+    // #731: the upstream hash the queue dedups on. Fixed value → asserted below.
+    canonicalSpecHash: vi.fn(() => 'hash-up'),
   };
 });
 
@@ -638,6 +640,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
         '/tmp/ws',
         '/tmp/ws/specs/minspec/SPEC-001/spec.md',
         'alt-a-toast',
+        'hash-up',
       );
       expect(configUpdate).not.toHaveBeenCalled(); // one-shot pick — pref untouched
     });
@@ -674,6 +677,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
         '/tmp/ws',
         '/tmp/ws/specs/minspec/SPEC-001/spec.md',
         'alt-a-toast',
+        'hash-up',
       );
     });
 
@@ -693,6 +697,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
         '/tmp/ws',
         '/tmp/ws/specs/minspec/SPEC-001/spec.md',
         'alt-a-toast',
+        'hash-up',
       );
       expect(configUpdate).not.toHaveBeenCalled(); // already enabled — no redundant re-write
     });
@@ -715,6 +720,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
         '/tmp/ws',
         '/tmp/ws/specs/minspec/SPEC-001/spec.md',
         'alt-a-toast',
+        'hash-up',
       );
     });
 
@@ -782,6 +788,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
         '/tmp/ws',
         '/tmp/ws/specs/minspec/SPEC-001/spec.md',
         'alt-a-toast',
+        'hash-up',
       );
     });
 
@@ -809,6 +816,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
         '/tmp/ws',
         '/tmp/ws/specs/minspec/SPEC-001/spec.md',
         'alt-a-toast',
+        'hash-up',
       );
       // Before #2506 this reached only `console.warn`, invisible to an Alt+A
       // toast user — the user was told nothing while the "Always" they clicked
