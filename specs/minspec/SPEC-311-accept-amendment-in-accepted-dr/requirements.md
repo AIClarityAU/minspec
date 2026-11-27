@@ -12,7 +12,7 @@ implements: none
 implements_reason: creates no file of its own. The Accept Amendment command (Clarify decision 1) sits beside acceptAdrCommand and setAdrStatusCommand in the shared packages/minspec/src/commands/adr.ts, reusing their identity gate and writeRecord path (FR-3, FR-4), plus one command contribution in packages/minspec/package.json (FR-7); both are listed in affects:.
 phases:
   specify: in-progress
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
