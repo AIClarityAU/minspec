@@ -285,7 +285,7 @@ export interface OpenPrResult {
 }
 
 /** GitHub's hard cap on a PR title (`Title is too long (maximum is 256 characters)`). */
-const PR_TITLE_MAX_LEN = 256;
+export const PR_TITLE_MAX_LEN = 256;
 
 /** {@link splitCommitMessage}'s result: a title GitHub will accept, plus the rest. */
 export interface SplitCommitMessage {
@@ -307,7 +307,9 @@ export interface SplitCommitMessage {
  * {@link PR_TITLE_MAX_LEN} chars, fails `gh pr create` outright — *after* the
  * branch is already pushed, stranding it with no PR pointing at it.
  *
- * Mirrors the bash algorithm exactly:
+ * Mirrors the bash split (#1606). Since #1438 `scripts/push-docs.sh` and
+ * `push-docs-lane.ts` reject an over-long subject up front (before any git
+ * work) instead of relying on step 2, which stays only as a defensive backstop:
  *   1. `title` = the first line; `body` = whatever follows the first `\n`, with
  *      one leading blank separator line (a second `\n`) stripped if present.
  *   2. If `title` alone exceeds {@link PR_TITLE_MAX_LEN}, truncate it to that
