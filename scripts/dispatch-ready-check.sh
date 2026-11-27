@@ -519,6 +519,31 @@ if [[ "${1:-}" == "--trusted-comment-bodies" ]]; then
   exit 0
 fi
 
+# ── Clear the #4169 `minspec-held` markers for one issue (human approval path) ──
+# approve-issue.sh calls this after a human lifts a hold, so the local second witness
+# does not re-hold an issue the human just released. Prints each marker removed; exits
+# 1 (loudly) if a marker cannot be removed — a lingering marker keeps refusing, so the
+# failure is never silent. The issue number must be numeric: it is spliced into a path.
+if [[ "${1:-}" == "--clear-held" ]]; then
+  shift
+  c_issue="${1:-}"
+  [[ "$c_issue" =~ ^[0-9]+$ ]] || { echo "usage: --clear-held <issue-number>" >&2; exit 2; }
+  c_base="${MINSPEC_LEASE_WORKTREE_BASE:-/tmp/minspec-agent}"
+  c_rc=0
+  for c_wt in "${c_base}/issue-${c_issue}" "${c_base}/issue-${c_issue}"-*; do
+    [[ -e "$c_wt/.git" ]] || continue
+    c_gd="$(git -C "$c_wt" rev-parse --absolute-git-dir 2>/dev/null)" || continue  # swallow-ok: an unresolvable git dir carries no readable marker, so there is nothing to clear
+    [[ -n "$c_gd" && -e "$c_gd/minspec-held" ]] || continue
+    if rm -f "$c_gd/minspec-held"; then
+      echo "cleared $c_gd/minspec-held"
+    else
+      echo "ERROR: could not remove $c_gd/minspec-held — dispatch will keep refusing #${c_issue} [held]" >&2
+      c_rc=1
+    fi
+  done
+  exit "$c_rc"
+fi
+
 # ── PURE PREDICATE: may a human approval lift this hold? (#1084) ──────────────
 # Exported as its own entry point so the credentialed writer (approve-issue.sh) and
 # the reader below decide by the SAME code, and so the policy is unit-testable
@@ -710,7 +735,7 @@ done
 # single producer). Needs the issue number (arg 5); the worktree base is the same one
 # the dispatcher uses. A worktree whose git dir cannot be resolved is skipped, not
 # trusted: a plain `.git` file pointer is followed via `git rev-parse`.
-if [[ -n "$BLOCKER_ISSUE" ]]; then
+if [[ "$BLOCKER_ISSUE" =~ ^[0-9]+$ ]]; then
   held_base="${MINSPEC_LEASE_WORKTREE_BASE:-/tmp/minspec-agent}"
   for held_wt in "${held_base}/issue-${BLOCKER_ISSUE}" "${held_base}/issue-${BLOCKER_ISSUE}"-*; do
     [[ -e "$held_wt/.git" ]] || continue

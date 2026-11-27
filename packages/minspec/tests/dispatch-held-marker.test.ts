@@ -111,3 +111,32 @@ describe('dispatch-issue.sh — hold_issue_labels (#4169)', () => {
     expect(fs.existsSync(path.join(wt, '.git', 'minspec-held'))).toBe(true);
   });
 });
+
+describe('dispatch-ready-check.sh --clear-held (#4169 release path)', () => {
+  it('clears the marker so a previously held issue is no longer refused [held]', () => {
+    const base = tmp();
+    const wt = makeWorktree(base, 'issue-4242-sid-1-2');
+    const other = makeWorktree(base, 'issue-42420-sid-1-2');
+    fs.writeFileSync(path.join(wt, '.git', 'minspec-held'), 'held\n');
+    fs.writeFileSync(path.join(other, '.git', 'minspec-held'), 'held\n');
+    expect(gate(base, '4242').out).toContain('[held]');
+    const r = spawnSync('bash', [GATE, '--clear-held', '4242'], {
+      encoding: 'utf-8',
+      env: { ...process.env, MINSPEC_LEASE_WORKTREE_BASE: base },
+    });
+    expect(r.status).toBe(0);
+    expect(fs.existsSync(path.join(wt, '.git', 'minspec-held'))).toBe(false);
+    expect(fs.existsSync(path.join(other, '.git', 'minspec-held'))).toBe(true);
+    expect(gate(base, '4242').out).not.toContain('[held]');
+  });
+
+  it('rejects a non-numeric issue number', () => {
+    const r = spawnSync('bash', [GATE, '--clear-held', '../x'], { encoding: 'utf-8' });
+    expect(r.status).toBe(2);
+  });
+
+  it('approve-issue.sh calls --clear-held, but not for an agent-quarantined issue', () => {
+    const src = fs.readFileSync(path.resolve(__dirname, '../../../scripts/approve-issue.sh'), 'utf-8');
+    expect(src).toMatch(/grep -qx "agent-quarantined" <<<"\$CURRENT_LABELS"[\s\S]*--clear-held "\$ISSUE"/);
+  });
+});
