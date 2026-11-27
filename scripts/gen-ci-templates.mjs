@@ -35,8 +35,9 @@ const OUTPUT_PATH = 'packages/minspec/src/lib/ci-review-templates.ts';
 const HOOK_OUTPUT_PATH = 'packages/minspec/src/lib/hook-templates.ts';
 const LINE_WIDTH = 100;
 
-// Mirrors CI_STACK in packages/minspec/tests/managed-region-templates.test.ts —
-// keep both lists in sync if the embedded stack grows (#564).
+// CI_STACK in packages/minspec/tests/managed-region-templates.test.ts plus its
+// DRIFT_GATED_ONLY list must equal this list; the 'CI_STACK covers every generator
+// source' test in that file enforces it (#1959, #564).
 const SOURCES = [
   {
     constName: 'AI_REVIEW_WORKFLOW',

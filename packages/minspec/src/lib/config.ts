@@ -68,6 +68,13 @@ export interface MinspecConfig {
    */
   readonly implementEvidence?: 'warn' | 'error';
   /**
+   * Severity of `decision.status-contradiction` (#1812): a document that marks the same
+   * decision id (`D<n>`, `OQ<n>`, `PQ<n>`) both open and resolved. `warn` (default) first;
+   * flip to `error` once the corpus is clean (same FR-7 ratchet as `implementEvidence`).
+   * Absent → treated as `warn`.
+   */
+  readonly decisionStatusContradiction?: 'warn' | 'error';
+  /**
    * Severity of the two implement close-out rules (#1595):
    * `implement.finished-not-closed` (every task ticked and every declared
    * `implements:` path on disk, yet `phases.implement` is still `in-progress`) and
@@ -171,6 +178,7 @@ export const DEFAULT_CONFIG: MinspecConfig = {
   coverage: { minimumPercentage: DEFAULT_COVERAGE_MINIMUM },
   ownershipDeclaration: 'warn',
   implementEvidence: 'warn',
+  decisionStatusContradiction: 'warn',
   implementCloseout: 'warn',
   autonomy: 'ask',
   statusLineAnnotation: 'warn',

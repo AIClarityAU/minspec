@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-115-continuous-tier-check/requirements.md",
+  "specHash": "99b4681e59aa58abf7a83b09585e89e745548bc76502bec3cf896325ff5fc2a1",
+  "approvedAt": "2026-11-17T04:00:03.473Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1117",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3803#issuecomment-6937435860"
+}

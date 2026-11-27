@@ -19,6 +19,7 @@ import {
   REVIEW_PERMISSIONS,
   MAX_TTL_SECONDS,
   CLOCK_SKEW_GRACE_SECONDS,
+  AppNotInstalledError,
   type InstallationTokenFactory,
 } from '../../broker/src/mint';
 
@@ -240,6 +241,29 @@ describe('AC-3 — scoped minting', () => {
     };
     const r = await mintScopedToken({ repository: REPO, repository_owner: '' }, boom);
     expect(r.ok === false && r.reason).not.toMatch(/4212099|144283146/);
+  });
+
+  // SPEC-034 task 2.1 (FR-4, AC-4): the one mint failure the caller can fix themselves
+  // is carried out as its own code, so the handler can answer 403 "install the App"
+  // instead of the generic 502.
+  it('reports app_not_installed when the factory signals the App is absent', async () => {
+    const absent: InstallationTokenFactory = async () => {
+      throw new AppNotInstalledError();
+    };
+    const r = await mintScopedToken({ repository: REPO, repository_owner: '' }, absent);
+    expect(r).toMatchObject({ ok: false, code: 'app_not_installed' });
+    expect(JSON.stringify(r)).not.toContain('ghs_');
+  });
+
+  it('reports mint_failed for any other factory error — the control for the case above', async () => {
+    // A plain Error whose MESSAGE says "not installed" must not be promoted: only the
+    // typed signal from the factory counts, so provider wording can never change the
+    // status a caller sees.
+    const boom: InstallationTokenFactory = async () => {
+      throw new Error('App not installed');
+    };
+    const r = await mintScopedToken({ repository: REPO, repository_owner: '' }, boom);
+    expect(r).toMatchObject({ ok: false, code: 'mint_failed' });
   });
 
   it('refuses to mint without a verified repository', async () => {

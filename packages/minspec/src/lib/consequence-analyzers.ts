@@ -197,8 +197,21 @@ export const publicApiAnalyzer: ConsequenceAnalyzer = (input) => {
   for (const file of input.changedFiles) {
     if (!isPublicSurface(file.path)) continue;
     // package.json is a public surface but not JS/TS export syntax — skip the
-    // name-diff for it; a touch to it is already captured by dependency_change.
-    if (!isCodeFile(file.path)) continue;
+    // export name-diff for it, but a touch to it is NOT otherwise captured: the
+    // scope-axis `dependency_change` never enters the consequence signals (#414).
+    // Emit the recognized high-blast `manifest_changed` so a manifest/exports
+    // change is never silent (deny-by-default for the gate, weight for the tier).
+    if (!isCodeFile(file.path)) {
+      signals.push({
+        name: 'manifest_changed',
+        value: true,
+        weight: 0,
+        tierContribution: 'T2',
+        axis: CONSEQUENCE,
+        explain: `public manifest ${file.path} ${file.status === 'deleted' ? 'removed' : 'changed'} (dependencies/exports/bin may shift)`,
+      });
+      continue;
+    }
 
     const now = scannable(file);
 

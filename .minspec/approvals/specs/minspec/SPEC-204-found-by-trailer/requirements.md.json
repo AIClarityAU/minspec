@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-204-found-by-trailer/requirements.md",
+  "specHash": "f897f0f89292cb90e7602d924ff51db4aedc6f726ef5706239b07498094f854a",
+  "approvedAt": "2026-11-12T20:01:51.396Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "767f4c347803fffb00952cbc1698a2d263c4d88e"
+}

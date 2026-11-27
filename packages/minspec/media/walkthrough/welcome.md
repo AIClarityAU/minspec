@@ -39,6 +39,9 @@ deterministic next human task** at a time — the single thing blocking progress
 No prioritization meeting, no backlog grooming. Finish that one thing and the next one
 appears.
 
+Specs, DRs, PRs, Epics, and Issues are all **Approvables** — MinSpec tracks which one needs
+your eye next.
+
 ## What feels different, day one
 
 - You write a spec sentence *before* opening the file you're about to change — even for a

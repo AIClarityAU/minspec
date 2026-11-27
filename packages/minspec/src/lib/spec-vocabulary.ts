@@ -34,6 +34,9 @@ export const SPEC_STATUSES = [
   'superseded',
 ] as const;
 
+/** Status of an individual phase */
+export type PhaseStatus = 'pending' | 'in-progress' | 'done' | 'skipped';
+
 /** Lifecycle status of the entire spec. */
 export type SpecStatus = (typeof SPEC_STATUSES)[number];
 

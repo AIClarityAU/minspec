@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-368-drain-wedge-bounded-cycle-progress-lock/requirements.md",
+  "specHash": "ed688468d9005fa73e132562e7d1a3496e7af8295bdc4306019493cb0a38eef0",
+  "approvedAt": "2026-11-17T05:35:06.031Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1117-b",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3804#issuecomment-6938680366"
+}

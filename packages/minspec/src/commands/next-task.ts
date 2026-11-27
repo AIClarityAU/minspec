@@ -11,7 +11,12 @@
  */
 
 import * as vscode from 'vscode';
-import { formatImperativeForSignpost, resolveNextTask, type NextTask } from '@aiclarity/shared';
+import {
+  formatImperativeForSignpost,
+  resolveNextTask,
+  type NextTask,
+  type ReviewPrNode,
+} from '@aiclarity/shared';
 import { buildArtifactGraph, artifactFileIndex } from '../lib/artifact-graph';
 
 const CLEAR_MESSAGE = "MinSpec: nothing to review — you're clear. ✓";
@@ -21,9 +26,13 @@ const CLEAR_MESSAGE = "MinSpec: nothing to review — you're clear. ✓";
  * build/resolve failure to `null` (treated as "clear") rather than throwing, so
  * every caller (command + status bar) shares one fail-safe path.
  */
-export function computeNextTask(workspaceRoot: string): NextTask | null {
+export function computeNextTask(
+  workspaceRoot: string,
+  reviewPrs?: ReviewPrNode[],
+): NextTask | null {
   try {
-    return resolveNextTask(buildArtifactGraph(workspaceRoot));
+    const graph = buildArtifactGraph(workspaceRoot);
+    return resolveNextTask(reviewPrs ? { ...graph, reviewPrs } : graph);
   } catch {
     return null;
   }
@@ -65,7 +74,9 @@ export function nextTaskCommand(workspaceRoot: string): () => Promise<void> {
     if (filePath) {
       try {
         const doc = await vscode.workspace.openTextDocument(filePath);
-        await vscode.window.showTextDocument(doc, { preview: false });
+        // Preview tab (reused across clicks, #906) that takes focus. The toast
+        // below is not awaited, so it cannot steal focus from the editor.
+        await vscode.window.showTextDocument(doc, { preview: true, preserveFocus: false });
       } catch {
         // Opening failed — still surface the imperative below.
       }

@@ -60,6 +60,9 @@
 #   MINSPEC_DRAIN_SERVICE_STOP_GRACE  seconds to wait for the drain on stop (default 90)
 #   MINSPEC_DRAIN_SERVICE_RETRY_BASE  first backoff after a failed launch/end (default 15, doubles)
 #   MINSPEC_DRAIN_SERVICE_RETRY_MAX   backoff ceiling in seconds (default 600)
+#   MINSPEC_DRAIN_SERVICE_MOVE_MIN_LIFE  a drain that stopped on a moved origin/main after
+#                                     fewer seconds than this (default 120) backs off before
+#                                     the in-process relaunch; a longer-lived one relaunches at once
 #   MINSPEC_DRAIN_CONCURRENCY    parallel agents per cycle for the drain this script starts
 #                                (default 8, DR-114; drain-inbox.sh clamps
 #                                bad values). The unit passes none, so 8 is what runs.
@@ -80,6 +83,7 @@ STOP_GRACE="${MINSPEC_DRAIN_SERVICE_STOP_GRACE:-90}"
 # Backoff between retries of a failed launch or failed drain end, inside ONE start (#3095).
 RETRY_BASE="${MINSPEC_DRAIN_SERVICE_RETRY_BASE:-15}"
 RETRY_MAX="${MINSPEC_DRAIN_SERVICE_RETRY_MAX:-600}"
+MOVE_MIN_LIFE="${MINSPEC_DRAIN_SERVICE_MOVE_MIN_LIFE:-120}"
 # The service's default is 8 (DR-114); drain-inbox.sh's own default (1, used by the
 # session-start drain) is unchanged. Set only for the drain this script launches.
 export MINSPEC_DRAIN_CONCURRENCY="${MINSPEC_DRAIN_CONCURRENCY:-8}"
@@ -102,6 +106,24 @@ drain_holder() {
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
   kill -0 "$pid" 2>/dev/null || return 1
   printf '%s' "$pid"
+}
+
+PRIMARY="${MINSPEC_DRAIN_PRIMARY_ROOT:-$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "$SCRIPT_DIR/../.." && pwd))}"
+
+# run_dir_drain (#3747): refresh the run dir (the drain's own --refresh-run-dir seam) and
+# print its drain-inbox.sh when the run dir sits at the checkout's origin/main. Fails
+# (prints nothing) when MINSPEC_DRAIN_SERVICE_DRAIN is set explicitly (an override wins),
+# or when the run dir is missing or not verified; the caller then runs in place, and the
+# drain's own STALE line says so. Never fatal. cmd_run calls it only when no drain holds
+# the lock, so this refresh never resets the run dir under a drain executing from it.
+run_dir_drain() {
+  [[ -n "${MINSPEC_DRAIN_SERVICE_DRAIN:-}" ]] && return 1
+  local run="${MINSPEC_DRAIN_RUN_DIR-/tmp/minspec-drain-run}" head origin
+  [[ -n "$run" && "${MINSPEC_DRAIN_SELF_REFRESH:-1}" != "0" ]] || return 1
+  head="$(MINSPEC_DRAIN_PRIMARY_ROOT="$PRIMARY" "$DRAIN" --refresh-run-dir 2>/dev/null 9>&- | tail -n 1)" || return 1
+  origin="$(git -C "$PRIMARY" rev-parse origin/main 2>/dev/null)" || return 1
+  [[ -n "$head" && "$head" == "$origin" && -x "$run/scripts/drain-inbox.sh" ]] || return 1
+  printf '%s\n' "$run/scripts/drain-inbox.sh"
 }
 
 # paused: the drain's own predicate, so the marker path is decided in one place.
@@ -148,7 +170,8 @@ describe_adopted() {
 }
 
 # report_end <log-offset> <pid>: print what the drain wrote since <log-offset> and
-# return the exit code that describes how it ended.
+# return the exit code that describes how it ended: 0 normal end, 1 failure, 2 the drain
+# asked to be relaunched because origin/main moved (#3747).
 report_end() {
   local off="$1" pid="$2" tail_text
   tail_text="$(tail -c +"$((off + 1))" "$DRAIN_LOG" 2>/dev/null | tail -n 8)"
@@ -157,6 +180,12 @@ report_end() {
   if grep -q 'consecutive cycle errors' <<<"$tail_text"; then
     say "FAILED: the drain stopped on consecutive cycle errors."
     return 1
+  fi
+  # #3747: the drain stopped itself because origin/main moved past its run dir. Not a
+  # failure and not a final end: the caller refreshes the run dir and relaunches.
+  if grep -q 'RESTART-ON-MAIN-MOVE' <<<"$tail_text"; then
+    say "RESTART: origin/main moved past the drain's run dir; refreshing it and relaunching inside this start."
+    return 2
   fi
   if ! grep -q -e 'loop exited' -e 'stopping on SIGTERM' <<<"$tail_text"; then
     say "FAILED: drain pid $pid ended without writing its exit line (killed, or its log is elsewhere)."
@@ -198,12 +227,22 @@ cmd_run() {
   # one of the unit's StartLimitBurst starts per failure, and a run of transient failures
   # after a host resume would mark the unit failed for good (#3095). Only a normal end
   # (exit 0) leaves this loop.
-  local was_paused=0 pid off rc delay="$RETRY_BASE"
+  local was_paused=0 pid off rc delay="$RETRY_BASE" wrc started
+  # #3747: a drain that stopped because main moved is relaunched here, not by systemd. A
+  # drain that lived at least MOVE_MIN_LIFE seconds resets the backoff; a shorter one
+  # backs off (retry_wait, capped at RETRY_MAX), so a run of rapid moves cannot spin.
   while :; do
     if pid="$(drain_holder)"; then
       say "adopting the running drain (pid $pid); starting nothing."
       describe_adopted "$pid"
-      if watch "$pid" "$(log_size)"; then exit 0; fi
+      started=$SECONDS
+      wrc=0; watch "$pid" "$(log_size)" || wrc=$?
+      if (( wrc == 0 )); then exit 0; fi
+      if (( wrc == 2 )); then
+        (( SECONDS - started >= MOVE_MIN_LIFE )) && delay="$RETRY_BASE"
+        (( SECONDS - started >= MOVE_MIN_LIFE )) || retry_wait delay
+        continue
+      fi
       retry_wait delay; continue
     fi
     if paused; then
@@ -214,11 +253,17 @@ cmd_run() {
     (( was_paused )) && say "RESUMED: pause marker gone."
     was_paused=0
     off="$(log_size)"
-    say "starting the drain: $DRAIN --continuous"
+    # #3747: run the drain from the verified run dir, not from this (possibly behind)
+    # checkout, so the code that runs is the code that was verified.
+    local drain="$DRAIN" run_script
+    if run_script="$(run_dir_drain)"; then
+      drain="$run_script"
+    fi
+    say "starting the drain: $drain --continuous"
     rc=0
     # 9>&-: the drain's loop outlives this call, and must not inherit this script's
     # lock, or a restarted supervisor would find the lock held and exit 75.
-    MINSPEC_SESSION_PID=$$ "$DRAIN" --continuous 9>&- || rc=$?
+    MINSPEC_SESSION_PID=$$ MINSPEC_DRAIN_PRIMARY_ROOT="$PRIMARY" "$drain" --continuous 9>&- || rc=$?
     if (( rc != 0 )); then
       say "FAILED: drain launch exited $rc (see the lines above)."
       retry_wait delay; continue
@@ -231,7 +276,14 @@ cmd_run() {
       say "FAILED: the drain launch exited 0 but no live pid holds $DRAIN_LOCK."
       retry_wait delay; continue
     fi
-    if watch "$pid" "$off"; then exit 0; fi
+    started=$SECONDS
+    wrc=0; watch "$pid" "$off" || wrc=$?
+    if (( wrc == 0 )); then exit 0; fi
+    if (( wrc == 2 )); then
+      (( SECONDS - started >= MOVE_MIN_LIFE )) && delay="$RETRY_BASE"
+      (( SECONDS - started >= MOVE_MIN_LIFE )) || retry_wait delay
+      continue
+    fi
     retry_wait delay
   done
 }

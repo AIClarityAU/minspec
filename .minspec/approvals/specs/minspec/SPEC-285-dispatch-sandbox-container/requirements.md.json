@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-285-dispatch-sandbox-container/requirements.md",
+  "specHash": "cc96464f06f955b5724d046aef3de550e037a3a1ef8557cc126b4d23163226d3",
+  "approvedAt": "2026-11-12T20:02:02.669Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "40081f98363f65ea470fc5eba741cc7ae9d214fe"
+}

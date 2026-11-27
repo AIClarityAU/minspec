@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-386-ref-check-warning-triage/requirements.md",
+  "specHash": "fa696808e1d0fae13a6a2aa51036f7d6bb65046c6a869d78b48ce3a9907e32fe",
+  "approvedAt": "2026-11-23T20:30:00.855Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1123",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4024#issuecomment-7112005209"
+}

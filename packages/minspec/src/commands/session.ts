@@ -7,7 +7,8 @@ import {
   type SessionType,
 } from '../lib/session';
 import { resolveTargetFolder } from '../lib/resolve-folder';
-import { hasOptInMarker, notOptedInMessage, NotOptedInError } from '../lib/opt-in';
+import { hasOptInMarker, notOptedInMessage } from '../lib/opt-in';
+import { showedOptInRefusal } from './opt-in-refusal';
 
 const SESSION_TYPES: SessionType[] = ['bug', 'feat', 'explore', 'plan'];
 
@@ -78,8 +79,7 @@ export async function declareScopeCommand(): Promise<void> {
     // then refuses, and that refusal is shown here rather than left to the
     // editor's handling of a rejected command (SPEC-096 FR-8). No "Session
     // started" follows it.
-    if (!(err instanceof NotOptedInError)) throw err;
-    vscode.window.showErrorMessage(err.message);
+    if (!showedOptInRefusal(err)) throw err;
     return;
   }
 

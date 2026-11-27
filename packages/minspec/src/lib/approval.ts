@@ -36,38 +36,11 @@ import {
   toPosixRel,
 } from './approval-store';
 
-export type ApprovalStatus = 'approved' | 'stale' | 'unapproved';
-
-/**
- * The FR-2 attributed approval record — the on-disk sidecar shape.
- *
- * `migrated` is `true` only for FR-5 backfilled records (an approval the human
- * never performed, flagged so the gate treats it valid-but-flagged — "re-approve
- * to clear"). A `migrated:true` record still resolves to `approved` for the
- * derive (non-blocking, warn-first), but carries its honest provenance.
- *
- * SPEC-017 adds two fields:
- *   `baselineBlob`  — FR-1 baseline pointer. One of THREE closed forms, frozen
- *                     forever (committed): a 40-hex git blob SHA | the literal
- *                     string 'gzip:fallback' (GZIP_MARKER) | '' (both mint paths
- *                     failed → no M1 datapoint). On-disk back-compat: absent in
- *                     legacy records (pre-SPEC-017) — `readRecord` normalizes
- *                     absent → '' so this required-string always holds in memory.
- *                     NEVER use a required-string validator or every legacy
- *                     approval silently drops (Costly #1, AC-1 back-compat).
- *   `reviewStart`   — RESERVED for M3 (FR-7, time-to-approve). NOT populated in
- *                     M1. Optional so M3 can backfill without a second migration.
- */
-export interface ApprovalRecord {
-  readonly specPath: string;       // repo-relative, POSIX, e.g. specs/minspec/SPEC-007-foo/requirements.md
-  readonly specHash: string;       // canonical hash (FR-3), hex
-  readonly approvedAt: string;     // ISO-8601 UTC
-  readonly approvedBy: string;     // git config user.email at approval time
-  readonly tier: Tier;
-  readonly migrated: boolean;
-  readonly baselineBlob: string;   // FR-1: 40-hex SHA | 'gzip:fallback' | '' (see above)
-  readonly reviewStart?: string;   // RESERVED for M3 (FR-7) — absent in M1; ISO-8601 UTC when set
-}
+// ApprovalStatus / ApprovalRecord live in ./approval-types (SPEC-040 FR-6 / #988) so
+// approval-store and lifecycle can name them without importing this module. Re-exported
+// so every existing `from './approval'` site is unchanged.
+export type { ApprovalStatus, ApprovalRecord } from './approval-types';
+import type { ApprovalStatus, ApprovalRecord } from './approval-types';
 
 /** Repo-relative POSIX path for a spec file, the approval store's key. */
 export function specRelPath(rootDir: string, specFilePath: string): string {
@@ -586,6 +559,25 @@ export function approveSpec(
   //    frontmatter-minus-lifecycle; see §Why two boundaries in design.md).
   const bodyOnly = getSpecBodyOnly(raw);
   const specPath = specRelPath(rootDir, specFilePath);
+
+  // #1371: a live, hash-matching approval by this same approver already exists —
+  // return it untouched. Re-stamping `approvedAt` would write a byte-different but
+  // semantically identical sidecar, minting a duplicate approval PR and a second
+  // "when was this approved" answer. A changed hash (legit re-approve) or a
+  // different approver (or a migrated record, which a human re-approval upgrades)
+  // falls through to the normal write. A record whose baseline is absent OR
+  // unrecoverable (dangling ref, gc-pruned blob, #404) also falls through so
+  // re-approving re-mints it and restores diffing.
+  const existing = readRecord(rootDir, specPath);
+  if (
+    existing &&
+    !existing.migrated &&
+    existing.specHash === hash &&
+    existing.approvedBy === email &&
+    classifyBaseline(rootDir, existing) === 'recovered'
+  ) {
+    return existing;
+  }
 
   // 2. Mint + pin the baseline (git blob → sanitized ref), gzip fallback if non-git
   //    OR if the ref pin fails — never leave a blob unpinned (gc would prune it).

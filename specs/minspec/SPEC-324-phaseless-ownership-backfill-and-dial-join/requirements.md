@@ -1,7 +1,7 @@
 ---
 id: SPEC-324
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — the spec→code ownership contract (SPEC-038/SPEC-081 follow-through)
@@ -12,11 +12,13 @@ relates_to: [SPEC-038, SPEC-051, SPEC-022, DR-088, DR-076, "#3650", "#1543", "#1
 # frontmatter (12 files, owned by no one) and a one-line severity change in files that
 # SPEC-081 owns/affects. It creates no new production file, so there is nothing to own.
 implements: none
+implements_reason: >-
+  Creates no new production file; its deliverables are edits to existing specs' frontmatter and a severity change in files SPEC-081 owns/affects.
 affects: [packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/template-registry.ts, scripts/validate-frontmatter.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -122,6 +124,8 @@ findings from `warning` to the `ownershipDeclaration` dial once its printed coun
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 3 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
+
 ### DQ-1 — Batch size and shape of the backfill
 
 - **(a) (rec) Up to 4 specs per PR, grouped by area** (agent-execute: 016, 019; approval/merge
@@ -129,6 +133,8 @@ findings from `warning` to the `ownershipDeclaration` dial once its printed coun
   root: 001). **Cost:** about 4 PRs and 4 reviews rather than one.
 - **(b) One PR of all 12.** **Cost:** a reviewer cannot realistically check 12 evidence lines
   against code; the bulk-sign-off shape #1543 warns against.
+
+**Recorded selection: Option (a),** up to 4 specs per PR, grouped by area. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ### DQ-2 — Who decides each declaration
 
@@ -138,12 +144,16 @@ findings from `warning` to the `ownershipDeclaration` dial once its printed coun
 - **(b) The founder authors all 12 by hand.** **Cost:** directly contradicts tenet 1 for a
   reversible frontmatter edit.
 
+**Recorded selection: Option (a),** an agent proposes each declaration with evidence; a human or ai-review reads the PR. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
+
 ### DQ-3 — Does the flip wait for every spec, or only the fallback count?
 
 - **(a) (rec) Only FR-6's fallback-armed count must be zero** — exactly the grandfather
   criterion SPEC-038 FR-7 and SPEC-081 DQ-2 set. **Cost:** none new.
 - **(b) Also require a clean count of `signal-absent`.** **Cost:** couples this flip to specs
   that merely lack a phases block, which SPEC-081 treats as a separate remedy (add a block via the tool).
+
+**Recorded selection: Option (a),** only FR-6's fallback-armed count must be zero. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 ## Risks
 

@@ -1,0 +1,150 @@
+--- a/cos.py
++++ b/cos.py
+@@ -641,15 +641,31 @@
+     return f" | {q['pct']:.0f}% used, resets {q['mins_left']}m{sd}"
+ 
+ 
+-def last_assistant_text(path):
+-    """Text of the final assistant turn - the thing a stalled session is sitting on."""
++def last_turn(path):
++    """(kind, text) of a transcript's final conversational record.
++
++    kind is "assistant" (text is that turn's text, possibly "" when the turn was
++    only a tool call), "user" (the last record is a USER record - a tool result or
++    an unanswered prompt; text is ""), or "none" (no user/assistant record could be
++    read). last_assistant_text() collapses all of these to "", which is right for
++    callers that only want text and wrong for any caller that must say WHY there is
++    none: a session wedged mid-tool-call and a session with nothing to read are not
++    the same thing (#2093).
++    """
+     conv = [d for d in tail_records(path) if d.get("type") in ("user", "assistant")]
+-    if not conv or conv[-1].get("type") != "assistant":
+-        return ""
++    if not conv:
++        return ("none", "")
++    if conv[-1].get("type") != "assistant":
++        return ("user", "")
+     c = (conv[-1].get("message") or {}).get("content")
+     if isinstance(c, list):
+         c = " ".join(b.get("text") or "" for b in c if isinstance(b, dict))
+-    return " ".join(str(c or "").split())
++    return ("assistant", " ".join(str(c or "").split()))
++
++
++def last_assistant_text(path):
++    """Text of the final assistant turn - the thing a stalled session is sitting on."""
++    return last_turn(path)[1]
+ 
+ 
+ TEST_MARKERS = ("vitest", "jest", "mocha")
+@@ -5053,6 +5069,30 @@
+     return (ok, counts)
+ 
+ 
++def nudge_text(r):
++    """(text, why) for one session, as cmd_nudge must see it.
++
++    Exactly one of the two is non-empty. `why` is the reason the session could NOT
++    be classified as parked-or-not. It exists because "" used to mean both "nothing
++    to nudge" and "I could not tell", and cmd_nudge skipped on it, so a session
++    wedged mid-tool-call - whose last record is by definition a USER record, the
++    tool result - vanished from the output and a run made only of such sessions
++    printed "no parked sessions" (#2093). An unclassifiable session is a third
++    state, never an absent one.
++    """
++    if not r.get("tpath"):
++        return ("", "no transcript found for this session")
++    kind, txt = last_turn(r["tpath"])
++    if kind == "none":
++        return ("", "transcript has no readable user/assistant record")
++    if kind == "user":
++        return ("", "last record is a USER record (tool result or unanswered prompt), "
++                    "not an assistant stop - wedged mid-tool-call?")
++    if not txt:
++        return ("", "last assistant record has no text - it ended on a tool call")
++    return (txt, "")
++
++
+ def cmd_nudge(args):
+     """Which parked sessions should be nudged RIGHT NOW - and, crucially, which should not.
+ 
+@@ -5075,15 +5115,20 @@
+     rows = load_sessions(enrich=True)
+     st = read_state()
+     led = dict(st.get("nudged") or {})
+-    due, held = [], []
++    due, held, unclassified = [], [], []
+     for r in rows:
+         if r["state"] != "LIVE":
+             continue
+         idl = idle_secs(r)
+         if idl is None or idl < 300:
+             continue                      # busy or just spoke - never interrupt
+-        txt = last_assistant_text(r["tpath"]) if r["tpath"] else ""
+-        if not txt or LIMIT_RE.search(txt):
++        txt, why = nudge_text(r)
++        if why:
++            # NOT a skip: an idle session with no assistant text to key on is
++            # reported, so "no parked sessions" can only ever mean what it says.
++            unclassified.append((r["name"], fmt_age(idl), why))
++            continue
++        if LIMIT_RE.search(txt):
+             continue                      # a quota wall is `stuck`, not a nudge
+         h = hashlib.sha1(txt.encode("utf-8", "replace")).hexdigest()[:12]
+         prev = (led.get(r["sid"]) or {}).get("hash")
+@@ -5098,8 +5143,17 @@
+     for name, h, age, _txt in held:
+         print(f"HELD    {name[:44]:<45} idle {age:>5}  "
+               f"unchanged since last nudge - it is blocked, not idle; do NOT re-send")
+-    if not due and not held:
++    for name, age, why in unclassified:
++        print(f"UNCLASS {name[:44]:<45} idle {age:>5}  {why}")
++    if unclassified:
++        print(f"\nUNCLASSIFIED: {len(unclassified)} idle session(s) could not be classified "
++              f"as parked or not - they are NOT absent. Read each one "
++              f"(cos.py digest <name>) before treating this run as quiet.")
++    if not due and not held and not unclassified:
+         print("no parked sessions")
++    elif not due and not held:
++        print(f"\nno classifiable parked sessions - but {len(unclassified)} UNCLASSIFIED "
++              f"above. This is NOT \"nothing to do\".")
+     elif not due:
+         print(f"\nnothing due: all {len(held)} parked session(s) are unchanged since their "
+               f"last nudge. Re-sending would burn a turn each to be told the same thing.")
+@@ -5130,8 +5184,8 @@
+             idl2 = idle_secs(r)
+             if idl2 is None or idl2 < 300:
+                 continue
+-            txt2 = last_assistant_text(r["tpath"]) if r["tpath"] else ""
+-            if not txt2 or LIMIT_RE.search(txt2):
++            txt2, why2 = nudge_text(r)
++            if why2 or LIMIT_RE.search(txt2):
+                 continue
+             h2 = hashlib.sha1(txt2.encode("utf-8", "replace")).hexdigest()[:12]
+             if (led.get(r["sid"]) or {}).get("hash") != h2:
+@@ -5170,14 +5224,23 @@
+                 failed += 1
+                 continue
+             r = hits[0]
+-            txt = last_assistant_text(r["tpath"]) if r["tpath"] else ""
++            txt, why = nudge_text(r)
++            if why:
++                # Hashing "" here is what filled the ledger with da39a3ee5e6b (the
++                # SHA-1 of the empty string): a mark keyed on "no text" that every
++                # other unclassifiable session also matches (#2093). Refuse it.
++                print(f"  ({key!r} is UNCLASSIFIED - {why}; not marked, there is no "
++                      f"assistant text to key the mark on)")
++                failed += 1
++                continue
+             led[r["sid"]] = {"hash": hashlib.sha1(txt.encode("utf-8", "replace")).hexdigest()[:12],
+                             "at": int(time.time()), "name": r["name"]}
+             n += 1
+         write_state({"nudged": led})
+         print(f"  marked {n} session(s) as nudged at their current state")
+         if failed:
+-            print(f"  {failed} NOT marked - they will be re-reported as DUE next tick")
++            print(f"  {failed} NOT marked (reason on each line above) - they will be "
++                  f"re-reported next tick, as DUE or UNCLASS")
+             sys.exit(1)
+ 
+ 

@@ -111,6 +111,13 @@ const FIXTURES: ReadonlyArray<{ label: string; input: ConsequenceInput }> = [
     },
   },
   {
+    label: 'public API: manifest (package.json) changed ⇒ manifest_changed',
+    input: {
+      refIndex: null,
+      changedFiles: [file({ path: 'packages/x/package.json', content: '{"main":"dist/index.js"}' })],
+    },
+  },
+  {
     label: 'irreversibility: new migration file with destructive SQL',
     input: {
       refIndex: null,

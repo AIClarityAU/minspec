@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-414-dependency-budget-single-home/requirements.md",
+  "specHash": "3698f4360b70853088b972a6649e118144d53bb512232f91283b99153abf8ff9",
+  "approvedAt": "2026-11-24T05:18:36.539Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:agent/issue-4021",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4045#issuecomment-7121876648"
+}

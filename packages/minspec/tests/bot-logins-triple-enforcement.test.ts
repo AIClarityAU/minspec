@@ -57,14 +57,27 @@ describe('ENFORCE: AI_REVIEW_BOT_LOGINS identifier agreement — ready-to-merge.
   // is captured too, so the guard covers it rather than being loosened to ignore it —
   // an unset variable must resolve to the shipped identity, never to an EMPTY allowlist,
   // which would affirm nobody and silently disarm the gate.
-  const bindings = [
+  //
+  // #4078 adds ONE other, named binding: `AI_REVIEW_APP: ${{ vars.AI_REVIEW_APP }}`, the
+  // switch that selects a review-only App. It is listed here by name rather than the
+  // assertion being loosened, so any OTHER `vars.*` env that creeps in still fails.
+  const KNOWN_OTHER_BINDINGS = ['AI_REVIEW_APP'];
+  const allBindings = [
     ...workflow.matchAll(
       /([A-Z0-9_]+):\s*\$\{\{\s*vars\.([A-Z0-9_]+)\s*(?:\|\|\s*'([^']*)')?\s*\}\}/g,
     ),
   ];
+  const others = allBindings.filter((b) => KNOWN_OTHER_BINDINGS.includes(b[1]) && b[1] === b[2]);
+  const bindings = allBindings.filter((b) => !others.includes(b));
 
   it('the workflow binds exactly one `env: KEY: ${{ vars.NAME }}` (the allowlist var)', () => {
     expect(bindings).toHaveLength(1);
+  });
+
+  it('#4078: the only other vars binding is AI_REVIEW_APP, self-consistent and with NO default', () => {
+    // No `|| 'builder'` fallback: an unset variable already means the single-App default,
+    // and a default here would make a typo'd or deleted variable silently select it.
+    expect(others.map((b) => [b[1], b[2], b[3]])).toEqual([['AI_REVIEW_APP', 'AI_REVIEW_APP', undefined]]);
   });
 
   const [, envKey, varName, fallback] = bindings[0];

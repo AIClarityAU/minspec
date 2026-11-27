@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-268-review-app-secrets-optional/requirements.md",
+  "specHash": "4dad2fe7e5df5167910eed9f6a9bc067e52befc82a1465a5593564fe712d428b",
+  "approvedAt": "2026-11-27T01:32:23.966Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "ed703f281fd0cd966edb7f8279aecaa9db437c92"
+}

@@ -1,7 +1,7 @@
 ---
 id: SPEC-213
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - the same domain as SPEC-037 (approver identity) and the human-decision-witness draft
@@ -19,9 +19,9 @@ relates_to: [DR-086, DR-087, DR-105, SPEC-037, SPEC-069, "#1816", "#1872", "#192
 implements: [scripts/lib/agent-location.sh, packages/minspec/tests/agent-location.test.ts]
 affects: [scripts/hooks/host-write-guard.py, packages/minspec/tests/host-write-guard.test.ts, scripts/drain-inbox.sh, scripts/dispatch-issue.sh, scripts/remediate-pr.sh, scripts/triage-inbox.sh, scripts/push-docs.sh, scripts/check-gh-bot-attribution.sh, scripts/lib/gh-bot.sh]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

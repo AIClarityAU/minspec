@@ -24,6 +24,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { pathToFileURL } from 'url';
 
 import {
   generateHarnessFiles,
@@ -315,6 +316,9 @@ function findRepoRoot(): string {
   throw new Error('could not locate repo root (…/.github/workflows/ai-review.yml)');
 }
 
+const PY_SHEBANG = '#!/usr/bin/env python3';
+const BASH_SHEBANG = '#!/usr/bin/env bash';
+
 /**
  * The CI-review-stack managed templates and their expected shape. Deliberately NOT
  * described by a count: the previous wording said "eight" while the list held eleven,
@@ -326,6 +330,8 @@ const CI_STACK: ReadonlyArray<{
   style: 'hash' | 'html' | 'slash';
   executable: boolean;
   shebang: boolean;
+  /** Preamble line when it is not the bash default (python scripts). */
+  preamble?: string;
   /**
    * #1486: the one template whose shipped copy is NOT byte-identical to this repo's
    * working file. Its machinery-path COMMENT is written from MinSpec's vantage and is
@@ -352,6 +358,26 @@ const CI_STACK: ReadonlyArray<{
   // ai-review-guard-test-parity.test.ts for why, and for the fail-closed property of
   // the gate that syncs it.
   { name: 'ai-review-guard-test', outputPath: '.github/scripts/ai-review-guard.test.js', style: 'slash', executable: false, shebang: false },
+  // #1959 — the sources the generator embeds that this list previously omitted; the
+  // 'CI_STACK covers every generator source' test below keeps the two from drifting.
+  { name: 'secret-scan-workflow', outputPath: '.github/workflows/secret-scan.yml', style: 'hash', executable: false, shebang: false },
+  { name: 'agent-context-lib', outputPath: 'scripts/lib/agent-context.sh', style: 'hash', executable: false, shebang: true },
+  { name: 'approval-provenance-script', outputPath: 'scripts/approval-provenance.py', style: 'hash', executable: true, shebang: true, preamble: PY_SHEBANG },
+  { name: 'canonical-hasher-python', outputPath: 'scripts/hooks/canonical.py', style: 'hash', executable: true, shebang: true, preamble: PY_SHEBANG },
+];
+
+const expectedPreamble = (t: (typeof CI_STACK)[number]): string | undefined =>
+  t.preamble ?? (t.shebang ? BASH_SHEBANG : undefined);
+
+/**
+ * Generator sources deliberately embedded for DRIFT GATING only and absent from the
+ * registry (see the comment on those entries in scripts/gen-ci-templates.mjs, #1502).
+ * ci-template-sources-witness.test.ts pins this same set from the registry side.
+ */
+const DRIFT_GATED_ONLY = [
+  'scripts/review-approvable.sh',
+  'scripts/review-pr.sh',
+  'scripts/roles/approvable-reviewer.md',
 ];
 
 const tplByName = (name: string) => MANAGED_REGION_TEMPLATES.find((t) => t.name === name);
@@ -370,17 +396,23 @@ describe('#564 CI-review stack — registry membership + [0] stability', () => {
       expect(tpl!.outputPath).toBe(t.outputPath);
       expect(tpl!.commentStyle).toBe(t.style);
       expect(tpl!.content.length).toBeGreaterThan(0);
-      // Scripts are executable + carry a bash shebang preamble; data files are not.
-      if (t.executable) {
-        expect(tpl!.executable).toBe(true);
-        expect(tpl!.preamble).toBe('#!/usr/bin/env bash');
-      } else {
-        expect(tpl!.executable).toBeFalsy();
-        expect(tpl!.preamble).toBeUndefined();
-      }
+      // Executable bit and preamble are independent: scripts carry a shebang preamble,
+      // data files none, and a sourced lib has the preamble without the execute bit.
+      expect(!!tpl!.executable).toBe(t.executable);
+      expect(tpl!.preamble).toBe(expectedPreamble(t));
       // Tool-independent (always scaffolded), like validate-workflow — no condition.
       expect(tpl!.condition).toBeUndefined();
     }
+  });
+});
+
+describe('#1959 CI_STACK covers every generator source', () => {
+  it('CI_STACK plus the drift-gated-only set equals the generator SOURCES, so the portability suite checks each embedded constant', async () => {
+    const gen = (await import(
+      pathToFileURL(path.join(findRepoRoot(), 'scripts', 'gen-ci-templates.mjs')).href
+    )) as { SOURCES: ReadonlyArray<{ srcPath: string }> };
+    const covered = [...CI_STACK.map((t) => t.outputPath), ...DRIFT_GATED_ONLY].sort();
+    expect(covered).toEqual(gen.SOURCES.map((x) => x.srcPath).sort());
   });
 });
 
@@ -446,8 +478,9 @@ describe('#564 CI-review stack — scaffolding is dependency-complete', () => {
       expect(onDisk).toContain(start);
       expect(onDisk).toContain(end);
       expect(splitManagedRegion(onDisk, start, end)).not.toBeNull();
+      const pre = expectedPreamble(t);
+      if (pre) expect(onDisk.startsWith(pre + '\n')).toBe(true);
       if (t.executable) {
-        expect(onDisk.startsWith('#!/usr/bin/env bash\n')).toBe(true);
         // Execute bit set so CI/git actually runs the script (POSIX fs).
         expect(fs.statSync(full).mode & 0o111).not.toBe(0);
       }

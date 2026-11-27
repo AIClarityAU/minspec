@@ -53,6 +53,7 @@ import {
   type PrFileEntry,
 } from '../../../scripts/lib/dr-id-collision';
 import { useShellTimeout } from './helpers/shell-timeout';
+import { MINSPEC_GITIGNORE_ENTRIES } from '../src/lib/scaffold';
 
 // Blocks B and C run `npx tsx <cli>` per case (npx, then tsx, then node, then a
 // TypeScript compile) — the heaviest child process in this suite, against vitest's 5s
@@ -296,6 +297,8 @@ describe('A — the validator FAILS the build on it (behaviour, not a grep)', ()
       path.join(root, '.minspec', 'config.json'),
       JSON.stringify({ decisionsDir: DIR }),
     );
+    // #383: the gitignore gate runs wherever .minspec/ exists and fails closed without it.
+    fs.writeFileSync(path.join(root, '.gitignore'), MINSPEC_GITIGNORE_ENTRIES.join('\n') + '\n');
     fs.mkdirSync(path.join(root, DIR), { recursive: true });
     for (const [name, content] of Object.entries(files)) {
       fs.writeFileSync(path.join(root, DIR, name), content);

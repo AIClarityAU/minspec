@@ -7,6 +7,7 @@ import {
   analyzeGitDiff,
   buildConsequenceInput,
   expandRenamePath,
+  fsReadFile,
   type ClassificationSignal,
 } from '../src/lib/git-analyzer';
 import type { ChangedFile, ConsequenceInput } from '../src/lib/consequence-analyzers';
@@ -1469,7 +1470,7 @@ describe('binary files', () => {
     expect(findSignal(signals, 'files_changed')!.value).toBe(2);
   }, 30000);
 
-  it.fails('SHOULD total the text side only — today it is NaN, which reads as T4', async () => {
+  it('totals the text side only — a binary file adds no lines (#1197)', async () => {
     const signals = await analyzeGitDiff(repoWithStagedBinary());
     const lines = findSignal(signals, 'lines_changed')!;
     expect(lines.value).toBe(2); // a.ts +1/-1; logo.png contributes no lines
@@ -1488,7 +1489,7 @@ describe('binary files', () => {
     expect(files.get('a.ts')!.insertions).toBe(1);
   }, 30000);
 
-  it.fails('SHOULD give a binary file numeric line counts — today they are undefined', async () => {
+  it('gives a binary file numeric zero line counts (#1197)', async () => {
     const file = byPath(await buildConsequenceInput(repoWithStagedBinary())).get('logo.png')!;
     expect(file.insertions).toBe(0);
     expect(file.deletions).toBe(0);
@@ -1518,4 +1519,27 @@ describe('staged rename (#1188)', () => {
     expect(f.content).toBe('l1\nl2\nl3\nl4\nl5\nl6\n');
     expect(f.oldContent).toBe('l1\nl2\nl3\nl4\nl5\nl6\n');
   }, 30000);
+});
+
+describe('fsReadFile', () => {
+  it('resolves undefined (does not reject) on an unreadable path', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fsrf-'));
+    try {
+      await expect(fsReadFile(dir)).resolves.toBeUndefined();
+      await expect(fsReadFile(path.join(dir, 'missing.ts'))).resolves.toBeUndefined();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns file content when readable', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fsrf-'));
+    try {
+      const f = path.join(dir, 'a.txt');
+      fs.writeFileSync(f, 'hi');
+      await expect(fsReadFile(f)).resolves.toBe('hi');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

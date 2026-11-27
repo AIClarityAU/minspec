@@ -768,6 +768,7 @@ const CLASSIFICATION: Readonly<Record<string, readonly [CommandClass, string]>> 
 
   'minspec.commitHarnessRefresh': ['no-marker-write', 'Commits harness files that already exist; local git only.'],
   'minspec.tidyPrimary': ['no-marker-write', 'Discards redundant working-tree paths after a confirm; reads .minspec/sessions.'],
+  'minspec.viewQueue': ['no-marker-write', 'Read-only: lists .minspec/queue/ requests and opens the chosen spec.'],
   'minspec.constitutionShowPrompt': ['no-marker-write', 'Opens a prompt in an untitled editor.'],
   'minspec.constitutionCompact': ['no-marker-write', 'Rewrites a constitution that already exists; says so when there is none.'],
   'minspec.classify': ['no-marker-write', 'Reads the diff. Its two persisting buttons are offered only when opted in (#2355).'],

@@ -1,7 +1,7 @@
 ---
 id: SPEC-217
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - docs-lane.yml is a harness file shipped byte-for-byte to every adopter
@@ -17,8 +17,8 @@ implements_reason: >-
 affects: [.github/workflows/docs-lane.yml, packages/minspec/src/lib/ci-review-templates.ts, packages/minspec/src/lib/governance-transition.ts, scripts/lib/governance-transition.sh, scripts/push-docs.sh, packages/minspec/src/lib/approval-pr.ts, packages/minspec/tests/governance-lane-eligibility.test.ts, packages/minspec/tests/approval-pr.test.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

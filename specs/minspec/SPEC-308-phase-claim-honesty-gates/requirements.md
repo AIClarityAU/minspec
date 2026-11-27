@@ -1,7 +1,7 @@
 ---
 id: SPEC-308
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — a lifecycle claim must be backed by evidence
@@ -15,8 +15,8 @@ affects:
   - scripts/validate-frontmatter.ts
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -100,9 +100,17 @@ Two genuine gaps remain:
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 3 selections below is an agent pick of the option this document marks recommended, recorded on 2026-11-17 under the founder decision in queue item clarsel. Sign-off ratifies them and may change any of them.
+
 - **D-1 — What is SPEC-015's true clarify state, and is Clarify required for T3?** SDD says Clarify is required for T3–T4, but `phaseMappings` lists it as *optional* for T3 in config.
   - **(rec) A: honour the config.** `phase.order` treats only `requiredPhases` as mandatory; for SPEC-015 record `clarify: skipped` (it was a small, fully-decided rename). Cost: T3 specs can still skip Clarify silently, so the check only catches contradictory states, not the SDD "Clarify required" rule.
   - B: require Clarify for T3/T4 in the rule regardless of config. Cost: contradicts the config the project already ships and floods the corpus (R1); needs a config/SDD reconciliation first.
   - C: mark SPEC-015 `clarify: done` retroactively. Cost: a false history claim — the very class this issue is about.
+
+  **Recorded selection: the recommended option,** Option A, honour the config, and record `clarify: skipped` for SPEC-015. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D-2 — Is the `implements: none` evidence hole (FR-7) in this spec or a follow-up?** (rec) In: it is the same root cause and a few lines. Cost: widens blast radius to specs currently using `none` with `implement: in-progress` (needs a measured count first); if large, split out.
+
+  **Recorded selection: the recommended option,** in this spec: the `implements: none` evidence hole (FR-7) stays here. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
 - **D-3 — Flip `implementEvidence` to `error` in this repo now?** (rec) Yes, but only after current hits are repaired — `npm run validate` on 2026-11-12 still shows one (SPEC-095: `packages/minspec/tests/text-io-inventory.test.ts` missing while `implement: in-progress`), so the flip is gated on fixing that first, matching how SPEC-038 ratcheted. Cost: any in-flight spec PR that claims `implement: in-progress` before its files land turns red; the author must stage the claim after the code.
+
+  **Recorded selection: the recommended option,** yes, flip `implementEvidence` to `error` in this repo, only after the current hits are repaired. Agent pick of the recommended option, founder decision queue item clarsel, recorded 2026-11-17; sign-off ratifies it.
