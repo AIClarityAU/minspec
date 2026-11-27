@@ -45,6 +45,10 @@ function guardedChildProcess(real) {
       return (...args) => {
         const name = String(prop);
         if (PROGRAM_CALLS.has(name) && !isGit(args[0])) record('child_process', `${name} ${String(args[0])}`);
+        // A shell re-parses the command string, so even `git` is not a bounded program.
+        if (PROGRAM_CALLS.has(name) && args.some((a) => a && typeof a === 'object' && !Array.isArray(a) && a.shell)) {
+          record('child_process', `${name} ${String(args[0])} (shell option)`);
+        }
         if (SHELL_CALLS.has(name) && !isGit(String(args[0]).trim().split(/\s+/)[0])) record('child_process', `${name} ${String(args[0])}`);
         if (name === 'fork') record('child_process', `fork ${String(args[0])}`);
         return v.apply(target, args);
@@ -84,6 +88,8 @@ function guardedFs(real, label) {
       const v = Reflect.get(target, prop);
       if (prop === 'promises' && v) return guardedFs(v, `${label}.promises`);
       if (typeof v !== 'function' || typeof prop !== 'string') return v;
+      // Constructors (ReadStream/WriteStream/Dirent...) must stay constructible.
+      if (/^[A-Z]/.test(prop)) return v;
       return function (...args) {
         checkArgs(label, prop, args);
         return v.apply(target, args);
