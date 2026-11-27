@@ -104,6 +104,8 @@ const NETWORK_FEATURES: readonly NetworkFeature[] = [
   { module: 'lib/github.ts', feature: PARK, kind: 'command', consent: 'gesture', trigger: 'first step of the command the user ran' },
   { module: 'lib/github.ts', feature: SCORE, kind: 'command', consent: 'gesture', trigger: 'first step of the command the user ran' },
   { module: 'lib/github.ts', feature: TRIAGE, kind: 'command', consent: 'gesture', trigger: 'first step of the command the user ran' },
+  // lib/github.ts - `gh api user`, the read behind the Getting Started page's Verify button (SPEC-042 D4).
+  { module: 'lib/github.ts', feature: 'Verify against GitHub', kind: 'button', consent: 'gesture', trigger: 'the user clicks the button on the Getting Started page' },
 
   // lib/parking-lot.ts - `gh issue list --search`, `gh issue create`, `gh issue comment`.
   { module: 'lib/parking-lot.ts', feature: PARK, kind: 'command', consent: 'gesture', trigger: 'the user runs Park Topic' },

@@ -30,8 +30,7 @@ export type Denial =
   | 'oidc_invalid'
   | 'repo_claim_mismatch'
   | 'unsupported_profile'
-  | 'unexpected_field'
-  | 'not_implemented';
+  | 'unexpected_field';
 
 export type Decision =
   | { allow: true; repository: string }

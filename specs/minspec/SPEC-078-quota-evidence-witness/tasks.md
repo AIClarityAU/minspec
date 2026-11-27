@@ -44,7 +44,7 @@ Rules for every task:
 
 ## 1 - The classifying attempt's streams survive the failover (FR-1; AC-1, AC-2)
 
-- [ ] **1.1** `packages/minspec/tests/quota-evidence-witness.test.ts` (new) - the harness from
+- [x] **1.1** `packages/minspec/tests/quota-evidence-witness.test.ts` (new) - the harness from
   design.md, *Testing*: temp git repo, stub `claude` that answers `--help` and picks its
   output by which login it was handed. Include the control: a stub that prints the login
   variable it saw, proving the subscription and PAYG launches are told apart. Then AC-1
@@ -53,7 +53,7 @@ Rules for every task:
   `Credit balance is too low`) and AC-2 (PAYG writes nothing). Both expect
   `evidence: captured`, a detail containing the subscription limit line, and
   `classified_via: stderr(loose)` with the subscription attempt's byte counts.
-- [ ] **1.2** `scripts/review-branch.sh` - the snapshot from design.md, *The snapshot*
+- [x] **1.2** `scripts/review-branch.sh` - the snapshot from design.md, *The snapshot*
   (`CLASSIFY_ERR`, `CLASSIFY_OUT_TEXT`, `CLASSIFY_OUT_BYTES`, `CLASSIFY_BRANCH`, and the
   `PAYG_*` copies with `PAYG_RAN`); `emit_unavailable` reads the snapshot instead of `$1`
   and the globals; the detail appends the labelled PAYG lines. The `captured`/`NONE`

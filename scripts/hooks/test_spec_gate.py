@@ -39,6 +39,21 @@ _spec = importlib.util.spec_from_file_location("spec_gate_module", GATE_PY)
 spec_gate_module = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(spec_gate_module)
 
+
+
+def _gate_cmd():
+    """Command that runs spec-gate.py. Under scripts/python-coverage.sh
+    (COVERAGE_PROCESS_START set, #1256) the subprocess is wrapped in
+    `coverage run --parallel-mode` so its lines are measured; otherwise it is
+    the plain interpreter, exactly as Claude Code invokes it."""
+    rc = os.environ.get("COVERAGE_PROCESS_START")
+    if rc:
+        return [sys.executable, "-m", "coverage", "run",
+                "--parallel-mode", "--rcfile=" + rc,
+                "--source=" + _HERE, GATE_PY]
+    return [sys.executable, GATE_PY]
+
+
 IMPLEMENTING_PHASES = (
     "phases:\n"
     "  specify: done\n"
@@ -121,7 +136,7 @@ class GateFixture:
             "cwd": self.root,
         }
         proc = subprocess.run(
-            [sys.executable, GATE_PY],
+            _gate_cmd(),
             input=json.dumps(env).encode("utf-8"),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -313,6 +328,20 @@ class ScopedGateTests(unittest.TestCase):
             "an approved spec does not even freeze its own dir",
         )
 
+    def test_bom_marked_spec_is_still_gated(self):
+        """#2477: a leading UTF-8 BOM must not drop the spec from gating."""
+        rel = "specs/minspec/SPEC-905-bom/requirements.md"
+        content = _spec_text(
+            "SPEC-905", IMPLEMENTING_PHASES,
+            extra_fm="implements:\n  - packages/x/src/a.ts\n",
+        )
+        path = os.path.join(self.fx.root, rel)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.write(b"\xef\xbb\xbf" + content.encode("utf-8"))
+        self.fx.write("packages/x/src/a.ts", "export const a = 1;\n")
+        self.assertEqual(self.fx.decision("packages/x/src/a.ts"), "deny")
+
     def test_stale_approval_blocks_declared_impl_not_own_doc(self):
         """A stale approval re-blocks the spec's DECLARED impl CODE — but NOT the
         spec's own doc, which must stay editable to drive re-approval."""
@@ -477,6 +506,18 @@ class ScopedGateTests(unittest.TestCase):
         self.assertIsNone(
             self.fx.decision("specs/minspec/SPEC-907-x/requirements.md", tool="Read")
         )
+
+
+class FmListTrailingSpaceTests(unittest.TestCase):
+    """#3653: a trailing space/tab after a block-form key must not drop the list."""
+
+    def test_block_header_with_trailing_whitespace_keeps_all_paths(self):
+        for pad in (" ", "\t", "  \t"):
+            fm = "implements:" + pad + "\n  - packages/a/src/lost.ts\n  - packages/b.ts"
+            self.assertEqual(
+                spec_gate_module.fm_list(fm, "implements"),
+                ["packages/a/src/lost.ts", "packages/b.ts"],
+            )
 
 
 class Select958VerdictTests(unittest.TestCase):

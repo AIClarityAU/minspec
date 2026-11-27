@@ -307,3 +307,27 @@ describe('#1157 — the ambiguity guard shows its evidence', () => {
     expect(err).not.toContain(secret);
   });
 });
+
+describe('review-decide.sh — block completeness (#1456)', () => {
+  it('BEGIN with no END (truncated agent output) → changes', () => {
+    expect(decide('REVIEW_VERDICT_BEGIN\nverdict: pass\nblocking: 0\n')).toBe(CHANGES);
+  });
+
+  it('END with no BEGIN → changes', () => {
+    expect(decide('verdict: pass\nblocking: 0\nREVIEW_VERDICT_END\n')).toBe(CHANGES);
+  });
+
+  it('END before BEGIN with the block left unclosed → changes (#3484 second review)', () => {
+    expect(
+      decide('REVIEW_VERDICT_END\nREVIEW_VERDICT_BEGIN\nverdict: pass\nblocking: 0\n'),
+    ).toBe(CHANGES);
+  });
+
+  it('two ENDs → changes', () => {
+    expect(decide(block('pass', '0') + '\nREVIEW_VERDICT_END\n')).toBe(CHANGES);
+  });
+
+  it('a complete single block still greens', () => {
+    expect(decide(block('pass', '0'))).toBe(PASS);
+  });
+});

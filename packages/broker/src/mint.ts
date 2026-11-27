@@ -74,9 +74,35 @@ export interface MintedToken {
   repositories: [string];
 }
 
+/**
+ * Why a mint was refused, as the handler needs to report it.
+ *
+ * `app_not_installed` is the one failure the CUSTOMER can fix (FR-4, AC-4: install the
+ * App or grant it this repo), so it is carried separately and answered as a 403 with an
+ * install reason. Everything else is ours or GitHub's and stays `mint_failed` (502).
+ */
+export type MintFailure = 'app_not_installed' | 'mint_failed';
+
 export type MintResult =
   | { ok: true; minted: MintedToken }
-  | { ok: false; reason: string };
+  | { ok: false; code: MintFailure; reason: string };
+
+/**
+ * Thrown by an `InstallationTokenFactory` when the App has no installation covering the
+ * requested repository (SPEC-034 task 2.1, FR-4).
+ *
+ * A TYPE, not a message match. `mintScopedToken` promotes only this class to
+ * `app_not_installed`; a plain `Error` that happens to say "not installed" stays
+ * `mint_failed`, so provider wording can never change the status a caller sees. It lives
+ * here rather than in `app-auth.ts` because it is part of the factory contract this module
+ * defines, and importing it must not pull the key-holding module into a caller.
+ */
+export class AppNotInstalledError extends Error {
+  constructor() {
+    super('app not installed on repository');
+    this.name = 'AppNotInstalledError';
+  }
+}
 
 /** What an injected auth implementation must provide. */
 export type InstallationTokenFactory = (args: {
@@ -129,7 +155,7 @@ export async function mintScopedToken(
 ): Promise<MintResult> {
   const repository = claims.repository;
   if (typeof repository !== 'string' || repository.length === 0) {
-    return { ok: false, reason: 'no verified repository claim' };
+    return { ok: false, code: 'mint_failed', reason: 'no verified repository claim' };
   }
 
   let raw: Awaited<ReturnType<InstallationTokenFactory>>;
@@ -138,27 +164,30 @@ export async function mintScopedToken(
   } catch (err) {
     // A mint failure must never surface a token or a partial success (AC-9/FR-9). The
     // underlying error may quote App/installation detail, so it is not echoed back.
-    return { ok: false, reason: err instanceof Error ? err.name : 'mint failed' };
+    if (err instanceof AppNotInstalledError) {
+      return { ok: false, code: 'app_not_installed', reason: err.name };
+    }
+    return { ok: false, code: 'mint_failed', reason: err instanceof Error ? err.name : 'mint failed' };
   }
 
   if (!raw || typeof raw.token !== 'string' || raw.token.length === 0) {
-    return { ok: false, reason: 'auth returned no token' };
+    return { ok: false, code: 'mint_failed', reason: 'auth returned no token' };
   }
 
   const expiresAt = clampExpiry(raw.expiresAt);
-  if (!expiresAt) return { ok: false, reason: 'auth returned an unusable expiry' };
+  if (!expiresAt) return { ok: false, code: 'mint_failed', reason: 'auth returned an unusable expiry' };
 
   // A token whose scope we cannot read is a token we cannot vouch for. Refuse rather
   // than mint it and describe it with the profile we merely ASKED for — that would make
   // the response understate a scope nobody checked.
   if (!raw.permissions || typeof raw.permissions !== 'object') {
-    return { ok: false, reason: 'auth did not report granted permissions' };
+    return { ok: false, code: 'mint_failed', reason: 'auth did not report granted permissions' };
   }
 
   // The real case: a provider that hands back MORE than the review profile. Refuse it;
   // do not mint a wider credential and render it as though the broker sanctioned it.
   const widening = findWidening(raw.permissions);
-  if (widening) return { ok: false, reason: `auth ${widening}` };
+  if (widening) return { ok: false, code: 'mint_failed', reason: `auth ${widening}` };
 
   return {
     ok: true,

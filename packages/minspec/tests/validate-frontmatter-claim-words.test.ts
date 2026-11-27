@@ -22,6 +22,7 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { TSX_BIN } from './helpers/run-tsx-cli';
 
 const REPO_ROOT = process.cwd();
 const SCRIPT_PATH = path.join(REPO_ROOT, 'scripts', 'validate-frontmatter.ts');
@@ -30,7 +31,6 @@ const SCRIPT_PATH = path.join(REPO_ROOT, 'scripts', 'validate-frontmatter.ts');
 // and `npx` resolves binaries by walking up from cwd, so it would miss
 // node_modules/.bin/tsx and could try to FETCH tsx instead. That would break the
 // offline invariant and hang in a sandboxed CI run.
-const TSX_BIN = path.join(REPO_ROOT, 'node_modules', '.bin', 'tsx');
 
 /** A minimal well-formed DR, so any failure is attributable to Rule 19 alone. */
 function writeDoc(tmpDir: string, body: string, relPath = 'docs/probe.md'): void {

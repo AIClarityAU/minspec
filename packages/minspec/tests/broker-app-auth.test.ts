@@ -15,6 +15,7 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { makeInstallationTokenFactory } from '../../broker/src/app-auth';
+import { AppNotInstalledError } from '../../broker/src/mint';
 
 const REPO = 'AIClarityAU/voip-sms-inbox';
 
@@ -92,13 +93,49 @@ describe('makeInstallationTokenFactory — guards around the installation lookup
   });
 
   it('throws when the installation lookup fails, without leaking the response', async () => {
+    // A 500 is GitHub failing, not the App being absent. It must stay a generic failure
+    // (a 502 on the wire), never be reported as "install the App" - that would send an
+    // adopter to re-install an App that is installed, during an outage.
     const f = await factory();
     globalThis.fetch = (async () =>
-      new Response('{"message":"Not Found"}', { status: 404 })) as unknown as typeof fetch;
-    await expect(f({ repository: REPO, permissions: { issues: 'write' } })).rejects.toThrow(
-      /installation lookup failed/,
-    );
+      new Response('{"message":"Server Error"}', { status: 500 })) as unknown as typeof fetch;
+    const err = await f({ repository: REPO, permissions: { issues: 'write' } }).catch((e) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(String(err.message)).toMatch(/installation lookup failed/);
+    expect(err).not.toBeInstanceOf(AppNotInstalledError);
   });
+
+  // SPEC-034 task 2.1 (FR-4, AC-4). GitHub answers `GET /repos/{o}/{r}/installation`
+  // with 404 when the App has no installation covering that repository - either not
+  // installed on the owner at all, or installed without access to this repo. That is the
+  // one lookup outcome the customer can fix themselves, so it is the one that gets its
+  // own error type.
+  it('throws AppNotInstalledError when the installation lookup is a 404', async () => {
+    const f = await factory();
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return new Response('{"message":"Not Found"}', { status: 404 });
+    }) as unknown as typeof fetch;
+    const err = await f({ repository: REPO, permissions: { issues: 'write' } }).catch((e) => e);
+    expect(err).toBeInstanceOf(AppNotInstalledError);
+    // Stops at the lookup: no installation, so nothing is ever asked to mint.
+    expect(calls).toBe(1);
+  });
+
+  it.each([401, 403, 422, 503])(
+    'does NOT read a %i lookup as "not installed" — only a 404 means that',
+    async (status) => {
+      // A 401/403 here means OUR App JWT was refused (bad key, clock, suspended App).
+      // Telling the customer to install the App would blame them for our fault.
+      const f = await factory();
+      globalThis.fetch = (async () =>
+        new Response('{}', { status })) as unknown as typeof fetch;
+      const err = await f({ repository: REPO, permissions: { issues: 'write' } }).catch((e) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(AppNotInstalledError);
+    },
+  );
 
   it('throws when the lookup succeeds but carries no installation id', async () => {
     // A 200 with an unexpected body must not be read as "installation 0" or undefined and

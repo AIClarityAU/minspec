@@ -460,7 +460,17 @@ lease_renew() {
 lease_verify_holds() {
   local item="${1:?lease_verify_holds needs an item}" sid now claims enum_complete decision
   sid="$(lease_self_sid)"; now="$(date -u +%s)"
-  if claims="$(lease_read_claims "$item")"; then enum_complete=1; else enum_complete=0; claims='[]'; fi
+  # A failed read is an OBSERVATION that the token may be dead (#3735): a long dispatch
+  # holds the App token it minted at start (~1 h life), so a late verify gets HTTP 401,
+  # which would read as "claim lost" and stand finished work down unpublished. Re-mint and
+  # retry ONCE, as lease_renew does; gh_bot_reauth_read is non-zero when no different
+  # credential was obtained, and then the read stays unreadable and this fails closed
+  # (INV-6), so a retry that cannot help is never made.
+  if claims="$(lease_read_claims "$item")"; then enum_complete=1
+  elif gh_bot_reauth_read && claims="$(lease_read_claims "$item")"; then
+    enum_complete=1
+    echo "lease: read of the claims on #${item} succeeded after a token re-mint." >&2
+  else enum_complete=0; claims='[]'; fi
   decision="$(classify_claim "$claims" "$sid" "$now" "$enum_complete" | head -n1)"
   [[ "$decision" == "own" ]]
 }

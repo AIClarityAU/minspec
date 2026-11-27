@@ -1,7 +1,7 @@
 ---
 id: SPEC-297
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - concurrent multi-session coordination; two drain PRs taking one spec id is that problem
@@ -14,9 +14,9 @@ implements_reason: >-
   (publish-time guard and fallback), scripts/lib/spec-id-claims.ts (reuse), a new guard test.
   SPEC-227 owns the allocator and cross-PR gate; this spec adds no second allocator.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -126,6 +126,8 @@ because it decides whether FR-1 alone would have prevented them.
 
 ## Decisions needed (Clarify)
 
+Recorded selections: each of the 2 selections below is the option this document marks recommended, copied by the runner's agent on 2026-11-13. These are not human choices and no delegation made them; the approver confirms or changes each.
+
 ### DQ-1 - On a guard refusal, retry or hand to a human?
 
 - **(a) (rec) Renumber and re-run once automatically**, then refuse if still failing. Cost: a
@@ -134,12 +136,16 @@ because it decides whether FR-1 alone would have prevented them.
 - **(b) Refuse and route the issue to a human.** Cost: every collision becomes human work,
   against tenet 1 (make the founder's job smaller).
 
+**Recorded selection: Option (a),** renumber and re-run once automatically, then refuse if the guard still fails. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
+
 ### DQ-2 - Should an allocator failure stop the dispatch (FR-3)?
 
 - **(a) (rec) Yes, return to queue.** Cost: an allocator or network outage idles Specify
   dispatches until it recovers.
 - **(b) Keep the blind fallback, rely on FR-1 at publish.** Cost: wasted agent tokens on a spec
   that will be refused (tenet 2), though no wrong id can be published.
+
+**Recorded selection: Option (a),** yes, an allocator failure stops the dispatch and returns the issue to the queue. Recorded by the runner's agent on 2026-11-13 as the document's (rec) option; the approver may change it.
 
 Neither option has been chosen by a human.
 

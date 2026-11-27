@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-127-split-layout-task-tracked-done/requirements.md",
+  "specHash": "601daeaf3e9958abfcef442ece8c780a80a8a2696091fd8dea986ba235a3e547",
+  "approvedAt": "2026-11-12T14:11:06.529Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-a",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3180#issuecomment-6823018530"
+}

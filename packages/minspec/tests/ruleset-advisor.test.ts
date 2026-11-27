@@ -254,6 +254,51 @@ describe('hasRequiredChecksRuleset()', () => {
     });
     expect(await hasRequiredChecksRuleset('o', 'r', run)).toBe(false);
   });
+
+  it('ignores evaluate-mode (dry-run) rulesets even when the detail is fully configured (#369)', async () => {
+    const { run } = makeRunner((_c, args) => {
+      const p = apiPath(args);
+      if (p === 'repos/o/r/rulesets') {
+        return ok(JSON.stringify([{ id: 9, target: 'branch', enforcement: 'evaluate' }]));
+      }
+      // Identical to the detail that yields `true` for an active ruleset, so
+      // only the enforcement check can make this false.
+      if (p === 'repos/o/r/rulesets/9') {
+        return ok(
+          JSON.stringify({
+            conditions: { ref_name: { include: ['~DEFAULT_BRANCH'] } },
+            rules: [
+              {
+                type: 'required_status_checks',
+                parameters: { required_status_checks: [{ context: 'lint' }, { context: 'test' }] },
+              },
+            ],
+          }),
+        );
+      }
+      return undefined;
+    });
+    expect(await hasRequiredChecksRuleset('o', 'r', run)).toBe(false);
+  });
+
+  it('ignores an active ruleset that targets only a non-default branch (#369)', async () => {
+    const { run } = makeRunner((_c, args) => {
+      const p = apiPath(args);
+      if (p === 'repos/o/r/rulesets') {
+        return ok(JSON.stringify([{ id: 5, target: 'branch', enforcement: 'active' }]));
+      }
+      if (p === 'repos/o/r/rulesets/5') {
+        return ok(
+          JSON.stringify({
+            conditions: { ref_name: { include: ['refs/heads/release'] } },
+            rules: [{ type: 'required_status_checks' }],
+          }),
+        );
+      }
+      return undefined;
+    });
+    expect(await hasRequiredChecksRuleset('o', 'r', run)).toBe(false);
+  });
 });
 
 // =============================================================================
@@ -1057,7 +1102,7 @@ describe('probeReviewerConfigured — Tier-A producibility (no #559 deadlock)', 
       apiPath(args) === 'repos/o/r/actions/secrets' ? ok(JSON.stringify(names)) : undefined,
     ).run;
 
-  it('true only when ALL THREE reviewer secrets are set', async () => {
+  it('true when all three reviewer-related secrets are set (App arm)', async () => {
     expect(
       await probeReviewerConfigured(
         'o',
@@ -1073,10 +1118,13 @@ describe('probeReviewerConfigured — Tier-A producibility (no #559 deadlock)', 
   // "configured", `ai-review` was made a REQUIRED check, yet the workflow's own
   // guard skipped and never posted it → every merge permanently blocked (#559).
   // This case FAILS on the 2-of-3 logic (it returned true) and PASSES on the fix.
-  it('false when MINSPEC_APP_PRIVATE_KEY is missing (only OAUTH + APP_ID set) — #559 deadlock regression', async () => {
+  // SPEC-268 (#2982): the App secrets no longer gate the review. Without them the
+  // scaffolded workflows post with GITHUB_TOKEN, so the checks ARE producible and the
+  // #559 guard (never require what cannot post) correctly reads "configured".
+  it('true when MINSPEC_APP_PRIVATE_KEY is missing (half-configured App falls back to GITHUB_TOKEN) — SPEC-268', async () => {
     expect(
       await probeReviewerConfigured('o', 'r', secrets(['CLAUDE_CODE_OAUTH_TOKEN', 'MINSPEC_APP_ID'])),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('false when the inference token (CLAUDE_CODE_OAUTH_TOKEN) is missing', async () => {
@@ -1085,10 +1133,14 @@ describe('probeReviewerConfigured — Tier-A producibility (no #559 deadlock)', 
     ).toBe(false);
   });
 
-  it('false when the App id (MINSPEC_APP_ID) is missing', async () => {
+  it('true when the App id (MINSPEC_APP_ID) is missing — SPEC-268', async () => {
     expect(
       await probeReviewerConfigured('o', 'r', secrets(['CLAUDE_CODE_OAUTH_TOKEN', 'MINSPEC_APP_PRIVATE_KEY'])),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it('true with ONLY the Claude secret (no App at all) — SPEC-268 AC6', async () => {
+    expect(await probeReviewerConfigured('o', 'r', secrets(['CLAUDE_CODE_OAUTH_TOKEN']))).toBe(true);
   });
 
   it('the probe set equals the ai-review.yml guard set (REVIEWER_SECRETS is the single source of truth)', async () => {

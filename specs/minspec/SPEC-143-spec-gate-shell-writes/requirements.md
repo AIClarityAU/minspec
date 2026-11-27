@@ -1,7 +1,7 @@
 ---
 id: SPEC-143
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the doc-before-code gate is the methodology's write-time enforcement
@@ -17,9 +17,9 @@ relates_to: [DR-012, DR-031, DR-047, SPEC-022, SPEC-038, "#1911", "#1893", "#37"
 implements: [scripts/hooks/spec_gate_bash.py, scripts/hooks/spec-gate-post.py, scripts/hooks/test_spec_gate_bash.py, scripts/hooks/test_spec_gate_post.py]
 affects: [scripts/hooks/spec-gate.py, scripts/hooks/spec-gate.sh, .claude/settings.json]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
