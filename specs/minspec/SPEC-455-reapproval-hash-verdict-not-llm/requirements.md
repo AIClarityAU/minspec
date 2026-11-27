@@ -1,5 +1,5 @@
 ---
-id: SPEC-137
+id: SPEC-455
 type: requirements
 status: specifying
 tier: T3
@@ -67,6 +67,10 @@ is forged/mismatched solely from "hash changed, no spec change in this diff" is 
 parent before the verdict is decided, with the discard stated in the posted review. Findings on
 any other ground (approver identity, ride-along content, tier) are untouched.
 
+Identifying a finding whose sole basis is the hash claim depends on D-2's outcome: it needs a
+machine-readable tag in the voter output schema (DR-079), not free-text matching on finding
+prose, which would either miss findings or suppress too many.
+
 ### FR-3 — A MISMATCH verdict is still decided by the tool
 A `MISMATCH` (or an indeterminate verdict) is not softened: it fails closed and visibly, naming
 the sidecar and both hashes.
@@ -75,7 +79,9 @@ the sidecar and both hashes.
 If the provenance step errors, times out, or yields no verdict for a PR that changes a sidecar,
 the PR is NOT treated as `MATCHES`; today's `|| true` swallow
 (`review-branch.sh` provenance call) must become a visible degraded state (constitution
-invariant 2).
+invariant 2). That line's `swallow-ok` justification (optional note, changes no verdict) stops
+being true once FR-2 lets the output decide a verdict, so the change removes or rewrites that
+comment rather than leaving it stale beside a gate that now depends on the output.
 
 ### FR-5 — Retires itself under SPEC-069
 Once SPEC-069 FR-5 arms the exemption, this guard applies only to non-exempt PRs that still
