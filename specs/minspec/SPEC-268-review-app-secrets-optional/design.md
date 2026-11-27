@@ -65,10 +65,20 @@ ${{ steps.guard.outputs.identity == 'actions' && github.token || steps.app-token
   silently downgrades to `github.token`.
 
 A test asserts every `steps.app-token.outputs.token` reference in the workflow sits inside
-that exact expression. The mint step runs only when `identity == 'app'`. Workflow-level
-`permissions:` widen to the FR4 set (`contents: read`, `pull-requests: write`,
-`issues: write`, `checks: write`, `statuses: write`). The inference step still receives no
-GitHub token.
+that exact expression. The mint step runs only when `identity == 'app'`. The inference step
+still receives no GitHub token.
+
+Permissions are per job, so the App arm's job token is not widened (review finding on
+#4079, commit 67d63a65). Workflow-level `permissions:` stay `contents: read`. A first job,
+`arm` (`permissions: {}`), decides App or `GITHUB_TOKEN` from the same rule as R1. Then exactly
+one of two jobs runs the review steps, shared through one YAML anchor:
+- `runner` (App arm) keeps `contents: read`; every write uses the App token.
+- `runner-actions` (`GITHUB_TOKEN` arm) alone gets the FR4 write set (`pull-requests`,
+  `issues`, `checks`, `statuses`: write).
+
+The guard step fails red if its own identity decision disagrees with the job it runs in, so
+the two can never drift silently. The `runner-actions` job also records a `pass witness`
+step, which runs only on a posted, non-machinery pass (R3).
 
 ## R3 - `ready-to-merge.yml` (FR5-FR7)
 
@@ -128,8 +138,20 @@ gate reads the file list only in the Actions arm. A base guard that predates thi
 has no `effectiveAllowlist`, so the gate falls back to the unwidened list: strict, never
 loose.
 
-`github-actions[bot]` matches all three witnesses unchanged: label actor and status creator
-by login, check-run by `app.slug` + `[bot]` (`verifyHeadPassCheckRun`).
+In the widened arm the label, status and check-run witnesses are NOT trusted: every
+`GITHUB_TOKEN` in the repo writes as `github-actions[bot]`, including CI jobs that run a
+PR's own code, so none of them can tell `ai-review.yml`'s token from another workflow's
+(review finding on #4079, commit 67d63a65). The only pass witness there is the Actions run
+record, which only GitHub writes:
+- `selectReviewRun` picks the latest `ai-review.yml` `pull_request` run for this PR's head,
+  from this repo;
+- `verifyReviewRunWitness` requires that run to have completed `success`, with exactly one
+  `runner-actions` job on the same head and run attempt whose `pass witness` step concluded
+  `success`.
+
+Any missing or unreadable piece is no pass (fail closed). A base guard without these
+functions refuses the widened arm. The App arm never reads Actions runs and keeps its
+existing witnesses (label actor, status creator, check-run `app.slug`).
 
 ## R4 - Probe and report (FR8)
 
@@ -154,7 +176,7 @@ by login, check-run by `app.slug` + `[bot]` (`verifyHeadPassCheckRun`).
 
 ## R5b - Persisted checkout credential is removed before the voters run
 
-The widened `GITHUB_TOKEN` (both arms, FR4) is persisted by `actions/checkout` into
+The `GITHUB_TOKEN` (write-scoped in `runner-actions`, read-only in `runner`) is persisted by `actions/checkout` into
 `.git/config` as an `http` extraheader, where the read-only voters could read it. After the
 last fetch, `ai-review.yml` unsets that extraheader and fails closed if any extraheader
 remains, before any voter runs. This runs in both arms; the fetch path is unchanged because
@@ -172,8 +194,10 @@ it precedes the unset.
   `success` red; a run it replaces in the queue skips its provenance revert and stale-pass
   strip; a PR read failure posts on the reviewed head; and a newer head whose queued run it
   replaced can have no status until the next gate run for that head that writes one.
-- The forge DR-115 accepts (a same-repo PR editing a non-machinery path cannot post as
-  `github-actions` without touching `.github/`, so FR6 closes the workflow route).
+- Same bar as the App arm: anyone who can push workflow files can run a workflow at
+  `.github/workflows/ai-review.yml`'s path (for example a PR against a base they control).
+  A same-repo PR's own code, or any other workflow's `GITHUB_TOKEN`, cannot produce the run
+  witness. FR6's machinery refusal still stands as defence in depth.
 
 ## Rejected alternatives (DR-086 section 4)
 
