@@ -53,14 +53,17 @@ minimum (new files are not grandfathered). Floors are generated from a measured 
 run and committed. In scope = the files vitest's `coverage.include` already covers.
 Metrics ratcheted: at least statements and branches.
 
-**FR-2 Fail visibly, never best-effort.** A missing, unparsable or stale baseline, or a
+**FR-2 Fail visibly, never best-effort.** A missing, unparsable or stale baseline (stale = it lists a file that no longer exists in the
+coverage include set, or it was generated under a different include set than the current
+one), or a
 missing coverage report, FAILS the gate with a message naming the cause. It never skips,
 never passes on an empty comparison, and the check is not wired with `|| true`
 (constitution invariant 2). The failure output lists each offending file, its floor and
 its measured value.
 
 **FR-3 Floors move only upward by default.** Regenerating the baseline raises floors and
-removes entries for files that reach the project minimum; lowering a floor requires an
+keeps every file's entry, including files at or above the project minimum, so a raised floor
+never slides back; lowering a floor requires an
 explicit, reviewable flag whose use is visible in the diff of the baseline file. A file
 that is deleted or renamed has its entry removed by the same regeneration.
 
@@ -104,7 +107,7 @@ error stops being raised (assert the captured text, do not merely swallow it).
 - **AC-1** Dropping one audited file's coverage below its floor (e.g. deleting a test) makes
   the ratchet exit non-zero naming that file; restoring it exits zero. (FR-1, FR-2)
 - **AC-2** A brand-new source file with no tests and below the minimum fails the check. (FR-1)
-- **AC-3** With the baseline file removed, corrupted, or the coverage report absent, the
+- **AC-3** With the baseline file removed, corrupted, stale (lists a deleted file), or the coverage report absent, the
   check exits non-zero with a cause message; none of these passes. (FR-2)
 - **AC-4** Regenerating the baseline after adding tests raises floors and never lowers one
   without the explicit flag. (FR-3)
