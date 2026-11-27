@@ -86,6 +86,13 @@ test('parseAllowlist: unset/empty yields an empty list (authorizes nobody)', () 
 });
 
 // ── SPEC-268: effectiveAllowlist + pathsTouchMachinery ───────────────────────
+test('pathsTouchMachinery: truncation is measured on listed ENTRIES, not on paths inflated by renames', () => {
+  const paths = ['src/a.ts', 'src/old-a.ts', 'src/b.ts', 'src/old-b.ts'];
+  assert.equal(pathsTouchMachinery(paths, 3, 2), true, '2 entries listed of 3 changed is truncated');
+  assert.equal(pathsTouchMachinery(paths, 2, 2), false, 'complete listing, no machinery');
+  assert.equal(pathsTouchMachinery(paths, 3), false, 'legacy two-argument call keeps its old meaning');
+});
+
 test('effectiveAllowlist: a Dependabot PR or Dependabot-triggered run never widens (its secrets are withheld)', () => {
   const ok = { raw: 'minspec-sdd[bot]', identity: 'actions', varSet: false, isFork: false, touchesMachinery: false };
   assert.equal(effectiveAllowlist(ok).widened, true);

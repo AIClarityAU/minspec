@@ -1201,13 +1201,19 @@ function inputTouchesMachinery(inputText) {
  * MACHINERY_PATH_RE as {@link inputTouchesMachinery}, applied to the file names the
  * pulls API returns, so there is one predicate, not a second hand-written copy.
  *
- * FAIL TOWARD "yes": a missing or empty list, a non-string entry, or a list shorter than
+ * FAIL TOWARD "yes": a missing or empty list, a non-string entry, or a listing shorter than
  * `expectedCount` (the API caps the listing; `pr.changed_files` says how many there are)
  * is machinery, because a gate that cannot see every path must not widen anything.
+ *
+ * `listedCount` is the number of file ENTRIES the API returned. Pass it whenever `paths`
+ * also carries rename sources (`previous_filename`): those add a second path per renamed
+ * entry, so `paths.length` can reach `expectedCount` on a truncated listing and hide a
+ * machinery file in the unlisted tail. Without it, `paths.length` is measured (legacy).
  */
-function pathsTouchMachinery(paths, expectedCount) {
+function pathsTouchMachinery(paths, expectedCount, listedCount) {
   if (!Array.isArray(paths) || paths.length === 0) return true;
-  if (typeof expectedCount === 'number' && paths.length < expectedCount) return true;
+  const listed = typeof listedCount === 'number' ? listedCount : paths.length;
+  if (typeof expectedCount === 'number' && listed < expectedCount) return true;
   for (const p of paths) {
     if (typeof p !== 'string' || p === '') return true;
     if (MACHINERY_PATH_RE.test(p)) return true;
