@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-329-backfill-dropped-review-findings/requirements.md",
+  "specHash": "47141d473dae85e6ba2436a885aa9b8720a089b67d2f852635509a9929b1b953",
+  "approvedAt": "2026-11-17T04:37:48.874Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1117",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3803#issuecomment-6937435860"
+}

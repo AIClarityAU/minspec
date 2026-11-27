@@ -393,7 +393,17 @@ describe('drain-inbox.sh — pause marker + signal cleanup (#1187)', () => {
   function start(s: ReturnType<typeof sandbox>): number {
     const r = spawnSync('bash', [DRAIN, '--continuous'], { env: s.env, encoding: 'utf-8' });
     expect(r.status, r.stdout + r.stderr).toBe(0);
-    return Number(fs.readFileSync(s.lock, 'utf-8').trim());
+    // The parent exits 0 right after backgrounding the loop subshell; that subshell writes
+    // the lock asynchronously (noclobber acquire), so the lock can lag the parent's exit.
+    // Poll (bounded) instead of reading once, and fail with the drain's own output.
+    const end = Date.now() + 10000;
+    while (!fs.existsSync(s.lock) && Date.now() < end) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+    }
+    expect(fs.existsSync(s.lock), `drain.lock never appeared\nstdout: ${r.stdout}\nstderr: ${r.stderr}\nlog: ${logOf(s)}`).toBe(true);
+    const pid = Number(fs.readFileSync(s.lock, 'utf-8').trim());
+    expect(Number.isInteger(pid) && pid > 0, `lock content not a pid\nlog: ${logOf(s)}`).toBe(true);
+    return pid;
   }
 
   it('--paused seam: present marker => exit 0, absent or removed => exit 1', () => {

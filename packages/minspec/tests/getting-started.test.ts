@@ -78,6 +78,7 @@ import {
   type PageDeps,
 } from '../src/views/getting-started-webview';
 import { buildPageDeps, hotkeysFromManifest } from '../src/commands/getting-started';
+import { lookupGhUser } from '../src/lib/github';
 import { COVERAGE_HELPER, type GhIdentity } from '../src/lib/onboarding-settings';
 import { escapeHtml } from '../src/views/getting-started-webview';
 
@@ -658,11 +659,54 @@ describe('Verify against GitHub is shown only when a lookup is wired', () => {
     expect(html(page)).not.toContain('The offline value stands');
   });
 
-  it('the production command wires no gh caller (a new one needs a README network row first)', () => {
+  it('the production command wires the gh lookup, so the button renders; render still spawns no gh', () => {
     const folder = tmpFolder({ optedIn: true });
     const deps = buildPageDeps(folder, {});
-    expect(deps.lookupGhIdentity).toBeUndefined();
-    expect(html(new OnboardingPage(deps))).not.toContain('data-act="verifyGitHub"');
+    expect(deps.lookupGhIdentity).toBeTypeOf('function');
+    expect(html(new OnboardingPage(deps))).toContain('data-act="verifyGitHub"');
+    expect(spawned.some((s) => s.file === 'gh')).toBe(false);
+  });
+
+  it('a real Verify click runs exactly `gh api user`, once; a failed spawn leaves the offline value', async () => {
+    const folder = tmpFolder({ optedIn: true });
+    const page = new OnboardingPage(buildPageDeps(folder, {}));
+    html(page);
+    expect(spawned.filter((s) => s.file === 'gh')).toEqual([]);
+
+    // The child_process mock refuses execFile, which is the air-gapped / no-gh shape.
+    await expect(page.handle({ type: 'verifyGitHub' })).resolves.toBeUndefined();
+    expect(spawned.filter((s) => s.file === 'gh')).toEqual([{ file: 'gh', args: ['api', 'user'] }]);
+    expect(html(page)).toContain('The offline value stands');
+    expect(updates).toEqual([]);
+  });
+});
+
+describe('D4 - lookupGhUser is a best-effort `gh api user` read', () => {
+  const runner = (result: { code: number; stdout: string } | 'throw') => {
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const fn = async (cmd: string, args: string[]) => {
+      calls.push({ cmd, args });
+      if (result === 'throw') throw new Error('spawn gh ENOENT');
+      return { ...result, stderr: '' };
+    };
+    return { fn, calls };
+  };
+
+  it('runs `gh api user` and nothing else, and parses the account', async () => {
+    const r = runner({ code: 0, stdout: JSON.stringify({ login: 'octo', id: 7, email: 'octo@corp.com' }) });
+    await expect(lookupGhUser(r.fn)).resolves.toEqual({ login: 'octo', id: 7, email: 'octo@corp.com' });
+    expect(r.calls).toEqual([{ cmd: 'gh', args: ['api', 'user'] }]);
+  });
+
+  it('null on a non-zero exit, unparseable output, a login-less body, or a throw', async () => {
+    for (const result of [
+      { code: 1, stdout: JSON.stringify({ login: 'octo' }) },
+      { code: 0, stdout: 'not json' },
+      { code: 0, stdout: JSON.stringify({ message: 'Bad credentials' }) },
+      'throw' as const,
+    ]) {
+      await expect(lookupGhUser(runner(result).fn)).resolves.toBeNull();
+    }
   });
 });
 

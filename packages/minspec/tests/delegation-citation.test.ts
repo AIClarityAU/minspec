@@ -8,6 +8,7 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { TSX_BIN } from './helpers/run-tsx-cli';
 import {
   findWrongDelegationCitations,
   isCorrectedSpec,
@@ -77,7 +78,7 @@ describe('validate (T0)', () => {
     const sd = path.join(dir, 'specs', 'x', `${specId}-t`);
     fs.mkdirSync(sd, { recursive: true });
     fs.writeFileSync(path.join(sd, 'requirements.md'), `# t\n\n${WRONG}`);
-    const r = spawnSync(path.join(root, 'node_modules/.bin/tsx'), [path.join(root, 'scripts/validate-frontmatter.ts')], {
+    const r = spawnSync(TSX_BIN, [path.join(root, 'scripts/validate-frontmatter.ts')], {
       cwd: dir,
       encoding: 'utf-8',
     });

@@ -42,7 +42,8 @@ import { EpicGroupNode } from '../src/views/epic-grouping';
 import { TreeExpansionMemory } from '../src/views/tree-expansion-memory';
 import type { EpicSummary } from '../src/lib/epic-manager';
 import { SPEC_STATUSES } from '../src/lib/spec';
-import { approveSpec } from '../src/lib/approval';
+import { approveSpec, getApprovalRecord } from '../src/lib/approval';
+import { writeRecord } from '../src/lib/approval-store';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -447,6 +448,19 @@ describe('SpecTreeProvider — approval wiring (regression)', () => {
     return groupsOf(provider).flatMap((g) => provider.getChildren(g) as SpecNode[]);
   }
 
+  it('#741: default provider surfaces a migrated:true record as specNode.migrated (genuine approval stays specNode.approved)', () => {
+    const specPath = writeSpec('SPEC-001');
+    approveSpec(tmpDir, specPath, 'T2', 'tester@example.com');
+    const spec = makeSpec({ id: 'SPEC-001', status: 'implementing', filePath: specPath });
+    expect(activeNodes(new SpecTreeProvider(tmpDir, () => [spec]))[0].contextValue).toBe('specNode.approved');
+
+    writeRecord(tmpDir, { ...getApprovalRecord(tmpDir, specPath)!, migrated: true });
+    const node = activeNodes(new SpecTreeProvider(tmpDir, () => [spec]))[0];
+    expect(node.approval).toBe('approved');
+    expect(node.contextValue).toBe('specNode.migrated');
+    expect((node.iconPath as { id: string }).id).toBe('unlock');
+  });
+
   it('default-constructed provider reflects a real approval from approvals.json', () => {
     const specPath = writeSpec('SPEC-001');
     approveSpec(tmpDir, specPath, 'T2', 'tester@example.com'); // binds canonical hash, path-keyed
@@ -623,6 +637,8 @@ describe('SpecTreeProvider — Needs Re-Approval group (SPEC-029)', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
     const contextMenus: Array<{ command: string; when: string }> = pkg.contributes.menus['view/item/context'];
     const widenedFragment = 'viewItem =~ /^specNode(\\.stale)?( |$)/';
+    // #741: approveSpec ("Re-approve to verify") also covers specNode.migrated rows.
+    const approveFragment = 'viewItem =~ /^specNode(\\.stale|\\.migrated)?( |$)/';
 
     const classify = contextMenus.filter((m) => m.command === 'minspec.classify');
     expect(classify.length).toBeGreaterThan(0);
@@ -630,13 +646,67 @@ describe('SpecTreeProvider — Needs Re-Approval group (SPEC-029)', () => {
 
     const approve = contextMenus.filter((m) => m.command === 'minspec.approveSpec');
     expect(approve.length).toBeGreaterThan(0);
-    for (const m of approve) expect(m.when).toContain(widenedFragment);
+    for (const m of approve) expect(m.when).toContain(approveFragment);
 
-    // revokeApproval must NOT be widened — it stays scoped to specNode.approved only
-    // (now via regex too, since it must still tolerate a trailing hasDesign/hasTasks flag).
+    // revokeApproval is scoped to approved rows only (never the classify/stale-widened
+    // pattern); #741 widens it to also match specNode.migrated, via regex so it still
+    // tolerates a trailing hasDesign/hasTasks flag.
     const revoke = contextMenus.find((m) => m.command === 'minspec.revokeApproval');
-    expect(revoke?.when).toContain('specNode\\.approved');
+    expect(revoke?.when).toContain('specNode\\.(approved|migrated)');
     expect(revoke?.when).not.toContain(widenedFragment);
+  });
+
+  it('#741: an approved + migrated (unverified-provenance) spec gets a distinct unlock icon, tag, tooltip and specNode.migrated contextValue', () => {
+    const n = new SpecNode(makeSpec({ status: 'implementing' }), 'approved', false, false, true);
+    expect((n.iconPath as { id: string }).id).toBe('unlock');
+    expect(n.description).toContain('approved \u00b7 unverified');
+    expect(n.tooltip).toContain('UNVERIFIED');
+    expect(n.contextValue).toBe('specNode.migrated');
+    // genuine approval unchanged
+    const g = new SpecNode(makeSpec({ status: 'implementing' }), 'approved', false, false, false);
+    expect((g.iconPath as { id: string }).id).toBe('lock');
+    expect(g.contextValue).toBe('specNode.approved');
+    // migrated ignored when not approved, or terminal
+    expect(new SpecNode(makeSpec({ status: 'implementing' }), 'stale', false, false, true).contextValue).toBe('specNode.stale');
+    expect(new SpecNode(makeSpec({ status: 'done' }), 'approved', false, false, true).contextValue).toBe('specNode.terminal');
+  });
+
+  it('#741: menus — revoke + approveSpec match specNode.migrated; classify/showChanges do not', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
+    const menus: Array<{ command: string; when: string }> = pkg.contributes.menus['view/item/context'];
+    const rx = (cmd: string) => {
+      const m = menus.find((x) => x.command === cmd);
+      expect(m, `menu entry for ${cmd}`).toBeDefined();
+      const match = /viewItem =~ \/(.*)\//.exec(m!.when);
+      expect(match, `viewItem regex in when-clause of ${cmd}`).not.toBeNull();
+      return new RegExp(match![1]);
+    };
+    expect(rx('minspec.revokeApproval').test('specNode.migrated hasDesign')).toBe(true);
+    expect(rx('minspec.revokeApproval').test('specNode.approved')).toBe(true);
+    expect(rx('minspec.approveSpec').test('specNode.migrated')).toBe(true);
+    expect(rx('minspec.classify').test('specNode.migrated')).toBe(false);
+    expect(rx('minspec.showChangesSinceApproval').test('specNode.migrated')).toBe(false);
+  });
+
+  it('#741: every view/item/context clause that matches specNode.approved also matches specNode.migrated', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
+    const menus: Array<{ command: string; when: string }> = pkg.contributes.menus['view/item/context'];
+    // Clauses deliberately excluded from the parity rule (none today: the only
+    // clause matching approved rows is revokeApproval, which is meaningful for
+    // unverified approvals too). List any future exclusion here with its reason.
+    const EXCLUDED = new Set<string>();
+    let checked = 0;
+    for (const m of menus) {
+      const match = /viewItem =~ \/(.*)\//.exec(m.when);
+      if (!match) continue;
+      const re = new RegExp(match[1]);
+      for (const flags of ['', ' hasDesign', ' hasTasks', ' hasDesign hasTasks']) {
+        if (!re.test('specNode.approved' + flags) || EXCLUDED.has(m.command)) continue;
+        checked++;
+        expect(re.test('specNode.migrated' + flags), `${m.command} (${m.when}) matches approved but not migrated`).toBe(true);
+      }
+    }
+    expect(checked).toBeGreaterThan(0);
   });
 
   it('Slice 5: a non-terminal stale spec gets contextValue specNode.stale; approved/unapproved unchanged', () => {

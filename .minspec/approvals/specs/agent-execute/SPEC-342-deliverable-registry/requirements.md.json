@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/agent-execute/SPEC-342-deliverable-registry/requirements.md",
+  "specHash": "4b40e69ed86c23dda6b64801a44e3756198ff5ac3446f95ec8284c4f1f6316d7",
+  "approvedAt": "2026-11-21T13:13:06.376Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/implements-fm-1121b",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3918#issuecomment-7058896016"
+}

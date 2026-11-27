@@ -60,8 +60,15 @@ epic: EPIC-007  # Agent Execute
 
 ## Slice 6 — Open wrong-merge gaps (Acceptance Criteria §J; not closed by the merged gate)
 
-- [ ] **#489** — cross-check Signal-1 root cause against the real git diff (not the agent's self-reported `changedFiles`), or drop Signal-1 from eligibility. *(AC-25)*
-- [ ] **#490** — floor an analyzed *code* change with zero recognized signals so it cannot classify low-blast (analyzer false-negative). *(AC-26)*
-- [ ] **#491** — an audit-append failure on an `eligible` decision must HOLD (block the merge), not proceed untraced. *(AC-27)*
-- [ ] **#466** — pin the merge to the evaluated SHA (`--match-head-commit` or re-evaluate), closing the TOCTOU window. *(AC-28)*
-- [ ] **(test-gaps, from the AC audit)** add the named missing tests: AC-1 missing-conjunct key, AC-6 `hollow-findings-missing` key, AC-18 loop conjunction, AC-19 throw→HOLD conversion, AC-20 audit-record shape, AC-21 fallback-body parity, AC-24 filter-guard call-site.
+- [x] **#489** — cross-check Signal-1 root cause against the real git diff (not the agent's self-reported `changedFiles`), or drop Signal-1 from eligibility. *(AC-25)* — PR #728: `withVerifiedAuthority` overwrites Signal-1's `changedFiles` with the real diff's `changedFilePaths` (`auto-merge.ts:380`); test `auto-merge.test.ts:517`.
+- [x] **#490** — floor an analyzed *code* change with zero recognized signals so it cannot classify low-blast (analyzer false-negative). *(AC-26)* — PR #775 (DR-058): `classifyBlast` returns `low` only on an affirmative low-blast signal (`auto-merge.ts:255`); test `auto-merge.test.ts:563`.
+- [x] **#491** — an audit-append failure on an `eligible` decision must HOLD (block the merge), not proceed untraced. *(AC-27)* — PR #727: `applyAuditFailsafe` (`scripts/auto-merge-gate.ts:1001`), applied in `main()`; test `auto-merge-gate.test.ts:687`.
+- [ ] **#466 → #1262** — pin the merge to the evaluated SHA (`--match-head-commit` or re-evaluate), closing the TOCTOU window. *(AC-28)* — **still open.** #466 closed a different variant (#776 SHA-binds the `ai-review:pass` label to the head); the SPEC-024 merge itself, `gh pr merge "$PR_NUM" --repo "$REPO" --squash` (`scripts/dispatch-issue.sh:2947`), carries no head pin. Tracked by [#1262](https://github.com/AIClarityAU/minspec/issues/1262).
+- [ ] **(test-gaps, from the AC audit)** add the named missing tests:
+  - [x] AC-1 missing-conjunct key — `auto-merge.test.ts:591` (each required input names its own `failed[]` key and the reason quotes it).
+  - [x] AC-6 `hollow-findings-missing` key — `auto-merge.test.ts:639` (absent / non-array ⇒ that key, not `hollow-tests`; empty array control).
+  - [x] AC-19 throw→HOLD conversion — `auto-merge-gate.test.ts:925`: `main()` run as a process against a real repo with an unresolvable base emits `eligible:false`, `failed:['gate-error']`, even opted in, and audits it; control with a resolvable base.
+  - [x] AC-20 audit-record shape — `auto-merge-gate.test.ts:962`: exact key set, types, record equals the emitted decision, second run appends.
+  - [x] AC-21 fallback-body parity, gate side — `auto-merge-gate.test.ts:1012`: the emitted `block` equals `renderReviewSignals` with the prover's verdict substituted for the self-report. The dispatch-side composition (the `HOLD_BODY` printf in `scripts/dispatch-issue.sh`) is still untested; it lands with the AC-18 seam below.
+  - [ ] AC-18 loop conjunction — needs a callable seam in `scripts/dispatch-issue.sh` for the merge/hold branch (now five terms: eligible, PR number, mode, `ready-to-merge`, and the DR-086 autonomy verdict); a source-text assertion would pass without the behaviour.
+  - [ ] AC-24 filter-guard call-site — needs a dispatch-level test that the gate is never invoked for a held-for-human category; same seam requirement.

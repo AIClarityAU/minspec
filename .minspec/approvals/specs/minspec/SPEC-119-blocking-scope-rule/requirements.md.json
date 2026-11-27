@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-119-blocking-scope-rule/requirements.md",
+  "specHash": "08ed65aa8f932b75d2abd908463a8a16f8f60112b73a61ae8cc0b1400d3684cf",
+  "approvedAt": "2026-11-23T08:58:36.108Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:specfix-1123-text",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3980#issuecomment-7095556064"
+}

@@ -94,9 +94,10 @@ describe('truncation_backstop_label() — pure decision function (#427)', () => 
 //
 // Confirms the call site actually wires GATE_LABEL through
 // truncation_backstop_label() and that a small (well under DIFF_CAP) diff's
-// clean pass verdict still reaches `gh pr edit --add-label` as
-// `ai-review:pass` — i.e. the fix didn't regress the normal, non-truncated
-// path. Stubs `gh` and `claude` on PATH; does not attempt the truncated path
+// clean pass verdict still comes out as `ai-review:pass` — in the advisory
+// comment heading, since #4078 retired this runner's label write (the local
+// runner holds the builder identity, whose verdict must not gate) — i.e. the
+// fix didn't regress the normal, non-truncated path. Stubs `gh` and `claude` on PATH; does not attempt the truncated path
 // (see file header for why that can't run as a real subprocess here).
 
 const FAKE_GH = `#!/usr/bin/env bash
@@ -193,7 +194,7 @@ describe('review-pr.sh — end-to-end sanity (untruncated path unaffected)', () 
     fs.rmSync(binDir, { recursive: true, force: true });
   });
 
-  it('small diff + clean pass verdict → ai-review:pass, no truncation notice', () => {
+  it('small diff + clean pass verdict → advisory ai-review:pass comment, no label written, no truncation notice', () => {
     const prViewFile = path.join(scratch, 'pr-view.json');
     const diffFile = path.join(scratch, 'pr.diff');
     const claudeOutFile = path.join(scratch, CLAUDE_OUTPUT);
@@ -237,7 +238,11 @@ describe('review-pr.sh — end-to-end sanity (untruncated path unaffected)', () 
     const commentBody = fs.readFileSync(commentBodyFile, 'utf-8');
     const claudeStdin = fs.readFileSync(stdinCaptureFile, 'utf-8');
 
-    expect(addedLabel(editLog)).toBe('ai-review:pass');
+    // #4078: the outcome is in the advisory comment; NO ai-review:* label is written
+    // (neither added nor removed), because this runner's identity is the builder's.
+    expect(commentBody).toContain('Advisory AI review (local) — `ai-review:pass`');
+    expect(addedLabel(editLog)).toBeUndefined();
+    expect(editLog).not.toMatch(/ai-review:/);
     expect(commentBody).not.toContain('Diff truncated');
     // The distinguishing assertion (#2168): proves the prompt actually arrived
     // on claude's stdin, not just that claude ran and the script pressed on

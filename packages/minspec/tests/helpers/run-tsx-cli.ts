@@ -35,14 +35,45 @@
  * never as a passing assertion, and never as a precisely-worded but wrong one.
  */
 import { existsSync } from 'fs';
-import { spawnSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import * as path from 'path';
 
 /** Repo root, resolved from this helper's own location — never from a child's cwd. */
 export const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
 
-/** This repo's own locally-installed `tsx` binary, resolved by absolute path. */
-export const TSX_BIN = path.join(REPO_ROOT, 'node_modules', '.bin', 'tsx');
+/**
+ * Locate `tsx` the way Node resolves a dependency: walk UP from `start` for the first
+ * `node_modules/.bin/tsx`. A git worktree has no `node_modules` of its own (`npm ci` runs
+ * only in the primary checkout), so when the walk finds nothing, fall back to the primary
+ * checkout — the parent of the repo's git common dir (#1191). Returns the in-repo path
+ * when nothing exists, so a missing install still yields a precise ENOENT message.
+ */
+export function resolveTsxBin(start: string = REPO_ROOT): string {
+  const rel = path.join('node_modules', '.bin', 'tsx');
+  let dir = start;
+  for (;;) {
+    const candidate = path.join(dir, rel);
+    if (existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  try {
+    const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], {
+      cwd: start,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const candidate = path.join(path.dirname(common), rel);
+    if (common && existsSync(candidate)) return candidate;
+  } catch {
+    // not a git checkout — fall through to the in-repo path
+  }
+  return path.join(start, rel);
+}
+
+/** This repo's `tsx` binary: own `node_modules`, an ancestor's, or the primary checkout's. */
+export const TSX_BIN = resolveTsxBin();
 
 export interface CliResult {
   status: number | null;

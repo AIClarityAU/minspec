@@ -1,7 +1,7 @@
 ---
 id: SPEC-320
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - lifecycle/phase state and the spec-gate
@@ -14,9 +14,9 @@ implements_reason: >-
   `packages/minspec/src/lib/slash-commands.ts`, `.claude/commands/minspec-clarify.md`,
   `packages/minspec/src/lib/spec-validator.ts`, and tests. None of it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

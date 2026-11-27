@@ -1,7 +1,7 @@
 ---
 id: SPEC-289
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - PRs from contributors who do not use MinSpec
@@ -14,9 +14,9 @@ implements_reason: >-
   a new pure classifier module, config schema) are fixed at Plan, after Decisions D1-D6 are
   answered and the FR-0 baseline is measured.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -241,11 +241,11 @@ spend for that run, so the FR-0 comparison can be redone from logs after the cha
 ## Decisions needed (Clarify)
 
 Each decision below carries a recorded selection: the option this document recommends, copied
-by an agent session (minspec-sdd[bot]) on 2026-11-12. These are agent recommendations, not
-ratified answers, so Clarify stays open. No human chose any option, and DLG-001 (DR-108, the
-delegated-approval record) covers approval only, not Clarify selections. The founder's answer on
-operator queue item c1106au (outside this repo) is not a committed record, and DR-108 section 4
-says a queue item cannot carry consent, so it does not close Clarify here.
+by an agent session (minspec-sdd[bot]) on 2026-11-12. No human chose any option. Under the
+founder decision on queue item clarsel (2026-11-17), recorded in DR-123, an agent's recorded pick
+of a T3 spec's recommended option for each Clarify question closes that question, and approving
+the spec ratifies the picks. DLG-001 (DR-108, the delegated-approval record) covers approval only,
+not Clarify selections; the picks are agent-recorded, not delegated.
 D6's selection, if ratified, is a rule for Plan: if the FR-0 baseline shows the target bot pull requests
 spend zero tokens today, Plan returns this spec to Clarify with those numbers instead of building.
 

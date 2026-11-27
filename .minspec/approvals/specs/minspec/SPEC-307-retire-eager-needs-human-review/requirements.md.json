@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-307-retire-eager-needs-human-review/requirements.md",
+  "specHash": "350cc3954e65b1d03d6a49571eae215a20a59afc995bbc32285ef25025a0151d",
+  "approvedAt": "2026-11-22T00:28:17.765Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1120",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3911#issuecomment-7070998190"
+}

@@ -329,7 +329,7 @@ describe('remediate-pr.sh: the fork-PR guard is wired into the main flow (#1894)
   const code = fs.readFileSync(SCRIPT, 'utf-8');
 
   it('requests headRepository and headRepositoryOwner from the PR fetch — the exact filed repro (`grep headRepository` used to return nothing)', () => {
-    expect(code).toMatch(/--json number,state,isDraft,headRefName,headRepository,headRepositoryOwner,/);
+    expect(code).toMatch(/--json number,state,isDraft,headRefName,headRefOid,headRepository,headRepositoryOwner,/);
   });
 
   it('calls same_repo before the worktree is ever created against origin/$BRANCH', () => {
@@ -575,15 +575,30 @@ describe('remediate-pr.sh rerun-first gate (#3042)', () => {
   });
 });
 
-describe('remediate-pr.sh --classify: sweep defers ai-review:pass BEHIND PRs (#3069)', () => {
-  const sweep = (labels: string, mergeState = 'BEHIND', failing: 'yes' | 'no' = 'no', bad: 'yes' | 'no' = 'no') =>
+describe('remediate-pr.sh --classify: sweep defers witnessed-pass BEHIND PRs (#3069, #4078)', () => {
+  // #4078: the 9th argument is the witness (a `ready-to-merge` success posted by GitHub
+  // Actions on the head, scripts/lib/ready-witness.sh). The label no longer decides.
+  const sweep = (
+    labels: string,
+    mergeState = 'BEHIND',
+    failing: 'yes' | 'no' = 'no',
+    bad: 'yes' | 'no' = 'no',
+    witnessed: 'yes' | 'no' = labels.includes('ai-review:pass') ? 'yes' : 'no',
+  ) =>
     execFileSync(
       'bash',
-      [SCRIPT, '--classify', 'agent/issue-1', 'MERGEABLE', mergeState, labels, failing, bad, 'no', 'yes'],
+      [SCRIPT, '--classify', 'agent/issue-1', 'MERGEABLE', mergeState, labels, failing, bad, 'no', 'yes', witnessed],
       { encoding: 'utf-8' },
     ).trim();
 
-  it('a sweep over three green ai-review:pass BEHIND PRs issues zero rebase-only actions', () => {
+  it('#4078: a bare ai-review:pass label with NO witness does not defer — the builder cannot steer the sweep', () => {
+    expect(sweep('ai-review:pass', 'BEHIND', 'no', 'no', 'no')).toBe('rebase-only');
+  });
+  it('#4078: the witness defers even without the label (the label is not what is trusted)', () => {
+    expect(sweep('', 'BEHIND', 'no', 'no', 'yes')).toBe('skip-awaiting-merge-turn');
+  });
+
+  it('a sweep over three green witnessed-pass BEHIND PRs issues zero rebase-only actions', () => {
     const actions = [1, 2, 3].map(() => sweep('ai-review:pass'));
     expect(actions.filter((a) => a === 'rebase-only')).toHaveLength(0);
     expect(actions).toEqual(Array(3).fill('skip-awaiting-merge-turn'));
@@ -654,5 +669,41 @@ describe('remediate-pr.sh: delegated-approval branches (dlg-approve/*) — mecha
       execFileSync('bash', [SCRIPT, '--derive-failed-runs', ...extra], { encoding: 'utf-8', input: roll }).trim().split('\n');
     expect(run([])).toEqual(['222']);
     expect(run(['with-review'])).toEqual(['111', '222']);
+  });
+});
+
+// #4052 — ai_review_bad must read the ai-review:changes LABEL: on a machinery PR the
+// ai-review check is forced NEUTRAL, so the check alone is a blind witness.
+describe('remediate-pr.sh --derive-ai-review-bad: label OR red check (#4052)', () => {
+  const neutral = { name: 'ai-review', workflowName: 'ai-review', status: 'COMPLETED', conclusion: 'NEUTRAL' };
+  const green = { name: 'test', workflowName: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS' };
+  function derive(labels: string[], rollup: unknown[]): string {
+    return execFileSync('bash', [SCRIPT, '--derive-ai-review-bad'], {
+      encoding: 'utf-8',
+      input: JSON.stringify({ labels: labels.map((name) => ({ name })), statusCheckRollup: rollup }),
+    }).trim();
+  }
+
+  it('machinery PR: ai-review:changes + NEUTRAL ai-review check → yes', () => {
+    expect(derive(['ai-review:changes', 'ai-review:pending', 'needs-human-review'], [neutral, green])).toBe('yes');
+  });
+
+  it('ai-review:changes with no ai-review check at all → yes', () => {
+    expect(derive(['ai-review:changes', 'ai-review:pending', 'needs-human-review'], [green])).toBe('yes');
+  });
+
+  it('ai-review:pass + NEUTRAL check → no', () => {
+    expect(derive(['ai-review:pass'], [neutral, green])).toBe('no');
+  });
+
+  it('a red ai-review check without the label → yes', () => {
+    expect(derive([], [{ ...neutral, conclusion: 'FAILURE' }, green])).toBe('yes');
+  });
+
+  it('parity: drain and dispatch-issue.sh both derive through the shared helper', () => {
+    const drain = fs.readFileSync(SCRIPT, 'utf-8');
+    const dispatch = fs.readFileSync(path.resolve(__dirname, '../../../scripts/dispatch-issue.sh'), 'utf-8');
+    expect(drain).toMatch(/AI_REVIEW_BAD=\$\(derive_ai_review_bad "\$PR_JSON"\)/);
+    expect(dispatch).toMatch(/remediate-pr\.sh" --derive-ai-review-bad/);
   });
 });

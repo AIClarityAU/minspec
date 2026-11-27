@@ -166,25 +166,18 @@ describe('push-docs.sh — PR title/body split (#1606)', () => {
     expect(body).toContain('DR-102.md');
   });
 
-  it('a single-line message over 256 chars is truncated to a title on a word boundary', () => {
-    const { root, primary } = setupRepo({ 'docs/decisions/DR-103.md': 'seed\n' });
+  it('a subject over 256 chars fails fast, before any commit or push (#1438)', () => {
+    const { root, origin, primary } = setupRepo({ 'docs/decisions/DR-103.md': 'seed\n' });
     fs.writeFileSync(path.join(primary, 'docs/decisions/DR-103.md'), 'updated\n');
 
-    // Words of 9 chars incl. trailing space, well past 256 chars total, no blank-line body.
     const msg = 'docs(DR-103): ' + Array.from({ length: 40 }, (_, i) => `word${i}word`).join(' ');
     expect(msg.length).toBeGreaterThan(256);
 
-    const result = runPushDocs(primary, root, ['-m', msg]);
-    expect(result.status).toBe(0);
-
-    const argv = argvFromGhLog(path.join(root, 'gh-calls.log'));
-    const title = flagValue(argv, '--title');
-
-    expect(title.length).toBeLessThanOrEqual(256);
-    // Truncated on a word boundary: title is a clean prefix of the original
-    // message up to some space, never a mid-word cut.
-    expect(msg.startsWith(title)).toBe(true);
-    expect(msg[title.length]).toBe(' ');
+    const result = runPushDocs(primary, root, ['-m', `${msg}\n\nbody`]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toMatch(/256/);
+    expect(fs.readFileSync(path.join(root, 'gh-calls.log'), 'utf-8')).toBe('');
+    expect(git(origin, 'branch', '--list', 'docs-lane/*')).toBe('');
   });
 });
 

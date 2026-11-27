@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-375-ai-review-paused-state/requirements.md",
+  "specHash": "228485ab9460f0f51faef8bca73159c4753684ab30345d487290dc8bd9908d2e",
+  "approvedAt": "2026-11-22T00:56:59.193Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:clarify-picks-a-1121",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3933#issuecomment-7071221736"
+}

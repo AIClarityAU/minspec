@@ -159,14 +159,37 @@ export interface ArtifactGraph {
   adrs: AdrNode[];
   /** Explicit cross-cutting edges (FR-13). May be empty/absent — handled gracefully. */
   edges?: Edge[];
+  /**
+   * #523 — open pull-request snapshots (label sets) injected by the caller. The
+   * core never fetches (Tier-0, invariant 1); absent/empty ⇒ no PR nodes.
+   */
+  reviewPrs?: ReviewPrNode[];
 }
+
+/** An open PR's number + label names, as a snapshot (#523). */
+export interface ReviewPrNode {
+  number: number;
+  title?: string;
+  labels: string[];
+}
+
+/** Label: the AI reviewer could not run (quota/transient) — retry-able, not a code verdict. */
+export const AI_REVIEW_BLOCKED_LABEL = 'ai-review:blocked';
+/** Labels that mean a real verdict/human action exists, so a stale `blocked` is not the story. */
+const REVIEW_VERDICT_LABELS = ['ai-review:changes', 'ai-review:pass', 'needs-human-review'];
 
 // ---- Output ----
 export type SeverityClass = 'gate-violation' | 'blocked-ready' | 'promote-parent' | 'pending';
 //  NOTE: 'phase-action' IS produced (#1436) — see the implement-hole generator
 //  below. It is authoring work, never an approval: SPEC-014 FR-13 forbids any
 //  surface rendering it with an Approve control.
-export type NodeKind = 'epic-promote' | 'spec-approve' | 'adr-accept' | 'phase-action' | 'answer-OQ';
+export type NodeKind =
+  | 'epic-promote'
+  | 'spec-approve'
+  | 'adr-accept'
+  | 'phase-action'
+  | 'answer-OQ'
+  | 'rereview-pending';
 
 export interface Evidence {
   severityClass: SeverityClass;
@@ -991,6 +1014,35 @@ function generateNodes(
     );
   }
 
+  // #523 rereview-pending: a PR whose AI review could not run (`ai-review:blocked`
+  // — quota/transient). Retry-able work (ai-review-retry.yml re-runs it hourly),
+  // NOT a code-review action, so it is pinned to `pending` and is never conflated
+  // with a `needs-human-review` (real changes) PR: a PR carrying any verdict
+  // label is skipped, because that verdict is the live signal.
+  for (const pr of graph.reviewPrs ?? []) {
+    if (!pr.labels.includes(AI_REVIEW_BLOCKED_LABEL)) continue;
+    if (pr.labels.some((l) => REVIEW_VERDICT_LABELS.includes(l))) continue;
+    const id = `PR-${pr.number}`;
+    ranked.push(
+      mkRanked(
+        {
+          kind: 'rereview-pending',
+          targetId: id,
+          imperative: `Re-review pending (quota): PR #${pr.number} — retry, not a code-review action`,
+          severityClass: 'pending',
+          evidence: {
+            severityClass: 'pending',
+            rule: 'pending.rereview-quota',
+            explanation: `PR #${pr.number} is ${AI_REVIEW_BLOCKED_LABEL}: the reviewer could not run (quota/transient); re-run the review`,
+            refs: [id],
+          },
+        },
+        'pending',
+        { epicOrder: INF, artifactId: id },
+      ),
+    );
+  }
+
   // Epic-promote: a proposed epic with ≥1 pending child.
   for (const e of graph.epics) {
     if (superseded.has(e.id)) continue;
@@ -1047,6 +1099,11 @@ function compareRanked(a: RankedNode, b: RankedNode): number {
   if (a.epicOrder !== b.epicOrder) return a.epicOrder < b.epicOrder ? -1 : 1;
   if (a.goalRank !== b.goalRank) return a.goalRank < b.goalRank ? -1 : 1;
   if (a.priority !== b.priority) return a.priority < b.priority ? -1 : 1;
+  // #523: a retry-able re-review is not a human decision — on a full dial tie it
+  // yields to every real human task (id order alone would put "PR-" before "SPEC-").
+  const ar = a.task.kind === 'rereview-pending' ? 1 : 0;
+  const br = b.task.kind === 'rereview-pending' ? 1 : 0;
+  if (ar !== br) return ar - br;
   return compareIds(a.artifactId, b.artifactId);
 }
 
@@ -1110,13 +1167,16 @@ function clusterRelatesTo(sorted: RankedNode[], graph: ArtifactGraph): RankedNod
 // =====================================================================
 
 /**
- * Within a severity class only, stable-topologically order so an un-cleared
+ * Stable-topologically order the WHOLE sorted queue so an un-cleared
  * `depends_on` blocker ranks BEFORE its dependent. Without this a blocked node
  * can surface as the single next task — the never-wrong defect (FR-13: "it MUST
- * rank below an un-cleared target"). Cross-class deps are already separated by
- * classRank (or surfaced as an advance-past gate-violation), so flooring is
- * block-bounded. A dependency cycle (already corruption) makes no Kahn progress
- * and its members are appended in block order — never loops. Pure, deterministic.
+ * rank below an un-cleared target"). The pass is NOT bounded by severity class
+ * (#3836): a dependent in a higher class than its blocker (e.g. a `blocked-ready`
+ * spec-approve depending on a `pending` spec) used to keep its class-rank lead
+ * because flooring only reordered within a class. Step-4 order remains the
+ * tiebreak, so nothing moves unless an edge forces it. A dependency cycle
+ * (already corruption) makes no Kahn progress and its members are appended in
+ * order — never loops. Pure, deterministic.
  */
 function floorDependsOn(
   sorted: RankedNode[],
@@ -1125,21 +1185,12 @@ function floorDependsOn(
 ): RankedNode[] {
   const uncleared = unclearedDependsOn(graph, index);
   if (uncleared.size === 0) return sorted;
-
-  const out: RankedNode[] = [];
-  let i = 0;
-  while (i < sorted.length) {
-    let j = i;
-    while (j < sorted.length && sorted[j].classRank === sorted[i].classRank) j++;
-    out.push(...topoFloorBlock(sorted.slice(i, j), uncleared));
-    i = j;
-  }
-  return out;
+  return topoFloorBlock(sorted, uncleared);
 }
 
 /**
- * Stable topological sort of one same-class block: a node is emitted only after
- * all its in-block un-cleared blockers. Block order is the tiebreak, so it never
+ * Stable topological sort of the ranked queue: a node is emitted only after
+ * all its un-cleared blockers present in the queue. Queue order is the tiebreak, so it never
  * reorders beyond what flooring requires (preserving the Step-4 total order
  * otherwise). A leftover cycle (impossible here — cycles are corruption — but
  * guarded) is appended in block order, so the pass can never infinite-loop.
@@ -1160,12 +1211,14 @@ function topoFloorBlock(
 ): RankedNode[] {
   if (block.length < 2) return block;
   const inBlock = new Set(block.map((b) => b.artifactId));
-  const blockers = new Map<string, string[]>();
+  // A gate-violation (class 0) is never pushed below a LOWER class: it already
+  // targets the blocker (advance-past, #1237) and must stay on top. It is only
+  // floored against blockers that are themselves gate-violations.
+  const inGate = new Set(block.filter((b) => b.classRank === 0).map((b) => b.artifactId));
+  const blockers = new Map<RankedNode, string[]>(); // per-NODE: gate-violation differs
   for (const node of block) {
-    blockers.set(
-      node.artifactId,
-      (uncleared.get(node.artifactId) ?? []).filter((t) => inBlock.has(t)),
-    );
+    const eligible = node.classRank === 0 ? inGate : inBlock;
+    blockers.set(node, (uncleared.get(node.artifactId) ?? []).filter((t) => eligible.has(t)));
   }
 
   const placed = new Set<RankedNode>(); // per-NODE: already in `out`
@@ -1176,7 +1229,7 @@ function topoFloorBlock(
     progress = false;
     for (const node of block) {
       if (placed.has(node)) continue;
-      if (blockers.get(node.artifactId)!.every((b) => clearedArtifacts.has(b))) {
+      if (blockers.get(node)!.every((b) => clearedArtifacts.has(b))) {
         placed.add(node);
         clearedArtifacts.add(node.artifactId);
         out.push(node);

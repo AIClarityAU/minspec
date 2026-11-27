@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-382-dispatched-sessions-load-lesson-hook/requirements.md",
+  "specHash": "da7bafcffa88222d859a63ddaf7b60c2d6ea049262323a0dcea18858a3fe2292",
+  "approvedAt": "2026-11-22T00:57:34.832Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:clarify-picks-a-1121",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3933#issuecomment-7071221736"
+}

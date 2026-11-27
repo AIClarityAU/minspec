@@ -402,6 +402,25 @@ describe('FR-13 — cross-cutting edges', () => {
     expect(ids.indexOf('SPEC-009')).toBeLessThan(ids.indexOf('SPEC-001'));
   });
 
+  it('FR-13-blocks-cross-class (#3836): a blocked-ready dependent ranks below its pending blocker', () => {
+    // SPEC-001 (active epic, unapproved) is blocked-ready; its blocker SPEC-009 has
+    // no active epic so is merely pending. Class order alone puts SPEC-001 first;
+    // FR-13 "MUST rank below an un-cleared target" needs flooring across classes.
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'specifying', 'unapproved', { epic: 'EPIC-001' }),
+        mkSpec('SPEC-009', 'specifying', 'unapproved'),
+      ],
+      edges: [{ kind: 'depends_on', from: 'SPEC-001', to: 'SPEC-009' }],
+    });
+    const pipe = resolvePipeline(g);
+    const ids = pipe.map((t) => t.targetId);
+    expect(ids.indexOf('SPEC-009')).toBeGreaterThanOrEqual(0);
+    expect(ids.indexOf('SPEC-009')).toBeLessThan(ids.indexOf('SPEC-001'));
+    expect(resolveNextTask(g)!.targetId).toBe('SPEC-009');
+  });
+
   it('FR-13-blocks-transitive: a depends_on chain floors blocker-first, against id order', () => {
     // SPEC-001 depends_on SPEC-002 depends_on SPEC-003. Natural id order is
     // [001,002,003]; flooring must invert it to deepest-blocker-first.
@@ -1240,5 +1259,48 @@ describe('INV-PA — phase-action implement-hole node (#1436)', () => {
       ],
     });
     expect(resolveNextTask(g)!.imperative).toBe('Implement SPEC-001');
+  });
+});
+
+// =====================================================================
+// #523 — ai-review:blocked PRs surface as re-review-pending tasks
+// =====================================================================
+describe('#523 rereview-pending (ai-review:blocked)', () => {
+  it('surfaces a blocked PR as a pending, retry-able task', () => {
+    const t = resolveNextTask({
+      ...graph({}),
+      reviewPrs: [{ number: 519, labels: ['ai-review:blocked'] }],
+    });
+    expect(t?.kind).toBe('rereview-pending');
+    expect(t?.targetId).toBe('PR-519');
+    expect(t?.severityClass).toBe('pending');
+    expect(t?.evidence.rule).toBe('pending.rereview-quota');
+    expect(t?.imperative).toMatch(/Re-review pending \(quota\)/);
+  });
+
+  it('does not surface PRs with a verdict label or without the blocked label', () => {
+    const p = resolvePipeline({
+      ...graph({}),
+      reviewPrs: [
+        { number: 1, labels: ['ai-review:blocked', 'ai-review:changes'] },
+        { number: 2, labels: ['ai-review:blocked', 'needs-human-review'] },
+        { number: 3, labels: ['ai-review:pass'] },
+        { number: 4, labels: [] },
+      ],
+    });
+    expect(p).toEqual([]);
+  });
+
+  it('ranks below a real gate task and is deterministic', () => {
+    const g: ArtifactGraph = {
+      ...graph({ specs: [mkSpec('SPEC-001', 'specifying', 'unapproved')] }),
+      reviewPrs: [
+        { number: 20, labels: ['ai-review:blocked'] },
+        { number: 3, labels: ['ai-review:blocked'] },
+      ],
+    };
+    const p = resolvePipeline(g);
+    expect(p.map((t) => t.targetId)).toEqual(['SPEC-001', 'PR-3', 'PR-20']);
+    expect(resolvePipeline(g)).toEqual(p);
   });
 });

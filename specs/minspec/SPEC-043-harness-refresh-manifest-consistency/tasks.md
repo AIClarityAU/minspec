@@ -2,7 +2,7 @@
 id: SPEC-043
 type: tasks
 # 🔒 Editing voids approval (hash in .minspec/approvals.json → stale); re-run "MinSpec: Approve Spec". DR-012
-status: implementing
+status: done
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — derived-state truthfulness (harness-refresh hash manifest)

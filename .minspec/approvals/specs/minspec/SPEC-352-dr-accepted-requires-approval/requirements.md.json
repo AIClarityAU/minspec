@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-352-dr-accepted-requires-approval/requirements.md",
+  "specHash": "78f92a48b73a0fb9d5f0cd24947e52c9df5f7b1e0ba5b8c431cf3c00a03e62db",
+  "approvedAt": "2026-11-17T05:07:06.382Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1117-b",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3804#issuecomment-6938680366"
+}

@@ -1,7 +1,7 @@
 ---
 id: SPEC-297
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - concurrent multi-session coordination; two drain PRs taking one spec id is that problem
@@ -14,9 +14,9 @@ implements_reason: >-
   (publish-time guard and fallback), scripts/lib/spec-id-claims.ts (reuse), a new guard test.
   SPEC-227 owns the allocator and cross-PR gate; this spec adds no second allocator.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

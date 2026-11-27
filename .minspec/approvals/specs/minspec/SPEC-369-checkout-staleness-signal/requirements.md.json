@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-369-checkout-staleness-signal/requirements.md",
+  "specHash": "350ddcab6c44b6207000898e7d403bb42e18206125940c466e9bf379df7a4b00",
+  "approvedAt": "2026-11-17T05:35:21.882Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1117-b",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3804#issuecomment-6938680366"
+}

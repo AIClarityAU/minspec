@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-182-ai-review-witness-never-absent/requirements.md",
+  "specHash": "ab93c3d2b9e79d12137348ae47d48c4058d41b8dcf452764c41c9823c6d15e1c",
+  "approvedAt": "2026-11-21T12:17:52.970Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/specd-held-1121",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3922#issuecomment-7062198171"
+}

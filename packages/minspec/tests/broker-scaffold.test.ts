@@ -61,11 +61,13 @@ describe('SPEC-034 — an unconfigured broker refuses everything', () => {
   it('refuses a non-POST before any request handling', async () => {
     const res = await call(TOKEN_PATH, { method: 'GET' });
     expect(res.status).toBe(405);
+    expect(((await res.json()) as TokenError).error).toBe('method_not_allowed');
   });
 
   it('404s an unknown route rather than falling through to the token path', async () => {
     const res = await call('/', { method: 'POST' });
     expect(res.status).toBe(404);
+    expect(((await res.json()) as TokenError).error).toBe('no_such_route');
   });
 
   it('is not reachable from extension source — vendor infra, never shipped', () => {

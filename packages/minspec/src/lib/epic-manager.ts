@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from './config';
-import { slugify } from './spec-manager';
+import { slugify } from './slug';
 import { ensureDirectory } from './opt-in';
 import { prepareText, readDocument, readDocumentText, restoreLineEndings } from './text-io';
 

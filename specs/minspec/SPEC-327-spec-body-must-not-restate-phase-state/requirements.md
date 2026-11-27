@@ -1,7 +1,7 @@
 ---
 id: SPEC-327
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the specify-to-approve flow whose output this keeps self-consistent
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Expected surface: `packages/minspec/src/lib/spec-validator.ts` (one new body check beside
   `validateStatusClaims`), the specify prompt/spec template, and tests. None of it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

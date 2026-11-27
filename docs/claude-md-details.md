@@ -87,3 +87,31 @@ ask - surface and continue.
 > `MIN-SPEC-019` with the 3-letter code) until #679 lands the `/`-joined paragraph grammar and
 > #681 migrates the corpus. Until then, write refs in whichever form is clearest and don't
 > mass-rewrite.
+
+<a id="workflows-permission-boundary"></a>
+## CI-review stack is human-maintainable only (#1977)
+
+An agent cannot push any change under `.github/workflows/`: the App installation holds no
+`workflows` permission, and GitHub rejects the push with `refusing to allow a GitHub App to
+create or update workflow ... without 'workflows' permission`. DR-097 (the `ai-review.yml`
+wiring is a founder push) and DR-103 (the App's `workflows` permission was removed; what an
+agent cannot do) already record this limit.
+
+**Consequence.** The managed CI-review templates are generated from this repo's own workflow
+files (`scripts/gen-ci-templates.mjs` emits them into `ci-review-templates.ts`, and the
+portability suite asserts the embedded copy is byte-identical to the on-disk source). There is
+no split where an agent edits only the generated file: that drifts and the drift gate rightly
+fails. So every fix to the review machinery ends in a founder push. Agents can diagnose, write,
+and test the fix, and commit it; they cannot publish it.
+
+**What to do instead.** Do not retry the push or look for a workaround.
+1. Commit the fix on a branch (tests and generated templates included) so the diff is complete.
+2. Stage the workflow diff where the founder can apply it.
+3. Hand the push to the founder as one step, naming the branch and the workflow file(s).
+
+**Why the permission stays withheld.** An agent that can rewrite the workflows that review it
+can disable its own gate (the self-certification problem the machinery-path set, #1284 and
+#1957, exists to prevent). Re-granting is rejected. The cost is a human in the critical path of
+every gate fix, slowest exactly when a gate is broken; it is a known property, not a defect.
+A pre-approved single-diff path is a separate design question, not decided here. Related but
+distinct: #1834 (the stack cannot update itself within one PR).

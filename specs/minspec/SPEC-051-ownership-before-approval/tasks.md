@@ -37,11 +37,22 @@ first). Each task names its acceptance signal so "done" is checkable, not assert
 
 ## T2 — T0 tests (before any behaviour change)
 
-- [ ] **T2.1** `ownership-guard.test.ts` — approve refuses an undeclared T3/T4 primary spec.
+> **Shipped before this file was ticked (verified 2026-11-13 against code, not issue state).**
+> T2.1/T2.2/T2.6: `packages/minspec/tests/ownership-guard.test.ts` (refusal with no sidecar,
+> no file mutation, no ref; `none` + reason approves; `advanceSpecToImplementing` refusal leaves
+> the file byte-identical). T4: one shared guard, `assertOwnershipDeclaredForAdvance` in
+> `packages/minspec/src/lib/ownership-advance-guard.ts`, called from `commands/approve.ts` before
+> `advanceSpecToImplementing` (#1806, #2265), from `advanceSpecToImplementing` itself (#1473, closing
+> #1446) and from `approveSpec`. It reuses `violationsIntroducedByApproval` rather than the
+> `ownershipDeclared(...)` extraction T3 describes, so T3 and the T2.5 parity table stay open as
+> written. T2.3/T2.4 stay open: the suite covers a T2 spec and a declared path, not a non-primary
+> spec or an explicitly greenfield path.
+
+- [x] **T2.1** `ownership-guard.test.ts` — approve refuses an undeclared T3/T4 primary spec.
       Assert **absence of every side effect**: no sidecar written, no `status:` flip, no
       baseline blob minted, no ref created. *(Not just "it threw" — the whole point is that
       nothing is half-written.)*
-- [ ] **T2.2** `implements: none` + `implements_reason` approves cleanly (FR-4 escape
+- [x] **T2.2** `implements: none` + `implements_reason` approves cleanly (FR-4 escape
       reachable pre-approval).
 - [ ] **T2.3** T1/T2 tiers and non-primary specs approve unguarded (AC-7 scope; no regression).
 - [ ] **T2.4** Greenfield path (declared, not on disk) satisfies the guard — mirrors the
@@ -51,7 +62,7 @@ first). Each task names its acceptance signal so "done" is checkable, not assert
       one shared fixture list (INV-5, risk R5). Both must import the same matcher; the test
       fails if either grows a private rule. This is DR-077's sanctioned shape for a rule with
       two call sites.
-- [ ] **T2.6** `advanceSpecToImplementing` refuses an undeclared spec and leaves `phases`
+- [x] **T2.6** `advanceSpecToImplementing` refuses an undeclared spec and leaves `phases`
       **byte-unchanged** (DQ-2 class fix; no half-advance).
 
 ## T3 — Extract the shared predicate (behaviour-preserving)
@@ -77,26 +88,35 @@ first). Each task names its acceptance signal so "done" is checkable, not assert
 > to disk** → `recordApproval(` (sidecar) → `commitApprovalIfEnabled(`. The Plan flip is the
 > FIRST write, so a guard living only inside `approveSpec` cannot prevent it.
 
-- [ ] **T4.1 (primary)** `packages/minspec/src/commands/approve.ts`: call the guard **before
+- [x] **T4.1 (primary)** `packages/minspec/src/commands/approve.ts`: call the guard **before
       the `advanceSpecToImplementing` call**, alongside the existing `checkApprover` pre-check. This is the
       only point that precedes every write. Surface the refusal as an actionable message
       naming the exact frontmatter line to add.
-- [ ] **T4.2** `advanceSpecToImplementing` (`packages/minspec/src/lib/spec.ts:568`): call it
+- [x] **T4.2** `advanceSpecToImplementing` (`packages/minspec/src/lib/spec.ts:568`): call it
       before `phasesForApproval` mutates anything — the shared guard for the class (DQ-2).
       One production call site today (in `packages/minspec/src/commands/approve.ts`), so it
       adds no coverage now; its value is that any future advance actor inherits the check.
       Justify it on that, never on a caller count.
-- [ ] **T4.3** `approveSpec` (`packages/minspec/src/lib/approval.ts:512`): defence in depth
+- [x] **T4.3** `approveSpec` (`packages/minspec/src/lib/approval.ts:512`): defence in depth
       at the lib boundary, for a caller that bypasses the command. Note it **cannot** prevent
       the `advanceSpecToImplementing` flip — it is a backstop, not the gate.
 
 ## T5 — Template prompt (DQ-1 Option C)
 
-- [ ] **T5.1** Spec scaffold emits a commented `implements:` line at Specify, documenting the
+- [x] **T5.1** Spec scaffold emits a commented `implements:` line at Specify, documenting the
       `none` + `implements_reason` escape inline, so ownership is authored long before
       approval and T4's refusal becomes a rarely-fired backstop.
-- [ ] **T5.2** Managed-region template change only — no new gate, no behaviour in the
+- [x] **T5.2** Managed-region template change only — no new gate, no behaviour in the
       validator. Confirm harness-refresh re-scaffolds it without clobbering user edits.
+
+> **T5 as built (2026-11-13).** `createSpec` (`packages/minspec/src/lib/spec-manager.ts`,
+> `ownershipDeclarationPrompt`) stamps a commented `implements:` block above `phases:` in every new
+> spec, at every tier (specs are created at T2 and raised later). It is creation-only, like the #1510
+> hash-lock reminder, so it never touches an existing spec's hashed bytes and needs no harness
+> refresh. The `/minspec-specify` command's managed guidance already asks for the same declaration
+> (#1489, `slash-commands.ts` `FRONTMATTER_GUIDANCE`). No gate: `validateSpec` output is identical
+> with and without the prompt, and the documented `none` escape, uncommented verbatim, passes the rule
+> at `error` (`packages/minspec/tests/spec-scaffold-ownership-prompt.test.ts`).
 
 ## T6 — Trap-staled detector (DQ-3, non-blocking)
 

@@ -11,7 +11,8 @@ import {
   type IntegrateResult,
 } from '../lib/constitution-proposer';
 import { compactConstitution } from '../lib/constitution-compaction';
-import { ensureDirectory, hasOptInMarker, notOptedInMessage, NotOptedInError } from '../lib/opt-in';
+import { ensureDirectory, hasOptInMarker, notOptedInMessage } from '../lib/opt-in';
+import { showedOptInRefusal } from './opt-in-refusal';
 
 /**
  * SPEC-025 FR-2/FR-3 (manual path): assemble the deterministic context manifest +
@@ -20,7 +21,7 @@ import { ensureDirectory, hasOptInMarker, notOptedInMessage, NotOptedInError } f
  * the prompt is handed off. The future Tier-1 agent-execute provider implements
  * the same ConstitutionProvider seam — no rework here.
  *
- * This is the "Generate with AI" leg of the empty-constitution nudge (#320): the
+ * This is the "Prepare AI prompt" leg of the empty-constitution nudge (#320): the
  * LLM-powered alternative to the deterministic {@link constitutionProposeCommand}
  * seed. `folderArg` lets the nudge target the exact folder it evaluated instead
  * of re-resolving (multi-root safe, mirrors the propose command's own arg).
@@ -126,12 +127,9 @@ export async function constitutionProposeCommand(folderArg?: string): Promise<vo
       },
     });
   } catch (err) {
-    if (err instanceof NotOptedInError) {
-      // The refusal is the whole message: nothing was written, so "could not
-      // propose a draft" wrapped around it would add nothing true.
-      vscode.window.showErrorMessage(err.message);
-      return;
-    }
+    // The refusal is the whole message: nothing was written, so "could not
+    // propose a draft" wrapped around it would add nothing true.
+    if (showedOptInRefusal(err)) return;
     vscode.window.showErrorMessage(
       `MinSpec: Could not propose a constitution draft — ${
         err instanceof Error ? err.message : String(err)

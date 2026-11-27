@@ -336,17 +336,26 @@ export function runCaller(opts: CallerOptions, deps: CallerDeps): CallerReport {
     return refuse('not-bot-identity', `the token is not a working App installation token: ${String(err).split('\n')[0]}`);
   }
 
-  let openPaths: Set<string>;
+  // path -> numbers of the open PRs touching it, so an in-open-pr skip can name the blocker (#3927).
+  let openPaths: Map<string, number[]>;
   let openHeads: Set<string>;
   try {
     const rows = JSON.parse(
       deps.gh(['pr', 'list', '--repo', repo, '--state', 'open', '--limit', String(OPEN_PR_LIMIT), '--json', 'number,headRefName,files'], token),
-    ) as { headRefName?: string; files?: { path?: string }[] }[];
+    ) as { number?: number; headRefName?: string; files?: { path?: string }[] }[];
     if (!Array.isArray(rows)) throw new Error('not a list');
     if (rows.length >= OPEN_PR_LIMIT) {
       return refuse('open-pr-read-truncated', `the open pull request read returned ${rows.length}, the limit: it may be cut off`);
     }
-    openPaths = new Set(rows.flatMap((r) => (r.files ?? []).map((f) => String(f.path ?? ''))));
+    openPaths = new Map();
+    for (const r of rows) {
+      for (const f of r.files ?? []) {
+        const p = String(f.path ?? '');
+        const nums = openPaths.get(p) ?? [];
+        if (typeof r.number === 'number' && !nums.includes(r.number)) nums.push(r.number);
+        openPaths.set(p, nums);
+      }
+    }
     openHeads = new Set(rows.map((r) => String(r.headRefName ?? '')));
   } catch (err) {
     return refuse('open-pr-read-failed', String(err).split('\n')[0]);
@@ -453,8 +462,16 @@ export function runCaller(opts: CallerOptions, deps: CallerDeps): CallerReport {
       skip(artifact, 'content-pr-unknown', 'the pull request that last changed this content could not be read from git');
       continue;
     }
-    if (openPaths.has(artifact) || openPaths.has(sidecarPathFor(artifact))) {
-      skip(artifact, 'in-open-pr', 'an open pull request changes this artifact or its approval record', pr);
+    const sidecar = sidecarPathFor(artifact);
+    if (openPaths.has(artifact) || openPaths.has(sidecar)) {
+      const blockers = [...new Set([...(openPaths.get(artifact) ?? []), ...(openPaths.get(sidecar) ?? [])])].sort((a, b) => a - b);
+      // `pr` is the (merged) content PR, NOT the blocker: the blocking open PRs are in `detail`.
+      skip(
+        artifact,
+        'in-open-pr',
+        `blocked by open pull request ${blockers.length > 0 ? blockers.map((n) => `#${n}`).join(', ') : '(number unreadable)'} changing this artifact or its approval record; pr is the merged content PR #${pr}, not the blocker`,
+        pr,
+      );
       continue;
     }
     candidates.push({ artifact, content, hash, pr, id: artifactId(artifact, content) });

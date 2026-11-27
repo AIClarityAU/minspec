@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-298-implementing-without-plan-or-tasks/requirements.md",
+  "specHash": "9ccf2512f84210dc06cd2b4abbfe6681e66764b05ba8acd4a339f0f9a9d41698",
+  "approvedAt": "2026-11-22T00:28:00.536Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1120",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3911#issuecomment-7070998190"
+}

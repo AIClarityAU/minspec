@@ -8,6 +8,9 @@ dist/
 *.vsix
 .vscode-test/
 coverage/
+# test-all.sh --coverage writes Vitest's report here instead of coverage/ so the repo
+# root never holds a bare dir named like the Python module the ms-python adapter imports (#1185).
+.vitest-coverage/
 # coverage.py's data file. Not the same thing as coverage/ above (that is
 # Vitest's HTML report). Running the Python suite under coverage drops this in
 # the repo root, and it is a binary SQLite blob nobody wants in a diff.
@@ -145,3 +148,6 @@ sites/scroogellm.com/
 # not do. Cross-clone recovery is already handled without it (classifyBaseline surfaces
 # 'unrecoverable', and #701 walks the spec's own history).
 .minspec/snapshots/
+
+# Session scratch dirs (#3100): a rescue/junk sweep once pushed these to a public origin.
+.scratch*/
