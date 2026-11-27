@@ -8,6 +8,12 @@ epic: EPIC-002  # Signpost Integrity — edge trustworthiness
 aspects: [dag, edges, linter, provenance, tier-0, determinism, never-wrong]
 depends_on: [SPEC-012]
 relates_to: [SPEC-041, DR-019, DR-062, DR-023]
+phases:
+  specify: in-progress
+  clarify: done
+  plan: pending
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — Symmetric prose-link linter + edge provenance (Requirements)
