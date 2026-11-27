@@ -266,11 +266,14 @@ case "$noun $verb" in
     # Default: the 403 an App installation token gets, body on stdout as the real gh prints
     # it — the drain's production shape (#3037, #3592). STUB_GH_LOGIN answers as a user
     # token instead; STUB_GH_USER_ERROR fails some other way (a 401, a network error), so
-    # no identity can be established at all.
+    # no identity can be established at all. STUB_GH_USER_403_PAD appends that many bytes
+    # after the 403, which makes a reader that leaves at its first match leave while the
+    # answer is still being handed to it (#4178).
     if [[ -n "\${STUB_GH_LOGIN:-}" ]]; then echo "\$STUB_GH_LOGIN"; exit 0; fi
     if [[ -n "\${STUB_GH_USER_ERROR:-}" ]]; then echo "\$STUB_GH_USER_ERROR" >&2; exit 1; fi
     echo '{"message":"Resource not accessible by integration","status":"403"}'
     echo 'gh: Resource not accessible by integration (HTTP 403)' >&2
+    if [[ -n "\${STUB_GH_USER_403_PAD:-}" ]]; then head -c "\$STUB_GH_USER_403_PAD" /dev/zero | tr '\\0' x >&2; echo >&2; fi
     exit 1 ;;
   "api graphql")
     [[ "$query" == mutation* ]] && wrote "api graphql-mutation"
