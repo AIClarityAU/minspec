@@ -84,4 +84,17 @@ describe('check-worktree-salvage CLI', () => {
     expect(run(path.join(d, 'sub'))).toBe(2);
     expect(run(d)).toBe(1);
   }, 60000);
+  it('hand-written gitignored file is SALVAGE; ignored build output alone is NOTHING_UNIQUE', () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-ignored-'));
+    const g = (...a: string[]) => execFileSync('git', a, { cwd: d, stdio: 'pipe' });
+    g('init', '-q');
+    fs.writeFileSync(path.join(d, '.gitignore'), '.env.local\nnode_modules/\n');
+    g('add', '.');
+    g('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init');
+    fs.mkdirSync(path.join(d, 'node_modules', 'x'), { recursive: true });
+    fs.writeFileSync(path.join(d, 'node_modules', 'x', 'i.js'), 'x\n');
+    expect(run(d)).toBe(0);
+    fs.writeFileSync(path.join(d, '.env.local'), 'SECRET=1\n');
+    expect(run(d)).toBe(1);
+  }, 60000);
 });

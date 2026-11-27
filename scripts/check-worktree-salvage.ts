@@ -38,7 +38,12 @@ function main(): number {
     const result = classifyWorktree({
       stagedNumstat: git(dir, ['diff', '--cached', '--numstat']),
       unstagedNumstat: git(dir, ['diff', '--numstat']),
-      untracked: git(dir, ['ls-files', '--others', '--exclude-standard']).split('\n'),
+      untracked: [
+        ...git(dir, ['ls-files', '--others', '--exclude-standard']).split('\n'),
+        // Gitignored files too: a hand-written .env.local is ignored yet exists nowhere else.
+        // Build output among them is dropped by classifyWorktree's artifact filter.
+        ...git(dir, ['ls-files', '--others', '--ignored', '--exclude-standard']).split('\n'),
+      ],
     });
     console.log(
       `${result.verdict}: +${result.insertions} -${result.deletions}` +
