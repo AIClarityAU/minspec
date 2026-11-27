@@ -58,7 +58,7 @@ spec's approval and each needs a re-approve. Riskiest assumption: the founder ac
 
 ## Acceptance criteria
 
-- AC-1: after the change, `grep -rl 'approvals.json\[' specs` returns nothing.
+- AC-1: after the change, the FR-3 gate reports no spec whose frontmatter lock notice names `approvals.json[`. A raw `grep -rl 'approvals.json\[' specs` is NOT the criterion: it also matches this spec and SPEC-044 (requirements.md and design.md), which quote the string in prose, not as a notice (12 files at 2026-11-27).
 - AC-2: a fixture spec whose notice names `.minspec/approvals.json[SPEC-X]` produces a gate finding; one
   naming its own correct sidecar produces none; one naming a *different spec's* sidecar produces one.
 - AC-3: `hashLockReminder(p)` output passes the gate for `p` (round-trip test, so the emitter and checker
