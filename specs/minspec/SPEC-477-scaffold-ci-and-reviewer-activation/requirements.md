@@ -1,5 +1,5 @@
 ---
-id: SPEC-437
+id: SPEC-477
 type: requirements
 status: specifying
 tier: T3
@@ -9,7 +9,7 @@ aspects: [ci, scaffold, required-checks, rulesets, reviewer-activation, consent,
 relates_to: [SPEC-033, SPEC-071, DR-050, DR-066, DR-037, DR-054, "#564", "#557", "#559", "#560", "#562", "#561"]
 ---
 
-# SPEC-437: Finish #564 — scaffold `ci.yml` (Tier B) and offer reviewer activation (secrets + App)
+# SPEC-477: Finish #564 — scaffold `ci.yml` (Tier B) and offer reviewer activation (secrets + App)
 
 > Materializes [#564](https://github.com/AIClarityAU/minspec/issues/564) — "scaffold the FULL
 > required-check CI stack on init, two-tier". **Most of #564 already shipped**; this spec
