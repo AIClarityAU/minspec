@@ -26,8 +26,10 @@ import { execFileSync } from 'child_process';
  * (see `scripts/build-extension.sh`). Deliberately a bare identifier rather than an import
  * so the bundler can substitute it as a literal.
  *
- * `'dev'` in a non-packaged build (plain `npm run build`, tests, F5 debugging) — those are
- * compiled from the working tree by definition, so there is nothing to compare.
+ * `'dev'` when the define was never applied (vitest, or any path that bypasses
+ * `scripts/build-extension.sh`). `npm run build` routes through that script and always
+ * injects a real SHA, so a plain build is stamped; a `dev` stamp means the code ran from
+ * the working tree unbundled, so there is nothing to compare.
  */
 declare const __MINSPEC_BUILD_SHA__: string | undefined;
 
