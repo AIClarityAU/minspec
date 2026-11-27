@@ -1,6 +1,6 @@
 // SPEC-136 FR-6 / FR-7, task 9: the read-only operations leave the whole project tree
 // byte-identical (including .git/config), and at most one table entry carries the approval
-// effect. Task 13 adds `approve`; it then tightens the FR-7 assertion from "none" to "exactly one".
+// effect. Task 13 added `approve`; the FR-7 assertion is "exactly one, named approve".
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, lstatSync, readlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -87,8 +87,7 @@ function approvalPathProblem(table: readonly { name: string; effect: Operation["
 }
 
 describe('FR-7: one approval path', () => {
-  // Task 13 adds `approve`; change this 0 to 1 there.
-  const EXPECTED_APPROVAL_ENTRIES = 0;
+  const EXPECTED_APPROVAL_ENTRIES = 1;
 
   it('the real table has no entry beyond the expected approval path', () => {
     expect(approvalPathProblem(OPERATIONS, EXPECTED_APPROVAL_ENTRIES)).toBeNull();
