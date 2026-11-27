@@ -986,4 +986,12 @@ The founder answered this as runner queue item clarsel on 2026-11-17 (words in t
 <!-- dr-summary:DR-124 auto=b3c6f8a249ed -->
 SPEC-022 FR-1 (specs/minspec/SPEC-022-approval-foundation/requirements.md:77) says approval ground truth is **committed** to the repo. Before #576 the approval record was only git-*tracked*: written to disk and left in the working tree. Nothing committed it. So an approval could sit uncommitted indefinitely, be lost to a checkout or a reset, or be swept into an unrelated commit by another session. "Committed ground truth" was a claim the code did not keep.
 <!-- /dr-summary:DR-124 -->
+
+## [DR-126 — Repos with the MinSpec App secrets do not behave exactly as before - the review re-evaluates ready-to-merge once more per completed review, and both arms remove the persisted checkout credential before the voters run](DR-126.md)
+
+*Status: proposed · Date: 2026-11-27*
+
+<!-- dr-summary:DR-126 auto=9388e18a9ff4 -->
+DR-115 Decision 1 kept the App arm "exactly as today". SPEC-268 then specified the no-App fallback. Building it (PR #4079, branch cos/noapp-secrets-1126) changed the App arm in two ways:
+<!-- /dr-summary:DR-126 -->
 <!-- minspec:dr-index:end -->
