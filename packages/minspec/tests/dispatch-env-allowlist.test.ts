@@ -140,6 +140,23 @@ describe('T0: the build agent, started by the real scripts/dispatch-issue.sh', (
     expectNothingForbidden(launch, held);
   });
 
+  it('an inherited token is still recognised, and the agent still started, when the 403 answer is long (#4178)', () => {
+    // The row above that inherits a token passes through gh-bot.sh's identity probe before
+    // the claim, the launcher's first write. That probe recognised GitHub's 403 by piping
+    // the answer into `grep -q` under pipefail, and lost to SIGPIPE whenever grep left
+    // before the answer was fully written: on a loaded runner with the real two-line
+    // answer, always with a long one. The launcher then died before its claim, and this
+    // suite saw no launch at all. Padding the answer makes the losing schedule certain.
+    // gh-bot's own message does not reach r.out: the claim is posted with its stderr
+    // discarded, so the launch count is the observable.
+    const held = ['GH_TOKEN', 'MINSPEC_GH_BOT_TOKEN_STAMP'];
+    const r = runDispatch({ issue: TRUSTED, env: { ...withFixtureValues(held), STUB_GH_USER_403_PAD: String(1 << 20) } });
+    // The probe ran, so this went down the path the padding is for.
+    expect(r.ghCalls, r.out).toContain('api user ');
+    const launch = onlyLaunch(r.launches, r.out);
+    expectNothingForbidden(launch, held);
+  });
+
   it('the launcher did hold a token while the agent ran, and kept it afterwards', () => {
     // The other half of the row above that inherits nothing. A launcher with no token
     // would make "the agent has none" true for the wrong reason, and a fix that disarmed
