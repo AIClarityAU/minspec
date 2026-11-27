@@ -37,9 +37,12 @@ it never compares the referenced artifact's **state** with the referrer's. Same 
 class as #137. Related but distinct: #1066 (acceptance leaves no provenance) - this spec makes
 ratification *happen on time*, #1066 makes it *evidenced*.
 
-**Measured baseline (this dispatch, local worktree).** 1 DR on disk has `status: proposed`; no
-spec's `depends_on`/`relates_to` cites it, so the ERROR tier introduces no existing failures and
-needs no backfill. (Re-measure at plan time; the corpus moves.)
+**Measured baseline (this dispatch, local worktree).** 1 DR on disk has `status: proposed`
+(DR-106, two ranked core tenets). It appears in `relates_to` of SPEC-269, SPEC-291 and SPEC-292
+(and nowhere in `depends_on`), so a rule over `relates_to`/`depends_on` (Decision 1 option c)
+would flag those three specs today; under option (a) none are flagged, because no spec has an
+`implements_dr:` key yet, so the ERROR tier introduces no existing failures and needs no
+backfill. (Re-measure at plan time; the corpus moves.)
 
 ## Functional requirements
 
@@ -64,6 +67,10 @@ needs no backfill. (Re-measure at plan time; the corpus moves.)
   script, with unit tests, following the existing Rule 17/18 pattern.
 - **FR-8 - Traceability.** The message and the script comment cite #1081, DR-064, DR-069 as the
   earning incidents.
+- **FR-9 - Coverage advisory.** When a spec's `phases.implement` is `in-progress` or `done`, it has
+  no `implements_dr:` entry for a DR it cites in `relates_to`/`depends_on`, and that DR has
+  `status: proposed`, `validate` emits a `warn()` naming both ids, so an unmigrated spec is not
+  silently outside the gate. Advisory only; never an error.
 
 ## Acceptance criteria
 
@@ -100,8 +107,15 @@ checking DR-to-DR state; a spec-phase transition hook in the editor (the gate li
    - **(a) New explicit `implements_dr:` frontmatter list (rec)** - exact, no false positives, so
      safe for the ERROR tier. Cost: a new frontmatter key to document and teach the scaffold, and
      existing specs must opt in (SPEC-040 would add `implements_dr: [DR-064]`); an unmigrated spec
-     is silently outside the gate.
-   - **(b) Reuse `depends_on` only** - no schema change and covers SPEC-040 today. Cost: false
+     is outside the gate. That silent-coverage gap (invariant 2) is mitigated by a WARN-tier
+     advisory for a spec at `implement: in-progress/done` that cites a `proposed` DR in
+     `relates_to`/`depends_on` with no `implements_dr:` (see FR-9). The key is deliberately
+     distinct from the existing SPEC-038 `implements:` key (owned-code file paths, e.g. SPEC-040
+     frontmatter): DR ids in that path list would clash with SPEC-038's edit-lock, so the two are
+     not merged or overloaded.
+   - **(b) Reuse `depends_on` only** - no schema change, but SPEC-040 has no `depends_on` (DR-064 is only in its
+     `relates_to`), so it would catch neither earning incident without migration - the same opt-in
+     cost as (a). Cost: false
      positives for DRs a spec merely depends on, which is unacceptable at ERROR, so FR-3 would
      have to downgrade to WARN and the issue's ERROR tier is lost.
    - **(c) Any `relates_to`/`depends_on` DR** - widest net. Cost: SPEC-040 would flag DR-014 it
