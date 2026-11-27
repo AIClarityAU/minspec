@@ -1,6 +1,6 @@
 // SPEC-136 FR-5 (hash), FR-9, FR-16: the core's `hash` equals the library's specHash for the
 // same file, every result carries a stamped coreVersion, and failures exit non-zero.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { readFileSync } from 'node:fs';
@@ -21,7 +21,12 @@ import { dirname } from 'node:path';
 import { listSpecs } from '../../minspec/src/lib/spec-catalog';
 import { formatNextTaskLabel, resolveNextTask } from '../../shared/src/next-task';
 import { buildContext, renderTemplate } from '../../minspec/src/lib/template-engine';
-import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS } from '../../minspec/src/lib/template-registry';
+import {
+  MANAGED_REGION_TEMPLATES,
+  renderManagedFile,
+  TEMPLATE_NAMES,
+  TEMPLATE_OUTPUT_PATHS,
+} from '../../minspec/src/lib/template-registry';
 import { buildBundle, runCore } from './helpers';
 
 const SPEC = '---\nid: SPEC-900\nstatus: specifying\n---\n\n# Parity\n\nBody text.\n';
@@ -305,4 +310,85 @@ describe('validate corpus rules (FR-3): one fixture per "Yes" row of design.md',
     const r = rulesOf(corpusProject({ 'specs/SPEC-917-x/requirements.md': SPEC_OK('SPEC-917') }));
     expect(r.json.findings.filter((f: any) => f.rule.startsWith('corpus.'))).toEqual([]);
   });
+});
+
+describe('validate finds everything the Python validator finds (FR-3, AC "Same verdicts")', () => {
+  const VALIDATE_PY_PATH = '.minspec/hooks/validate.py';
+  const pySource = renderManagedFile(MANAGED_REGION_TEMPLATES.find((t) => t.outputPath === VALIDATE_PY_PATH)!);
+  const DR = (n: string, extra = '') => `---\nid: DR-${n}\nstatus: proposed\n---\n\n# DR-${n}\n\n## In plain terms\n\nx\n${extra}`;
+  const OWNERSHIP_SPEC = (id: string) =>
+    `---\nid: ${id}\nstatus: specifying\ntier: T3\nphases:\n  plan: in-progress\n---\n\n# ${id}\n`;
+
+  /** One planted instance of each Python finding, keyed by the path Python names. */
+  const planted: Record<string, string | Buffer> = {
+    'specs/SPEC-950-missing-id/requirements.md': '---\nstatus: specifying\n---\n\n# No id\n',
+    'specs/SPEC-951-bad-id/requirements.md': '---\nid: BAD\nstatus: specifying\n---\n\n# Bad id\n',
+    'specs/SPEC-952-ownership/requirements.md': OWNERSHIP_SPEC('SPEC-952'),
+    'specs/SPEC-953-unreadable/requirements.md': Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from('# x\n')]),
+    'docs/decisions/DR-950.md': '---\nstatus: proposed\n---\n\n# No id\n\n## In plain terms\n\nx\n',
+    'docs/decisions/DR-951.md': '---\nid: nope\nstatus: proposed\n---\n\n# Bad\n\n## In plain terms\n\nx\n',
+    'docs/decisions/DR-952.md': '---\nid: DR-952\nstatus: proposed\n---\n\n# No plain terms\n',
+    'docs/domain/untyped.md': '# Untyped domain doc\n',
+  };
+
+  const plant = (config: object): string => {
+    const dir = mkdtempSync(join(work, 'pyparity-'));
+    mkdirSync(join(dir, '.minspec'), { recursive: true });
+    writeFileSync(join(dir, '.minspec', 'config.json'), JSON.stringify(config));
+    writeFileSync(join(dir, 'validate.py'), pySource);
+    for (const [rel, content] of Object.entries(planted)) {
+      mkdirSync(dirname(join(dir, rel)), { recursive: true });
+      writeFileSync(join(dir, rel), content);
+    }
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    return dir;
+  };
+
+  const pythonLines = (dir: string): { level: string; file: string; line: string }[] => {
+    const r = spawnSync('python3', [join(dir, 'validate.py')], { cwd: dir, encoding: 'utf8' });
+    if (r.error) {
+      throw new Error(`python3 is required to prove the core finds what validate.py finds, and it did not run: ${r.error.message}`);
+    }
+    return r.stderr
+      .split('\n')
+      .map((line) => /^(FAIL|WARN) (\S+): /.exec(line))
+      .filter((m): m is RegExpExecArray => m !== null)
+      .map((m) => ({ level: m[1], file: m[2], line: m[0] }));
+  };
+
+  for (const [mode, config, level] of [
+    ['ownershipDeclaration: error', { ownershipDeclaration: 'error' }, 'FAIL'],
+    ['ownershipDeclaration unset (warn)', {}, 'WARN'],
+  ] as const) {
+    it(`every Python FAIL/WARN line has a core finding on the same file (${mode})`, () => {
+      const dir = plant(config);
+      const py = pythonLines(dir);
+      // The plant is only meaningful if Python reports each planted file, at the intended level.
+      const pyFiles = new Set(py.map((p) => p.file));
+      for (const rel of Object.keys(planted)) expect(pyFiles.has(rel), `python reported nothing on ${rel}`).toBe(true);
+      expect(py.find((p) => p.file.includes('SPEC-952'))!.level).toBe(level);
+      const core = runCore(bundle, ['validate', '--root', dir]);
+      const coreFiles = new Set((core.json.findings as any[]).map((f) => f.file));
+      for (const p of py) {
+        expect(coreFiles.has(p.file), `${p.line} has no core finding on ${p.file}; core files: ${[...coreFiles].join(', ')}`).toBe(true);
+      }
+      expect(core.json.outcome).toBe('fail');
+    }, 60_000);
+  }
+
+  it('control: a clean corpus has no Python finding and no core finding', () => {
+    const dir = mkdtempSync(join(work, 'pyparity-clean-'));
+    mkdirSync(join(dir, '.minspec'), { recursive: true });
+    mkdirSync(join(dir, 'specs', 'SPEC-960-x'), { recursive: true });
+    mkdirSync(join(dir, 'docs', 'decisions'), { recursive: true });
+    writeFileSync(join(dir, 'validate.py'), pySource);
+    writeFileSync(join(dir, 'specs', 'SPEC-960-x', 'requirements.md'), '---\nid: SPEC-960\nstatus: specifying\n---\n\n# X\n');
+    writeFileSync(join(dir, 'docs', 'decisions', 'DR-960.md'), DR('960'));
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    expect(pythonLines(dir)).toEqual([]);
+    const core = runCore(bundle, ['validate', '--root', dir]);
+    // The core also reports the library's advisory spec rules, which Python does not; the
+    // claim is only that it adds no error and no corpus finding where Python is silent.
+    expect((core.json.findings as any[]).filter((f) => f.severity === 'error' || f.rule.startsWith('corpus.'))).toEqual([]);
+  }, 30_000);
 });

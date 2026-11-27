@@ -29,7 +29,7 @@ import { walkOptionalRoot } from '../../../scripts/lib/corpus-walk';
 import { drsMissingPlainTerms } from '../../../scripts/lib/dr-required-sections';
 import { checkDeclaredDrIds } from '../../../scripts/lib/dr-id-collision';
 import { checkDeclaredSpecIds } from '../../../scripts/lib/spec-id-collision';
-import { parseFrontmatter, domainDocFailures, specIdFailure } from '../../../scripts/lib/domain-doc-rules';
+import { parseFrontmatter, domainDocFailures, specIdFailure, drIdFailure } from '../../../scripts/lib/domain-doc-rules';
 
 export interface CorpusFinding {
   file: string;
@@ -135,6 +135,12 @@ export function runCorpusRules(root: string): CorpusFinding[] {
   try {
     const drFiles = walkOptionalRoot(decisionsDir, '.md').map((f) => ({ file: s.rel(f), content: read(f) }));
     for (const d of checkDeclaredDrIds(drFiles)) s.add('corpus.dr-id', path.join(root, d.files[0]), 'error', `DR id ${d.kind} - ${d.message}`);
+    // The Python validator's half: every decision record (not the register's INDEX/README) must carry a well-formed `id:`.
+    for (const d of drFiles) {
+      if (/(^|\/)(INDEX|README)\.md$/.test(d.file)) continue;
+      const m = drIdFailure(d.content);
+      if (m) s.add('corpus.dr-id', path.join(root, d.file), 'error', `${d.file}: ${m}`);
+    }
   } catch (err) {
     s.unrunnable('corpus.dr-id', 'the DR id uniqueness check could not run', err, true, decisionsDir);
   }

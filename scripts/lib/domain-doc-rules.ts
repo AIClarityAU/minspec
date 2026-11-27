@@ -36,3 +36,17 @@ export function specIdFailure(content: string): string | null {
   const id = parseFrontmatter(content)['id'];
   return !id || !/^SPEC-\d+$/.test(id) ? 'missing or invalid `id: SPEC-NNN` frontmatter' : null;
 }
+
+/**
+ * The shipped Python validator's DR `id:` rule: the failure message for a decision record
+ * without a well-formed `id: DR-NNN`, else null. `validate-frontmatter.ts` has no such rule
+ * (#2297), so only the headless core calls this one, to find what `validate.py` finds
+ * (SPEC-136 FR-3). Quotes and a trailing comment are tolerated the way `validate.py` does.
+ */
+export function drIdFailure(content: string): string | null {
+  const raw = parseFrontmatter(content)['id'];
+  let id = (raw ?? '').split('#', 1)[0].trim();
+  if (id.length >= 2 && id[0] === id[id.length - 1] && (id[0] === '"' || id[0] === "'")) id = id.slice(1, -1);
+  if (!id) return 'missing `id: DR-NNN` frontmatter';
+  return /^DR-\d+$/.test(id) ? null : `invalid \`id: DR-NNN\` frontmatter (got \`${id}\`)`;
+}
