@@ -1,7 +1,7 @@
 ---
 id: SPEC-370
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — this is a Tier-1 network-consent boundary (DR-004) around auto-filing GitHub issues
@@ -19,8 +19,8 @@ implements_reason: >-
   and there is nothing to claim ownership of yet.
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

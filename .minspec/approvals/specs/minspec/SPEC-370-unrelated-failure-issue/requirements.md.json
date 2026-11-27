@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-370-unrelated-failure-issue/requirements.md",
+  "specHash": "35afcfb185e3db6819c30bd6daf5df94490549f110ea3275fdbe4481075b0893",
+  "approvedAt": "2026-11-25T23:31:02.782Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-unblock-1125",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4064#issuecomment-7176903984"
+}
