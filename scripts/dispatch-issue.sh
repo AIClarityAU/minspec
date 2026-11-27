@@ -2209,7 +2209,10 @@ crash_log_excerpt() {
 # Returns 1 when the label could not be written; the marker is already in place by then.
 mark_worktree_held() {
   local reason="$1" gd
-  gd="$(git -C "$WORKTREE" rev-parse --absolute-git-dir 2>/dev/null)" || gd=""  # swallow-ok: reported on the next line; a tree with no readable git dir cannot carry the marker, and the label write still runs
+  # The git directory is the PIN's (agent_worktree_pin, taken before the agent ran) — never
+  # git run inside the agent's worktree, whose `.git` file and config the agent could have
+  # rewritten (agent-launch-sites.test.ts).
+  gd="${AGENT_WORKTREE_GIT_DIR:-}"
   if [[ -z "$gd" ]]; then
     echo "WARNING: cannot write the minspec-held marker for #$ISSUE — no git dir at $WORKTREE (#4169)" >&2
     return 1

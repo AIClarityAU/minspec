@@ -99,6 +99,7 @@ describe('dispatch-issue.sh — hold_issue_labels (#4169)', () => {
         PATH: `${bin}:${process.env.PATH}`,
         GH_CALLS: calls,
         WORKTREE: wt,
+        AGENT_WORKTREE_GIT_DIR: path.join(wt, '.git'),
         ISSUE: '7',
         REPO: 'o/r',
         HOLD_LABEL_RETRY_SLEEP: '0',
