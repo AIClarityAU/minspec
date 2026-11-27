@@ -2198,6 +2198,43 @@ crash_log_excerpt() {
   return "$rc"
 }
 
+# #4169 — the hold-label write must not be a best-effort `|| true`. The label
+# (`agent-quarantined` / `needs-human-review`) is what keeps the drain from picking a
+# held issue again, so a failed write used to leave it `agent-ready` with no trace
+# (#1485). Two independent witnesses now (constitution invariant 2):
+#   1. a local `minspec-held` marker in the held worktree's git directory, written FIRST
+#      so it exists even when the network write below never succeeds; dispatch-ready-check.sh
+#      refuses an issue whose worktree carries it;
+#   2. the label itself, retried, and a LOUD stderr line (never silent) when every try fails.
+# Returns 1 when the label could not be written; the marker is already in place by then.
+mark_worktree_held() {
+  local reason="$1" gd
+  gd="$(git -C "$WORKTREE" rev-parse --absolute-git-dir 2>/dev/null)" || gd=""  # swallow-ok: reported on the next line; a tree with no readable git dir cannot carry the marker, and the label write still runs
+  if [[ -z "$gd" ]]; then
+    echo "WARNING: cannot write the minspec-held marker for #$ISSUE — no git dir at $WORKTREE (#4169)" >&2
+    return 1
+  fi
+  printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$reason" > "$gd/minspec-held" || {
+    echo "WARNING: failed writing $gd/minspec-held for #$ISSUE (#4169)" >&2
+    return 1
+  }
+}
+
+# hold_issue_labels <reason> <add-labels-csv> — marker first, then the retried label write.
+hold_issue_labels() {
+  local reason="$1" add="$2" attempt max="${HOLD_LABEL_ATTEMPTS:-3}"
+  mark_worktree_held "$reason" || true  # swallow-ok: mark_worktree_held already printed its own WARNING; the label write below is the other independent witness
+  for ((attempt = 1; attempt <= max; attempt++)); do
+    if gh issue edit "$ISSUE" --repo "$REPO" --remove-label "agent-running" --add-label "$add"; then
+      return 0
+    fi
+    echo "WARNING: hold-label write failed for #$ISSUE (attempt $attempt/$max): $add" >&2
+    [[ "$attempt" -lt "$max" ]] && sleep "${HOLD_LABEL_RETRY_SLEEP:-2}"
+  done
+  echo "ERROR: could NOT apply hold labels '$add' to #$ISSUE after $max attempts — the issue may stay agent-ready; the worktree minspec-held marker is the only witness left (#4169)" >&2
+  return 1
+}
+
 # Quarantine path (#358): the guard tripped, so we publish NOTHING. Label the issue
 # for a human, comment briefly, and leave the worktree intact for inspection.
 quarantine_publish() {
@@ -2211,9 +2248,7 @@ quarantine_publish() {
     --description "Agent output blocked by the pre-publish egress guard — human review required" 2>/dev/null || true
   gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
     --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
-  gh issue edit "$ISSUE" --repo "$REPO" \
-    --remove-label "agent-running" \
-    --add-label "agent-quarantined,needs-human-review" 2>/dev/null || true
+  hold_issue_labels "egress guard quarantine" "agent-quarantined,needs-human-review" || true  # swallow-ok: hold_issue_labels retried and printed ERROR itself, and wrote the minspec-held marker
   gh issue comment "$ISSUE" --repo "$REPO" \
     --body "$(printf 'egress guard blocked publish — see worktree `%s`\n\nThe pre-publish egress guard (`scripts/egress-scan.sh`) matched a secret/exfil marker in the agent output about to be published (committed diff / `.agent-summary.md` / `.review-signals.json`). Nothing was pushed and no PR was opened; the worktree is left intact for a human to inspect before any publish. (#358)' "$WORKTREE")" 2>/dev/null || true
   echo "Agent output QUARANTINED for #$ISSUE (role: $ROLE). Worktree left at: $WORKTREE"
@@ -2247,9 +2282,7 @@ hold_specify_scope() {
   printf '%s\n' "$strays" >&2
   gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
     --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
-  gh issue edit "$ISSUE" --repo "$REPO" \
-    --remove-label "agent-running" \
-    --add-label "needs-human-review" 2>/dev/null || true
+  hold_issue_labels "specify-only scope hold" "needs-human-review" || true  # swallow-ok: hold_issue_labels retried and printed ERROR itself, and wrote the minspec-held marker
   gh issue comment "$ISSUE" --repo "$REPO" \
     --body "$(printf '## ⏸ Specify-only dispatch held — the diff left the spec corpus\n\nThis issue was dispatched for the **Specify phase only** (tier T3/T4, DR-076 / #1169): the agent may write the spec and must stop, because the single human review this design funds is the reading of that spec, not of the raw issue.\n\nThe committed diff was not publishable, so **nothing was pushed and no PR was opened**:\n\n```\n%s\n```\n\nA specify-only dispatch may touch `specs/**` and `docs/decisions/**` and nothing else. The worktree is left intact at `%s` for inspection.\n\nRe-triage (`scripts/triage-inbox.sh %s`) to try again, or approve the issue for a full build if that is what you actually want (`scripts/approve-issue.sh %s`) — that lifts the `hold:specify` and dispatches an implementing agent.' \
       "$strays" "$WORKTREE" "$ISSUE" "$ISSUE")" 2>/dev/null || true
@@ -2280,9 +2313,7 @@ hold_workflow_push() {
   printf '%s\n' "$wf" | sed 's/^/      /' >&2
   gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
     --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
-  gh issue edit "$ISSUE" --repo "$REPO" \
-    --remove-label "agent-running" \
-    --add-label "needs-human-review" 2>/dev/null || true
+  hold_issue_labels "workflow-push hold" "needs-human-review" || true  # swallow-ok: hold_issue_labels retried and printed ERROR itself, and wrote the minspec-held marker
   gh issue comment "$ISSUE" --repo "$REPO" \
     --body "$(printf '## ⏸ Publish held — the diff touches CI workflow files\n\nThe build finished but **nothing was pushed**: the capability probe could not confirm the GitHub App holds `workflows: write` (#1120), so the forge may reject the push.\n\n```\n%s\n```\n\nThe worktree is left at `%s` (branch `%s`) — land it with a human credential carrying the `workflow` scope, or grant the permission (#1120).' \
       "$wf" "$WORKTREE" "$BRANCH")" 2>/dev/null || true
