@@ -248,9 +248,25 @@ forbids.
 
 ## FR-5 - ordering gate (OQ-3: CI is the enforcing copy)
 
-The doc-to-code pairing is SPEC-038's `implements:` / `affects:` frontmatter, the same source
-`owned_file_set` in `scripts/hooks/spec-gate.py` uses, matched case-insensitively like its
-`owned_match`. No new convention.
+The doc-to-code pairing is SPEC-038's `implements:` / `affects:` frontmatter, matched
+case-insensitively like `owned_match` in `scripts/hooks/spec-gate.py`. No new convention.
+
+**Only the structured half of spec-gate's owned set (correction, #529 dispatch 2026-11-26).**
+`declared_impl_files` in `scripts/hooks/spec-gate.py` builds `owned_file_set` from two
+signals: the structured `implements:` / `affects:` lists, and backtick paths in the spec's
+own `tasks.md` that resolve to an existing file. `planReviewOrdering` reads the **first only**.
+The tasks.md signal names files a task touches *read-only* as well as files it changes - this
+plan's own task 6.1 names `scripts/hooks/spec-gate.py (read only)`. Pairing on it would defer
+review of an unrelated `spec-gate.py` fix whenever SPEC-031 is ungreenlit, which is the
+over-broad scoping INV-5 and the #426 regression forbid. The cost of the choice: code a spec
+realises but never declares in `implements:` / `affects:` is reviewed immediately, not
+deferred. That miss stays visible, because the doc's own `:changes` / `:pending` still blocks
+the merge (below). SPEC-038's `ownership.implements.missing` rule narrows it: it fires on a
+primary T3/T4 spec whose `plan` phase is `in-progress` or `done`
+(`validateOwnership`, `packages/minspec/src/lib/spec-validator.ts`), at `error` in this repo
+(`ownershipDeclaration`, `.minspec/config.json`). T1/T2 specs, and T3/T4 specs before Plan,
+are not required to declare, so their implementing code is never deferred. The rejected alternative, consistency with spec-gate's full owned
+set, is listed under Rejected alternatives.
 
 `planReviewOrdering({ changedFiles, docs })` (pure, in the guard), where each doc is
 `{ path, type, implements, greenlit }`:
@@ -298,6 +314,10 @@ It joins the adopter template registry so adopters get it with `ai-review.yml`.
   a CommonJS twin plus a parity test keeps one behaviour without a build step in CI
   (`config.ts` already mirrors `scripts/lib/autonomy.ts` this way, but by comment only; this
   plan adds the test).
+- **Pairing on spec-gate's full owned set (structured lists plus tasks.md backtick paths):**
+  one pairing rule for the edit-time hook and the CI gate would read as simpler, but tasks.md
+  names read-only references, so it defers unrelated code (INV-5, #426). FR-5 pairs on the
+  structured lists only (see FR-5 above).
 - **A new required `ai-review/ordering` context:** the doc's own failing type already blocks the
   merge, and a new required context needs a ruleset write the App does not have.
 - **Per-type pass as a positive merge signal:** forgeable by anyone with write access.
