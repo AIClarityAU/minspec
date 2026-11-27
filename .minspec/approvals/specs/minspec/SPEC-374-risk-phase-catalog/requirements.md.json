@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-374-risk-phase-catalog/requirements.md",
+  "specHash": "e0b1a029ca0e6059e9121b0f9783ea2b6bc00c6542237187b4fb27ace4bb0508",
+  "approvedAt": "2026-11-24T10:30:55.106Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/record-cq-1124",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4048#issuecomment-7128287921"
+}
