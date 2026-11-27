@@ -1466,6 +1466,58 @@ if [[ "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
   # retries share ONE budget instead of each getting a fresh one.
   BUILD_DEADLINE=$(( $(date -u +%s) + LEASE_ABS_MAX_SECS ))
 fi
+# ── #3909 / SPEC-384: an earlier dispatch's worktree may still hold agent/issue-N ──
+# git lets one worktree at a time have a branch checked out, and a dispatch leaves its
+# worktree behind when it ends. The re-dispatch's `worktree add` then died with rc=128
+# ("already used by worktree"), every cycle, and the drain counted each one as a failed
+# dispatch: two whole cycles failed that way on 2026-11-27. The cleanup further down only
+# ever looks at THIS session's claim-unique path, so it never saw the old one. Ask git
+# who holds the branch, here: after the claim is won (so no other session holds a live
+# claim on this issue, the SPEC-044 liveness witness, D2) and before anything is started
+# (so a deferral is still a true "refused before starting").
+HOLDER_WITNESS="claim"
+if [[ "${MINSPEC_CLAIM_OFF:-0}" == "1" ]]; then HOLDER_WITNESS="none"; fi
+HOLDER_PLAN=$(issue_branch_holder_plan "$REPO_ROOT" "$BRANCH" "$WORKTREE_BASE" "$ISSUE" "$HOLDER_WITNESS") || {
+  echo "ERROR: could not tell whether a worktree already holds $BRANCH (#3909); nothing was started." >&2
+  exit 1
+}
+HOLDER_ACTION="" HOLDER_PATH="" HOLDER_REASON=""
+IFS=$'\t' read -r HOLDER_ACTION HOLDER_PATH HOLDER_REASON <<<"$HOLDER_PLAN"
+case "$HOLDER_ACTION" in
+  none) ;;
+  prune)
+    # The folder is gone: drop that ONE registration. Never a repository-wide
+    # `worktree prune`, which would also drop registrations this dispatch does not own.
+    echo "Worktree holder of $BRANCH: pruned - its folder $HOLDER_PATH no longer exists, so its registration is dropped (#3909)."
+    launcher_git -C "$REPO_ROOT" worktree remove "$HOLDER_PATH" || {
+      echo "ERROR: could not drop the registration of the missing worktree $HOLDER_PATH holding $BRANCH (#3909)." >&2
+      exit 1
+    }
+    HOLDER_ACTION="none"
+    ;;
+  reuse)
+    # A dead dispatch's worktree: continue in it as it is (SPEC-384 D1 a). Its commits,
+    # modified and untracked files all stay. Only the previous run's dispatcher files
+    # move out of the tree, so they cannot be posted or gated on as this run's.
+    if ! HOLDER_ASIDE=$(issue_branch_set_aside_artifacts "$HOLDER_PATH" "${WORKTREE_BASE}/.set-aside"); then
+      echo "Standing down on #$ISSUE - deferred: $BRANCH is held by $HOLDER_PATH and its previous run's files could not be set aside, so it is not reused (#3909). Nothing was started."
+      exit_declined
+    fi
+    echo "Worktree holder of $BRANCH: recovered - reusing the dead dispatch's worktree $HOLDER_PATH in place (SPEC-384 D1, #3909)."
+    if [[ -n "$HOLDER_ASIDE" ]]; then
+      echo "Worktree holder of $BRANCH: the previous run's summary, signals and log were moved to $HOLDER_ASIDE."
+    fi
+    ;;
+  defer)
+    echo "Standing down on #$ISSUE - deferred: $BRANCH is held by the worktree at $HOLDER_PATH: ${HOLDER_REASON} (#3909). Nothing was started."
+    exit_declined
+    ;;
+  *)
+    echo "ERROR: unknown worktree-holder plan '$HOLDER_PLAN' for $BRANCH (#3909); nothing was started." >&2
+    exit 1
+    ;;
+esac
+
 # The point of no return for "nothing was started" (#2641). Every exit above this line
 # started nothing. Everything below it has a claim, or was told it needs none, and goes
 # on to label the issue, make a worktree and run an agent: from here a caller that asked
@@ -1481,11 +1533,17 @@ BUILD_DEADLINE="${BUILD_DEADLINE:-0}"
 # force-removed racer A's LIVE worktree mid-build — the R7 corruption).
 WORKTREE="$(lease_worktree_path "$ISSUE")"
 
-if [[ -d "$WORKTREE" ]]; then
-  echo "Cleaning up existing worktree at $WORKTREE"
-  launcher_git -C "$REPO_ROOT" worktree remove "$WORKTREE" --force 2>/dev/null || true
-  # The branch is NOT deleted (#3452): it may hold the only copy of earlier work, and
-  # issue_branch_add_worktree below continues from or reuses it.
+if [[ "$HOLDER_ACTION" != "reuse" ]]; then
+  if [[ -d "$WORKTREE" ]]; then
+    echo "Cleaning up existing worktree at $WORKTREE"
+    launcher_git -C "$REPO_ROOT" worktree remove "$WORKTREE" --force 2>/dev/null || true
+    # The branch is NOT deleted (#3452): it may hold the only copy of earlier work, and
+    # issue_branch_add_worktree below continues from or reuses it.
+  fi
+else
+  # Reuse in place (#3909): the dead dispatch's worktree IS this run's worktree. Its path
+  # carries the old session id; the claim still names this session, which is what owns it.
+  WORKTREE="$HOLDER_PATH"
 fi
 
 # Branch off ORIGIN/main, not local `main`. The shared checkout's local `main`
@@ -1508,7 +1566,15 @@ git -C "$REPO_ROOT" fetch origin main -q
 # Fetch the issue branch too, so a branch only origin has is seen (#3452).
 git -C "$REPO_ROOT" fetch origin "$BRANCH" -q 2>/dev/null || true
 read -r BRANCH_MODE BRANCH_REF BRANCH_FF <<<"$(issue_branch_plan "$REPO_ROOT" "$BRANCH")"
-if [[ "$BRANCH_MODE" == "new" ]]; then
+if [[ "$HOLDER_ACTION" == "reuse" ]]; then
+  # Already checked out there, so nothing is added. A worktree an agent has had is moved
+  # only through the pinned git (lib/agent-worktree.sh), never by running git in it bare.
+  if [[ "$BRANCH_MODE" != "existing" ]]; then
+    echo "ERROR: $BRANCH is checked out in a reused worktree but the branch plan is '$BRANCH_MODE' (#3909); branch left untouched." >&2
+    exit 1
+  fi
+  # Its fast-forward, if any, runs after the pin below.
+elif [[ "$BRANCH_MODE" == "new" ]]; then
   launcher_git -C "$REPO_ROOT" worktree add -b "$BRANCH" "$WORKTREE" origin/main
 elif [[ "$BRANCH_MODE" == "existing" ]]; then
   # Continue from / reuse the branch an earlier attempt left; never recreate it.
@@ -1530,7 +1596,15 @@ echo "Branch $BRANCH: $BRANCH_MODE (new = from origin/main, existing/track = ear
 # it: this is the one moment its `.git` file is known to be what git itself wrote. Every
 # later git operation on the worktree names that directory (lib/agent-worktree.sh). A
 # worktree that cannot be pinned is not one to start an agent in, so this stops the run.
+# A REUSED worktree (#3909) is the exception to "the one moment": an agent has had it. For
+# that one, issue_branch_holder_plan reused it only after reading its `.git` file as text
+# and finding it names the git directory the repository itself recorded for it.
 agent_worktree_pin "$WORKTREE"
+if [[ "$HOLDER_ACTION" == "reuse" && "$BRANCH_REF" != "-" ]]; then
+  # A reused worktree (#3909) catches up with its branch's newer copy, fast-forward only,
+  # through the pinned git: an agent has had this tree, so git is never run in it bare.
+  agent_worktree_git merge --ff-only -q "$BRANCH_REF"
+fi
 
 # Label as running — a COSMETIC MIRROR of the claim only, applied AFTER a won claim AND after the worktree exists (#1652),
 # never the authority (D8/FR-9/DR-066: a label is a single, overwritable, non-atomic
