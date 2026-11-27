@@ -194,7 +194,9 @@ async function runGate(o: {
   identity: 'app' | 'actions';
   varSet?: boolean;
   fork?: boolean;
-  files?: string[] | Error;
+  files?: Array<string | { filename: string; previous_filename?: string }> | Error;
+  /** pr.changed_files; defaults to the number of listed entries. */
+  changedFiles?: number;
   poster?: string;
   /** PR author login (pr.user.login). */
   author?: string;
@@ -215,7 +217,7 @@ async function runGate(o: {
     body: '',
     auto_merge: null,
     draft: false,
-    changed_files: Array.isArray(files) ? files.length : 1,
+    changed_files: o.changedFiles ?? (Array.isArray(files) ? files.length : 1),
     user: { login: o.author ?? 'someone' },
   };
   const rec = (api: string) =>
@@ -253,7 +255,7 @@ async function runGate(o: {
     paginate: async (method: { api?: string }) => {
       if (method === rest.pulls.listFiles) {
         if (files instanceof Error) throw files;
-        return files.map((filename) => ({ filename }));
+        return files.map((f) => (typeof f === 'string' ? { filename: f } : f));
       }
       if (method === rest.issues.listEvents) {
         return [{ event: 'labeled', label: { name: PASS }, actor: { login: poster }, created_at: '2026-11-01T12:05:00Z' }];
@@ -488,6 +490,30 @@ describe('AC1/AC4 - the gate turns green on a github-actions pass only where FR5
     expect(r.state).toBe('failure');
   });
 
+  // T3 (independent review of fe80cda3): renames put two paths per listed entry into the
+  // list the truncation check measured, so a listing the API cut short (it caps at 3000)
+  // could still look complete and a machinery file in the unlisted tail went unseen.
+  it('a truncated listing is caught even when renames double the path count', async () => {
+    const r = await runGate({
+      identity: 'actions',
+      files: [
+        { filename: 'src/a.ts', previous_filename: 'src/old-a.ts' },
+        { filename: 'src/b.ts', previous_filename: 'src/old-b.ts' },
+      ],
+      changedFiles: 3, // one more file than the API listed: the tail could be .github/
+    });
+    expect(r.state).toBe('failure');
+  });
+
+  it('control: a complete listing with renames still widens', async () => {
+    const r = await runGate({
+      identity: 'actions',
+      files: [{ filename: 'src/a.ts', previous_filename: 'src/old-a.ts' }, 'src/b.ts'],
+      changedFiles: 2,
+    });
+    expect(r.state).toBe('success');
+  });
+
   it('AC4: machinery PR in the no-App arm -> failure', async () => {
     const r = await runGate({ identity: 'actions', files: ['src/a.ts', '.github/workflows/evil.yml'] });
     expect(r.state).toBe('failure');
@@ -655,5 +681,46 @@ describe('FR8/AC6 - the setup probe reports the identity mode in words', () => {
 
   it('no review-only App secrets: the sentence is unchanged (does not mention AI_REVIEW_APP)', () => {
     expect(advisor.describeReviewerSecrets(new Set(['CLAUDE_CODE_OAUTH_TOKEN'])).sentence).not.toMatch(/AI_REVIEW_APP/);
+  });
+});
+
+// FR3 / AC2 departure 2 (independent review of fe80cda3, low): the persisted checkout
+// credential is removed before any voter runs, and the review refuses to run if one
+// remains. Executes the SHIPPED block from ai-review.yml in a scratch git repo.
+describe('FR3 - the review drops the persisted checkout credential before the voters run', () => {
+  const lines = AI_REVIEW.split('\n');
+  const start = lines.findIndex((l) => l.includes("git config --local --unset-all 'http.https://github.com/.extraheader'"));
+  const end = lines.findIndex((l, i) => i > start && l.trim() === 'fi');
+  const block = lines.slice(start, end + 1).map((l) => l.replace(/^ {10}/, '')).join('\n');
+
+  function runIn(setup: string[][]) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cred-drop-'));
+    scratch.push(dir);
+    spawnSync('git', ['init', '-q', dir]);
+    for (const args of setup) spawnSync('git', ['-C', dir, ...args]);
+    const res = spawnSync('bash', ['-c', `set -eu\n${block}`], { cwd: dir, encoding: 'utf-8' });
+    const left = spawnSync('git', ['-C', dir, 'config', '--local', '--get-regexp', '^http\\..*\\.extraheader$'], { encoding: 'utf-8' });
+    return { code: res.status, stdout: res.stdout, left: left.stdout.trim() };
+  }
+
+  it('the block exists in the shipped workflow', () => {
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+  });
+
+  it('removes the github.com extraheader actions/checkout persists, then continues', () => {
+    const r = runIn([['config', '--local', 'http.https://github.com/.extraheader', 'AUTHORIZATION: basic x-shape-only']]);
+    expect(r.code).toBe(0);
+    expect(r.left).toBe('');
+  });
+
+  it('refuses to review (exit 1, visible error) when another persisted extraheader remains', () => {
+    const r = runIn([['config', '--local', 'http.https://example.com/.extraheader', 'AUTHORIZATION: basic x-shape-only']]);
+    expect(r.code).toBe(1);
+    expect(r.stdout).toMatch(/::error::a persisted git credential is still in \.git\/config/);
+  });
+
+  it('no credential at all: continues', () => {
+    expect(runIn([]).code).toBe(0);
   });
 });

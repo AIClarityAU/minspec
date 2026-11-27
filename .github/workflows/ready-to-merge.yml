@@ -417,9 +417,12 @@ jobs:
                   paths.push(f.filename);
                   if (f.previous_filename) paths.push(f.previous_filename);
                 }
+                // files.length, not paths.length: rename sources add a second path per
+                // entry, which would hide a listing the API cut short.
                 touchesMachinery = guard.pathsTouchMachinery(
                   paths,
                   typeof pr.changed_files === 'number' ? pr.changed_files : undefined,
+                  files.length,
                 );
               } catch (e) {
                 core.warning(`could not read the changed files of #${pr.number}: ${e.message} — not trusting ${guard.FALLBACK_REVIEWER_LOGIN}`);
