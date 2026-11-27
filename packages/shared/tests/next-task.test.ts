@@ -1261,3 +1261,46 @@ describe('INV-PA — phase-action implement-hole node (#1436)', () => {
     expect(resolveNextTask(g)!.imperative).toBe('Implement SPEC-001');
   });
 });
+
+// =====================================================================
+// #523 — ai-review:blocked PRs surface as re-review-pending tasks
+// =====================================================================
+describe('#523 rereview-pending (ai-review:blocked)', () => {
+  it('surfaces a blocked PR as a pending, retry-able task', () => {
+    const t = resolveNextTask({
+      ...graph({}),
+      reviewPrs: [{ number: 519, labels: ['ai-review:blocked'] }],
+    });
+    expect(t?.kind).toBe('rereview-pending');
+    expect(t?.targetId).toBe('PR-519');
+    expect(t?.severityClass).toBe('pending');
+    expect(t?.evidence.rule).toBe('pending.rereview-quota');
+    expect(t?.imperative).toMatch(/Re-review pending \(quota\)/);
+  });
+
+  it('does not surface PRs with a verdict label or without the blocked label', () => {
+    const p = resolvePipeline({
+      ...graph({}),
+      reviewPrs: [
+        { number: 1, labels: ['ai-review:blocked', 'ai-review:changes'] },
+        { number: 2, labels: ['ai-review:blocked', 'needs-human-review'] },
+        { number: 3, labels: ['ai-review:pass'] },
+        { number: 4, labels: [] },
+      ],
+    });
+    expect(p).toEqual([]);
+  });
+
+  it('ranks below a real gate task and is deterministic', () => {
+    const g: ArtifactGraph = {
+      ...graph({ specs: [mkSpec('SPEC-001', 'specifying', 'unapproved')] }),
+      reviewPrs: [
+        { number: 20, labels: ['ai-review:blocked'] },
+        { number: 3, labels: ['ai-review:blocked'] },
+      ],
+    };
+    const p = resolvePipeline(g);
+    expect(p.map((t) => t.targetId)).toEqual(['SPEC-001', 'PR-3', 'PR-20']);
+    expect(resolvePipeline(g)).toEqual(p);
+  });
+});
