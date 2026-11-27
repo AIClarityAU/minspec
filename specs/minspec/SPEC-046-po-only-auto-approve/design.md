@@ -268,7 +268,7 @@ findings change how the work is split. None changes a requirement.
    (`scripts/lib/delegated-merge.ts:27`); docs-lane's corpus excludes `.minspec/` (mandate 2's
    own note). Tasks pin this with a test rather than build a fourth copy. A missing withhold
    found by that test is a `DEEPER:` stop, not a silent pass.
-3. **Two committed sidecars carry a bot `approvedBy`.** Delegated approvals (DLG-001) write
+3. **Committed sidecars carry a bot `approvedBy` (162 at origin/main `c2ce4cb4`, counted with `grep -rl` over `.minspec/approvals/`; the count grows with every delegated approval).** Delegated approvals (DLG-001) write
    `approvedBy: "minspec-sdd[bot]"` with `actor` and `basis: "delegation:DLG-001"` (for
    example `.minspec/approvals/docs/decisions/DR-113.md.json`). INV-6's read backstop must use
    exactly `checkApprover`'s denylist (`packages/minspec/src/lib/approval.ts:402-409`, `:447`),
