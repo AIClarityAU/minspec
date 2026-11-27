@@ -1,7 +1,7 @@
 ---
 id: SPEC-391
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — "marker-bounded updates that never surprise-write"
@@ -24,9 +24,9 @@ affects:
   - packages/minspec/src/commands/init.ts
   - packages/minspec/package.json
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
