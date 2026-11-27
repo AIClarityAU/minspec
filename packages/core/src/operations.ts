@@ -4,11 +4,20 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { specHash } from '@aiclarity/shared';
-import { getApprovalRecord, getApprovalStatus } from '../../minspec/src/lib/approval';
+import {
+  approveSpec,
+  checkApprover,
+  getApprovalRecord,
+  getApprovalStatus,
+  gitConfigEmail,
+  parseAgentIdentities,
+} from '../../minspec/src/lib/approval';
+import { assertOwnershipDeclaredForAdvance } from '../../minspec/src/lib/ownership-advance-guard';
+import { isTerminalSpecStatus } from '../../minspec/src/lib/spec-vocabulary';
 import { formatNextTaskLabel, resolveNextTask } from '../../shared/src/next-task';
 import { buildArtifactGraph } from '../../minspec/src/lib/artifact-graph';
 import { deriveStatus, explicitTerminalOf } from '../../minspec/src/lib/lifecycle';
-import { parseSpec, readSpecFile } from '../../minspec/src/lib/spec';
+import { advanceSpecToImplementing, parseSpec, readSpecFile } from '../../minspec/src/lib/spec';
 import { loadConfig } from '../../minspec/src/lib/config';
 import { epicRefSet } from '../../minspec/src/lib/epic-manager';
 import { readShardIdFiles } from '../../minspec/src/lib/spec-layout';
@@ -26,7 +35,16 @@ export function coreVersion(): string {
 
 export type Effect = 'read-only' | 'git-config' | 'approval';
 export type Outcome = 'pass' | 'fail' | 'refused' | 'error';
-export type RefusalCode = 'not-a-minspec-project' | 'unknown-operation' | 'bad-argument' | 'spec-outside-project';
+export type RefusalCode =
+  | 'not-a-minspec-project'
+  | 'unknown-operation'
+  | 'bad-argument'
+  | 'spec-outside-project'
+  | 'already-approved'
+  | 'terminal-status'
+  | 'incomplete'
+  | 'not-ready-for-advance'
+  | 'approver-denied';
 
 export interface Finding {
   file: string;
@@ -208,7 +226,92 @@ const validateOperation: Operation = {
   },
 };
 
-export const OPERATIONS: readonly Operation[] = [validateOperation, hashOperation, statusOperation, nextOperation];
+const refuse = (code: RefusalCode, message: string): OperationReturn => ({ outcome: 'refused', refusal: { code, message } });
+
+/**
+ * FR-19: the editor's approve sequence (commands/approve.ts) with the UI removed, in its order.
+ * No commit and no phase-advance enqueue: those are editor preferences, and the queue writes a
+ * record FR-25 forbids. Step 1 (opt-in) is also enforced by runOperation; repeated so the
+ * entry is safe to call on its own.
+ */
+const approveOperation: Operation = {
+  name: 'approve',
+  summary: 'Record a human approval of one spec (never offered as a tool; refuses agent identities)',
+  input: {
+    type: 'object',
+    properties: { spec: { type: 'string', description: 'Spec file path (relative to the project root) or spec id' } },
+    required: ['spec'],
+    additionalProperties: false,
+  },
+  effect: 'approval',
+  async run(ctx, args) {
+    const optIn = requireOptedIn(ctx.root);
+    if (optIn) return optIn;
+    const ref = args.spec;
+    if (typeof ref !== 'string' || ref === '') return refuse('bad-argument', 'approve needs --spec <path|id>');
+    const specs = listSpecs(ctx.root);
+    const asPath = path.resolve(ctx.root, ref);
+    const rel = path.relative(ctx.root, asPath);
+    let summary = specs.find((s) => path.resolve(s.filePath) === asPath);
+    if (!summary) {
+      summary = specs.find((s) => s.id === ref);
+    }
+    if (!summary) {
+      if (fs.existsSync(asPath) && (rel === '' || rel.startsWith('..') || path.isAbsolute(rel))) {
+        return refuse('spec-outside-project', `${ref} is outside the project root ${ctx.root}`);
+      }
+      return refuse('bad-argument', `no spec matches ${ref}`);
+    }
+    const file = summary.filePath;
+    const parsed = readSpecFile(file);
+    // 2. Already approved / terminal: the editor's picker filter.
+    if (getApprovalStatus(ctx.root, file) === 'approved') return refuse('already-approved', `${summary.id} is already approved`);
+    if (isTerminalSpecStatus(parsed.frontmatter.status)) {
+      return refuse('terminal-status', `${summary.id} has status ${parsed.frontmatter.status}, past the approve-before-implement gate`);
+    }
+    // 3. Completeness, with the approve command's options.
+    const result = validateSpec(parsed, loadConfig(ctx.root), {
+      knownEpicRefs: epicRefSet(ctx.root),
+      siblingShardFiles: readShardIdFiles(path.dirname(file)),
+      pathExists: (relPath) => fs.existsSync(path.join(ctx.root, relPath)),
+    });
+    if (!result.complete) {
+      const relFile = path.relative(ctx.root, file).split(path.sep).join('/');
+      const findings: Finding[] = result.violations
+        .filter((v) => v.severity === 'error')
+        .map((v) => ({ file: relFile, rule: v.rule, severity: v.severity, message: v.message, fixHint: v.fixHint }));
+      return { ...refuse('incomplete', `${summary.id} is not complete - approval refused`), findings };
+    }
+    // 4. What the advance would introduce.
+    try {
+      assertOwnershipDeclaredForAdvance(file, parsed);
+    } catch (e) {
+      return refuse('not-ready-for-advance', errorMessage(e));
+    }
+    // 5. Approver identity: the clone's git user.email, checked before any write.
+    const email = gitConfigEmail(ctx.root);
+    const check = checkApprover(email, parseAgentIdentities(process.env.MINSPEC_AGENT_IDENTITIES));
+    if (!check.ok) return refuse('approver-denied', `Approval refused for ${summary.id} - ${check.reason}`);
+    // 6. Status/phases mirror, only from a pre-implementation status.
+    const wasPreImpl = parsed.frontmatter.status === 'new' || parsed.frontmatter.status === 'specifying';
+    if (wasPreImpl) advanceSpecToImplementing(file);
+    // 7. The record.
+    const record = approveSpec(ctx.root, file, summary.tier, email);
+    const specRel = path.relative(ctx.root, file).split(path.sep).join('/');
+    return {
+      outcome: 'pass',
+      data: { spec: specRel, record, status: getApprovalStatus(ctx.root, file) },
+    };
+  },
+};
+
+export const OPERATIONS: readonly Operation[] = [
+  validateOperation,
+  hashOperation,
+  statusOperation,
+  nextOperation,
+  approveOperation,
+];
 
 /** Run one operation and wrap its return in the stamped envelope. Never throws. */
 export async function runOperation(op: Operation, root: string, args: Record<string, unknown>): Promise<CoreResult> {
