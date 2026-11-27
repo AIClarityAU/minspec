@@ -1,7 +1,7 @@
 ---
 id: SPEC-093
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-010  # Reviewer Across All Approvables - its "Done" definition names the per-dev coverage setting this spec finishes
@@ -19,8 +19,8 @@ implements: [scripts/lib/review-coverage.sh, packages/minspec/tests/review-cover
 affects: [scripts/review-pr.sh, scripts/dispatch-issue.sh, .gitignore, packages/minspec/src/lib/ci-review-templates.ts, packages/minspec/tests/dispatch-no-local-ai-review-label.test.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

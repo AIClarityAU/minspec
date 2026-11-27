@@ -1,7 +1,7 @@
 ---
 id: SPEC-413
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - frontmatter-declared contract signals (amends the #23 contract-frontmatter spec)
@@ -15,8 +15,8 @@ relates_to: [SPEC-114, SPEC-109, SPEC-038, "#4018", "#23", "#4020", "#133"]
 implements: [packages/minspec/tests/cdd-contracts-none.test.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

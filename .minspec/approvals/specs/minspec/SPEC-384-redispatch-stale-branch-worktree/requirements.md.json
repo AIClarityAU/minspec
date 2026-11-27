@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-384-redispatch-stale-branch-worktree/requirements.md",
+  "specHash": "41c953e16413cbaa8492ca10d24815bbe26313ff74dca8ad52a959346853cba6",
+  "approvedAt": "2026-11-23T20:19:04.039Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/dlg-s384-1124",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4023#issuecomment-7111394056"
+}

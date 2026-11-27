@@ -3,7 +3,7 @@ epic: EPIC-002  # Signpost Integrity — a tasks/implement transition that claim
 id: SPEC-353
 type: requirements
 # Editing voids approval (hash in .minspec/approvals.json → stale); re-run "MinSpec: Approve Spec". DR-012
-status: specifying
+status: planning
 tier: T3
 product: minspec
 relates_to: [SPEC-006, SPEC-114, DR-012, DR-003, DR-004, DR-123, "#52", "#4019"]
@@ -12,6 +12,12 @@ implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan. Expected surface:
   a coverage check beside `packages/minspec/src/lib/spec-validator.ts` and `traceability.ts`, read at the
   approve path in `packages/minspec/src/commands/approve.ts` (all owned elsewhere).
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — Test-Completeness Gate (Requirements)

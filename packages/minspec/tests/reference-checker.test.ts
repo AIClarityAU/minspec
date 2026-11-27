@@ -234,3 +234,23 @@ describe('#3752 — declared parent-register ids (externalIds)', () => {
     expect(checkReferences('SPEC-359', reg)).toHaveLength(1);
   });
 });
+
+describe('#1267 — dotfile-directory citations keep their leading dot', () => {
+  const pathsOf = (text: string): string[] =>
+    extractReferences(text)
+      .filter((r) => r.kind === 'file')
+      .map((r) => r.path!);
+
+  it.each([
+    ['.claude/hooks/session-title.sh:19-26', '.claude/hooks/session-title.sh'],
+    ['.github/workflows/ready-to-merge.yml:12', '.github/workflows/ready-to-merge.yml'],
+    ['.minspec/config.json:3', '.minspec/config.json'],
+    ['.githooks/commit-msg.sh:5', '.githooks/commit-msg.sh'],
+    ['.claude/hooks/session-title.sh#L19-L26', '.claude/hooks/session-title.sh'],
+    ['.github/workflows/ready-to-merge.yml#L12', '.github/workflows/ready-to-merge.yml'],
+    ['.minspec/config.json#L3', '.minspec/config.json'],
+    ['.githooks/commit-msg.sh#L5', '.githooks/commit-msg.sh'],
+  ])('captures %s whole', (text, path) => {
+    expect(pathsOf(`see ${text} here`)).toEqual([path]);
+  });
+});

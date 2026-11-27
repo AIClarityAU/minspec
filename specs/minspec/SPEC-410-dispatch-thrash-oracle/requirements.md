@@ -1,7 +1,7 @@
 ---
 id: SPEC-410
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - a measured dispatch-health signal instead of a hand-derived one
@@ -11,9 +11,9 @@ relates_to: [SPEC-073, SPEC-074, SPEC-078, "#1238", "#912", "#1203", "#1202", "#
 implements: [scripts/thrash.ts, scripts/lib/thrash.ts, tests/thrash.test.ts]
 affects: [scripts/drain-inbox.sh, package.json]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

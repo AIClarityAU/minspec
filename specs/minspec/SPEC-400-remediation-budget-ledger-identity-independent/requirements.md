@@ -1,7 +1,7 @@
 ---
 id: SPEC-400
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute - the dev-time autonomous build/merge pipeline; the remediation runaway guard is scripts/remediate-pr.sh
@@ -15,9 +15,9 @@ implements_reason: >-
   resolve_author_identity, the runaway-guard block) and its existing test file(s). None of
   it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

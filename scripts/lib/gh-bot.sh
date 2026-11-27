@@ -43,8 +43,9 @@
 #     entirely. It is allowlisted in the guard for that reason.
 #   * `git push` — push identity comes from git credentials and commit
 #     authorship, not from `gh`. Out of scope.
-#   * `--admin` merges — remain a HUMAN action (founder decision, 2026-07-28).
-#     Nothing here grants or eases that.
+#   * `--admin` merges — only through the runner helper under the bot-merge
+#     decision record (DR-112, bot merges under three conditions); nothing here
+#     grants or eases that.
 #
 # ── Failure policy: closed and loud, at STARTUP ───────────────────────────────
 # If a token cannot be minted, scripts abort before doing any work rather than
@@ -357,8 +358,16 @@ _gh_bot_ensure() {
       # an expired or revoked HUMAN PAT returns exactly that, and reading it as
       # "must be an installation token" is the same guess this block exists to
       # stop making (#1401 security review).
-      if (( rc != 0 )) && printf '%s' "$probe" \
-           | command grep -qiE 'not accessible by integration|"status"[[:space:]]*:[[:space:]]*"?403|HTTP 403'; then
+      #
+      # A here-string, never `printf ... | grep -q` (#4178). Every caller runs under
+      # pipefail, and `grep -q` leaves at its first match, which is on the answer's first
+      # line. bash's printf writes a line at a time, so a printf still writing after grep
+      # had gone died of SIGPIPE (141) and pipefail turned a recognised 403 into "not a
+      # 403": the installation token was refused and the caller ended at its first write.
+      # It needed only an unlucky schedule, so it struck at random on a loaded machine.
+      # With no process writing into grep there is nothing to be killed.
+      if (( rc != 0 )) \
+           && command grep -qiE 'not accessible by integration|"status"[[:space:]]*:[[:space:]]*"?403|HTTP 403' <<<"$probe"; then
         _GH_BOT_VERIFIED=1
         return 0                    # positively identified installation token
       fi

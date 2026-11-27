@@ -1,7 +1,7 @@
 ---
 id: SPEC-399
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute - the dev-time autonomous build/merge pipeline; the held-issue queue is its human-facing backlog
@@ -14,9 +14,9 @@ implements_reason: >-
   renderer under `scripts/lib/`, a thin producer script under `scripts/`, an optional command in
   `packages/minspec/src/` that opens the generated file, and tests. None of it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

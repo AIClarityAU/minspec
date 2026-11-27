@@ -10,6 +10,7 @@ import {
   type CoreResult,
   type Operation,
 } from './operations';
+import { serve } from './tool-server';
 
 export { coreVersion };
 
@@ -51,6 +52,14 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
   const [name, ...rest] = argv;
   const root = process.cwd();
+  if (name === 'serve') {
+    // `serve [--root <dir>]`: the tool server (FR-10). The root is fixed once, at start.
+    if (rest.length === 0 || (rest.length === 2 && rest[0] === '--root')) {
+      await serve(rest.length === 2 ? path.resolve(rest[1]) : root, process.stdin, process.stdout);
+      return 0;
+    }
+    return emit(refusedResult('serve', root, 'bad-argument', 'usage: minspec-core serve [--root <dir>]'));
+  }
   if (name === undefined) {
     return emit(refusedResult('', root, 'bad-argument', 'usage: minspec-core <operation> [--root <dir>] | --list | --version'));
   }

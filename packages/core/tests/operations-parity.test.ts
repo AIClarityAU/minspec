@@ -1,6 +1,6 @@
 // SPEC-136 FR-5 (hash), FR-9, FR-16: the core's `hash` equals the library's specHash for the
 // same file, every result carries a stamped coreVersion, and failures exit non-zero.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { readFileSync } from 'node:fs';
@@ -23,6 +23,7 @@ import { formatNextTaskLabel, resolveNextTask } from '../../shared/src/next-task
 import { buildContext, renderTemplate } from '../../minspec/src/lib/template-engine';
 import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS } from '../../minspec/src/lib/template-registry';
 import { buildBundle, runCore } from './helpers';
+import { OPERATIONS, offeredAsTool, toolAnnotations } from '../src/operations';
 
 const SPEC = '---\nid: SPEC-900\nstatus: specifying\n---\n\n# Parity\n\nBody text.\n';
 let work: string;
@@ -304,5 +305,128 @@ describe('validate corpus rules (FR-3): one fixture per "Yes" row of design.md',
   it('control: an opted-in project with only a clean spec reports no corpus finding', () => {
     const r = rulesOf(corpusProject({ 'specs/SPEC-917-x/requirements.md': SPEC_OK('SPEC-917') }));
     expect(r.json.findings.filter((f: any) => f.rule.startsWith('corpus.'))).toEqual([]);
+  });
+});
+
+describe('the two ways in offer one set (FR-10, FR-11, FR-26)', () => {
+  /** Drive a whole session over pipes: every frame in, every frame out, until stdin closes. */
+  const session = (frames: unknown[], cwd = project) => {
+    const r = spawnSync(process.execPath, [bundle, 'serve', '--root', cwd], {
+      input: frames.map((f) => JSON.stringify(f)).join('\n') + '\n',
+      encoding: 'utf8',
+    });
+    const lines = r.stdout.split('\n').filter((l) => l !== '');
+    return { status: r.status, stderr: r.stderr, frames: lines.map((l) => JSON.parse(l)) };
+  };
+  const ARGS: Record<string, Record<string, string>> = { hash: { spec: 'specs/a.md' } };
+  const handshake = [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } },
+    { jsonrpc: '2.0', method: 'notifications/initialized' },
+    { jsonrpc: '2.0', id: 2, method: 'ping' },
+    { jsonrpc: '2.0', id: 3, method: 'tools/list' },
+  ];
+
+  /** The check under test: names the command line offers vs names the tool list offers, less approve. */
+  const surfaceDiff = (cli: string[], tools: string[]): string[] => {
+    const expected = cli.filter((n) => n !== 'approve');
+    return [...expected.filter((n) => !tools.includes(n)), ...tools.filter((n) => !expected.includes(n))];
+  };
+
+  it('answers initialize and ping, ignores the initialized notification, and logs nothing to stdout', () => {
+    const { status, frames } = session(handshake);
+    expect(status).toBe(0);
+    expect(frames.map((f) => f.id)).toEqual([1, 2, 3]);
+    expect(frames[0].result.serverInfo.name).toBe('minspec-core');
+    expect(frames[0].result.capabilities).toHaveProperty('tools');
+    expect(frames[1].result).toEqual({});
+  });
+
+  it('an unknown method is -32601; an unknown notification gets no reply', () => {
+    const { frames } = session([
+      { jsonrpc: '2.0', id: 7, method: 'resources/list' },
+      { jsonrpc: '2.0', method: 'notifications/whatever' },
+    ]);
+    expect(frames).toHaveLength(1);
+    expect(frames[0].error.code).toBe(-32601);
+    expect(frames[0].id).toBe(7);
+  });
+
+  it('--list and tools/list name the same operations, less approve', () => {
+    const listed = runCore(bundle, ['--list']).stdout.split('\n').filter(Boolean).map((l) => l.split('\t')[0]);
+    const tools = session(handshake).frames[2].result.tools.map((t: any) => t.name);
+    expect(listed.length).toBeGreaterThan(0);
+    expect(surfaceDiff(listed, tools)).toEqual([]);
+    expect(tools).not.toContain('approve');
+    expect(tools.sort()).toEqual(OPERATIONS.filter(offeredAsTool).map((o) => o.name).sort());
+  });
+
+  it('control: an operation reachable one way only fails the surface check', () => {
+    const listed = ['validate', 'hash', 'status', 'next', 'only-on-cli'];
+    const tools = ['validate', 'hash', 'status', 'next'];
+    expect(surfaceDiff(listed, tools)).toEqual(['only-on-cli']);
+    expect(surfaceDiff(tools, [...tools, 'only-in-tools'])).toEqual(['only-in-tools']);
+    expect(surfaceDiff([...tools, 'approve'], tools)).toEqual([]);
+  });
+
+  it('one call per operation gives a deep-equal envelope the command line and the tool server', () => {
+    const offered = OPERATIONS.filter(offeredAsTool);
+    expect(offered.length).toBeGreaterThan(0);
+    const calls = offered.map((op, i) => ({
+      jsonrpc: '2.0', id: 100 + i, method: 'tools/call', params: { name: op.name, arguments: ARGS[op.name] ?? {} },
+    }));
+    const { frames } = session(calls);
+    expect(frames).toHaveLength(offered.length);
+    offered.forEach((op, i) => {
+      const flags = Object.entries(ARGS[op.name] ?? {}).flatMap(([k, v]) => [`--${k}`, v]);
+      const cli = runCore(bundle, [op.name, '--root', project, ...flags]);
+      const viaTool = JSON.parse(frames[i].result.content[0].text);
+      expect(viaTool, op.name).toEqual(cli.json);
+      expect(frames[i].result.isError).toBe(cli.json.outcome !== 'pass');
+    });
+  }, 60_000);
+
+  it('control: different arguments give a different envelope', () => {
+    const { frames } = session([
+      { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'hash', arguments: { spec: 'specs/a.md' } } },
+      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'hash', arguments: { spec: 'specs/b.md' } } },
+    ]);
+    const [a, b] = frames.map((f) => JSON.parse(f.result.content[0].text));
+    expect(a.data.hash).not.toEqual(b.data.hash);
+  });
+
+  it('a call that fails is isError with the envelope; bad names and arguments are refused', () => {
+    const { frames } = session([
+      { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'hash', arguments: { spec: 'specs/missing.md' } } },
+      { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'approve', arguments: {} } },
+      { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'hash', arguments: {} } },
+      { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'hash', arguments: { spec: '../x.md' } } },
+    ]);
+    const env = frames.map((f) => JSON.parse(f.result.content[0].text));
+    expect(frames.every((f) => f.result.isError === true)).toBe(true);
+    expect(env[0].outcome).toBe('error');
+    expect(env[1].refusal.code).toBe('unknown-operation');
+    expect(env[2].refusal.code).toBe('bad-argument');
+    expect(env[3].refusal.code).toBe('spec-outside-project');
+  });
+
+  it('every tool has annotations and none that writes is readOnlyHint', () => {
+    const tools = session(handshake).frames[2].result.tools;
+    for (const t of tools) {
+      expect(t.annotations, t.name).toBeDefined();
+      expect(typeof t.annotations.readOnlyHint).toBe('boolean');
+      expect(typeof t.annotations.destructiveHint).toBe('boolean');
+      const op = OPERATIONS.find((o) => o.name === t.name)!;
+      if (op.effect !== 'read-only') expect(t.annotations.readOnlyHint, t.name).toBe(false);
+    }
+    for (const name of ['validate', 'hash', 'status', 'next']) {
+      expect(tools.find((t: any) => t.name === name).annotations.readOnlyHint).toBe(true);
+    }
+  });
+
+  it('control: the annotation check rejects a writing tool that claims readOnlyHint', () => {
+    const violates = (op: { effect: string }, hint: { readOnlyHint: boolean }) => op.effect !== 'read-only' && hint.readOnlyHint;
+    expect(violates({ effect: 'git-config' }, { readOnlyHint: true })).toBe(true);
+    // The table's own derivation never produces that claim for a writing effect.
+    expect(violates({ effect: 'git-config' }, toolAnnotations({ effect: 'git-config' } as any))).toBe(false);
   });
 });

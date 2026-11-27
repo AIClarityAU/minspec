@@ -329,7 +329,7 @@ describe('remediate-pr.sh: the fork-PR guard is wired into the main flow (#1894)
   const code = fs.readFileSync(SCRIPT, 'utf-8');
 
   it('requests headRepository and headRepositoryOwner from the PR fetch — the exact filed repro (`grep headRepository` used to return nothing)', () => {
-    expect(code).toMatch(/--json number,state,isDraft,headRefName,headRepository,headRepositoryOwner,/);
+    expect(code).toMatch(/--json number,state,isDraft,headRefName,headRefOid,headRepository,headRepositoryOwner,/);
   });
 
   it('calls same_repo before the worktree is ever created against origin/$BRANCH', () => {
@@ -575,15 +575,30 @@ describe('remediate-pr.sh rerun-first gate (#3042)', () => {
   });
 });
 
-describe('remediate-pr.sh --classify: sweep defers ai-review:pass BEHIND PRs (#3069)', () => {
-  const sweep = (labels: string, mergeState = 'BEHIND', failing: 'yes' | 'no' = 'no', bad: 'yes' | 'no' = 'no') =>
+describe('remediate-pr.sh --classify: sweep defers witnessed-pass BEHIND PRs (#3069, #4078)', () => {
+  // #4078: the 9th argument is the witness (a `ready-to-merge` success posted by GitHub
+  // Actions on the head, scripts/lib/ready-witness.sh). The label no longer decides.
+  const sweep = (
+    labels: string,
+    mergeState = 'BEHIND',
+    failing: 'yes' | 'no' = 'no',
+    bad: 'yes' | 'no' = 'no',
+    witnessed: 'yes' | 'no' = labels.includes('ai-review:pass') ? 'yes' : 'no',
+  ) =>
     execFileSync(
       'bash',
-      [SCRIPT, '--classify', 'agent/issue-1', 'MERGEABLE', mergeState, labels, failing, bad, 'no', 'yes'],
+      [SCRIPT, '--classify', 'agent/issue-1', 'MERGEABLE', mergeState, labels, failing, bad, 'no', 'yes', witnessed],
       { encoding: 'utf-8' },
     ).trim();
 
-  it('a sweep over three green ai-review:pass BEHIND PRs issues zero rebase-only actions', () => {
+  it('#4078: a bare ai-review:pass label with NO witness does not defer — the builder cannot steer the sweep', () => {
+    expect(sweep('ai-review:pass', 'BEHIND', 'no', 'no', 'no')).toBe('rebase-only');
+  });
+  it('#4078: the witness defers even without the label (the label is not what is trusted)', () => {
+    expect(sweep('', 'BEHIND', 'no', 'no', 'yes')).toBe('skip-awaiting-merge-turn');
+  });
+
+  it('a sweep over three green witnessed-pass BEHIND PRs issues zero rebase-only actions', () => {
     const actions = [1, 2, 3].map(() => sweep('ai-review:pass'));
     expect(actions.filter((a) => a === 'rebase-only')).toHaveLength(0);
     expect(actions).toEqual(Array(3).fill('skip-awaiting-merge-turn'));

@@ -1212,6 +1212,29 @@ export function violationsIntroducedByApproval(
   config: MinspecConfig,
   options: ValidateSpecOptions = {},
 ): ValidationViolation[] {
+  return violationsIntroducedByPhases(
+    spec,
+    config,
+    // Spread the original first so every required `Phase` key is present:
+    // `phasesForApproval` returns the open-ended `PhaseState`, while frontmatter
+    // requires the complete `Record<Phase, PhaseStatus>`.
+    { ...spec.frontmatter.phases, ...phasesForApproval(spec.frontmatter.phases) },
+    options,
+  );
+}
+
+/**
+ * Generalisation of {@link violationsIntroducedByApproval} to ANY phase-map move (#1380):
+ * the errors `newPhases` introduces that `spec` does not already carry. Every writer of
+ * the phase map (approval, `transitionPhase`, a future queue consumer) asks this same
+ * question, so the answer lives in one place.
+ */
+export function violationsIntroducedByPhases(
+  spec: ParsedSpec,
+  config: MinspecConfig,
+  newPhases: ParsedSpec['frontmatter']['phases'],
+  options: ValidateSpecOptions = {},
+): ValidationViolation[] {
   // Identity includes the message: two instances of the same rule (e.g. two bad
   // paths) are distinct findings, and collapsing them by rule alone would let a
   // newly-introduced one hide behind a pre-existing one.
@@ -1228,10 +1251,7 @@ export function violationsIntroducedByApproval(
     ...spec,
     frontmatter: {
       ...spec.frontmatter,
-      // Spread the original first so every required `Phase` key is present:
-      // `phasesForApproval` returns the open-ended `PhaseState`, while frontmatter
-      // requires the complete `Record<Phase, PhaseStatus>`.
-      phases: { ...spec.frontmatter.phases, ...phasesForApproval(spec.frontmatter.phases) },
+      phases: newPhases,
     },
   };
 

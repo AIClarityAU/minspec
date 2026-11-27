@@ -215,6 +215,46 @@ test('an inherited INSTALLATION token (gh api user 403s) is accepted', () => {
   assert.match(out, /TOKEN=ghs_installation/);
 });
 
+test('the 403 is recognised under pipefail however long the answer is (#4178)', () => {
+  // Every script that sources this file runs under `set -euo pipefail`; the test above
+  // does not, so it could not see this. The 403 used to be recognised by piping the
+  // captured answer from `printf` into `grep -q`. `grep -q` leaves at its first match,
+  // which is on the answer's first line, and bash's printf flushes its output one line
+  // at a time. When grep had already left by the time printf wrote the next line, printf
+  // died of SIGPIPE (141), pipefail made the whole test false, the installation token
+  // was taken for an unverifiable one, and gh_bot_die ended the caller before its first
+  // write. With the two-line answer GitHub really sends, that needed an unlucky schedule:
+  // a loaded CI runner. It stopped one dispatch in CI before it started its agent
+  // ("expected exactly one agent launch"). A long answer makes the same race certain:
+  // printf is still writing when grep, having matched, has gone.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-bot-ghstub-'));
+  const gh = path.join(dir, 'gh');
+  fs.writeFileSync(
+    gh,
+    [
+      '#!/usr/bin/env bash',
+      `echo '{"message":"Resource not accessible by integration","status":"403"}'`,
+      `echo 'gh: Resource not accessible by integration (HTTP 403)' >&2`,
+      // 1 MiB after the match: far past the pipe's 64 KiB and grep's first read.
+      `head -c 1048576 /dev/zero | tr '\\0' x >&2`,
+      'exit 1',
+      '',
+    ].join('\n'),
+  );
+  fs.chmodSync(gh, 0o755);
+  try {
+    const { status, out } = sh('set -euo pipefail; gh_bot_init; _gh_bot_ensure; echo "TOKEN=$GH_TOKEN"', {
+      GH_TOKEN: 'ghs_installation',
+      PATH: `${dir}:${process.env.PATH}`,
+    });
+    assert.equal(status, 0, `a 403 is a 403 however much follows it; got:\n${out.slice(0, 600)}`);
+    assert.match(out, /TOKEN=ghs_installation/);
+    assert.doesNotMatch(out, /identity could not be established/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('an EMPTY probe result fails closed — it is not proof of an installation token', () => {
   // The fail-open found by review on #1401. "Not login-shaped" was read as "must
   // be an installation token", so a probe that came back empty for ANY reason —

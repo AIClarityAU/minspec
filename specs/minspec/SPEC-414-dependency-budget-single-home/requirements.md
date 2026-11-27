@@ -1,7 +1,7 @@
 ---
 id: SPEC-414
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - "the methodology rules enforced by the extension rather than by convention" is this epic's Done line
@@ -14,9 +14,9 @@ relates_to: [SPEC-114, SPEC-109, DR-023, DR-066, DR-074, DR-004, DR-123, "#4021"
 implements: [packages/minspec/tests/dependency-budget-home.test.ts]
 affects: [packages/minspec/src/lib/config.ts, packages/minspec/src/lib/slash-commands.ts, .claude/commands/minspec-plan.md, scripts/roles/dev.md, specs/minspec/SPEC-114-refactorability-enablers/requirements.md]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

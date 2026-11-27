@@ -1,7 +1,7 @@
 ---
 id: SPEC-407
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology (kept per Decision D4: no better-fitting epic for dev-time dispatch economics)
@@ -12,9 +12,9 @@ implements_reason: >-
   Specify phase only. Which files this spec will own is decided at Plan. Expected surface: the
   dispatch scripts under `scripts/`, the dev role prompt, and tests. None of it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

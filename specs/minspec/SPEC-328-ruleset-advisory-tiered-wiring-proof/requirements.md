@@ -1,7 +1,7 @@
 ---
 id: SPEC-328
 type: requirements
-status: specifying
+status: planning
 tier: T2
 product: minspec
 epic: EPIC-009  # Team Readiness - guardrails a shared repo must carry
@@ -13,9 +13,9 @@ implements_reason: >-
   Specify phase only. Expected surface: tests only (`packages/minspec/tests/ruleset-advisor.test.ts`); the
   production wiring already exists (see Finding). None of the test work is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

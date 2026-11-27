@@ -133,8 +133,10 @@ describe('--derive-failed-runs with-review reads the shape production emits', ()
 });
 
 describe('--classify on dlg-approve/*: BEHIND beats a red check', () => {
+  // #4078: the 9th argument is the witnessed pass (ready-to-merge from GitHub Actions);
+  // these fixtures witness exactly the PRs whose label says pass, as before.
   const classify = (mergeState: string, labels: string, failing: string, bad: string, claim = 'no', sweep = 'yes') =>
-    execFileSync('bash', [SCRIPT, '--classify', DLG, 'MERGEABLE', mergeState, labels, failing, bad, claim, sweep], {
+    execFileSync('bash', [SCRIPT, '--classify', DLG, 'MERGEABLE', mergeState, labels, failing, bad, claim, sweep, labels.includes('ai-review:pass') ? 'yes' : 'no'], {
       encoding: 'utf-8',
     }).trim();
 

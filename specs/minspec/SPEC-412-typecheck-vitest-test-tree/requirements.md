@@ -1,7 +1,7 @@
 ---
 id: SPEC-412
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a green typecheck signposts coverage of tests/ that it does not have
@@ -14,9 +14,9 @@ implements_reason: >-
   a new vitest tsconfig per package, the root `typecheck` script in `package.json`, and
   whatever test files the first run proves wrong. None of it is claimed yet.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

@@ -1,7 +1,7 @@
 ---
 id: SPEC-124
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — a per-heading "read this carefully" signal is a finer-grained signpost than the existing Zone-A/B split, and it is already a named, approved dependency of SPEC-018 FR-13
@@ -22,9 +22,9 @@ implements: [packages/shared/src/attention-glyph.ts, packages/shared/tests/atten
 # hard-coded heading (FR-6). index.ts is the shared-package barrel every new module touches.
 affects: [packages/minspec/src/lib/spec-validator.ts, packages/shared/src/review-signals.ts, packages/shared/tests/review-signals.test.ts, packages/shared/src/index.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
