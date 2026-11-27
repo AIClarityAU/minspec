@@ -1,7 +1,7 @@
 ---
 id: SPEC-401
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness — concurrent multi-session coordination
@@ -10,6 +10,12 @@ implements: none
 implements_reason: >-
   Documentation-only disposition spec: AC-3 says no packages/, scripts/ or tests/ file is
   touched by this spec or its approval, and DQ-1's recorded Option A closes #181 with no code change.
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — Keep auto-built PR branches mergeable as base advances (Requirements)

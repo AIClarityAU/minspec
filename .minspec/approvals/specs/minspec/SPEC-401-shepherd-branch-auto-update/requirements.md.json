@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-401-shepherd-branch-auto-update/requirements.md",
+  "specHash": "605ea7539d83747e4502bbf2465b665287b4975c6699f8764b68cb3635894871",
+  "approvedAt": "2026-11-25T23:31:35.833Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-unblock-1125",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4064#issuecomment-7176903984"
+}
