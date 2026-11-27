@@ -317,7 +317,7 @@ export function parseSpec(content: string): ParsedSpec {
     created: (fmParsed.created as string) ?? new Date().toISOString().slice(0, 10),
     epic: (fmParsed.epic as string) || undefined,
     product: (fmParsed.product as string) || undefined,
-    type: (fmParsed.type as string) || undefined,
+    type: (typeof fmParsed.type === 'string' ? fmParsed.type : '') || undefined,
     // `superseded-by: SPEC-NNN` — recognized successor ref (SPEC-017 / #162). Keyed
     // by the hyphenated YAML key; surfaced camelCased on the frontmatter so writers
     // preserve it on round-trip rather than silently dropping it.
