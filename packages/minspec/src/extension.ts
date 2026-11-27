@@ -41,7 +41,7 @@ import { tidyPrimaryCommand } from './commands/tidy-primary';
 import { viewQueueCommand } from './commands/view-queue';
 import { listQueuedRequests } from './lib/phase-advance-queue';
 import { fromFrontmatter } from './lib/spec-progress';
-import { nextTaskCommand, computeNextTask } from './commands/next-task';
+import { nextTaskCommand, computeSignpostState, type SignpostState } from './commands/next-task';
 import { SpecPanel } from './views/spec-panel';
 import { GettingStartedPanel } from './views/getting-started-webview';
 import { gettingStartedCommand, hotkeysFromManifest } from './commands/getting-started';
@@ -272,6 +272,10 @@ export function activate(context: vscode.ExtensionContext): void {
   const nextTaskStatusBar = new MinSpecNextTaskStatusBar(
     resolveNextTaskKeybinding(context.extension?.packageJSON),
   );
+  const paintSignpost = (state: SignpostState) =>
+    state.kind === 'unclear'
+      ? nextTaskStatusBar.update(null, state.reason)
+      : nextTaskStatusBar.update(state.kind === 'task' ? state.task : null);
   let nextTaskTimer: ReturnType<typeof setTimeout> | undefined;
   const refreshNextTask = () => {
     if (!workspaceRoot) {
@@ -281,17 +285,18 @@ export function activate(context: vscode.ExtensionContext): void {
     if (nextTaskTimer) clearTimeout(nextTaskTimer);
     nextTaskTimer = setTimeout(() => {
       try {
-        nextTaskStatusBar.update(computeNextTask(workspaceRoot));
-      } catch {
-        nextTaskStatusBar.update(null);
+        paintSignpost(computeSignpostState(workspaceRoot));
+      } catch (err) {
+        nextTaskStatusBar.update(null, err instanceof Error ? err.message : String(err));
       }
     }, 300);
   };
-  // Initial paint (synchronous; computeNextTask is itself fail-safe).
+  // Initial paint (synchronous; computeSignpostState is itself fail-safe).
   try {
-    nextTaskStatusBar.update(workspaceRoot ? computeNextTask(workspaceRoot) : null);
-  } catch {
-    nextTaskStatusBar.update(null);
+    if (workspaceRoot) paintSignpost(computeSignpostState(workspaceRoot));
+    else nextTaskStatusBar.update(null);
+  } catch (err) {
+    nextTaskStatusBar.update(null, err instanceof Error ? err.message : String(err));
   }
 
   // Harness-refresh commit recovery status bar (#758). Debounced like the
