@@ -1,6 +1,6 @@
 // SPEC-136 design.md, "Invariants": the `--require` trap. Loaded with `node --require` before the
-// bundle. Every forbidden call is RECORDED to the original stderr fd and then thrown, so a library
-// `catch` that swallows the throw cannot hide it from the test. User-land `require` only is
+// bundle. Every forbidden call through the intercepted modules (network, worker_threads, inspector,
+// child_process, fs) is RECORDED to the original stderr fd and then thrown, so a library
 // intercepted (Module._load); Node's own internals keep the real modules, so stdout still works.
 'use strict';
 const fs = require('fs');
@@ -18,7 +18,7 @@ function record(kind, detail) {
   throw new Error(line.trim());
 }
 
-const NETWORK = new Set(['net', 'tls', 'http', 'https', 'http2', 'dgram', 'dns', 'dns/promises']);
+const NETWORK = new Set(['net', 'tls', 'http', 'https', 'http2', 'dgram', 'dns', 'dns/promises', 'worker_threads', 'inspector']);
 
 function forbidden(modName, real) {
   return new Proxy(real, {
