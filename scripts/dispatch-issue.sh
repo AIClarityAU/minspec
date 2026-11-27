@@ -2276,6 +2276,9 @@ crash_log_excerpt() {
 # for a human, comment briefly, and leave the worktree intact for inspection.
 quarantine_publish() {
   local matches="$1"
+  # Never reused by a later dispatch while held (#3909): a second witness to the label below.
+  issue_branch_mark_held "$AGENT_WORKTREE_GIT_DIR" "quarantined by the pre-publish egress guard (#358)" \
+    || echo "WARNING: #$ISSUE could not record the hold in its worktree's git directory; a later dispatch could reuse this worktree (#3909)." >&2
   echo "🛑 egress guard BLOCKED publish for #$ISSUE (role: $ROLE):" >&2
   printf '%s\n' "$matches" >&2
   # Create the labels if absent (best-effort), then apply the quarantine set. The
@@ -2317,6 +2320,9 @@ specify_scope_report() {
 # what happened. `agent-done` is NOT applied — the work did not complete.
 hold_specify_scope() {
   local strays="$1"
+  # Never reused by a later dispatch while held (#3909): a second witness to the label below.
+  issue_branch_mark_held "$AGENT_WORKTREE_GIT_DIR" "specify-only dispatch changed files outside the spec corpus" \
+    || echo "WARNING: #$ISSUE could not record the hold in its worktree's git directory; a later dispatch could reuse this worktree (#3909)." >&2
   echo "🛑 specify-only scope guard BLOCKED publish for #$ISSUE (role: $ROLE) — out-of-scope paths:" >&2
   printf '%s\n' "$strays" >&2
   gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
@@ -2349,6 +2355,9 @@ workflow_publish_blocked() {
 
 hold_workflow_push() {
   local wf="$1"
+  # Never reused by a later dispatch while held (#3909): a second witness to the label below.
+  issue_branch_mark_held "$AGENT_WORKTREE_GIT_DIR" "touches CI workflow files the App may not push (#1120)" \
+    || echo "WARNING: #$ISSUE could not record the hold in its worktree's git directory; a later dispatch could reuse this worktree (#3909)." >&2
   echo "🛑 workflow-push guard: NOT publishing #$ISSUE (role: $ROLE) — $BRANCH changes CI workflow files" >&2
   echo "  and the App 'workflows' permission is not confirmed (AIClarityAU/minspec#1120):" >&2
   printf '%s\n' "$wf" | sed 's/^/      /' >&2

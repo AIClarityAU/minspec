@@ -165,7 +165,32 @@ issue_branch_holder_plan() {
     printf 'defer\t%s\t%s\n' "$wt" "its .git does not name the repository's own record for it, so it is not reused"
     return 0
   fi
+  # A gate held this worktree for a human (egress quarantine, workflow push, specify
+  # scope): it stays as it is until a human acts. The issue's label says the same, but a
+  # label write can fail, so this is a second witness that cannot (issue_branch_mark_held).
+  if [[ -e "${recorded}/minspec-held" ]]; then
+    local why=""
+    why="$(<"${recorded}/minspec-held")" || why=""
+    printf 'defer\t%s\t%s\n' "$wt" "held for a human by an earlier dispatch: ${why%%$'\n'*}"
+    return 0
+  fi
   printf 'reuse\t%s\n' "$wt"
+}
+
+# issue_branch_mark_held <worktree-git-dir> <reason>: record that a gate held this worktree
+# for a human, in the worktree's own git directory (under the repository's .git, outside
+# the tree, so no agent run commits or removes it). issue_branch_holder_plan then never
+# reuses it. Returns 1, saying so, when it cannot be written.
+issue_branch_mark_held() {
+  local gd="${1-}" reason="${2-held}"
+  if [[ -z "$gd" || ! -d "$gd" ]]; then
+    echo "issue-branch: no git directory '${gd}' to record the hold in." >&2
+    return 1
+  fi
+  if ! printf '%s\n' "$reason" >"${gd}/minspec-held"; then
+    echo "issue-branch: could not write '${gd}/minspec-held'." >&2
+    return 1
+  fi
 }
 
 # issue_branch_set_aside_artifacts <holder> <dest-root>: before a reused worktree runs a new

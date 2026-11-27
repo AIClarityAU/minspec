@@ -166,6 +166,26 @@ describe('issue_branch_holder_plan: every other holder state', () => {
     expect(fields[2]).toMatch(/\.git/);
   });
 
+  it('a worktree a gate held for a human (quarantine, workflow push) is deferred, never reused', () => {
+    // #1485 on 2026-11-26: quarantined by the egress guard, but the label write failed, so
+    // the issue stayed agent-ready. The marker in the worktree's git directory is the
+    // second witness that keeps a reuse from running a new agent over held output.
+    const gd = git(holder, 'rev-parse', '--absolute-git-dir');
+    const m = sh(`issue_branch_mark_held "${gd}" "quarantined by the pre-publish egress guard (#358)"`);
+    expect(m.status, m.stderr).toBe(0);
+    expect(fs.existsSync(path.join(gd, 'minspec-held'))).toBe(true);
+    expect(git(holder, 'status', '--porcelain'), 'the marker is outside the tree').toBe('');
+    const { fields } = plan();
+    expect(fields.slice(0, 2)).toEqual(['defer', holder]);
+    expect(fields[2]).toBe('held for a human by an earlier dispatch: quarantined by the pre-publish egress guard (#358)');
+  });
+
+  it('issue_branch_mark_held with no git directory fails loudly', () => {
+    const r = sh(`issue_branch_mark_held "" "x"`);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/no git directory/);
+  });
+
   it('a git failure listing worktrees is an error, never "none" (invariant 2)', () => {
     const r = sh(`issue_branch_holder_plan "${path.join(tmp, 'not-a-repo')}" ${BR} "${base}" 7 claim`);
     expect(r.status).not.toBe(0);
@@ -240,6 +260,15 @@ describe('dispatch-issue.sh wiring (#3909)', () => {
     const block = src.slice(planCall, claimed);
     expect(block).toMatch(/defer\)[\s\S]*?exit_declined/);
   });
+
+  it.each(['quarantine_publish', 'hold_specify_scope', 'hold_workflow_push'])(
+    '%s records the hold in the worktree git directory, so no later dispatch reuses it',
+    (fn) => {
+      const start = at(`\n${fn}() {\n`);
+      const body = src.slice(start, src.indexOf('\n}\n', start));
+      expect(body).toContain('issue_branch_mark_held "$AGENT_WORKTREE_GIT_DIR" ');
+    },
+  );
 
   it('a reused holder becomes the worktree and is not added again', () => {
     expect(src).toContain('WORKTREE="$HOLDER_PATH"');
