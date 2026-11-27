@@ -1,7 +1,7 @@
 ---
 id: SPEC-084
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness — same epic as SPEC-034 (the review broker) and DR-094 (its one-hour token), which this narrows
@@ -16,8 +16,8 @@ implements_reason: >-
   for FR-11 under packages/broker/.
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
