@@ -487,35 +487,25 @@ describe('pushDocsLaneCommand — PR title/body split (#1883)', () => {
     expect(body).toContain('DR-102.md');
   });
 
-  it('a single-line message over 256 chars is truncated to a title on a word boundary', async () => {
+  it.each([
+    ['single-line', ''],
+    ['subject + body', '\n\nbody'],
+  ])('a %s message whose subject is over 256 chars fails fast, before any gh/git mutation (#1438)', async (_label, tail) => {
     writeDoc('docs/decisions/DR-103.md');
-    const message = 'docs(DR-103): ' + Array.from({ length: 40 }, (_, i) => `word${i}word`).join(' ');
-    expect(message.length).toBeGreaterThan(256);
-    const map: Record<string, ResponderVal> = {
+    const subject = 'docs(DR-103): ' + Array.from({ length: 40 }, (_, i) => `word${i}word`).join(' ');
+    expect(subject.length).toBeGreaterThan(256);
+    const { run, calls } = responder({
       ...LOCAL_PROBES(root, ' M docs/decisions/DR-103.md\n'),
       'gh auth status': 'Logged in to github.com\n',
-      'git fetch origin main': '',
-      'git worktree add': '',
-      'git add --': '',
-      'git diff --cached --quiet': Object.assign(new Error('exit 1'), { stderr: '' }),
-      'git commit': '',
-      'git push': '',
-      'gh pr create': 'https://github.com/AIClarityAU/minspec/pull/2001\n',
-      'git worktree remove': '',
-    };
-    const { run, calls } = responder(map);
+    });
     showWarn.mockResolvedValueOnce('Open docs-lane PR');
-    showInput.mockResolvedValueOnce(message);
+    showInput.mockResolvedValueOnce(subject + tail);
 
     const res = await pushDocsLaneCommand(root, { run });
-    expect(res.outcome).toBe('pushed');
-
-    const prCall = calls.find((c) => c.file === 'gh' && c.args[0] === 'pr' && c.args[1] === 'create');
-    const title = flagValue(prCall!.args, '--title');
-
-    expect(title.length).toBeLessThanOrEqual(256);
-    expect(message.startsWith(title)).toBe(true);
-    expect(message[title.length]).toBe(' ');
+    expect(res.outcome).toBe('failed');
+    expect(res.error).toMatch(/256/);
+    expect(gitMutated(calls)).toBe(false);
+    expect(calls.some((c) => c.file === 'gh' && c.args[0] === 'pr')).toBe(false);
   });
 });
 
