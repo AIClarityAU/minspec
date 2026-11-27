@@ -1,5 +1,5 @@
 ---
-id: SPEC-137
+id: SPEC-465
 type: requirements
 status: specifying
 tier: T3
@@ -11,7 +11,7 @@ implements: [packages/minspec/tests/status-lane-code-symmetry.test.ts]
 affects: [packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/lifecycle.ts]
 ---
 
-# SPEC-137: Status lane symmetry — status is checked against code, both directions
+# SPEC-465: Status lane symmetry — status is checked against code, both directions
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human
 > reads it, answers the Clarify questions, and approves it before any code changes.
