@@ -44,7 +44,8 @@ spec's approval and each needs a re-approve. Riskiest assumption: the founder ac
   is changed to the text `hashLockReminder(<its own path>)` would emit, or the path-agnostic form (see
   Decision D-1). The exact file list is computed by the FR-3 gate, not hand-maintained.
 - **FR-2 — One source of wording.** The notice wording stays defined once, in `hashLockReminder`; FR-1
-  copies are byte-for-byte what it returns (no third wording). The next store move changes that function
+  copies are byte-for-byte what it returns (no third wording). Conditional on D-1: if D-1(b) (path-agnostic)
+  is chosen, `hashLockReminder` itself changes to emit the path-agnostic text and the copies match that. The next store move changes that function
   and the FR-3 gate lists every spec to refresh.
 - **FR-3 — Gate.** The spec validator reports, per spec file, any frontmatter lock notice that names an
   approval location not holding that spec's record: (a) a `.minspec/approvals.json` pointer, or
@@ -58,13 +59,12 @@ spec's approval and each needs a re-approve. Riskiest assumption: the founder ac
 
 ## Acceptance criteria
 
-- AC-1: after the change, the FR-3 gate reports no spec whose frontmatter lock notice names `approvals.json[`. A raw `grep -rl 'approvals.json\[' specs` is NOT the criterion: it also matches this spec and SPEC-044 (requirements.md and design.md), which quote the string in prose, not as a notice (12 files at 2026-11-27).
+- AC-1: after the change, the FR-3 gate reports no spec whose frontmatter lock notice names `approvals.json[`. A raw `grep -rl 'approvals.json\[' specs` is NOT the criterion, because this spec quotes the string in prose (12 files at 2026-11-27: the 11 files FR-1 must fix, including both SPEC-044 `requirements.md` and `design.md`, whose line 4 is a frontmatter lock notice, plus this spec). Only this spec is exempt; no other file may be skipped.
 - AC-2: a fixture spec whose notice names `.minspec/approvals.json[SPEC-X]` produces a gate finding; one
   naming its own correct sidecar produces none; one naming a *different spec's* sidecar produces one.
 - AC-3: `hashLockReminder(p)` output passes the gate for `p` (round-trip test, so the emitter and checker
   cannot drift apart).
-- AC-4: for each touched approved spec, `status` reflects honest lifecycle after the edit (set to
-  `specifying` until re-approved, per the stale-approval rule) and no approval is forged or hand-edited.
+- AC-4: for each touched approved spec, `status` reflects honest lifecycle after the edit, set by the tool's stale-approval path (never hand-written, INV-3), and no approval is forged or hand-edited. Called out for the founder: SPEC-038 and SPEC-040 are at `done`, so the stale-approval reset is a lifecycle regression for them until re-approved.
 - AC-5: the gate emits no finding on specs with no lock notice (older/stub specs are not newly failed).
 
 ## Invariants this must not break
