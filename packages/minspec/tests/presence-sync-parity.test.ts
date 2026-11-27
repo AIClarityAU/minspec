@@ -31,6 +31,9 @@ import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
 
 import { isCheckoutOccupied, STALE_SECS, type SessionPresenceRecord } from '../src/lib/presence';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+useShellTimeout();
 
 const DRAIN = path.resolve(__dirname, '../../../scripts/drain-inbox.sh');
 
