@@ -72,4 +72,16 @@ describe('check-worktree-salvage CLI', () => {
     const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-plain-'));
     expect(run(plain)).toBe(2);
   }, 60000);
+  it('a subfolder path is refused (exit 2), never NOTHING_UNIQUE for the parent repo', () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'wt-sub-'));
+    const g = (...a: string[]) => execFileSync('git', a, { cwd: d, stdio: 'pipe' });
+    g('init', '-q');
+    fs.mkdirSync(path.join(d, 'sub'));
+    fs.writeFileSync(path.join(d, 'sub', 'a.txt'), 'one\n');
+    g('add', '.');
+    g('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'init');
+    fs.writeFileSync(path.join(d, 'top-untracked.md'), 'authored\n');
+    expect(run(path.join(d, 'sub'))).toBe(2);
+    expect(run(d)).toBe(1);
+  }, 60000);
 });

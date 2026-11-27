@@ -6,13 +6,14 @@
  *
  * Exit 0 = NOTHING_UNIQUE (uncommitted state has zero insertions, no untracked authored files).
  * Exit 1 = SALVAGE (archive before removal, or surface as a human decision).
- * Exit 2 = the check could not run (not a git worktree, git failed). Never reads as safe.
+ * Exit 2 = the check could not run (not a git worktree top folder, git failed). Never reads as safe.
  *
  * Orthogonal to the branch-level merged-PR and `git cherry` checks: this covers the
  * UNCOMMITTED dimension. Decision logic lives in lib/worktree-salvage.ts; this is IO only.
  */
 
 import { execFileSync } from 'node:child_process';
+import * as fs from 'node:fs';
 
 import { classifyWorktree } from './lib/worktree-salvage';
 
@@ -27,6 +28,13 @@ function main(): number {
     return 2;
   }
   try {
+    // Every git call below must cover the WHOLE worktree: refuse anything but the top folder
+    // (a subfolder would list only its own untracked files yet diff the whole tree).
+    const top = git(dir, ['rev-parse', '--show-toplevel']).trim();
+    if (!top || fs.realpathSync(top) !== fs.realpathSync(dir)) {
+      console.error(`check-worktree-salvage: ${dir} is not a worktree top folder (top is ${top || 'unknown'})`);
+      return 2;
+    }
     const result = classifyWorktree({
       stagedNumstat: git(dir, ['diff', '--cached', '--numstat']),
       unstagedNumstat: git(dir, ['diff', '--numstat']),
