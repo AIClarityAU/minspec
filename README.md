@@ -84,6 +84,10 @@ Bug fixes follow [**RCDD** — Root-Cause-Driven Debugging](docs/decisions/DR-00
 
 All architectural decisions land in [docs/decisions/](docs/decisions/INDEX.md) as `DR-NNN.md`.
 
+## Optional companion tools
+
+MinSpec works fully on its own. [docs/companion-tools.md](docs/companion-tools.md) lists optional, user-installed tools it recommends (CodeGraph MCP) and the ones it deliberately does not. Advisory only: no dependency, no network call by MinSpec.
+
 ## License
 
 All code is **MIT** — see [`LICENSE`](LICENSE). Prose is CC-BY-4.0. See [DR-083](docs/decisions/DR-083.md) for why, and [DR-018](docs/decisions/DR-018.md) for the multi-licence scheme it superseded.
