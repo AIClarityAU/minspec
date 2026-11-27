@@ -73,6 +73,26 @@ describe('provision_worktree_modules (#3238)', () => {
     expect(fs.readFileSync(path.join(f.dir, 'calls'), 'utf-8')).toMatch(/--ignore-scripts/);
   });
 
+  it('names an empty npm cache as the cause of a failed offline install (#3972)', () => {
+    const f = fixture('exit 1');
+    const empty = path.join(f.dir, 'emptycache');
+    fs.mkdirSync(empty);
+    const r = spawnSync('bash', ['-c', `source "${LIB}" && provision_worktree_modules "${f.wt}"`], {
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: `${f.bin}:${process.env.PATH}`, AGENT_LAUNCH_ENV: LAUNCH_ENV, npm_config_cache: empty },
+    });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/npm cache is empty/);
+    // A populated cache must not be blamed.
+    fs.mkdirSync(path.join(empty, '_cacache'));
+    fs.writeFileSync(path.join(empty, '_cacache', 'x'), '1');
+    const r2 = spawnSync('bash', ['-c', `source "${LIB}" && provision_worktree_modules "${f.wt}"`], {
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: `${f.bin}:${process.env.PATH}`, AGENT_LAUNCH_ENV: LAUNCH_ENV, npm_config_cache: empty },
+    });
+    expect(r2.stderr).not.toMatch(/npm cache is empty/);
+  });
+
   it('a successful offline install gives a real, non-symlink node_modules', () => {
     const f = fixture(INSTALL_OK);
     const r = run(f);
