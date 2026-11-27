@@ -1130,7 +1130,7 @@ function migrateLegacyClaudeSlashCommandShims(rootDir: string): void {
  * error, must never break init/refresh; the GitHub Actions backstop (DR-037) still
  * gates such repos on push.
  */
-function ensureHooksPath(rootDir: string): void {
+export function ensureHooksPath(rootDir: string): void {
   if (!isOwnGitRoot(rootDir)) return;
   try {
     let current = '';

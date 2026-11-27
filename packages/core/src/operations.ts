@@ -3,6 +3,7 @@
 // `validate`, `hash`, `status` and `next` are wired so far; later SPEC-136 tasks add the rest to the same table.
 import * as fs from 'fs';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
 import { specHash } from '@aiclarity/shared';
 import { getApprovalRecord, getApprovalStatus } from '../../minspec/src/lib/approval';
 import { formatNextTaskLabel, resolveNextTask } from '../../shared/src/next-task';
@@ -15,6 +16,8 @@ import { readShardIdFiles } from '../../minspec/src/lib/spec-layout';
 import { validateSpec } from '../../minspec/src/lib/spec-validator';
 import { listSpecs } from '../../minspec/src/lib/spec-catalog';
 import { runCorpusRules } from './corpus-rules';
+import { ensureHooksPath, isOwnGitRoot } from '../../minspec/src/lib/scaffold';
+import { MINSPEC_HOOKS_DIR } from '../../minspec/src/lib/template-registry';
 import { hasOptInMarker, notOptedInMessage } from '../../minspec/src/lib/opt-in';
 
 declare const __MINSPEC_CORE_VERSION__: string | undefined;
@@ -208,7 +211,43 @@ const validateOperation: Operation = {
   },
 };
 
-export const OPERATIONS: readonly Operation[] = [validateOperation, hashOperation, statusOperation, nextOperation];
+/** The clone's own `core.hooksPath` ('' when unset), read with the same call ensureHooksPath uses. */
+function readLocalHooksPath(root: string): string {
+  try {
+    return execFileSync('git', ['config', '--local', 'core.hooksPath'], {
+      cwd: root,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return '';
+  }
+}
+
+const activateOperation: Operation = {
+  name: 'activate',
+  summary: "Point this clone's git core.hooksPath at the project's hooks",
+  input: noArgs,
+  effect: 'git-config',
+  async run(ctx) {
+    // ensureHooksPath is quiet by design for the editor; here a no-op is reported, never a false pass.
+    if (!isOwnGitRoot(ctx.root)) {
+      return {
+        outcome: 'error',
+        error: { message: `${ctx.root} is not the top level of its own git work tree; core.hooksPath was not changed` },
+      };
+    }
+    const previous = readLocalHooksPath(ctx.root);
+    ensureHooksPath(ctx.root);
+    const hooksPath = readLocalHooksPath(ctx.root);
+    if (hooksPath !== MINSPEC_HOOKS_DIR) {
+      return { outcome: 'error', error: { message: `git config core.hooksPath is '${hooksPath}', expected '${MINSPEC_HOOKS_DIR}'` } };
+    }
+    return { outcome: 'pass', data: { hooksPath, previous } };
+  },
+};
+
+export const OPERATIONS: readonly Operation[] = [validateOperation, hashOperation, statusOperation, nextOperation, activateOperation];
 
 /** Run one operation and wrap its return in the stamped envelope. Never throws. */
 export async function runOperation(op: Operation, root: string, args: Record<string, unknown>): Promise<CoreResult> {
