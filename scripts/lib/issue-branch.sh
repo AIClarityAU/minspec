@@ -78,3 +78,146 @@ issue_branch_plan() {
     if [[ "$state" == empty ]]; then echo "track $tip origin/main"; else echo "track $tip -"; fi
   fi
 }
+
+# ── Which worktree already holds the branch (#3909, SPEC-384) ──────────────────────────
+#
+# git lets one worktree at a time have a branch checked out. A dispatch that finished (or
+# crashed) leaves its worktree registered at ${WORKTREE_BASE}/issue-N-<its sid>, still
+# holding agent/issue-N, and every later dispatch's `worktree add` for that branch died
+# with rc=128 ("already used by worktree"), cycle after cycle. The cleanup in
+# dispatch-issue.sh only looks at THIS session's claim-unique path, which is always fresh.
+#
+# issue_branch_holder_plan <repo> <branch> <worktree-base> <issue> <witness>
+# prints ONE tab-separated line saying what the dispatch does about a holder:
+#
+#   none                     nobody holds the branch: create the worktree as before
+#   prune  <path>            the holder's folder is gone: drop that one registration
+#                            (`git worktree remove <path>`, never a repository-wide prune)
+#   reuse  <path>            a dead dispatch's worktree: continue in it, as it is (D1 a)
+#   defer  <path>  <reason>  anything else: in flight, or not provably dead. Touch nothing.
+#
+# <witness> is "claim" when the caller has just WON this issue's claim (SPEC-044): no
+# other session holds a live claim on it, so a dispatch worktree under the base is dead
+# (D2, the lease is the one liveness witness). Anything else is "liveness unknown", and
+# unknown is never treated as dead (FR-5). Only a worktree under <worktree-base> named
+# issue-<issue>-<something> is eligible for prune or reuse; any other holder (a human's
+# checkout) is in flight (D3).
+#
+# Read-only, and runs no git inside the holder: the holder's `.git` file is read as text,
+# because an agent had that tree and may have rewritten it. A git failure listing the
+# worktrees returns 1 and prints nothing on stdout (no silent gate).
+issue_branch_holder_plan() {
+  local repo="$1" br="$2" base="${3%/}" issue="$4" witness="$5"
+  local listing line wt="" head="" locked=0 holders=() flags=() i base_real
+  if ! listing=$(git -C "$repo" worktree list --porcelain 2>&1); then
+    echo "issue-branch: could not list the worktrees of '${repo}': ${listing}" >&2
+    return 1
+  fi
+  # Records are blank-line separated; the extra newline closes the last one.
+  while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) wt="${line#worktree }"; head=""; locked=0 ;;
+      "branch "*) head="${line#branch }" ;;
+      locked|"locked "*) locked=1 ;;
+      "")
+        if [[ -n "$wt" && "$head" == "refs/heads/${br}" ]]; then
+          holders+=("$wt"); flags+=("$locked")
+        fi
+        wt=""; head=""; locked=0 ;;
+    esac
+  done <<<"${listing}"$'\n'
+  if (( ${#holders[@]} == 0 )); then printf 'none\n'; return 0; fi
+  if (( ${#holders[@]} > 1 )); then
+    printf 'defer\t%s\t%s\n' "${holders[0]}" "git lists ${#holders[@]} worktrees holding ${br}"
+    return 0
+  fi
+  wt="${holders[0]}"; locked="${flags[0]}"
+  base_real="$(cd "$base" 2>/dev/null && pwd -P)" || base_real="$base"
+  local name="${wt##*/}" parent="${wt%/*}"
+  if [[ "$parent" != "$base" && "$parent" != "$base_real" ]] \
+     || [[ "$name" != "issue-${issue}-"?* ]]; then
+    printf 'defer\t%s\t%s\n' "$wt" "held by a worktree outside this dispatcher's base (${base}/issue-${issue}-*), so treated as in flight (D3)"
+    return 0
+  fi
+  if (( locked )); then
+    printf 'defer\t%s\t%s\n' "$wt" "the holder is locked (git worktree lock)"
+    return 0
+  fi
+  if [[ ! -e "$wt" ]]; then
+    printf 'prune\t%s\n' "$wt"
+    return 0
+  fi
+  if [[ "$witness" != "claim" ]]; then
+    printf 'defer\t%s\t%s\n' "$wt" "liveness unknown: no won claim to prove its owner dead (FR-5)"
+    return 0
+  fi
+  # The holder's `.git` must still name the git directory the REPOSITORY recorded for it,
+  # or pinning it later would trust whatever an agent wrote there.
+  local recorded named=""
+  recorded="$(launcher_worktree_git_dir "$repo" "$wt" 2>/dev/null)" || recorded=""
+  if [[ -f "${wt}/.git" ]]; then
+    named="$(<"${wt}/.git")"
+    named="${named%%$'\n'*}"
+    named="${named#gitdir: }"
+    named="$(cd "$named" 2>/dev/null && pwd -P)" || named=""
+  fi
+  if [[ -z "$recorded" || "$named" != "$recorded" ]]; then
+    printf 'defer\t%s\t%s\n' "$wt" "its .git does not name the repository's own record for it, so it is not reused"
+    return 0
+  fi
+  # A gate held this worktree for a human (egress quarantine, workflow push, specify
+  # scope): it stays as it is until a human acts. The issue's label says the same, but a
+  # label write can fail, so this is a second witness that cannot (issue_branch_mark_held).
+  if [[ -e "${recorded}/minspec-held" ]]; then
+    local why=""
+    why="$(<"${recorded}/minspec-held")" || why=""
+    printf 'defer\t%s\t%s\n' "$wt" "held for a human by an earlier dispatch: ${why%%$'\n'*}"
+    return 0
+  fi
+  printf 'reuse\t%s\n' "$wt"
+}
+
+# issue_branch_mark_held <worktree-git-dir> <reason>: record that a gate held this worktree
+# for a human, in the worktree's own git directory (under the repository's .git, outside
+# the tree, so no agent run commits or removes it). issue_branch_holder_plan then never
+# reuses it. Returns 1, saying so, when it cannot be written.
+issue_branch_mark_held() {
+  local gd="${1-}" reason="${2-held}"
+  if [[ -z "$gd" || ! -d "$gd" ]]; then
+    echo "issue-branch: no git directory '${gd}' to record the hold in." >&2
+    return 1
+  fi
+  if ! printf '%s\n' "$reason" >"${gd}/minspec-held"; then
+    echo "issue-branch: could not write '${gd}/minspec-held'." >&2
+    return 1
+  fi
+}
+
+# issue_branch_set_aside_artifacts <holder> <dest-root>: before a reused worktree runs a new
+# agent, move the previous run's dispatcher files (.agent-summary.md, .review-signals.json,
+# .auto-merge-signals.json, .agent.log) to <dest-root>/<holder name>-<UTC stamp>/, outside
+# the tree. Otherwise a new run that writes no summary would have the OLD one posted as its
+# own, and the old signals would feed the merge gate. Nothing is deleted; the tree's own
+# work (commits, modified and untracked files) is left exactly as it is. Prints the
+# directory when something was moved. Returns 1 when the directory cannot be made (nothing
+# moved) or a move fails (the files before it are already in the directory; none is lost,
+# and the caller defers, so a later reuse finishes the job).
+issue_branch_set_aside_artifacts() {
+  local wt="${1%/}" root="${2%/}" dest f found=()
+  for f in .agent-summary.md .review-signals.json .auto-merge-signals.json .agent.log; do
+    [[ -e "${wt}/${f}" || -L "${wt}/${f}" ]] && found+=("$f")
+  done
+  (( ${#found[@]} )) || return 0
+  dest="${root}/${wt##*/}-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  if ! mkdir -p "$dest"; then
+    echo "issue-branch: could not make '${dest}' to set the previous run's files aside; nothing was moved." >&2
+    return 1
+  fi
+  for f in "${found[@]}"; do
+    if ! mv -n -- "${wt}/${f}" "${dest}/${f}"; then
+      echo "issue-branch: could not move '${wt}/${f}' to '${dest}'." >&2
+      return 1
+    fi
+  done
+  printf '%s\n' "$dest"
+}

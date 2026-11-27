@@ -1368,8 +1368,18 @@ describe('T0: a launcher runs nothing as itself out of a worktree it gave an age
     const walkers = codeFiles()
       .filter((f) => /\.sh$/.test(f))
       .filter((f) => linesOf(f).some((l) => /\bworktree list\b/.test(l.text)));
-    expect(walkers).toEqual(['drain-inbox.sh']);
-    for (const f of walkers) {
+    expect(walkers).toEqual(['drain-inbox.sh', 'lib/issue-branch.sh']);
+    // lib/issue-branch.sh lists worktrees only to find which one holds agent/issue-N
+    // (#3909). It runs git in the repository it was handed and in nothing else: the
+    // holder's `.git` file is read as text, never followed by git.
+    {
+      const lines = linesOf('lib/issue-branch.sh');
+      const targets = new Set(
+        lines.flatMap((l) => [...l.text.matchAll(/(?<![A-Za-z0-9_-])git -C "\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?"/g)].map((m) => m[1])),
+      );
+      expect([...targets].sort(), 'lib/issue-branch.sh').toEqual(['repo']);
+    }
+    for (const f of walkers.filter((w) => w === 'drain-inbox.sh')) {
       const lines = linesOf(f);
       const targets = new Set(
         lines.flatMap((l) => [...l.text.matchAll(/(?<![A-Za-z0-9_-])git -C "\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?"/g)].map((m) => m[1])),

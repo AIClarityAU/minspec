@@ -249,6 +249,11 @@ interface Scenario {
   beforeClaim?: boolean;
   /** MINSPEC_CLAIM_OFF=1: the block is skipped, and there is no claim to give back. */
   claimOff?: boolean;
+  /**
+   * What the #3909 holder check (inside the claim block) answers: `none` (default) or a
+   * `defer` line for a worktree that already holds the branch.
+   */
+  holder?: string;
   /** What the script does next. */
   tail: string[];
 }
@@ -273,6 +278,8 @@ function run(s: Scenario): Run & { marks: string[] } {
     `lease_stop_renew_ticker() { echo stop >> ${JSON.stringify(marks)}; }`,
     `lease_release_all() { echo release >> ${JSON.stringify(marks)}; }`,
     'LEASE_ABS_MAX_SECS=7200',
+    'REPO_ROOT=/nonexistent BRANCH=agent/issue-77 WORKTREE_BASE=/nonexistent',
+    `issue_branch_holder_plan() { printf '%b\\n' ${JSON.stringify(s.holder ?? 'none')}; }`,
     s.beforeClaim ? '' : claimBlock(),
     ...s.tail,
   ].join('\n');
@@ -324,6 +331,17 @@ describe('#2641: each stand-down in the check-then-claim block answers "refused"
     expect(r.out).toContain('PROCEEDED-TO-BUILD');
     expect(r.status).toBe(STARTED);
     expect(r.out).not.toContain('WARNING');
+  });
+
+  it('#3909: a worktree already holding the branch defers after the won claim: "refused", claim given back', () => {
+    // The holder check runs after the claim and before the point of no return, so a
+    // deferral started nothing, is answered as such, and is not counted as a failure.
+    const r = run({ ask: ASKED, failing: null, holder: 'defer\t/x/issue-77-sid-old\tin flight', tail: BUILDS });
+    expect(r.out).toMatch(/^Standing down on #77 - deferred: agent\/issue-77 is held by the worktree at \/x\/issue-77-sid-old: in flight/m);
+    expect(r.status).toBe(DECLINED);
+    expect(r.out).not.toContain('PROCEEDED-TO-BUILD');
+    expect(r.out).not.toContain('WARNING');
+    expect(r.marks).toEqual(['stop', 'release']);
   });
 
   it('NOT asked, all three say yes: exit 0, as before', () => {
