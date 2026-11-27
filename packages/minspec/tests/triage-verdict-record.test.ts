@@ -67,7 +67,15 @@ interface TriageRun {
 /** Drive scripts/triage-inbox.sh for one issue with stubbed `gh` and `claude`. */
 function runTriage(
   verdictBlock: string,
-  opts: { failBatchRemove?: boolean; labels?: string[]; rawLabels?: unknown; title?: string; scripts?: string } = {},
+  opts: {
+    failBatchRemove?: boolean;
+    labels?: string[];
+    /** Labels the issue wears on every read AFTER the first (labels added while triage ran). */
+    laterLabels?: string[];
+    rawLabels?: unknown;
+    title?: string;
+    scripts?: string;
+  } = {},
 ): TriageRun {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-triage-'));
   const bin = path.join(dir, 'bin');
@@ -80,6 +88,9 @@ function runTriage(
     labels: 'rawLabels' in opts ? opts.rawLabels : (opts.labels ?? ['inbox']).map((name) => ({ name })),
   });
   fs.writeFileSync(path.join(dir, 'issue.json'), issueJson);
+  if (opts.laterLabels) {
+    fs.writeFileSync(path.join(dir, 'issue-later.json'), JSON.stringify({ title, body: BODY, labels: opts.laterLabels.map((name) => ({ name })) }));
+  }
   fs.writeFileSync(path.join(dir, 'agent-out.txt'), verdictBlock);
   // Triage asks GitHub who wrote this issue's text before it triages it, in a read of
   // its own, and triages only when every one of them is on the list in
@@ -114,7 +125,9 @@ function runTriage(
 set -u
 sub="\${2:-}"
 case "$sub" in
-  view) echo "view" >> "$STUB_LOG"; cat "$STUB_DIR/issue.json" ;;
+  view)
+    echo "view" >> "$STUB_LOG"
+    if [[ -f "$STUB_DIR/issue-later.json" && "$(grep -c '^view$' "$STUB_LOG")" -gt 1 ]]; then cat "$STUB_DIR/issue-later.json"; else cat "$STUB_DIR/issue.json"; fi ;;
   graphql)
     case "$*" in
       *LabeledEvent*) cat "$STUB_DIR/label-events.json" ;;
@@ -258,7 +271,7 @@ describe('triage-inbox.sh writes the verdict record dispatch requires (#983)', (
   });
 
   it('an agent-ready verdict clears needs-human-review (so a re-triage un-holds the issue)', () => {
-    const run = runTriage(verdict());
+    const run = runTriage(verdict(), { labels: ['inbox', 'needs-human-review', 'needs-review', 'needs-info'] });
     const add = run.calls.find((c) => c.includes('add=[role:dev,agent-ready]'));
     expect(add, run.calls.join('\n')).toBeTruthy();
     const removed = run.calls.find((c) => /remove=\[[^\]]+\]/.test(c));
@@ -310,7 +323,9 @@ describe('triage-inbox.sh writes the verdict record dispatch requires (#983)', (
   });
 
   it('the specify verdict clears plain agent-ready (the two ready classes never co-exist)', () => {
-    const run = runTriage(verdict({ tier: 'T3', decision: 'agent-ready' }));
+    const run = runTriage(verdict({ tier: 'T3', decision: 'agent-ready' }), {
+      labels: ['inbox', 'agent-ready', 'needs-human-review'],
+    });
     const removed = run.calls.find((c) => /remove=\[[^\]]+\]/.test(c));
     expect(removed).toContain('agent-ready');
     expect(removed).toContain('needs-human-review');
@@ -318,23 +333,38 @@ describe('triage-inbox.sh writes the verdict record dispatch requires (#983)', (
   });
 
   it('a T1 verdict still clears any stale agent-ready-specify', () => {
-    const run = runTriage(verdict());
+    const run = runTriage(verdict(), { labels: ['inbox', 'agent-ready-specify'] });
     const removed = run.calls.find((c) => /remove=\[[^\]]+\]/.test(c));
     expect(removed).toContain('agent-ready-specify');
+  });
+
+  it('names only labels the issue carries — absent ones (agent-crashed...) never reach gh (#4097)', () => {
+    const run = runTriage(verdict(), { labels: ['inbox', 'needs-review'] });
+    const removed = run.calls.find((c) => /remove=\[[^\]]+\]/.test(c)) ?? '';
+    expect(removed).toBe('edit add=[] remove=[inbox,needs-review]');
+  });
+
+  it('removes a label added WHILE triage ran, absent from the first read of the issue', () => {
+    // dispatch can add needs-human-review during the slow classify call; it countermands a
+    // valid verdict, so the removal list must come from the issue as it is NOW.
+    const run = runTriage(verdict(), { labels: ['inbox'], laterLabels: ['inbox', 'needs-human-review'] });
+    const removed = run.calls.find((c) => /remove=\[[^\]]+\]/.test(c)) ?? '';
+    expect(removed).toContain('needs-human-review');
+    expect(removed).toContain('inbox');
   });
 
   it('a rejected BATCH label removal falls back to one-at-a-time, so inbox still clears', () => {
     // `gh` resolves label names against the repo and fails the WHOLE request if one
     // is unknown there — which would leave every superseded label in place, `inbox`
     // included, and re-triage this issue on every drain cycle forever.
-    const run = runTriage(verdict(), { failBatchRemove: true });
+    const run = runTriage(verdict(), { failBatchRemove: true, labels: ['inbox', 'needs-human-review'] });
     const singles = run.calls.filter((c) => /remove=\[[^,\]]+\]$/.test(c));
     expect(singles.some((c) => c.includes('remove=[inbox]'))).toBe(true);
     expect(singles.some((c) => c.includes('remove=[needs-human-review]'))).toBe(true);
   });
 
   it('a needs-info verdict clears agent-ready rather than leaving a contradiction', () => {
-    const run = runTriage(verdict({ decision: 'needs-info' }));
+    const run = runTriage(verdict({ decision: 'needs-info' }), { labels: ['inbox', 'agent-ready'] });
     expect(run.calls.some((c) => c.includes('add=[role:dev,needs-info,hold:info]'))).toBe(true);
     expect(run.calls.find((c) => /remove=\[[^\]]+\]/.test(c))).toContain('agent-ready');
   });
