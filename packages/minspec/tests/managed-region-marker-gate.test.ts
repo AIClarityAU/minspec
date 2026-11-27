@@ -21,7 +21,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { generateHarnessFiles, checkManagedRegionMarkers, refreshHarnessFiles } from '../src/lib/scaffold';
+import { generateHarnessFiles, checkManagedRegionMarkers, refreshHarnessFiles, rescaffoldManagedRegionFile } from '../src/lib/scaffold';
 import {
   MANAGED_REGION_TEMPLATES,
   SELF_HOSTED_TEMPLATE_NAMES,
@@ -148,26 +148,75 @@ describe('self-hosted template sources are never marker-wrapped (#767)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  const selfHosted = MANAGED_REGION_TEMPLATES.find((t) => SELF_HOSTED_TEMPLATE_NAMES.includes(t.name))!;
+  const selfHostedTpls = MANAGED_REGION_TEMPLATES.filter((t) => SELF_HOSTED_TEMPLATE_NAMES.includes(t.name));
 
-  it('Refresh leaves a raw template source untouched in a repo carrying the generator', () => {
-    generateHarnessFiles(tmpDir);
-    fs.mkdirSync(path.join(tmpDir, 'scripts'), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, 'scripts', 'gen-ci-templates.mjs'), '// generator\n');
-    const full = path.join(tmpDir, selfHosted.outputPath);
-    fs.mkdirSync(path.dirname(full), { recursive: true });
-    fs.writeFileSync(full, selfHosted.content);
-    refreshHarnessFiles(tmpDir);
-    expect(fs.readFileSync(full, 'utf-8')).toBe(selfHosted.content);
+  function markSelfHosting(root: string): void {
+    fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'scripts', 'gen-ci-templates.mjs'), '// generator\n');
+    const gen = path.join(root, 'packages', 'minspec', 'src', 'lib');
+    fs.mkdirSync(gen, { recursive: true });
+    fs.writeFileSync(path.join(gen, 'ci-review-templates.ts'), '// embedded\n');
+  }
+
+  it('every SELF_HOSTED_TEMPLATE_NAMES entry names a real managed template (skip/read lists cannot drift)', () => {
+    expect(selfHostedTpls.map((t) => t.name).sort()).toEqual([...SELF_HOSTED_TEMPLATE_NAMES].sort());
   });
 
-  it('a downstream repo (no generator) still gets the markers', () => {
+  it('Refresh leaves every raw source untouched, does not re-create deleted ones, and reports the skip', () => {
     generateHarnessFiles(tmpDir);
-    const full = path.join(tmpDir, selfHosted.outputPath);
-    fs.writeFileSync(full, selfHosted.content);
+    markSelfHosting(tmpDir);
+    const [deleted, ...rest] = selfHostedTpls;
+    for (const t of rest) {
+      const full = path.join(tmpDir, t.outputPath);
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, t.content);
+    }
+    fs.rmSync(path.join(tmpDir, deleted.outputPath), { force: true });
+    const warnings = refreshHarnessFiles(tmpDir);
+    for (const t of rest) {
+      expect(fs.readFileSync(path.join(tmpDir, t.outputPath), 'utf-8')).toBe(t.content);
+    }
+    expect(fs.existsSync(path.join(tmpDir, deleted.outputPath))).toBe(false);
+    const notice = warnings.find((w) => w.kind === 'self-hosted-skipped');
+    expect(notice).toBeDefined();
+    expect([...(notice!.outputPaths ?? [])].sort()).toEqual(selfHostedTpls.map((t) => t.outputPath).sort());
+  });
+
+  it('first init in a self-hosting repo does not scaffold the sources', () => {
+    markSelfHosting(tmpDir);
+    generateHarnessFiles(tmpDir);
+    for (const t of selfHostedTpls) {
+      expect(fs.existsSync(path.join(tmpDir, t.outputPath))).toBe(false);
+    }
+  });
+
+  it('consent-gated rescaffold refuses a self-hosted source', () => {
+    markSelfHosting(tmpDir);
+    const t = selfHostedTpls[0];
+    expect(rescaffoldManagedRegionFile(tmpDir, t.outputPath)).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, t.outputPath))).toBe(false);
+  });
+
+  it('one generator file alone (a copy, not minspec own repo) does not trigger the skip', () => {
+    generateHarnessFiles(tmpDir);
+    fs.mkdirSync(path.join(tmpDir, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'scripts', 'gen-ci-templates.mjs'), '// copy\n');
+    const warnings = refreshHarnessFiles(tmpDir);
+    expect(warnings.some((w) => w.kind === 'self-hosted-skipped')).toBe(false);
+  });
+
+  it('a downstream repo (no generator) still gets the markers on every template', () => {
+    generateHarnessFiles(tmpDir);
+    for (const t of selfHostedTpls) {
+      const full = path.join(tmpDir, t.outputPath);
+      fs.mkdirSync(path.dirname(full), { recursive: true });
+      fs.writeFileSync(full, t.content);
+    }
     refreshHarnessFiles(tmpDir);
-    expect(fs.readFileSync(full, 'utf-8')).toContain(
-      managedRegionStartMarker(selfHosted.name, selfHosted.commentStyle),
-    );
+    for (const t of selfHostedTpls) {
+      expect(fs.readFileSync(path.join(tmpDir, t.outputPath), 'utf-8')).toContain(
+        managedRegionStartMarker(t.name, t.commentStyle),
+      );
+    }
   });
 });

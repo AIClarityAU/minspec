@@ -1386,6 +1386,11 @@ export async function surfaceManagedRegionWarning(
   // announced "MinSpec: re-scaffolded <path>." A success message that can never
   // be true is the never-wrong failure, and it was being offered as the remedy
   // for the one notice that must not be dismissed by clicking the obvious button.
+  if (w.kind === 'self-hosted-skipped') {
+    await vscode.window.showInformationMessage(`[${label}] ${w.message}`);
+    return;
+  }
+
   if (w.kind === 'preserved-without-baseline') {
     const paths = w.outputPaths && w.outputPaths.length > 0 ? w.outputPaths : [w.outputPath];
     const openAction = paths.length > 1 ? OPEN_FILES_ACTION : OPEN_FILE_ACTION;

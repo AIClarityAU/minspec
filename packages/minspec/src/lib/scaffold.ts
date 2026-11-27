@@ -669,7 +669,8 @@ export interface ManagedRegionWarning {
     | 'missing-markers'
     | 'untracked'
     | 'project-name-mismatch'
-    | 'preserved-without-baseline';
+    | 'preserved-without-baseline'
+    | 'self-hosted-skipped';
 }
 
 /** The notice raised when a declared machine-local path is removed from the index. */
@@ -868,7 +869,19 @@ function missingMarkersMessage(outputPath: string): string {
 function isSelfHostedTemplate(rootDir: string, tpl: ManagedRegionTemplate): boolean {
   return (
     SELF_HOSTED_TEMPLATE_NAMES.includes(tpl.name) &&
-    fs.existsSync(path.join(rootDir, 'scripts', 'gen-ci-templates.mjs'))
+    fs.existsSync(path.join(rootDir, 'scripts', 'gen-ci-templates.mjs')) &&
+    fs.existsSync(path.join(rootDir, 'packages', 'minspec', 'src', 'lib', 'ci-review-templates.ts'))
+  );
+}
+
+/** The notice raised when Refresh deliberately leaves self-hosted template sources alone (#767). */
+export function selfHostedSkippedMessage(paths: readonly string[]): string {
+  return (
+    `Left ${paths.length} file(s) untouched because this repo generates MinSpec's own templates ` +
+    'from them (scripts/gen-ci-templates.mjs + ci-review-templates.ts present): ' +
+    `${paths.join(', ')}. Marker-wrapping them would corrupt the embedded templates. ` +
+    'They are not re-scaffolded, healed or updated by Refresh; if this is NOT minspec\'s own repo, ' +
+    'delete those two generator files to restore normal Refresh.'
   );
 }
 
@@ -1116,6 +1129,7 @@ function tryAutoHealManagedRegion(
  */
 function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): ManagedRegionWarning[] {
   const warnings: ManagedRegionWarning[] = [];
+  const selfHostedSkipped: string[] = [];
 
   for (const tpl of MANAGED_REGION_TEMPLATES) {
     // Skip a tool-gated template whose tool the project does not use (#241): never
@@ -1123,7 +1137,10 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
     // user removed by uninstalling the tool. Tool-independent templates are unconditional.
     if (tpl.condition && !tpl.condition(tools)) continue;
     // Minspec's own repo: these files are the raw template SOURCES — never wrap (#767).
-    if (isSelfHostedTemplate(rootDir, tpl)) continue;
+    if (isSelfHostedTemplate(rootDir, tpl)) {
+      selfHostedSkipped.push(tpl.outputPath);
+      continue;
+    }
 
     const fullPath = path.join(rootDir, tpl.outputPath);
 
@@ -1165,6 +1182,15 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
     }
   }
 
+  if (selfHostedSkipped.length > 0) {
+    warnings.push({
+      outputPath: selfHostedSkipped[0],
+      outputPaths: selfHostedSkipped,
+      message: selfHostedSkippedMessage(selfHostedSkipped),
+      kind: 'self-hosted-skipped',
+    });
+  }
+
   return warnings;
 }
 
@@ -1181,6 +1207,8 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
 export function rescaffoldManagedRegionFile(rootDir: string, outputPath: string): boolean {
   const tpl = MANAGED_REGION_TEMPLATES.find((t) => t.outputPath === outputPath);
   if (!tpl) return false;
+  // A self-hosted source is the raw input of the template generator (#767): never wrap it.
+  if (isSelfHostedTemplate(rootDir, tpl)) return false;
   writeManagedFile(path.join(rootDir, tpl.outputPath), tpl);
   return true;
 }
