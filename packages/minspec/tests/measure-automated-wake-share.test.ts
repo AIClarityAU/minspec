@@ -53,6 +53,13 @@ describe('idleWakes', () => {
     expect(idleWakes(jl([a, { type: 'user', turnOrigin: 'human' }, rewrite('b', '2026-01-01T00:30:00Z')]))).toEqual([]);
     expect(idleWakes(jl([a, { type: 'system', subtype: 'compact_boundary' }, { type: 'user', turnOrigin: 'human' }, rewrite('b', '2026-01-01T02:00:00Z')]))).toEqual([]);
   });
+  it('classes a rewrite after a tool round-trip as unlabelled and excludes it from the share', () => {
+    const tr = { type: 'user', message: { content: [{ type: 'tool_result' }] } };
+    const ws = idleWakes(jl([a, tr, rewrite('b', '2026-01-01T02:00:00Z')]));
+    expect(ws.map((w) => w.wake)).toEqual(['unlabelled']);
+    const s = summarize([...ws, { gap: 7200, tokens: 1, wake: 'human' }]);
+    expect(s.headline).toBe(0);
+  });
   it('ignores sidechain user records', () => {
     const text = jl([a, { type: 'user', isSidechain: true, turnOrigin: 'sdk' }, { type: 'user', turnOrigin: 'human' }, rewrite('b', '2026-01-01T02:00:00Z')]);
     expect(idleWakes(text).map((w) => w.wake)).toEqual(['human']);

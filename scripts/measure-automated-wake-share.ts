@@ -118,6 +118,9 @@ export function idleWakes(text: string, idleS = DEFAULT_IDLE_S): Wake[] {
     const r = classify(turns[i - 1], turns[i]);
     if (!r || r.gap <= idleS) continue;
     if (r.mechanism === 'compaction' || r.mechanism === 'context-shrink' || r.mechanism === 'model-switch') continue;
+    // A rewrite that follows a tool round-trip has no wake record: only tool_result user
+    // records sit between the turns, and those are skipped above. It is therefore labelled
+    // 'unlabelled' and left out of the share's denominator (see summarize). Deliberate.
     const u = firstUserAfter.get(i - 1);
     out.push({ gap: r.gap, tokens: r.tokens, wake: u ? classifyWake(u) : 'unlabelled' });
   }
