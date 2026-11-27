@@ -422,7 +422,7 @@ describe('triage-inbox.sh routes a pipeline-blocker straight to build (pb1030)',
     expect(declined.calls.some((c) => c.includes('add=[role:dev,needs-review,hold:tier]'))).toBe(true);
     const info = runTriage(verdict({ tier: 'T3', decision: 'needs-info' }), { labels: ['inbox', 'pipeline-blocker'] });
     expect(info.calls.some((c) => c.includes('add=[role:dev,needs-info,hold:info]'))).toBe(true);
-  });
+  }, 30_000); // two real triage-inbox.sh runs (~1.5s idle, over the 5s default on a loaded CI runner: #4172)
 
   it('a label list that does not name pipeline-blocker in .name fails closed to the specify route', () => {
     // (A label list jq cannot read at all passes no --label: the gate test pins that
