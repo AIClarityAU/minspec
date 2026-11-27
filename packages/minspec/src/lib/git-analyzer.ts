@@ -110,8 +110,8 @@ function getExtension(filePath: string): string {
  * Root-level files get '.' as their directory.
  */
 function getDirectory(filePath: string): string {
-  const dir = path.dirname(filePath);
-  return dir || '.';
+  // path.dirname never returns '' (root-level files yield '.').
+  return path.dirname(filePath);
 }
 
 /**
@@ -416,12 +416,12 @@ export async function buildConsequenceInput(
 }
 
 /** Best-effort UTF-8 file read; returns undefined on any failure. */
-async function fsReadFile(absPath: string): Promise<string | undefined> {
+export async function fsReadFile(absPath: string): Promise<string | undefined> {
   try {
     // Lazy import keeps fs out of the module's top-level surface; this is the IO
     // layer, so fs is permitted here (analyzers stay pure — INV-1).
     const fs = await import('fs');
-    return fs.promises.readFile(absPath, 'utf-8');
+    return await fs.promises.readFile(absPath, 'utf-8');
   } catch {
     return undefined;
   }

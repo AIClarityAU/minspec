@@ -34,13 +34,14 @@ affects: [packages/minspec/src/lib/ruleset-advisor.ts, packages/minspec/src/lib/
 > names a **symbol** first and gives the line only as it stood at `8bfc5cc5`, because a
 > line number alone rots silently; the line-level reference gap is #1252).
 >
-> **What a reader should check:** D-11 (an agent-recorded pick of the recommended option under DR-123; ratified at approval), the rewritten FR-7 /
+> **What a reader should check:** D-11 (option (a), the recommended option, with both lines of the founder's relayed answer quoted; ratified at approval), the rewritten FR-7 /
 > INV-9 / AC-6, and the rewritten AC-2. Everything else is an anchor or wording correction.
 >
-> **Revision 2026-11-26 (D-11 recorded; toggle request moved out).** D-11 carries the
-> DR-123 agent-recorded pick of option (a). A request to surface the auto-merge opt-in as an
-> owner-facing toggle is not a requirement of this spec; it is tracked against SPEC-030 /
-> DR-061 in [#4088](https://github.com/AIClarityAU/minspec/issues/4088).
+> **Revision 2026-11-26 (D-11 recorded with the founder's relayed words).** D-11 carries
+> option (a), the option marked (rec), and quotes both lines of the founder's answer as
+> relayed through runner-queue item in108. His toggle line is a requirement of
+> [SPEC-420](../SPEC-420-automerge-owner-toggle/requirements.md) (owner-facing auto-merge
+> toggle), not of this spec; see D-11.
 >
 > Note on protection reads: verify `main` protection via
 > `repos/{owner}/{repo}/rules/branches/main` (rulesets). This org uses rulesets, not classic
@@ -299,9 +300,10 @@ finding: the gate checks the thing it happens to know about and is silent on the
   it inflates scope, it is cleanly separable to its own T2 issue — the governance-content FRs
   do not depend on it.)*
 
-- *Not a requirement here:* an owner-facing auto-merge toggle on the onboarding/settings
-  page belongs to SPEC-030 / DR-061; tracked in
-  [#4088](https://github.com/AIClarityAU/minspec/issues/4088).
+- *Not a requirement here:* the owner-facing, off-by-default auto-merge toggle on the
+  onboarding/setup page that the founder asked for with D-11 is specified under
+  [SPEC-420](../SPEC-420-automerge-owner-toggle/requirements.md) (owner-facing auto-merge
+  toggle; tracked in [#4088](https://github.com/AIClarityAU/minspec/issues/4088)).
 
 ### Out of scope (explicitly)
 
@@ -374,11 +376,25 @@ finding: the gate checks the thing it happens to know about and is silent on the
 - **D-11 — Recorded selection (answered, not ratified).** **Recorded selection: option (a),
   Off, owner opts in:** deny on both auto-merge switches in a freshly scaffolded repo, no
   automatic flip; turning either on stays a deliberate per-repo act by its owner. It is the
-  option marked (rec). An agent copied it from the runner-queue answer to item in108
-  (2026-11-26) and no human chose it in this spec. Authority: founder decision, queue item
-  clarsel (2026-11-17), under which an agent's recorded pick of the (rec) option closes a T3
-  Clarify question (DR-123). Approving this spec ratifies the pick; the approver may change it
-  before approving. Options (b) and (c) are not selected; INV-9 and FR-7 stand as written.
+  option marked (rec).
+  **The founder's answer, relayed through the runner queue (item in108, 2026-11-26).** The
+  item records his pick in the proxy's AskUserQuestion, verbatim: "SPEC-033 D-11: founder
+  picked (a) Off, owner opts in (Recommended): deny on both auto-merge switches in a freshly
+  scaffolded repo, no automatic flip; turning either on stays a deliberate per-repo act by
+  its owner". A later update to the same item records the line he added, verbatim: "it
+  should be off by default, but shown in the onboarding/setup page as one of several easy
+  toggles".
+  **What this record can and cannot claim.** Both lines reached this spec through the queue,
+  which any session can write, and no provenance mechanism in this repo attests a queue
+  answer (the review panel's trusted provenance covers approval sidecars and DR acceptance
+  only), so a queue item alone cannot carry consent (DR-123). This spec therefore records
+  option (a) in DR-123's form: the selection is copied from the relayed answer, it matches
+  the (rec) option, and the founder's approval of SPEC-033 ratifies it; he may change it
+  before approving. His added line asks for the toggle surface, which this spec does not
+  own: it is a requirement of
+  [SPEC-420](../SPEC-420-automerge-owner-toggle/requirements.md) (owner-facing auto-merge
+  toggle), which quotes the same line. Options (b) and (c) are not selected; INV-9 and FR-7
+  stand as written.
   Original question and options follow.
   **What auto-merge posture does a freshly scaffolded repo get, now that the #703
   flip condition has fired?** #703 resolved: `pr-gate` until #489/#490/#491/#466 close,
@@ -557,8 +573,9 @@ D-11's recorded selection.
   selection:** option (a) adds no scaffold write, so SPEC-063's removal list needs nothing for
   it.
 - **Owner-facing auto-merge toggle (founder request, 2026-11-26).** Not in this spec: it is
-  SPEC-030's surface (DR-061 Follow-ups), with SPEC-042 / SPEC-063 amendments at their next
-  revision. Any ruleset write it needs stays inside D-1/D-2's security-reviewed opt-in slice.
+  specified under [SPEC-420](../SPEC-420-automerge-owner-toggle/requirements.md)
+  (owner-facing auto-merge toggle) on SPEC-030's surface (DR-061 Follow-ups), with SPEC-042 /
+  SPEC-063 amendments at their next revision. Any ruleset write it needs stays inside D-1/D-2's security-reviewed opt-in slice.
   Tracked in [#4088](https://github.com/AIClarityAU/minspec/issues/4088).
 - **FR-9 command-merge is separable** (D-10) — if Plan finds collapsing the two init/refresh
   commands inflates SPEC-033, split it to its own T2 issue; the governance-content FRs
@@ -589,13 +606,14 @@ Recorded because nobody reviewed these choices live (DR-086 §4).
 - **Edit the body but leave `status: implementing`.** Rejected: the stored approval hash
   covers the old bytes, so the file would claim an approval it no longer has.
 
-## Alternatives rejected in the 2026-11-26 revision (D-11 recorded; toggle request moved out)
+## Alternatives rejected in the 2026-11-26 revision (D-11 recorded with the founder's relayed words)
 
 Recorded because nobody reviewed these choices live (DR-086 §4).
 
-- **Record D-11 as the founder's own verbatim answer.** Rejected: the queue item is not
-  citable from the repo and a queue item cannot carry consent (DR-123), so D-11 keeps the
-  agent-recorded form of the (rec) option, ratified at approval.
+- **Record D-11 as the founder's own answer, with consent claimed in this spec.** Rejected:
+  no provenance mechanism in this repo attests a queue answer and a queue item cannot carry
+  consent (DR-123), so D-11 keeps DR-123's form of the (rec) option, ratified at approval.
+  His words are still recorded, both lines verbatim, labelled as relayed through the queue.
 - **Keep the founder's toggle request here as a new requirement.** Rejected: DR-123 lets an
   agent record only the recommended option, not turn an extra request into binding scope;
   the `autoMerge.native` owner surface already belongs to SPEC-030 (DR-061 Follow-ups); and

@@ -43,8 +43,9 @@
 #     entirely. It is allowlisted in the guard for that reason.
 #   * `git push` — push identity comes from git credentials and commit
 #     authorship, not from `gh`. Out of scope.
-#   * `--admin` merges — remain a HUMAN action (founder decision, 2026-07-28).
-#     Nothing here grants or eases that.
+#   * `--admin` merges — only through the runner helper under the bot-merge
+#     decision record (DR-112, bot merges under three conditions); nothing here
+#     grants or eases that.
 #
 # ── Failure policy: closed and loud, at STARTUP ───────────────────────────────
 # If a token cannot be minted, scripts abort before doing any work rather than

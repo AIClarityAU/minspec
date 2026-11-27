@@ -877,7 +877,7 @@ const CONSTITUTION_PROPOSE_NUDGE_SKIP = 'minspec.constitutionProposeNudge.skip';
 
 /**
  * #320: surface the empty-constitution nudge with two offer-to-fix actions — a
- * deterministic "Propose draft" seed and an LLM-powered "Generate with AI…"
+ * deterministic "Propose draft" seed and an LLM-powered "Prepare AI prompt…"
  * hand-off — plus "Don't ask again".
  *
  * Best-effort + advisory: a failure here never affects activation, the toast is
