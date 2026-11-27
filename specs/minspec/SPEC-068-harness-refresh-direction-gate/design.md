@@ -67,7 +67,7 @@ every surface that ships a bundle.
 | Validate entry and its CI site | root `package.json` `validate` = `npx tsx scripts/validate-frontmatter.ts`; `ci.yml` step "Validate frontmatter" in the `lint` job |
 | Required checks on `main` | `lint`, `test`, `MinSpec SDD validation`, `ai-review`, `ready-to-merge`, `build` (read from `/rules/branches/main` on 2026-10-28) |
 | Package script | `packages/minspec/package.json` `prepackage` = `npm run supply-chain:check`, `package` = `npm run build && vsce package --no-dependencies` |
-| Highest validate rule number | Rule 24 (`scripts/validate-frontmatter.ts:1060`) |
+| Highest validate rule number | Rule 30 (`scripts/validate-frontmatter.ts:701`, at origin/main `c2ce4cb4`); next free is Rule 31 |
 
 ## Clarify decisions taken
 
@@ -313,7 +313,7 @@ above shows the hold notice and stops: no `Review and write` action exists on th
 
 | Surface | Call | Required on `main`? |
 |---|---|---|
-| `npm run validate` | Rule 25 in `scripts/validate-frontmatter.ts`: `checkTemplateEpoch()`; `fail(...)` with its message when `!ok`. No `try { } catch { stay silent }`: a throw is itself a failure (the Rule 12 / #871 shape) | yes, CI `lint` |
+| `npm run validate` | Rule 31 in `scripts/validate-frontmatter.ts`: `checkTemplateEpoch()`; `fail(...)` with its message when `!ok`. No `try { } catch { stay silent }`: a throw is itself a failure (the Rule 12 / #871 shape) | yes, CI `lint` |
 | vitest | `harness-provenance.test.ts`: `expect(checkTemplateEpoch().ok).toBe(true)` on the live corpus | yes, CI `test` |
 | packaging | `scripts/check-template-epoch.ts`, run from `prepackage` after the supply-chain check | n/a, local and release |
 | merge order | `scripts/check-template-epoch.ts --base <ref>` in a new workflow (below) | advisory until added to the ruleset |
@@ -355,7 +355,7 @@ unchanged when they throw, so the gate's answer does not depend on git.
 | `packages/minspec/src/lib/scaffold.ts` | verdict, holds, notice, baseline overlay, record writes | `affects` |
 | `packages/minspec/src/lib/auto-bootstrap.ts` | sentinel helper, `commandArg` origin | `affects` |
 | `packages/minspec/src/commands/init.ts` | override flow, summary toast, `deps.origin` | `affects` |
-| `scripts/validate-frontmatter.ts` | Rule 25 | `affects` |
+| `scripts/validate-frontmatter.ts` | Rule 31 | `affects` |
 | `.github/workflows/ci.yml` | **no change needed**: its `lint` job already runs `npm run validate`, and `test` already runs vitest. Listed in `affects` at Specify; this plan found no edit is required | `affects` |
 | `scripts/check-template-epoch.ts` | new: package gate and merge-order mode | not listed. Needed for DQ-1 and the Risks row; a script calling `checkTemplateEpoch`, no rule of its own |
 | `packages/minspec/package.json` | `prepackage` runs the script | not listed. DQ-1 |

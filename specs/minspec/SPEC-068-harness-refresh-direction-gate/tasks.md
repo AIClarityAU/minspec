@@ -58,12 +58,12 @@ Shared rules for every task:
 
 ## 2 - The validate gate (FR-2, INV-4)
 
-- [ ] **2.1** `scripts/validate-frontmatter.ts` - Rule 25: call `checkTemplateEpoch()` and
+- [ ] **2.1** `scripts/validate-frontmatter.ts` - Rule 31: call `checkTemplateEpoch()` and
   `fail()` with its message when `!ok`. A thrown error is reported as a failure naming the
   rule, never caught silently (the Rule 12 shape).
   *Done when:* `npm run validate` passes on the branch; in a scratch copy of the worktree,
   editing one line of `CLAUDE_MD_TEMPLATE` in `template-registry.ts` makes `npm run
-  validate` exit non-zero with the Rule 25 message, and the pull request quotes that output.
+  validate` exit non-zero with the Rule 31 message, and the pull request quotes that output.
   The vitest case from 1.2 is the second required-check witness (CI `test` job); `lint`
   runs this rule.
 
