@@ -199,7 +199,9 @@ issue_branch_mark_held() {
 # the tree. Otherwise a new run that writes no summary would have the OLD one posted as its
 # own, and the old signals would feed the merge gate. Nothing is deleted; the tree's own
 # work (commits, modified and untracked files) is left exactly as it is. Prints the
-# directory when something was moved; returns 1, moving nothing, when it cannot be made.
+# directory when something was moved. Returns 1 when the directory cannot be made (nothing
+# moved) or a move fails (the files before it are already in the directory; none is lost,
+# and the caller defers, so a later reuse finishes the job).
 issue_branch_set_aside_artifacts() {
   local wt="${1%/}" root="${2%/}" dest f found=()
   for f in .agent-summary.md .review-signals.json .auto-merge-signals.json .agent.log; do
