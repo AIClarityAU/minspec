@@ -64,7 +64,11 @@ describe('hold:* labels (#1002)', () => {
     // the one time it is real. Flagged `medium` on PR #1291.
     const src = read('scripts/triage-inbox.sh');
     expect(src).toMatch(/CURRENT_LABELS=\$\(echo "\$ISSUE_JSON" \| jq -r/);
-    expect(src).toMatch(/\[\[ ",\$\{CURRENT_LABELS\}," == \*",hold:\$\{h\},"\* \]\] \|\| continue/);
+    // #4097: the filter covers the WHOLE superseded list (agent-crashed etc. do not
+    // exist repo-wide either), applied once after the hold:* labels are appended.
+    expect(src).toMatch(/\[\[ ",\$\{CURRENT_LABELS\}," == \*",\$\{_l\},"\* \]\] && _kept\+=/);
+    expect(src).toMatch(/SUPERSEDED="\$_kept"/);
+    expect(src).toMatch(/if \[\[ -n "\$SUPERSEDED" \]\] && ! gh issue edit/);
   });
 
   it('the supersede list covers every emitted non-none hold', () => {
