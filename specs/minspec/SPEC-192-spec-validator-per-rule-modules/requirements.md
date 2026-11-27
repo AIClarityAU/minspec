@@ -6,7 +6,7 @@ tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the validator is the methodology's completeness gate; this makes it cheap to change safely
 depends_on: [SPEC-040, DR-012, DR-064]  # SPEC-040 owns the import-cycle gate this spec must keep green; DR-012 the tier-aware completeness validator being split; DR-064 the Tier-0 layer rules the new modules sit under
-relates_to: [SPEC-038, SPEC-134, SPEC-136, SPEC-047, SPEC-051, SPEC-046, DR-066, "#693", "#137", "#651", "#153", "#108", "#1446"]
+relates_to: [SPEC-038, SPEC-134, SPEC-136, SPEC-047, SPEC-051, SPEC-046, DR-066, "#693", "#137", "#651", "#153", "#108", "#1446", "#988", "#1595"]
 # Ownership (SPEC-038) is deliberately NOT declared yet: the file layout is Clarify
 # question CQ-1 below, and every path depends on its answer. Plan declares
 # `implements:`/`affects:` once CQ-1 is settled.
@@ -22,37 +22,47 @@ phases:
 
 ## In plain terms
 
-The spec checker is one 1,777-line file. Every new check edits it, and the checks that
+The spec checker is one 1,883-line file. Every new check edits it, and the checks that
 guess at prose (does this spec describe a page? an API?) have been fixed by shipping and
 re-fixing, six times in one day. This splits each check into its own small file behind
 the same public functions, and adds a folder of example specs, each marked "this check
-must fire" or "must stay quiet", that CI runs. Cost: about 25 new files, and a merge
-clash with four approved specs that also edit this file. Left out: changing what any
-check reports. Riskiest assumption: every check can move with byte-identical output.
+must fire" or "must stay quiet", that CI runs. The third part of the issue (moving
+`slugify` out of the spec manager) has already landed on main and needs no work here.
+Cost: about 25 new files, and a merge clash with the specs that also edit this file.
+Left out: changing what any check reports. Riskiest assumption: every check can move
+with byte-identical output.
 
 > **SPECIFICATION ONLY.** Nothing is built by the session that wrote this. A human reads
 > it and approves it through the normal spec-approval gate before any design or code.
 > The questions under [Decisions needed (Clarify)](#decisions-needed-clarify) are the
 > reason for the read.
 
-**Origin.** Issue #693 (2026-07-13 malleability audit). Baseline: written against
-`origin/main` `5f792386` (2026-10-15).
+**Origin.** Issue #693 (2026-07-13 malleability audit). Baseline: first written against
+`origin/main` `5f792386` (2026-10-15); refreshed 2026-11-27 against `origin/main`
+`7322e031`. Every line number below is at `7322e031`.
 
 ## One-Sentence Scope
 
 Restructure `packages/minspec/src/lib/spec-validator.ts` into a thin public façade over
 one Tier-0 module per validation rule plus separate heuristic-detector modules, with
-**no change to any violation it reports**; add a committed fire/quiet fixture corpus run
-by CI for every heuristic rule; and move `slugify` out of `spec-manager.ts` into a leaf
-util so `epic-manager`/`adr-manager`/`epic-backfill` stop importing the spec manager.
+**no change to any violation it reports**, and add a committed fire/quiet fixture corpus
+run by CI for every heuristic rule. (The issue's third item, re-homing `slugify`, is
+already on main; Part C only keeps it that way.)
 
-## Context - what the code does today (read at `5f792386`, not inferred)
+## Context - what the code does today (read at `7322e031`, not inferred)
 
 The issue's figures are from July and have moved. Current state:
 
-- **Size.** `spec-validator.ts` is **1,777 lines** (issue said 1,303). `validateSpec`
-  starts at `spec-validator.ts:1157` and runs to about `:1384` (~228 lines). The file
-  exports 25 symbols. 38 commits have touched it since 2026-04-01.
+- **Size.** `spec-validator.ts` is **1,883 lines** (issue said 1,303; 1,777 at the first
+  draft of this spec). `validateSpec` runs from `spec-validator.ts:1261` to `:1455`
+  (195 lines). The file has 29 top-level `export` statements. 40 commits have touched it
+  since 2026-04-01; it is still growing.
+- **It grew two rules while this spec waited.** `abfbe350` (#1595) added
+  `validateImplementCloseout` (`:1164`), `implementCloseoutKind` (`:1136`) and the
+  `CloseoutTaskTally` type, emitting `implement.finished-not-closed` and
+  `implement.phantom-hole`; `validateSpec` calls it at `:1288`. `72245712` (#1380) added
+  `violationsIntroducedByPhases` (`:1232`). Each edit went into the hotspot, which is the
+  pattern this spec exists to stop.
 - **Fix-thrash, confirmed.** `git log` shows on 2026-06-04/05: `61a47bba` ('rest' false
   positive, #108), `9c1ec7b3` (markdown table mistaken for an ascii box, #153),
   `f11f1415` (api/data over-match on polysemous prose, #153), `b2aed646`, `e58a1f09`
@@ -63,34 +73,41 @@ The issue's figures are from July and have moved. Current state:
   `acceptance.missing`, `aspect.{ux,api,data,architecture}.no-*`, `epic.missing`,
   `epic.unresolved`, `frontmatter.<field>.{missing,unknown,unresolved}`,
   `frontmatter.prose-line`, `implement.claimed-without-evidence`,
+  `implement.finished-not-closed`, `implement.phantom-hole`,
   `ownership.implements.{missing,invalid}`, `park-ref.dangling`, `section.<phase>.empty`,
   `shard-id.mismatch`, `status-claim.contradicted`, `status.cross-artifact.regression`,
   `status.inline-comment`, `status.mirror-drift`, `status.orphan-comment`,
   `split-coverage.<type>.missing`.
 - **Two kinds of entry point.** Per-spec: `validateSpec` (orchestrates the rest) plus the
   separately-exported `validateOwnership`, `validateStatusAnnotation`,
-  `validateFrontmatterProse`, `validateImplementEvidence`, `checkAcceptanceCriteria`,
-  `violationsIntroducedByApproval`. Corpus-level (take many files):
+  `validateFrontmatterProse`, `validateImplementEvidence`, `validateImplementCloseout`,
+  `implementCloseoutKind`, `checkAcceptanceCriteria`, `violationsIntroducedByApproval`,
+  `violationsIntroducedByPhases`. Corpus-level (take many files):
   `validateSplitLayoutCoverage`, `validateStatusMonotonicity`,
   `validateShardIdConsistency`, `validateStatusClaims`. The CI/commit path
   (`scripts/validate-frontmatter.ts`) imports several of these directly so the editor
   and CI cannot drift (#654); that sharing MUST survive.
 - **Heuristic code.** Aspect detection (`detectsUx`/`detectsApi`/`detectsData`,
-  keyword lists at `:97`–`:123`, `stripCodeSpans`, `wordBoundaryRe`), mockup detection
+  keyword lists at `:97`–`:123`, `wordBoundaryRe` `:126`, `stripCodeSpans` `:139`,
+  `detectsUx`/`detectsApi`/`detectsData` `:152`–`:179`), mockup detection
   (`MARKDOWN_TABLE_RE`, `BOX_GLYPH_RE`, `PLUS_FRAME_RE`, `markdownTableLineSet`,
-  `:224`–`:313`), frontmatter prose counting (`countFrontmatterProseLines`, `:794`),
+  `:224`–`:248`), frontmatter prose counting (`countFrontmatterProseLines`, `:809`),
   park-claim detection (`PARK_CLAIM_RE`, `:643`) and done-claim detection
-  (`claimRegex`, `CLAIM_WINDOW`, `:1698`–`:1718`). These are the ones that over-match.
-- **The import cycle in the issue no longer exists as written.** `spec-validator.ts`
-  imports nothing from `epic-manager` today (its imports are `spec`, `spec-vocabulary`,
-  `config`, `lifecycle`, `approval`, `ownership-path-rules`, `:13`–`:29`), and
-  `epicRefValue` already lives in `spec-vocabulary` (`epic-manager.ts:183` re-exports
-  it). `spec-layout.ts:8` → `spec-validator` is `import type` only. What remains is the
-  value edge `epic-manager.ts:4` → `spec-manager` for `slugify` (also
-  `adr-manager.ts:5`, `epic-backfill.ts:10`), which SPEC-040 FR-6 names as
-  "one-edit-away" fragility and defers. Verified: `npm run check:cycles` (SPEC-040
-  FR-2) at `5f792386` prints "110 modules scanned, 0 runtime import cycles". So Part C
-  below removes fragility; it does not break a live cycle.
+  (`CLAIM_WINDOW`, `claimRegex`, `:1806`–`:1824`). These are the ones that over-match.
+- **The issue's import cycle is gone, and its third item is already done.**
+  `spec-validator.ts` imports nothing from `epic-manager` (its imports are `spec`
+  (type), `spec-vocabulary`, `config`, `lifecycle`, `approval` (type),
+  `ownership-path-rules`, `:13`–`:29`), and `epicRefValue` lives in `spec-vocabulary`.
+  `slugify` was re-homed to the leaf `lib/slug.ts` (no imports) by `ca60e336`
+  (SPEC-040 FR-6, #988, PR #3830): `epic-manager.ts:4`, `adr-manager.ts:5` and
+  `epic-backfill.ts:10` import it from `./slug`, and `spec-manager.ts:78` re-exports it
+  for outside callers (the backfill-epics command still imports that re-export, which
+  is a command importing lib, not a cycle). The same commit added
+  `tests/import-cycle-dissolution.test.ts`, which pins that the slugify consumers import
+  nothing from `./spec-manager`. At `5f792386` `npm run check:cycles` printed "110
+  modules scanned, 0 runtime import cycles"; I did not re-run it at `7322e031` (no
+  installed dependencies in this checkout), so that it is still 0 is unverified here.
+  Part C below is therefore a guard against regression, not new work.
 - **Coverage.** `packages/minspec/tests/spec-validator.test.ts` is 1,587 lines; at least
   12 other test files and two src callers import from `spec-validator`.
 
@@ -133,8 +150,9 @@ The issue's figures are from July and have moved. Current state:
 - **FR-3 - One file per rule.** Each per-spec rule currently inlined in `validateSpec`
   (epic ref, closed-set frontmatter, status mirror drift, phase sections, acceptance
   criteria, aspect artifacts, park-ref, and the already-separate ownership / status
-  annotation / frontmatter prose / implement evidence) lives in its own module exporting
-  one `SpecRule`. A rule's module holds its own constants, regexes and helpers unless
+  annotation / frontmatter prose / implement evidence / implement closeout) lives in its
+  own module exporting one `SpecRule`. A rule's module holds its own constants, regexes
+  and helpers unless
   another rule shares them (then FR-5).
 - **FR-4 - An ordered registry, written by hand.** One module exports
   `SPEC_RULES: readonly SpecRule[]` listing every per-spec rule in the order
@@ -192,18 +210,17 @@ The issue's figures are from July and have moved. Current state:
   `id:`-uniqueness check: they live outside `specs/`, and any `id:` they carry uses a
   range or prefix Plan shows no corpus walker parses as a real spec id.
 
-### C. Re-home `slugify`
+### C. Keep the cycle dissolved (the `slugify` move is already on main)
 
-- **FR-14 - A leaf util.** `slugify` moves to a new Tier-0 module with no imports of its
-  own. `spec-manager.ts` keeps exporting `slugify` (re-export) so FR-1-style callers
-  outside `lib` do not change. `epic-manager.ts`, `adr-manager.ts` and
-  `epic-backfill.ts` import it from the new module, so none of the three imports
-  `spec-manager` for it. Behaviour is unchanged (the 50-character cap and trimming at
-  `spec-manager.ts:75`–`:87` included).
+- **FR-14 - No new module re-creates the cycle.** `slugify` already lives in
+  `lib/slug.ts` (`ca60e336`, #988). No module this spec adds may import
+  `spec-manager`, `epic-manager` or `spec-layout` at runtime, and none of the existing
+  `import-cycle-dissolution.test.ts` assertions may be edited.
 - **FR-15 - The cycle gate stays green and gains nothing to waive.** `npm run
-  check:cycles` passes after the change, and the value edge
-  `epic-manager → spec-manager` no longer exists. Whether a residual cycle exists today
-  was checked at Specify (none; see Context) and is re-checked by the gate on the PR.
+  check:cycles` passes on each implementing PR with no new allowlist entry. Splitting
+  one file into ~25 multiplies the import edges inside `lib/`, so a rule module that
+  imports the façade (or a sibling rule importing back through it) is the likely new
+  cycle; the façade imports rules, and rules never import the façade.
 
 ## Acceptance Criteria
 
@@ -232,8 +249,9 @@ The issue's figures are from July and have moved. Current state:
       three of the seeded classes.
 - [ ] AC-8 (FR-13): `npm run validate` output is identical with and without the corpus
       present (no new warnings, no duplicate-id finding).
-- [ ] AC-9 (FR-14/FR-15): `npm run check:cycles` passes; no file in `lib/` imports
-      `slugify` from `./spec-manager`.
+- [ ] AC-9 (FR-14/FR-15): `npm run check:cycles` passes with no new allowlist entry;
+      `import-cycle-dissolution.test.ts` passes unedited; a test asserts no rule,
+      detector or registry module imports `./spec-validator` (the façade).
 - [ ] AC-10: `npm test`, `npm run lint` and `npm run validate` pass.
 
 ## Invariants (must not break)
@@ -261,14 +279,16 @@ The issue's figures are from July and have moved. Current state:
 - **CQ-1 - Where the modules live.**
   - **a (rec)** keep `lib/spec-validator.ts` as the façade and put modules in a sibling
     directory `lib/spec-rules/` (rules) and `lib/spec-rules/detect/` (detectors). Every
-    import specifier and every approved spec's `affects:` line naming
-    `spec-validator.ts` (SPEC-134, SPEC-046, SPEC-051, SPEC-047, all `planning`) stays
-    valid. Cost: those specs' `affects:` will then point at a façade while the code
-    they plan to change sits in `spec-rules/`, so each will need an ownership update when
-    it is built.
+    import specifier stays valid, and so does every spec whose frontmatter names
+    `spec-validator.ts`: a grep of frontmatter blocks at `7322e031` finds it in 33 specs
+    (SPEC-134, SPEC-046, SPEC-051, SPEC-047, SPEC-059 among them;
+    most `planning`, some `implementing`/`done`). I did not separate `implements:` from
+    `affects:` or comments in that count. Cost: those specs will then name a façade
+    while the code they plan to change sits in `spec-rules/`, so each needs an
+    ownership update when it is next built - spread over many future PRs, not paid here.
   - **b** replace the file with a directory `lib/spec-validator/index.ts`. Specifiers
-    still resolve, but the path `spec-validator.ts` vanishes, which breaks the `affects:`
-    of four approved specs and needs their re-approval.
+    still resolve, but the path `spec-validator.ts` vanishes, which breaks the
+    ownership lines of those ~33 specs at once and needs their re-approval.
 - **CQ-2 - What a fixture asserts.**
   - **a (rec)** presence / absence of one rule id per fixture (FR-9). Cost: does not
     catch a change in message wording or severity; FR-7's one-off characterisation run
@@ -281,17 +301,18 @@ The issue's figures are from July and have moved. Current state:
     later to prove a future refactor is a pure move.
   - **b** commit a golden snapshot of the real corpus. Re-runnable, but every spec edit in
     the repo changes it, so it goes stale daily or becomes a rubber-stamped update.
-- **CQ-4 - Order against the in-flight rule additions.** SPEC-134 (FR-2, FR-20) and
-  others add new rules to this file and are approved (`planning`).
+- **CQ-4 - Order against the in-flight rule additions.** SPEC-134 (FR-2, FR-20),
+  SPEC-047 and SPEC-051 (all `planning` on `7322e031`) add or change rules in this file,
+  and two unplanned rules (#1595, #1380) landed in it while this spec waited.
   - **a (rec)** land this decomposition first, so those specs add a rule file rather
     than edit the hotspot. Cost: their Plans, written against the single file, need a
     small update, and any of them already in a PR will conflict.
   - **b** let them land first, then decompose. No rework for them, but the hotspot grows
     first and this refactor rebases over each.
 - **CQ-5 - Ship as one PR or slices?**
-  - **a (rec)** three PRs in order: Part C (slugify, tiny), Part A (the split, behaviour
-    proven by AC-2), Part B (corpus + harness). Cost: the corpus lands last, so the
-    split itself is guarded only by the existing tests plus AC-2.
+  - **a (rec)** two PRs in order: Part A (the split, behaviour proven by AC-2, with
+    Part C's guard tests), then Part B (corpus + harness). Cost: the corpus lands last,
+    so the split itself is guarded only by the existing tests plus AC-2.
   - **b** corpus first, then split. Better guarded, but the corpus would be written
     against the old internals and the `heuristic` flag check (FR-11) cannot exist until
     the registry does.
@@ -304,8 +325,9 @@ The issue's figures are from July and have moved. Current state:
   façade makes that move easier; it is not made here.
 - Corpus-level fixtures for the four multi-file validators (their inputs are file sets,
   not one spec); a follow-up if they prove heuristic-prone.
-- Re-homing other lib helpers or dissolving the other type-only-held cycles SPEC-040
-  lists (`approval→approval-store`, `spec→lifecycle`).
+- Re-homing `slugify` (done by #988) or any other lib helper, and the other cycles
+  SPEC-040 FR-6 covered (`approval→approval-store`, `spec→lifecycle`, also done by
+  `ca60e336`).
 
 ## Risks
 
@@ -346,4 +368,7 @@ the cycle gate) and DR-066 (no silent gate).
 - Issue: #693 (this spec).
 - Seam named in the issue: #137 (symmetric closed-set primitive) becomes one rule module.
 - Prior step: #651 / `21eaf6b4` (options object).
-- Cycle work this continues: SPEC-040 FR-6, #1446 (`d1a285b7`).
+- Cycle work this continues: SPEC-040 FR-6, #1446 (`d1a285b7`), #988 (`ca60e336`,
+  which delivered the issue's `slugify` item).
+- Rules added to the hotspot while this spec waited: #1595 (`abfbe350`), #1380
+  (`72245712`).
