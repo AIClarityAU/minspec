@@ -1,14 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-268-review-app-secrets-optional/requirements.md",
-  "specHash": "cb4b2868df0e96c9ee76bd27565bd9a3431e03976bfaf81ba41082637c316c00",
-  "approvedAt": "2026-11-23T06:59:43.741Z",
-  "approvedBy": "minspec-sdd[bot]",
+  "specHash": "4dad2fe7e5df5167910eed9f6a9bc067e52befc82a1465a5593564fe712d428b",
+  "approvedAt": "2026-11-27T01:32:23.966Z",
+  "approvedBy": "github@harvest316.com",
   "tier": "T3",
   "migrated": false,
-  "baselineBlob": "",
-  "actor": "minspec-sdd[bot]",
-  "basis": "delegation:DLG-001",
-  "act": "spec-approval",
-  "author": "session:cos/clarify-picks-1122b",
-  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3969#issuecomment-7078074036"
+  "baselineBlob": "ed703f281fd0cd966edb7f8279aecaa9db437c92"
 }
