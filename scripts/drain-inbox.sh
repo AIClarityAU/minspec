@@ -270,6 +270,25 @@ DRAIN_RUN_DIR="${MINSPEC_DRAIN_RUN_DIR-/tmp/minspec-drain-run}"
 # can point it at a hermetic fixture without a full git clone.
 PRIMARY_ROOT="${MINSPEC_DRAIN_PRIMARY_ROOT:-$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "${SCRIPT_DIR}/.." && pwd))}"
 
+# short_sha: 7-char display of a SHA, but a non-SHA sentinel (norun/noorigin) is
+# printed whole - truncating it to "noorigi" read as a mangled SHA (#2006).
+short_sha() {
+  if [[ "$1" =~ ^[0-9a-f]{40,64}$ ]]; then printf '%s' "${1:0:7}"; else printf '<unresolved:%s>' "$1"; fi
+}
+
+# assert_primary_is_worktree: PRIMARY_ROOT is used as a git repo throughout. If it
+# is not one, every `git -C "$PRIMARY_ROOT" rev-parse origin/main` fails and the
+# #773 freshness comparison can never succeed - a configuration error, so say so
+# loudly (once per call) instead of hiding it behind a sentinel (#2006). Returns 1
+# when it is not a work tree; callers keep their fail-safe fallback.
+assert_primary_is_worktree() {
+  if [[ "$(git -C "$PRIMARY_ROOT" rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
+    return 0
+  fi
+  echo "[drain] ERROR: PRIMARY_ROOT ($PRIMARY_ROOT) is not a git work tree - configuration error (check MINSPEC_DRAIN_PRIMARY_ROOT / the script's checkout). The origin/main freshness check cannot succeed until fixed (#2006)." >&2
+  return 1
+}
+
 # ── Continuous-loop tunables (env-overridable) ───────────────────────────────
 INTERVAL="${MINSPEC_DRAIN_INTERVAL:-1200}"           # 20 min between cycles
 QUOTA_BACKOFF="${MINSPEC_DRAIN_QUOTA_BACKOFF:-1800}"  # 30 min pause on a quota hit
@@ -1010,6 +1029,9 @@ ensure_fresh_run_dir() {
         return 0 ;;
   esac
 
+  # Before EITHER origin/main comparison below (the run-dir path returns early, so a check
+  # placed later never ran in production).
+  assert_primary_is_worktree || true   # swallow-ok: it already printed a loud ERROR; the fail-safe fallback below (children re-check, #481) is the intended behaviour
   GIT_TERMINAL_PROMPT=0 git -C "$PRIMARY_ROOT" fetch origin main -q 2>/dev/null || true
 
   # Executing FROM the run dir (drain-service.sh starts it there, #3747): never create,
@@ -1025,7 +1047,7 @@ ensure_fresh_run_dir() {
     here_origin="$(git -C "$PRIMARY_ROOT" rev-parse origin/main 2>/dev/null || echo 'noorigin')"
     if [[ "$here_head" != "$here_origin" ]]; then
       RUN_DIR_RESTART=true
-      echo "[drain] origin/main moved (run=${here_head:0:7} origin=${here_origin:0:7}) and this drain executes from the run dir — not refreshing it under the running script; ending the loop so drain-service.sh refreshes it and starts the new code (#3747)."
+      echo "[drain] origin/main moved (run=$(short_sha "$here_head") origin=$(short_sha "$here_origin")) and this drain executes from the run dir — not refreshing it under the running script; ending the loop so drain-service.sh refreshes it and starts the new code (#3747)."
       return 0
     fi
   fi
@@ -1090,7 +1112,7 @@ ensure_fresh_run_dir() {
       echo "[drain] STALE: run dir verified at origin/main (${run_head:0:7}) but the executing scripts/ tree ($SCRIPT_DIR) differs from origin/main's — the drain's own logic or a lib it sources is NOT current; run it from the run dir (drain-service.sh does) (#3747)." >&2
     fi
   else
-    echo "[drain] WARNING: run dir NOT verified at origin/main (run=${run_head:0:7} origin=${origin_head:0:7}) — running in place; children re-check freshness (#481)." >&2
+    echo "[drain] WARNING: run dir NOT verified at origin/main (run=$(short_sha "$run_head") origin=$(short_sha "$origin_head")) — running in place; children re-check freshness (#481)." >&2
   fi
   return 0
 }
