@@ -1,5 +1,5 @@
 ---
-id: SPEC-137
+id: SPEC-479
 type: requirements
 status: specifying
 tier: T3
@@ -8,7 +8,7 @@ epic: EPIC-003  # SDD Core Methodology — the frontmatter a spec carries and th
 relates_to: [SPEC-022, SPEC-042, SPEC-054, DR-012, DR-034, "#974", "#1510", "#971"]
 ---
 
-# SPEC-137: A spec's approval-location notice must name the file that holds its record, and a gate must check it
+# SPEC-479: A spec's approval-location notice must name the file that holds its record, and a gate must check it
 
 Issue: [#974](https://github.com/AIClarityAU/minspec/issues/974). Design rests on DR-034 (path-keyed
 sidecar store, SPEC-022) and DR-012 (hash lock). **Specify only — no code is authorised by this document.**
