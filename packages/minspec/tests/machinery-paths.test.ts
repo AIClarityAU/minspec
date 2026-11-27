@@ -41,6 +41,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createRequire } from 'module';
 import { AI_REVIEW_WORKFLOW } from '../src/lib/ci-review-templates';
+import { MANAGED_REGION_TEMPLATES, MINSPEC_HOOKS_DIR } from '../src/lib/template-registry';
 import { isBoundaryPath } from '../../../scripts/auto-merge-gate';
 import {
   MACHINERY_DIR_PREFIXES,
@@ -289,6 +290,36 @@ describe('#1758 all three machinery definitions classify one path table identica
         false,
       );
       expect(isMachineryPath(p), 'the canonical machinery-paths.ts module').toBe(false);
+    });
+  }
+});
+
+describe('#1485 every scaffolded gate path is machinery (derived from the scaffolder, not hand-listed)', () => {
+  // The table here is built from template-registry.ts's own output paths, so a gate the
+  // scaffolder starts writing under the hooks directory is covered with no test edit — and
+  // a hooks directory missing from the machinery set fails here. A repo initialised by
+  // MinSpec has `.minspec/hooks/` and no `.githooks/`.
+  const scaffoldedGatePaths = MANAGED_REGION_TEMPLATES.map((t) => t.outputPath).filter((p) =>
+    p.startsWith(`${MINSPEC_HOOKS_DIR}/`),
+  );
+
+  it('the scaffolder writes at least the pre-commit and commit-msg gates (non-vacuous)', () => {
+    expect(scaffoldedGatePaths).toContain(`${MINSPEC_HOOKS_DIR}/pre-commit`);
+    expect(scaffoldedGatePaths).toContain(`${MINSPEC_HOOKS_DIR}/commit-msg`);
+  });
+
+  for (const p of scaffoldedGatePaths) {
+    it(`ai-review.yml, dispatch-issue.sh, the guard and the canonical module classify ${p} as machinery`, () => {
+      const guard = createRequire(__filename)('../../../.github/scripts/ai-review-guard.js');
+      const wf = machineryPattern(fs.readFileSync(WORKFLOW, 'utf8'), 'ai-review.yml');
+      const shipped = machineryPattern(AI_REVIEW_WORKFLOW, 'the shipped template');
+      const dispatch = dispatchMachineryPattern(fs.readFileSync(DISPATCH, 'utf8'));
+      expect(new RegExp(wf).test(p), 'ai-review.yml').toBe(true);
+      expect(new RegExp(shipped).test(p), 'shipped template').toBe(true);
+      expect(new RegExp(dispatch).test(p), 'dispatch-issue.sh').toBe(true);
+      expect(guard.MACHINERY_PATH_RE.test(p), 'ai-review-guard.js').toBe(true);
+      expect(isMachineryPath(p), 'machinery-paths.ts').toBe(true);
+      expect(isBoundaryPath(p), 'auto-merge-gate.ts').toBe(true);
     });
   }
 });

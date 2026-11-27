@@ -55,6 +55,11 @@
  *   .githooks/  — pre-commit (protected-branch #1041, RCDD DR-003), pre-push
  *                 (workflow-file protection #1120), commit-msg. This repo runs
  *                 `core.hooksPath=.githooks`.
+ *   .minspec/hooks/ — the DR-037 gate hooks (pre-commit, commit-msg, validate.py) that
+ *                 `template-registry.ts` scaffolds into every MinSpec-initialised repo and
+ *                 points `core.hooksPath` at. A downstream repo has no `.githooks/`, so
+ *                 without this entry a PR editing its own commit gate classified as
+ *                 `not machinery` and was certifiable by the review it gates (#1485).
  *   .circleci/, .buildkite/, .husky/ — this repo does not use these providers today,
  *                 but `scripts/auto-merge-gate.ts`'s CI/build boundary detector (#422)
  *                 already treats them as machinery-class (arbitrary code at CI/commit
@@ -69,6 +74,7 @@ export const MACHINERY_DIR_PREFIXES: readonly string[] = [
   '.circleci/',
   '.buildkite/',
   '.husky/',
+  '.minspec/hooks/',
 ];
 
 /**

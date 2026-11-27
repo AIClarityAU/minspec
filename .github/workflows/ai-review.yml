@@ -747,6 +747,10 @@ jobs:
           #                scripts/auto-merge-gate.ts's CI/build boundary detector (#422)
           #                already treats them as machinery-class; folded in here so all
           #                three consumers agree instead of silently disagreeing (#1758).
+          #   .minspec/hooks/ — the DR-037 gate hooks scaffolded into every MinSpec-initialised
+          #                repo (core.hooksPath points here; such a repo has no .githooks/).
+          #                Added #1485: without it a downstream PR editing its own commit gate
+          #                classified "not machinery" and the review could certify it.
           #   template-registry.ts — GENERATES the .minspec/hooks/pre-commit gate that every
           #                MinSpec-initialised project runs. Its blast radius is strictly
           #                larger than .githooks/ (which is this repo only), so leaving it
@@ -782,7 +786,7 @@ jobs:
           # a prior reconciliation, 01369b6b, updated only this file and a test that only
           # read this file, leaving dispatch-issue.sh's copy narrower and its invariant-2
           # second-witness inert for two paths). Keep the marker comment above it.
-          elif printf '%s\n' "$MACHINERY_CANDIDATES" | grep -qE '^\.github/|^scripts/|^\.githooks/|^\.circleci/|^\.buildkite/|^\.husky/|^packages/minspec/src/lib/(template-registry|ci-review-templates|machinery-paths)\.ts$'; then
+          elif printf '%s\n' "$MACHINERY_CANDIDATES" | grep -qE '^\.github/|^scripts/|^\.githooks/|^\.circleci/|^\.buildkite/|^\.husky/|^\.minspec/hooks/|^packages/minspec/src/lib/(template-registry|ci-review-templates|machinery-paths)\.ts$'; then
             SELF_EDIT=yes
             SELF_EDIT_KIND=machinery
           fi

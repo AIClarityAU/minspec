@@ -317,7 +317,7 @@ PUBLISH_PATH_RE='^sites/|^\.github/workflows/deploy-sites\.yml$'
 # ai-review.yml covers, so this second witness was inert for them. #1758 also folded in
 # `.circleci/`/`.buildkite/`/`.husky/` (unused here, zero-cost) so all three definitions
 # — this one, ai-review.yml, and auto-merge-gate.ts's BOUNDARY_DIR_PREFIXES — agree.
-MACHINERY_PATH_RE='^\.github/|^scripts/|^\.githooks/|^\.circleci/|^\.buildkite/|^\.husky/|^packages/minspec/src/lib/(template-registry|ci-review-templates|machinery-paths)\.ts$'
+MACHINERY_PATH_RE='^\.github/|^scripts/|^\.githooks/|^\.circleci/|^\.buildkite/|^\.husky/|^\.minspec/hooks/|^packages/minspec/src/lib/(template-registry|ci-review-templates|machinery-paths)\.ts$'
 
 # MACHINERY_CARVE_OUT_RE (#2018) — the EXEMPTIONS from the line above: exact paths that
 # sit under a machinery prefix but decide nothing, and that nothing which decides reads.
