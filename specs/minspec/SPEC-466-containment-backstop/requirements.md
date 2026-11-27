@@ -7,10 +7,11 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - DR-074 (blast radius, invariant 3) lives here
 aspects: [containment, blast-radius, machine-wide, invariant, silent-gate, inventory-test, tier-0]
 relates_to: [DR-074, DR-073, DR-066, DR-086, SPEC-096, "#1150", "#1147", "#1149", "#1319", "#1049", "#1050"]
-# Ownership declared in Specify (SPEC-038). All four files are NEW: the scanner's pure
-# library and its CLI (witness B, FR-1 to FR-8), and the two tests that pin them - the
-# scanner's own fixture test (FR-10) and the shipped-code reach inventory (witness A, FR-9).
-implements: [scripts/lib/machine-scope.ts, scripts/check-machine-scope.ts, packages/minspec/tests/check-machine-scope.test.ts, packages/minspec/tests/machine-scope-inventory.test.ts]
+# Ownership declared in Specify (SPEC-038). Four files are NEW: the scanner's pure library and
+# its CLI (witness B, FR-5 to FR-11), and the two tests that pin them - the shipped-code reach
+# inventory (witness A, FR-1 to FR-4) and the scanner's own fixture test (FR-12). Two files are
+# EDITED by FR-11: the session-start hook and package.json (the `check:machine-scope` script).
+implements: [scripts/lib/machine-scope.ts, scripts/check-machine-scope.ts, packages/minspec/tests/check-machine-scope.test.ts, packages/minspec/tests/machine-scope-inventory.test.ts, scripts/hooks/session-start.sh, package.json]
 ---
 
 # SPEC-466: A deterministic backstop for the containment invariant
@@ -184,10 +185,16 @@ this spec does not edit the accepted DR (see Out of Scope).
   network call (invariant 1). It reads only the FR-5 paths. Its output quotes the matched line
   only, never a whole file, because these files can hold credentials.
 - **FR-11 - Where it runs.** An npm script `check:machine-scope` runs
-  `scripts/check-machine-scope.ts`. `scripts/hooks/session-start.sh` runs it and prints its
+  `scripts/check-machine-scope.ts` as `npx tsx scripts/check-machine-scope.ts`, the same
+  runtime every other `check:*` script in `package.json` uses.
+  `scripts/hooks/session-start.sh` runs that npm script and prints its
   output when it exits non-zero; it does not block the session and its exit status is not
   swallowed into a pass - the hook prints `machine-scope: N finding(s)` or
-  `machine-scope: could not check (exit 2)` on its own line. It is **not** wired into
+  `machine-scope: could not check (exit 2)` on its own line. If the runner itself cannot be
+  launched (`npx` or `tsx` missing, or the script file absent), the hook treats that as the
+  could-not-check outcome: it prints a visible warning line naming the launch failure and then
+  the `machine-scope: could not check (exit 2)` line. A launch failure is never silent and
+  never read as a pass. It is **not** wired into
   `npm run validate` or any merge-gating CI job (Clarify D1): on a runner every surface is
   absent, so it would either always pass (a silent gate) or always fail.
 - **FR-12 - Scanner fixture test.** `packages/minspec/tests/check-machine-scope.test.ts` runs
@@ -221,6 +228,10 @@ this spec does not edit the accepted DR (see Out of Scope).
   it never exits 0 in that case.
 - **AC-5.** Opening a session in this repository with one planted finding in a fake home
   shows the `machine-scope:` line in the session-start output; the session still starts.
+- **AC-5b.** With `npx` unavailable on `PATH` (or `scripts/check-machine-scope.ts` renamed),
+  the session-start output shows a warning line naming the launch failure plus
+  `machine-scope: could not check (exit 2)`; the session still starts and the hook does not
+  print a clean or empty result.
 - **AC-6.** A `grep` for network APIs (`fetch`, `http`, `https`, `net`, `child_process` running
   `gh` or `curl`) in `scripts/lib/machine-scope.ts` and `scripts/check-machine-scope.ts`
   returns nothing.
@@ -318,7 +329,7 @@ one carries its own gate - is DR-074, already accepted. This spec supplies its e
 
 ## Out of Scope
 
-- **Fixing the files the scanner finds.** It reports; the founder edits his own home
+- **Fixing the files the scanner finds.** It reports; the founder edits their own home
   directory.
 - **Scripts in this repository that patch `~/.claude/scripts/`** (`scripts/host-patches/**`).
   They patch the founder's own tooling (`cos.py`), carry no rule loaded into an agent's
