@@ -986,4 +986,11 @@ The founder answered this as runner queue item clarsel on 2026-11-17 (words in t
 <!-- dr-summary:DR-124 auto=b3c6f8a249ed -->
 SPEC-022 FR-1 (specs/minspec/SPEC-022-approval-foundation/requirements.md:77) says approval ground truth is **committed** to the repo. Before #576 the approval record was only git-*tracked*: written to disk and left in the working tree. Nothing committed it. So an approval could sit uncommitted indefinitely, be lost to a checkout or a reset, or be swept into an unrelated commit by another session. "Committed ground truth" was a claim the code did not keep.
 <!-- /dr-summary:DR-124 -->
+## [DR-125 — The AI review prompt has exactly two authority levels - an untrusted diff and one trusted provenance block - and only computed facts carry the trusted block's authority](DR-125.md)
+
+*Status: proposed · Date: 2026-11-27*
+
+<!-- dr-summary:DR-125 auto=a11ce9e262f8 -->
+The AI review prompt carries an untrusted diff and one trusted approval-provenance block. Only template text and facts computed from git and the canonical hasher carry the trusted block's authority. Repo text may appear in it only as a sanitized, labelled, single-line quote, and adding a third channel needs the same analysis first.
+<!-- /dr-summary:DR-125 -->
 <!-- minspec:dr-index:end -->
