@@ -4,6 +4,7 @@ import { DEFAULT_CONFIG, loadConfig, resolveAndValidate, TIERS, type Tier } from
 import { buildContext, renderTemplate, renderAll, resolveProjectName } from './template-engine';
 import {
   TEMPLATE_NAMES,
+  SELF_HOSTED_TEMPLATE_NAMES,
   TEMPLATE_OUTPUT_PATHS,
   MANAGED_REGION_TEMPLATES,
   MINSPEC_HOOKS_DIR,
@@ -857,6 +858,21 @@ function missingMarkersMessage(outputPath: string): string {
 }
 
 /**
+ * True when `rootDir` is minspec's OWN repo (#767): it carries the generator that
+ * base64-embeds the CI-review stack and Claude hooks from their on-disk files.
+ * There those files are dual-role — live harness AND the raw, marker-less SOURCE of
+ * the embedded templates (`renderManagedBlock` adds markers at scaffold time,
+ * downstream) — so scaffold/Refresh must leave `SELF_HOSTED_TEMPLATE_NAMES` alone or
+ * the source drifts from its embedded copy and ships marker-corrupted.
+ */
+function isSelfHostedTemplate(rootDir: string, tpl: ManagedRegionTemplate): boolean {
+  return (
+    SELF_HOSTED_TEMPLATE_NAMES.includes(tpl.name) &&
+    fs.existsSync(path.join(rootDir, 'scripts', 'gen-ci-templates.mjs'))
+  );
+}
+
+/**
  * Scaffold managed-region templates (#249, DR-037) at first init.
  *
  * Managed-region templates (YAML workflows, scripts) cannot go through the
@@ -873,6 +889,7 @@ function generateManagedRegionTemplates(rootDir: string, tools: DetectedTools): 
     // tool the project actually uses; tool-independent templates (CI workflow, git
     // hooks) have no condition and are always scaffolded.
     if (tpl.condition && !tpl.condition(tools)) continue;
+    if (isSelfHostedTemplate(rootDir, tpl)) continue;
     const fullPath = path.join(rootDir, tpl.outputPath);
     if (!fs.existsSync(fullPath)) {
       writeManagedFile(fullPath, tpl);
@@ -1105,6 +1122,8 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
     // scaffold a Claude shim into a Cursor-only project, and never re-scaffold one a
     // user removed by uninstalling the tool. Tool-independent templates are unconditional.
     if (tpl.condition && !tpl.condition(tools)) continue;
+    // Minspec's own repo: these files are the raw template SOURCES — never wrap (#767).
+    if (isSelfHostedTemplate(rootDir, tpl)) continue;
 
     const fullPath = path.join(rootDir, tpl.outputPath);
 

@@ -21,7 +21,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { generateHarnessFiles, checkManagedRegionMarkers } from '../src/lib/scaffold';
+import { generateHarnessFiles, checkManagedRegionMarkers, refreshHarnessFiles } from '../src/lib/scaffold';
 import {
   MANAGED_REGION_TEMPLATES,
   SELF_HOSTED_TEMPLATE_NAMES,
@@ -136,5 +136,38 @@ describe('#760 self-hosted exclusion (minspec’s own repo)', () => {
     for (const p of selfHostedPaths) {
       expect(flaggedPaths.has(p)).toBe(true);
     }
+  });
+});
+
+describe('self-hosted template sources are never marker-wrapped (#767)', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-selfhost-test-'));
+  });
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const selfHosted = MANAGED_REGION_TEMPLATES.find((t) => SELF_HOSTED_TEMPLATE_NAMES.includes(t.name))!;
+
+  it('Refresh leaves a raw template source untouched in a repo carrying the generator', () => {
+    generateHarnessFiles(tmpDir);
+    fs.mkdirSync(path.join(tmpDir, 'scripts'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'scripts', 'gen-ci-templates.mjs'), '// generator\n');
+    const full = path.join(tmpDir, selfHosted.outputPath);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, selfHosted.content);
+    refreshHarnessFiles(tmpDir);
+    expect(fs.readFileSync(full, 'utf-8')).toBe(selfHosted.content);
+  });
+
+  it('a downstream repo (no generator) still gets the markers', () => {
+    generateHarnessFiles(tmpDir);
+    const full = path.join(tmpDir, selfHosted.outputPath);
+    fs.writeFileSync(full, selfHosted.content);
+    refreshHarnessFiles(tmpDir);
+    expect(fs.readFileSync(full, 'utf-8')).toContain(
+      managedRegionStartMarker(selfHosted.name, selfHosted.commentStyle),
+    );
   });
 });
