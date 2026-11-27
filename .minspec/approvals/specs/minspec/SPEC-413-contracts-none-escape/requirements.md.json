@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-413-contracts-none-escape/requirements.md",
+  "specHash": "61f639c96e349b94581233690a471786a20608deed9e775f6b8983baea4991b3",
+  "approvedAt": "2026-11-24T04:17:50.256Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:agent/issue-4018",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4044#issuecomment-7121733094"
+}

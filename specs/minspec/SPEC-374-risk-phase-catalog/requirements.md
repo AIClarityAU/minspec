@@ -227,6 +227,14 @@ upward-only ratchet, which this catalog keeps.
   *Cost:* #91 then has no trip-frequency data, and the catalog's design gets no field
   contact until after validation.
 
+**Recorded selection: (a), advisory now,** build advisory mode now and enforce only after #91.
+Source: the answer to task-queue item cq374, 2026-11-24 ("1 Advisory now (Recommended) = build
+advisory mode now, enforce only after #91"), an answer the queue attributes to the founder. A
+queue answer is not consent (DR-108 section 4), so this selection is unverified. Option (a) needs
+a human to confirm the DR-024 reading ("do not *enforce* before #91"), so it binds only if the
+founder approves this spec's text with it in place. A delegated approval does not supply that
+confirmation, and until the founder approves, the reading stays unconfirmed.
+
 ### DQ-2: What is an "obligation": a new lifecycle phase, or a required section?
 
 - **(a) A required section inside an existing phase, via SPEC-013's section registry
@@ -244,6 +252,8 @@ upward-only ratchet, which this catalog keeps.
   `phaseMappings` consumer, the lifecycle state machine and the sidebar. That is a contract
   change of the kind the DR-359 ADR filter flags, and it would need its own DR.
 
+**Recorded selection: the recommended option,** (a), an obligation is a required section inside an existing phase, via SPEC-013's section registry. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 ### DQ-3: Confirm the v1 mapping in FR-2.
 
 The judgement calls, each with the recommended option first:
@@ -260,6 +270,8 @@ The judgement calls, each with the recommended option first:
   plan phase, which is exactly the "tiny but consequential" case DR-022 §2 wants to express,
   but it is still a heavier result than "add one section to the spec". The alternative is
   to land T1/T2 obligations in `specify`.
+
+**Recorded selection: the recommended option,** the FR-2 v1 mapping as written, with each judgement call's recommended option: `manifest_changed` trips contract + consumer review, `concurrency` is a catalog entry, and every obligation lands in `plan`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
 
 ## Out of scope
 

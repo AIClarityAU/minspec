@@ -428,6 +428,8 @@ This is the decision DR-101 records. Accepting DR-101 answers it.
   and AC-3 inverts. Since neither weight separates specs today, this buys nothing now and
   would surprise whoever first sets a `priority`.
 
+**Recorded selection: the recommended option,** Option A, the term sits last, immediately before the artifact id. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 ### DQ-3 - Do a stage's blockers inherit the preference in this version?
 
 - **Option A - yes, through uncleared `depends_on` edges (rec).** Without it the term does
@@ -438,6 +440,8 @@ This is the decision DR-101 records. Accepting DR-101 answers it.
 - **Option B - direct stages only.** Smaller: drop FR-5 item 2, AC-4's expected order and
   AC-5. *Cost:* the signal goes quiet whenever a stage is waiting on something, which is
   when knowing what to clear first matters most.
+
+**Recorded selection: the recommended option,** Option A, yes, a stage's blockers inherit the preference through uncleared `depends_on` edges. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
 
 ## Out of Scope
 

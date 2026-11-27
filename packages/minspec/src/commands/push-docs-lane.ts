@@ -51,6 +51,7 @@ import {
   openPullRequest,
   slugFromOriginUrl,
   splitCommitMessage,
+  PR_TITLE_MAX_LEN,
   type ExecRun,
 } from '../lib/approval-pr';
 
@@ -247,6 +248,16 @@ export async function pushDocsLaneCommand(
     const n = files.length;
     const message = await promptMessage(n);
     if (message === undefined) return await surface({ outcome: 'cancelled' });
+    // Fail fast (#1438), matching scripts/push-docs.sh: GitHub rejects a PR title
+    // over the cap, and by the time `gh pr create` runs the branch is already
+    // pushed — so reject BEFORE any worktree/commit/push rather than truncate.
+    const subjectLen = message.split('\n', 1)[0].length;
+    if (subjectLen > PR_TITLE_MAX_LEN) {
+      return await surface({
+        outcome: 'failed',
+        error: `Subject line is ${subjectLen} chars; GitHub's PR title limit is ${PR_TITLE_MAX_LEN}. Shorten the first line (put detail after a blank line). Nothing was committed or pushed.`,
+      });
+    }
 
     // ── Network (all consented) ────────────────────────────────────────────────
     // Pre-flight gh so a missing/unauthenticated CLI fails BEFORE any git mutation,

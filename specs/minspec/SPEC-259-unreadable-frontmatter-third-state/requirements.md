@@ -1,7 +1,7 @@
 ---
 id: SPEC-259
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity - a decision or epic whose frontmatter block cannot be parsed reads as `proposed`, so the signpost names an accepted decision as the next task
@@ -10,9 +10,9 @@ relates_to: [SPEC-095, DR-003, "#2468", "#2397", "#2404", "#968"]
 implements: none
 implements_reason: creates no file the spec names. FR-1 to FR-6 change existing shared modules (adr-manager.ts, epic-manager.ts, artifact-graph.ts and every consumer of the status type), and where the shared FR-1 predicate lives is a Plan decision. Declaring those shared files would freeze them for every other session until approval.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

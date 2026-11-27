@@ -8,7 +8,11 @@
 # Bypass with SKIP_SUPPLY_CHAIN_CHECK=1 (use only for known-good emergency cuts).
 #
 # Catalogs live in ~/.cache/bumblebee/catalogs/*.json. Empty catalog dir =
-# pre-flight inventory only (script still fails on bumblebee errors).
+# pre-flight inventory only (script still fails on bumblebee errors) — EXCEPT in
+# release mode: SUPPLY_CHAIN_REQUIRE_CATALOGS=1 (set by `npm run package:release`, #2410)
+# makes an empty catalog dir exit 2, since a release's "green" must mean "compared
+# against a catalog", not just "a scan ran". The require switch is not bypassed by
+# an empty dir; only SKIP_SUPPLY_CHAIN_CHECK=1 skips the whole gate.
 #
 # BUMBLEBEE_VERSION below also pins scripts/fetch-bumblebee-catalogs.sh's catalog
 # fetch ref. The version pins across FOUR surfaces (both scripts + ci.yml +
@@ -270,6 +274,12 @@ mkdir -p "$OUT_DIR" "$CATALOG_DIR"
 CATALOG_FLAG=""
 if [ -n "$(ls -1 "$CATALOG_DIR"/*.json 2>/dev/null)" ]; then
   CATALOG_FLAG="--exposure-catalog=$CATALOG_DIR"
+elif [ "${SUPPLY_CHAIN_REQUIRE_CATALOGS:-}" = "1" ]; then
+  echo "✗ check-supply-chain: no exposure catalogs in $CATALOG_DIR and SUPPLY_CHAIN_REQUIRE_CATALOGS=1 (release mode)." >&2
+  echo "  A release must be compared against a threat catalog. Run scripts/fetch-bumblebee-catalogs.sh" >&2
+  echo "  (or use \`npm run package:release\`, which does), then retry." >&2
+  echo "  (exit 2: could not run the comparison — not a threat finding)" >&2
+  exit 2
 fi
 
 echo "check-supply-chain: scanning $REPO_ROOT" >&2

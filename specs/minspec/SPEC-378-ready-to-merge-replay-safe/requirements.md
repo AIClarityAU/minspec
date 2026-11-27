@@ -1,7 +1,7 @@
 ---
 id: SPEC-378
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - a required check must exist and be visible, and not depend on timing it does not control
@@ -10,7 +10,13 @@ relates_to: ["#1211", "#1204", "#1176", "#1688", "#1973", "SPEC-182", "SPEC-304"
 implements: none
 implements_reason: >-
   Specified, not built. No design.md/tasks.md exist; the fix-shape choice under
-  "Decisions needed (Clarify)" is unanswered.
+  "Decisions needed (Clarify)" has a recorded selection (agent pick of the recommended option; founder decision, queue item clarsel, DR-123). Q4 is closed and deferred to #3953.
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-378: `ready-to-merge` verdicts are bound to the state they evaluated, so a replayed run cannot regress a green gate (Requirements)
@@ -113,17 +119,23 @@ Bad state: PR #1176 was `ai-review:pass`, checks green, yet `BLOCKED`, because a
      Cost: changes the required-check contract in the ruleset (a founder-held change), risks a
      status/check-run name collision of exactly the shadowing kind this issue reports during
      transition, and needs the `checks: write` permission plus a DR.
+
+   **Recorded selection: the recommended option,** (a), keep the commit status and fix its inputs (FR1-FR5). Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 2. **Live re-read scope.** **(a) only when `run_attempt > 1`** **(rec)** — first attempts unchanged,
    least API spend; cost: a *first-attempt* run delayed in the #1973 queue still reads a payload that
    may be old. **(b) always** — closes that too; cost: one extra `pulls.get` per run and a behavioural
    change to every event, widening the regression surface.
+   **Recorded selection: the recommended option,** (a), live re-read only when `run_attempt > 1`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 3. **On a head mismatch (FR2): skip or re-evaluate?** **(a) skip + log** (issue suggestion 2) —
    simplest; cost: relies on a later event for the live head, which #1973 notes is not guaranteed.
    **(b) evaluate and post against the live head** **(rec)** — always writes, fail-closed; cost: a
    replay then does real work on a SHA it was not started for.
+   **Recorded selection: the recommended option,** (b), evaluate and post against the live head. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 4. **Should drain auto-remediation be restricted to the newest run?** Out of this spec's allowlist
    (scripts), so it is *not* required here; say whether to file it as a follow-up.
 
+   **Recorded selection: closed, deferred to a follow-up.** Agent pick, no human chose it; the reason for the pick is the founder's queue answer `f` ("f file the follow-up and close Q4 (Recommended)") to queue item c378q4 at 2026-11-22T03:02:33Z, recorded 2026-11-22, DR-123; sign-off ratifies it. Follow-up filed as #3953 (remediate only newest CI run).
+
 ## Follow-ups (tracked)
 
-- Drain auto-remediation rerunning only the newest run: #1211 (decide in Decision 4; file separately if yes).
+- Drain auto-remediation rerunning only the newest run: #1211 (Decision 4 closed: deferred to #3953, remediate only newest CI run).

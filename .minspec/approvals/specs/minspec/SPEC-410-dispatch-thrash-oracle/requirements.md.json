@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-410-dispatch-thrash-oracle/requirements.md",
+  "specHash": "6b4ab00ce7846a5a8ca30d82a59b652d4afd6c6938795993689a4dc94d6355f6",
+  "approvedAt": "2026-11-23T22:07:19.566Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1123",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4024#issuecomment-7112005209"
+}

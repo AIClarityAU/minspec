@@ -153,7 +153,7 @@ if [ "$WITH_COVERAGE" -eq 1 ]; then
   # Coverage thresholds come from .minspec/config.json (coverage.minimumPercentage),
   # read by vitest.config.ts — NOT from a VS Code setting, so a headless run and the
   # Testing panel's coverage profile gate on the same number.
-  run_suite "MinSpec · Vitest (+coverage)" vitest "$MINSPEC_ROOT" npx vitest run --coverage
+  run_suite "MinSpec · Vitest (+coverage)" vitest "$MINSPEC_ROOT" npx vitest run --coverage --coverage.reportsDirectory=.vitest-coverage
 else
   run_suite "MinSpec · Vitest" vitest "$MINSPEC_ROOT" npx vitest run
 fi
@@ -184,6 +184,9 @@ run_suite "MinSpec · Testing-panel discovery" other "$MINSPEC_ROOT" \
 # `node --test` (no args) used for tee-proxy below.
 run_suite "MinSpec · node:test (ai-review guard)" node "$MINSPEC_ROOT" \
   bash -c 'node --test .github/scripts/*.test.js'
+
+run_suite "MinSpec · node:test (scripts/lib)" node "$MINSPEC_ROOT" \
+  bash -c 'node --test scripts/lib/*.test.mjs'
 
 if [ "$WITH_E2E" -eq 1 ]; then
   # Downloads and spawns a real VS Code, so it needs a display (or xvfb-run) and a

@@ -92,7 +92,7 @@ async function recoverOnProtectedBranch(
   message: string,
   current: string,
   baseBranch: string | undefined,
-): Promise<{ suffix: string } | 'declined' | undefined> {
+): Promise<{ suffix: string } | 'declined' | { failed: string } | undefined> {
   // DR-078 §4 — the SINGLE accessor, not `pushOnApproveMode()`. This path read the
   // VS Code setting DIRECTLY while its sibling `pushApprovalIfEnabled` read the
   // project-local preference first, so a user who had answered "always push from now
@@ -158,7 +158,15 @@ async function recoverOnProtectedBranch(
     // Every non-success falls back to the honest warning, with the reason logged.
     // NOT surfaced as a success suffix: the files really are still only local.
     console.warn(`MinSpec: approval recovery ${res.outcome} — ${res.error ?? 'no detail'}`);
-    return undefined;
+    // in97: hand the reason back so the fallback toast can NAME it. A console line is
+    // invisible to the founder; on 2026-11-22 five recoveries failed on a pre-commit gate
+    // and the only visible text was "NOT committed". Only a real `failed` outcome is
+    // named: `nothing-to-commit` / `no-remote` / `offline` are not failures of saving,
+    // so they keep the plain fallback wording. First line only - hook stderr can run to
+    // pages, and the full text stays in the console line above.
+    if (res.outcome !== 'failed') return undefined;
+    const firstLine = (res.error ?? '').split(/\r?\n/).find((l) => l.trim() !== '')?.trim();
+    return { failed: firstLine ?? 'no detail' };
   }
 
   // Success — the approval is committed on a branch and pushed. FINISH it into a PR
@@ -289,13 +297,15 @@ export async function commitApprovalIfEnabled(
           stranded: true,
         };
       }
-      if (recovery) return { ...recovery, result };
+      if (recovery && 'suffix' in recovery) return { ...recovery, result };
+      const recoveryFailure = recovery && 'failed' in recovery ? recovery.failed : undefined;
 
       // Fallback — unchanged: consent withheld, or recovery failed. Say plainly what
       // happened and what state the files are in; never a bare console.warn.
       void vscode.window.showWarningMessage(
         `Approval written but NOT committed: '${current}' is the default branch, ` +
           `so a commit there could not be pushed. ` +
+          (recoveryFailure ? `Saving it on a branch failed: ${recoveryFailure}. ` : '') +
           (named ? `${named} ${result.paths && result.paths.length === 1 ? 'is' : 'are'} in your working tree, uncommitted — ` : `Your files are saved in the working tree — `) +
           `commit ${named ? 'all of them' : 'them'} on a branch to keep them.`,
         SHOW_FILES_ACTION,

@@ -1,7 +1,7 @@
 ---
 id: SPEC-382
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline
@@ -11,6 +11,12 @@ implements: none
 implements_reason: >-
   Specified, not built by this dispatch. A partial fix already merged (#3086, commit d851c7442)
   covering only the in-repo launcher and only ten lessons; the remaining requirements are unbuilt.
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-382: Dispatched agent sessions load the lesson hook (Requirements)
@@ -78,12 +84,15 @@ sessions only.
    pilot's control arm intact; cost: the other lessons stay undelivered to dispatched sessions.
    (b) Drop `LESSON_ONLY` after the pilot — full coverage; cost: more injected tokens per session
    (tenet 2) and the pilot's control comparison is lost.
+   **Recorded selection: the recommended option,** (a), keep the ten-lesson `LESSON_ONLY` allowlist. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 2. **Inline `--settings` vs. a project `.claude/settings.json` hook entry.** Inline **(rec)** (already
    built; no hook in checked-in config for adopters of this repo's `.claude/`); cost: a launcher with its
    own `--settings` must remember to merge. Project entry is visible in the repo but fires for
    interactive sessions too, double-delivering with the user-level hook.
+   **Recorded selection: the recommended option,** inline `--settings`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 3. **Close #3082 on this spec's FR1-FR5, or keep it open for FR6?** Rec: close, file the host handoff
    separately; cost: the runner gap is tracked only by that handoff issue.
+   **Recorded selection: the recommended option,** close #3082 on FR1-FR5 and file the host handoff separately. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 
 ## Follow-ups (tracked)
 

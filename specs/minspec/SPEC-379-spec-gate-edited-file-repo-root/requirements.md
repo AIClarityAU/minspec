@@ -1,7 +1,7 @@
 ---
 id: SPEC-379
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — a governance gate that silently allows is a trust-boundary failure
@@ -10,7 +10,13 @@ relates_to: ["#1893", "#1869", DR-031, DR-047, SPEC-022]
 implements: none
 implements_reason: >-
   Specified, not built. No design.md/tasks.md exist; the cwd-vs-file-root choice under
-  "Decisions needed (Clarify)" is unanswered.
+  "Decisions needed (Clarify)" has a recorded selection (agent pick of the recommended option; founder decision, queue item clarsel, DR-123).
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-379: The T3/T4 spec gate resolves its corpus from the edited file's repo, not the session cwd (Requirements)
@@ -106,9 +112,13 @@ other hooks (the sweep for the same cwd-ambient class in sibling hooks is a foll
      `../` paths); likely to be disabled, which loses the gate entirely.
    - C — refuse unless cwd is a MinSpec repo root. Simple, but turns a silent wrong answer into a hard
      stop for sessions that legitimately span checkouts.
+
+   **Recorded selection: the recommended option,** A, walk up from the edited file to the enclosing `.minspec/`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 2. **Walk depth bound** (FR-5). Recommend 32 parent levels, which covers any realistic tree; *cost:*
    a pathologically deep checkout beyond it is allowed (with the FR-4 reason logged) rather than gated.
    Alternative: no bound, stop at filesystem root — *cost:* a theoretical stall on a pathological path.
+   **Recorded selection: the recommended option,** 32 parent levels. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.
 3. **Where the FR-4 reason is recorded** — stderr only (recommended; no new file, visible in the
    hook transcript), or an append-only log under `.minspec/` (*cost:* a write on the hot path and a
    new artifact to keep out of git).
+   **Recorded selection: the recommended option,** stderr only. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-21; sign-off ratifies it.

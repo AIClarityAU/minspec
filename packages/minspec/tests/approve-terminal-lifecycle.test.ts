@@ -212,6 +212,40 @@ describe('#440 — terminal-lifecycle specs must not be offered for approval', (
     expect(disagreements).toEqual([]);
   });
 
+  // ── Full status x approval matrix, expected values from a hand-written table ──
+  // Not derived from SPEC_STATUSES / TERMINAL_SPEC_STATUSES: deriving it would make
+  // the check a tautology. A status added to the vocabulary without a row here
+  // fails the first test, so a new status must be decided, not defaulted to active.
+  const DECIDED_STATUS_CLASS: Readonly<Record<string, 'terminal' | 'active'>> = {
+    new: 'active',
+    specifying: 'active',
+    planning: 'active',
+    implementing: 'active',
+    done: 'terminal',
+    archived: 'terminal',
+    superseded: 'terminal',
+  };
+
+  it('every spec status is explicitly classified terminal or active', () => {
+    expect(Object.keys(DECIDED_STATUS_CLASS).sort()).toEqual([...SPEC_STATUSES].sort());
+  });
+
+  it('real picker and real tree match the decided class for every status x approval pair', async () => {
+    const wrong: string[] = [];
+    for (const status of SPEC_STATUSES) {
+      for (const approval of ['unapproved', 'approved', 'stale'] as ApprovalStatus[]) {
+        const spec = summary('SPEC-501', status);
+        const expected = DECIDED_STATUS_CLASS[status] === 'active' && approval !== 'approved';
+        const tree = treeOffersApprove(spec, approval);
+        const picker = await pickerOffersApprove(spec, approval);
+        if (tree !== expected || picker !== expected) {
+          wrong.push(`${status}/${approval}: expected=${expected} tree=${tree} picker=${picker}`);
+        }
+      }
+    }
+    expect(wrong).toEqual([]);
+  });
+
   // ── The tree's own internal asymmetry: `superseded` was documented terminal
   //    in STATUS_GROUPS but omitted from the `terminal` predicate. ────────────
   it('treats `superseded` as terminal on the tree row, like done/archived', () => {
