@@ -48,6 +48,67 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
 const ARGS: Record<string, Record<string, unknown>> = { hash: { spec: 'specs/one.md' } };
 const READ_ONLY = ['validate', 'hash', 'status', 'next'];
 
+describe('FR-6: activate writes only core.hooksPath', () => {
+  const gitList = (dir: string) =>
+    spawnSync('git', ['config', '--local', '--list'], { cwd: dir, encoding: 'utf8' }).stdout.split('\n').filter(Boolean).sort();
+  const files = (dir: string): string => {
+    // every entry except .git/config, which activate is allowed to change
+    const lines: string[] = [];
+    const walk = (d: string, rel: string) => {
+      for (const name of readdirSync(d).sort()) {
+        const r = rel ? `${rel}/${name}` : name;
+        if (r === '.git/config') continue;
+        const p = join(d, name);
+        if (lstatSync(p).isDirectory()) walk(p, r);
+        else lines.push(`${r} ${createHash('sha256').update(readFileSync(p)).digest('hex')}`);
+      }
+    };
+    walk(dir, '');
+    return lines.join('\n');
+  };
+
+  it('is declared git-config', () => {
+    expect(OPERATIONS.find((o) => o.name === 'activate')!.effect).toBe('git-config');
+  });
+
+  it('changes only core.hooksPath and no file', async () => {
+    const op = OPERATIONS.find((o) => o.name === 'activate')!;
+    const cfgBefore = gitList(root);
+    const filesBefore = files(root);
+    const r = await runOperation(op, root, {});
+    expect(r.outcome).toBe('pass');
+    expect(r.data).toEqual({ hooksPath: '.minspec/hooks', previous: '' });
+    const cfgAfter = gitList(root);
+    expect(cfgAfter.filter((l) => !cfgBefore.includes(l))).toEqual(['core.hookspath=.minspec/hooks']);
+    expect(cfgBefore.filter((l) => !cfgAfter.includes(l))).toEqual([]);
+    expect(files(root)).toBe(filesBefore);
+    // idempotent: second run reports the previous value
+    const again = await runOperation(op, root, {});
+    expect(again.data).toEqual({ hooksPath: '.minspec/hooks', previous: '.minspec/hooks' });
+    spawnSync('git', ['config', '--local', '--unset', 'core.hooksPath'], { cwd: root });
+  });
+
+  it('control: the config comparison detects a second changed key', () => {
+    const before = gitList(root);
+    spawnSync('git', ['config', '--local', 'user.name', 'x'], { cwd: root });
+    const after = gitList(root);
+    spawnSync('git', ['config', '--local', '--unset', 'user.name'], { cwd: root });
+    expect(after.filter((l) => !before.includes(l))).toEqual(['user.name=x']);
+  });
+
+  it('errors, not passes, when the folder is not its own git root', async () => {
+    const nested = join(root, 'specs');
+    const op = OPERATIONS.find((o) => o.name === 'activate')!;
+    mkdirSync(join(nested, '.minspec'), { recursive: true });
+    try {
+      const r = await runOperation(op, nested, {});
+      expect(r.outcome).toBe('error');
+    } finally {
+      rmSync(join(nested, '.minspec'), { recursive: true, force: true });
+    }
+  });
+});
+
 describe('FR-6: read-only operations do not write', () => {
   it('the fixture tree includes .git/config', () => {
     expect(readFileSync(join(root, '.git', 'config'), 'utf8')).toContain('[core]');
