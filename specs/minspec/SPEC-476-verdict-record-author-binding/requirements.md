@@ -1,5 +1,5 @@
 ---
-id: SPEC-465
+id: SPEC-476
 type: requirements
 status: specifying
 tier: T3
@@ -22,7 +22,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-465: Bind each verdict record to the account that wrote its comment
+# SPEC-476: Bind each verdict record to the account that wrote its comment
 
 > **This is a SPECIFICATION ONLY.** Written by a Specify-only dispatch (DR-076, the solo-mode
 > ceremony record / #1169) for issue #1105. Nothing is built until a human reads it, resolves
