@@ -273,8 +273,15 @@ describe('the record on disk', () => {
   it('names no memory-fabric repo and quotes the founder verbatim', () => {
     for (const d of ds) {
       expect(d.repo.toLowerCase()).not.toContain('memory-fabric');
-      expect(d.words).toContain('greenlight all future development');
+      expect(d.words.trim()).not.toBe('');
     }
+    expect(ds.find((d) => d.id === 'DLG-001')?.words).toContain('greenlight all future development');
+  });
+
+  it('DLG-001 still covers exactly spec approval and engineering-DR acceptance (DR-122 adds, never widens)', () => {
+    const d1 = ds.find((d) => d.id === 'DLG-001');
+    expect(d1?.covers).toEqual(['spec-approval', 'engineering-dr-acceptance']);
+    expect(d1?.decision).toBe('DR-108');
   });
 
   it('is gated on a decision record, so writing the file activates nothing', () => {
