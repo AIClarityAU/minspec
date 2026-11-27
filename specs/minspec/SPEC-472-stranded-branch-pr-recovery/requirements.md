@@ -51,15 +51,19 @@ branches on origin that lack a PR. The failure is loud once, then forgotten.
   wait until reset (bounded, see FR-3), then retry list+create. On `auth`, keep the existing
   single forced re-mint (#4062). On `unknown`, behave as today.
 - **FR-3 Bounded wait.** The in-dispatch wait is capped (default per Decision 1). Past the cap
-  the dispatch does not hold its slot: it records the branch as pending-PR (FR-4) and exits 1
-  as today.
-- **FR-4 Durable pending-PR marker.** A stranded branch is recorded in a place a later cycle can
-  read without the dispatch's process (branch name, head SHA, issue number, verdict if any,
-  time). The marker is never the only witness: FR-5 does not depend on it.
+  the dispatch does not hold its slot: it leaves the pushed branch for the sweep (FR-4, FR-5)
+  and exits 1 as today.
+- **FR-4 No separate marker (Decision 4 option a).** The pushed `agent/issue-N` branch on origin
+  with no PR is itself the marker; no local state file or issue comment is written. The sweep
+  derives the issue number from the branch name and the head SHA from origin. The earlier
+  verdict and timestamps are deliberately not kept (FR-9 re-runs review anyway).
 - **FR-5 Recovery sweep.** A later drain cycle lists `agent/issue-*` branches on origin that
-  have no PR in any state, excluding branches whose issue has a merged/closed PR, and, for each,
-  opens the PR with the body the dispatch would have used, then runs the usual review and gate.
-  This is independent of the marker (second witness, constitution invariant 2).
+  have no PR in any state, excluding branches whose issue has an open, merged or closed PR, and, for each,
+  opens the PR with a rebuilt body: the title and body come from the issue (fetched by number)
+  plus the standard PR template, since the dispatch's `$BODY` and `$ISSUE_TITLE` are process
+  state that is gone. Then it runs the usual review and gate. With no marker (FR-4) the sweep is
+  the only recovery witness; the failed dispatch's exit 1 and drain-log line (FR-8) are the
+  visible signal, so the gap is never silent (constitution invariant 2).
 - **FR-6 Rate-limit aware sweep.** The sweep checks remaining quota first and defers entirely
   while it is exhausted; it never loops tightly against the limit.
 - **FR-7 No duplicate PRs, no duplicate dispatch.** The sweep is idempotent (re-list before
@@ -112,7 +116,7 @@ faults; recovering non-`agent/issue-*` branches.
    tokens once more per recovered branch. (b) reuse the stored verdict; cheaper, but trusts a
    verdict whose own post step errored (as `issue-1267` did) and which may predate main moving.
 3. **Decision record.** (a) **(rec)** no DR: the change is reversible in under a day (script
-   logic, DR-359 filter); costs no durable rationale beyond this spec. (b) file a DR for the
+   logic, DR-359 filter (parent-register record, `MMO/DR359`)); costs no durable rationale beyond this spec. (b) file a DR for the
    marker format if it becomes a cross-script contract.
 4. **Marker location.** (a) **(rec)** none beyond origin itself (branch with no PR is the
    marker; sweep derives the rest from the branch and issue); fewest moving parts, but loses
