@@ -30,6 +30,40 @@ const REPO = path.resolve(__dirname, '../../..');
 const AI_REVIEW = fs.readFileSync(path.join(REPO, '.github/workflows/ai-review.yml'), 'utf-8');
 const RTM = fs.readFileSync(path.join(REPO, '.github/workflows/ready-to-merge.yml'), 'utf-8');
 
+/**
+ * One top-level job of ai-review.yml, read textually (js-yaml is only a transitive
+ * dependency here, see docs-lane-hold.test.ts): its simple `key: value` lines and its
+ * two-level maps (`permissions`, `env`, `outputs`), comments stripped.
+ */
+function jobOf(id: string) {
+  const rows = AI_REVIEW.split('\n');
+  const at = rows.findIndex((l) => l === `  ${id}:`);
+  if (at < 0) throw new Error(`job ${id} is missing`);
+  const body: string[] = [];
+  for (let i = at + 1; i < rows.length; i++) {
+    if (/^ {2}\S/.test(rows[i]) || /^\S/.test(rows[i])) break;
+    body.push(rows[i]);
+  }
+  const top: Record<string, string> = {};
+  const maps: Record<string, Record<string, string>> = {};
+  let cur: string | null = null;
+  for (const raw of body) {
+    const l = raw.replace(/\s+#.*$/, '');
+    if (/^\s*#/.test(l) || l.trim() === '') continue;
+    let m = /^ {4}([a-z-]+):\s*(.*)$/i.exec(l);
+    if (m) {
+      top[m[1]] = m[2];
+      cur = m[2] === '' ? m[1] : null;
+      if (cur) maps[cur] = {};
+      continue;
+    }
+    m = /^ {6}([A-Za-z_-]+):\s*(.*)$/.exec(l);
+    if (m && cur) maps[cur][m[1]] = m[2];
+  }
+  return { top, maps, body: body.join('\n') };
+}
+
+
 const GUARD_STEP = 'Check reviewer is configured (skip cleanly if not)';
 const CTX_STEP = 'Resolve the pull request and reviewer identity';
 const GATE_STEP = 'Enforce ai-review label integrity and reflect the merge gate';
@@ -100,16 +134,39 @@ function stepLines(source: string, stepName: string): string[] {
   return out;
 }
 
-/** Runs the ai-review.yml guard step with the given secrets; returns its outputs + log. */
-function runGuardStep(secrets: { oauth?: string; appId?: string; appKey?: string; mode?: string; reviewAppId?: string; reviewAppKey?: string }) {
+const ARM_STEP = 'Decide the reviewer arm (App or GITHUB_TOKEN)';
+
+/** Runs ai-review.yml's `arm` job step (which review job starts) with the given secrets. */
+function runArmStep(secrets: { appId?: string; appKey?: string; mode?: string }): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'identity-arm-'));
+  scratch.push(dir);
+  const out = path.join(dir, 'out');
+  fs.writeFileSync(out, '');
+  const res = spawnSync('bash', ['-c', stepScalar(AI_REVIEW, ARM_STEP, 'run')], {
+    env: { PATH: process.env.PATH, GITHUB_OUTPUT: out, APP_ID: secrets.appId ?? '', APP_KEY: secrets.appKey ?? '', REVIEW_APP_MODE: secrets.mode ?? '' },
+    encoding: 'utf-8',
+  });
+  if (res.status !== 0) throw new Error(`arm step exited ${res.status}`);
+  const m = /^arm=(.*)$/m.exec(fs.readFileSync(out, 'utf-8'));
+  return m ? m[1] : '';
+}
+
+/**
+ * Runs the ai-review.yml guard step with the given secrets; returns its outputs + log.
+ * `jobArm` is the job it runs in (REVIEW_JOB_ARM); by default the one the `arm` job picks
+ * for the same secrets, exactly as the workflow wires it.
+ */
+function runGuardStep(secrets: { oauth?: string; appId?: string; appKey?: string; mode?: string; reviewAppId?: string; reviewAppKey?: string; jobArm?: string }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'identity-guard-'));
   scratch.push(dir);
   const out = path.join(dir, 'out');
   fs.writeFileSync(out, '');
+  const jobArm = secrets.jobArm ?? runArmStep(secrets);
   const res = spawnSync('bash', ['-c', stepScalar(AI_REVIEW, GUARD_STEP, 'run')], {
     env: {
       PATH: process.env.PATH,
       GITHUB_OUTPUT: out,
+      REVIEW_JOB_ARM: jobArm,
       OAUTH_TOKEN: secrets.oauth ?? '',
       APP_ID: secrets.appId ?? '',
       APP_KEY: secrets.appKey ?? '',
@@ -188,6 +245,37 @@ async function runCtx(o: {
   return { log, outputs, notices, warnings, failed: failed as string | null };
 }
 
+/** A genuine ai-review.yml run on HEAD for PR 7, as the Actions API returns it. */
+function genuineRun(over: Record<string, unknown> = {}) {
+  return {
+    id: 501,
+    path: '.github/workflows/ai-review.yml',
+    event: 'pull_request',
+    head_sha: HEAD,
+    head_repository: { full_name: 'OWNER/REPO' },
+    pull_requests: [{ number: 7 }],
+    status: 'completed',
+    conclusion: 'success',
+    run_attempt: 1,
+    created_at: '2026-11-01T12:01:00Z',
+    ...over,
+  };
+}
+
+/** Its GITHUB_TOKEN-arm job, with the pass witness step in the given conclusion. */
+function genuineJob(witness: string = 'success', over: Record<string, unknown> = {}) {
+  return {
+    run_id: 501,
+    run_attempt: 1,
+    name: GUARD.REVIEW_ACTIONS_JOB,
+    head_sha: HEAD,
+    status: 'completed',
+    conclusion: 'success',
+    steps: [{ name: GUARD.PASS_WITNESS_STEP, status: 'completed', conclusion: witness }],
+    ...over,
+  };
+}
+
 /** Runs the ready-to-merge gate step against a PR whose pass was posted by `poster`. */
 async function runGate(o: {
   eventName?: 'pull_request' | 'workflow_run';
@@ -200,6 +288,10 @@ async function runGate(o: {
   author?: string;
   /** context.actor (the run's triggering actor). */
   actor?: string;
+  /** ai-review workflow runs on the head (Actions API); default: one genuine passing run. */
+  reviewRuns?: unknown[] | Error;
+  /** jobs of the selected run; default: the GITHUB_TOKEN-arm job with the witness step green. */
+  reviewJobs?: unknown[] | Error;
 }) {
   const poster = o.poster ?? ACTIONS_BOT;
   const slug = poster.replace(/\[bot\]$/, '');
@@ -247,10 +339,16 @@ async function runGate(o: {
       createComment: rec('issues.createComment'),
     },
     checks: { listForRef: Object.assign(async () => ({ data: { total_count: 0, check_runs: [] } }), { api: 'checks.listForRef' }) },
+    actions: {
+      listWorkflowRuns: Object.assign(async () => ({ data: { total_count: 0, workflow_runs: [] } }), { api: 'actions.listWorkflowRuns' }),
+      listJobsForWorkflowRun: Object.assign(async () => ({ data: { total_count: 0, jobs: [] } }), { api: 'actions.listJobsForWorkflowRun' }),
+    },
   };
+  const reviewRuns = o.reviewRuns ?? [genuineRun()];
+  const reviewJobs = o.reviewJobs ?? [genuineJob()];
   const github = {
     rest,
-    paginate: async (method: { api?: string }) => {
+    paginate: async (method: { api?: string }, args?: Record<string, unknown>) => {
       if (method === rest.pulls.listFiles) {
         if (files instanceof Error) throw files;
         return files.map((filename) => ({ filename }));
@@ -260,6 +358,16 @@ async function runGate(o: {
       }
       if (method === rest.repos.listCommitStatusesForRef) {
         return [{ context: 'ai-review/pass', state: 'success', creator: { login: poster }, created_at: '2026-11-01T12:05:00Z' }];
+      }
+      if (method === rest.actions.listWorkflowRuns) {
+        log.push({ api: 'actions.listWorkflowRuns', args: args ?? {} });
+        if (reviewRuns instanceof Error) throw reviewRuns;
+        return reviewRuns;
+      }
+      if (method === rest.actions.listJobsForWorkflowRun) {
+        log.push({ api: 'actions.listJobsForWorkflowRun', args: args ?? {} });
+        if (reviewJobs instanceof Error) throw reviewJobs;
+        return reviewJobs;
       }
       if (method === rest.checks.listForRef) {
         return [{ name: 'ai-review', status: 'completed', conclusion: 'success', head_sha: HEAD, app: { slug }, completed_at: '2026-11-01T12:05:00Z' }];
@@ -387,22 +495,81 @@ describe('FR2-FR4 - token selection in ai-review.yml', () => {
     expect(mint).toMatch(/if: steps\.guard\.outputs\.identity == 'app'/);
   });
 
-  it('workflow permissions grant exactly the FR4 write scopes', () => {
+  // Review finding (#4079): the write scopes are granted ONLY to the GITHUB_TOKEN arm's
+  // job; the App arm's own token stays `contents: read`, exactly as before SPEC-268.
+  it('workflow + App-arm job keep contents: read; only the GITHUB_TOKEN-arm job gets the FR4 write scopes', () => {
     const m = /^permissions:\n((?: {2}.+\n)+)/m.exec(AI_REVIEW);
-    expect(m).not.toBeNull();
-    const scopes = Object.fromEntries(
-      m![1]
-        .trim()
-        .split('\n')
-        .map((l) => l.replace(/#.*$/, '').trim().split(/:\s*/)),
-    );
-    expect(scopes).toEqual({
+    expect(m![1].replace(/#.*$/gm, '').trim()).toBe('contents: read');
+    expect(jobOf('arm').top.permissions).toBe('{}');
+    expect(jobOf('runner').maps.permissions).toEqual({ contents: 'read' });
+    expect(jobOf(GUARD.REVIEW_ACTIONS_JOB).maps.permissions).toEqual({
       contents: 'read',
       'pull-requests': 'write',
       issues: 'write',
       checks: 'write',
       statuses: 'write',
     });
+  });
+
+  it('exactly one review job runs per arm, both run the SAME steps, each tells the guard its arm', () => {
+    const jobIds = AI_REVIEW.slice(AI_REVIEW.indexOf('\njobs:\n'))
+      .split('\n')
+      .filter((l) => /^ {2}[a-z][\w-]*:$/.test(l))
+      .map((l) => l.trim().slice(0, -1));
+    expect(jobIds).toEqual(['arm', 'runner', GUARD.REVIEW_ACTIONS_JOB]);
+    const r = jobOf('runner');
+    expect(r.top.needs).toBe('arm');
+    expect(r.top.if).toBe("needs.arm.outputs.arm != 'actions'");
+    expect(r.maps.env).toEqual({ REVIEW_JOB_ARM: 'app' });
+    // `steps:` then the anchor on its own line: the steps are defined ONCE, in `runner`.
+    expect(r.body).toMatch(/^ {4}steps:\n {6}&review-steps\n/m);
+    const a = jobOf(GUARD.REVIEW_ACTIONS_JOB);
+    expect(a.top.needs).toBe('arm');
+    expect(a.top.if).toBe("needs.arm.outputs.arm == 'actions'");
+    expect(a.maps.env).toEqual({ REVIEW_JOB_ARM: 'actions' });
+    expect(a.top.steps).toBe('*review-steps'); // the same list, not a drifting copy
+    expect(AI_REVIEW.match(/&review-steps\b/g)).toHaveLength(1);
+    expect(jobOf('arm').maps.outputs).toEqual({ arm: '${{ steps.arm.outputs.arm }}' });
+  });
+
+  it('the arm job and the guard decide the same arm for every secret state', () => {
+    const states = [{}, { appId: '1' }, { appKey: SHAPE }, { appId: '1', appKey: SHAPE }];
+    for (const mode of ['', 'builder', ' Builder ', 'review']) {
+      for (const st of states) {
+        const s = { oauth: SHAPE, mode, reviewAppId: '9', reviewAppKey: SHAPE, ...st };
+        const r = runGuardStep(s);
+        expect(r.code, JSON.stringify(s)).toBe(0);
+        expect(r.outputs.identity).toBe(runArmStep(s));
+      }
+    }
+  });
+
+  it('guard in the wrong job (or no job arm) fails red before posting anything', () => {
+    for (const [secrets, jobArm] of [
+      [{ oauth: SHAPE }, 'app'],
+      [{ oauth: SHAPE, appId: '1', appKey: SHAPE }, 'actions'],
+      [{ oauth: SHAPE }, ''],
+    ] as const) {
+      const r = runGuardStep({ ...secrets, jobArm });
+      expect(r.code).toBe(1);
+      expect(r.stdout).toContain('Reviewer arm mismatch');
+      expect(r.outputs.configured).toBeUndefined();
+      expect(r.outputs.identity).toBeUndefined();
+    }
+  });
+
+  it('the pass witness step is named as the guard expects and runs only on a posted, non-machinery pass', () => {
+    const rows = AI_REVIEW.split('\n');
+    const at = rows.findIndex((l) => l.trim() === `- name: ${GUARD.PASS_WITNESS_STEP}`);
+    expect(at).toBeGreaterThan(rows.findIndex((l) => l.trim() === '- name: Post verdict + apply label as minspec-sdd[bot]'));
+    expect(at).toBeLessThan(rows.findIndex((l) => l.trim() === `- name: Fail closed — request changes as minspec-sdd[bot] on any error`));
+    const step = stepLines(AI_REVIEW, GUARD.PASS_WITNESS_STEP).map((l) => l.trim());
+    // implicit success(): skipped whenever any earlier step failed
+    expect(step).toContain(
+      "if: steps.guard.outputs.configured == 'true' && steps.review.outputs.label == 'ai-review:pass' && steps.review.outputs.is_machinery != 'true'",
+    );
+    expect(step.find((l) => l.startsWith('run:'))).not.toMatch(/\$\{\{/);
+    expect(GUARD.REVIEW_WORKFLOW_PATH).toBe('.github/workflows/ai-review.yml');
   });
 
   it('the inference step still receives no GitHub token', () => {
@@ -506,6 +673,75 @@ describe('AC1/AC4 - the gate turns green on a github-actions pass only where FR5
   it('FR5: an operator-set AI_REVIEW_BOT_LOGINS is never widened behind their back', async () => {
     const r = await runGate({ identity: 'actions', varSet: true });
     expect(r.state).toBe('failure');
+  });
+});
+
+// SPEC-268 independent review (#4079, rv-4079-fe80cda3): github-actions[bot] is the login of
+// EVERY GITHUB_TOKEN in the repo, so in the no-App arm a non-machinery PR whose own code
+// runs under CI (a test, an npm lifecycle script) could post the label, the status and the
+// check-run itself. The gate must not count any of them: only the ai-review.yml RUN on the
+// head, read through the Actions API, is evidence there.
+describe('review finding - a github-actions pass counts only when the ai-review run on the head recorded it', () => {
+  it('forged: label + ai-review/pass status + ai-review check-run all by github-actions[bot], no ai-review run -> failure', async () => {
+    const r = await runGate({ identity: 'actions', reviewRuns: [] });
+    expect(r.state).toBe('failure');
+    expect(r.description).toMatch(/no ai-review run/);
+  });
+
+  it('forged: a different workflow (CI running the PR code) on the head, even with a step of the same name -> failure', async () => {
+    const r = await runGate({ identity: 'actions', reviewRuns: [genuineRun({ path: '.github/workflows/ci.yml' })] });
+    expect(r.state).toBe('failure');
+  });
+
+  it('forged: a workflow_dispatch run of ai-review.yml is not a pull_request review -> failure', async () => {
+    const r = await runGate({ identity: 'actions', reviewRuns: [genuineRun({ event: 'workflow_dispatch' })] });
+    expect(r.state).toBe('failure');
+  });
+
+  it('the genuine run did not record a pass (witness step skipped) -> failure despite the forged label/status/check', async () => {
+    const r = await runGate({ identity: 'actions', reviewJobs: [genuineJob('skipped')] });
+    expect(r.state).toBe('failure');
+  });
+
+  it('a run on an OLDER head does not speak for this one -> failure', async () => {
+    const r = await runGate({ identity: 'actions', reviewRuns: [genuineRun({ head_sha: 'd'.repeat(40) })] });
+    expect(r.state).toBe('failure');
+  });
+
+  it('the latest ai-review run on the head is still running -> failure', async () => {
+    const r = await runGate({ identity: 'actions', reviewRuns: [genuineRun({ status: 'in_progress', conclusion: null })] });
+    expect(r.state).toBe('failure');
+  });
+
+  it('runs listing unreadable -> failure (fail closed, visibly)', async () => {
+    const r = await runGate({ identity: 'actions', reviewRuns: new Error('HTTP 500') });
+    expect(r.state).toBe('failure');
+    expect(r.warnings.join('\n')).toMatch(/ai-review run/);
+  });
+
+  it('jobs listing unreadable -> failure (fail closed)', async () => {
+    const r = await runGate({ identity: 'actions', reviewJobs: new Error('HTTP 403') });
+    expect(r.state).toBe('failure');
+  });
+
+  it('genuine ai-review run on the head recorded the pass -> success, read for THIS head through ai-review.yml', async () => {
+    const r = await runGate({ identity: 'actions' });
+    expect(r.state).toBe('success');
+    const runs = r.log.find((c) => c.api === 'actions.listWorkflowRuns');
+    expect(runs?.args).toMatchObject({ owner: 'OWNER', repo: 'REPO', workflow_id: 'ai-review.yml', head_sha: HEAD, event: 'pull_request' });
+    const jobs = r.log.find((c) => c.api === 'actions.listJobsForWorkflowRun');
+    expect(jobs?.args).toMatchObject({ run_id: 501, filter: 'latest' });
+  });
+
+  it('App arm never consults the Actions runs (its witnesses are App-attested)', async () => {
+    const r = await runGate({ identity: 'app', poster: 'minspec-sdd[bot]', reviewRuns: [] });
+    expect(r.state).toBe('success');
+    expect(r.log.some((c) => c.api === 'actions.listWorkflowRuns')).toBe(false);
+  });
+
+  it('ready-to-merge may read Actions runs (actions: read) and nothing more on that scope', () => {
+    expect(RTM).toMatch(/^ {2}actions: read\b/m);
+    expect(RTM).not.toMatch(/^ {2}actions: write/m);
   });
 });
 

@@ -70,6 +70,13 @@
 # `AI_REVIEW_APP` is not `review` (the review-only App below never widens). A label
 # made with GITHUB_TOKEN triggers no `labeled` run, so the `workflow_run` trigger
 # below re-evaluates the gate when a review completes.
+# github-actions[bot] is the login of EVERY GITHUB_TOKEN in the repo (CI running
+# the PR's own tests included), so in that arm the label, the `ai-review/pass`
+# status and the `ai-review` check-run are NOT evidence of a review. The pass
+# counts only when the ai-review.yml `pull_request` run on the PR's head, read
+# through the Actions API (`actions: read`), finished green and its
+# `runner-actions` job ran the pass witness step. Anything missing or unreadable
+# is no pass (fail closed).
 #
 # ── OPTIONAL — a review-only App (#4078) ─────────────────────────────────────
 # By default the App that posts the verdicts is the same one your build agents use,
@@ -157,6 +164,7 @@ permissions:
   pull-requests: write   # remove a stale/forged `ai-review:pass` + post an audit comment
   issues: read           # read the PR's label timeline (issue events API) for pass provenance
   checks: read           # #810 — read the head's `ai-review` verdict check-run (2nd SHA-bound witness)
+  actions: read          # SPEC-268 — no-App arm: read the ai-review.yml run on the head (the only witness there)
   contents: read         # checkout the trusted base commit + read the head commit's timestamp
 
 jobs:
@@ -400,6 +408,7 @@ jobs:
             // Runs AFTER the #4078 resolution above, so a misconfigured review mode has
             // already failed closed; in review mode ctx reports identity `app`, so this
             // never widens there.
+            let actionsArm = false; // true ⇒ github-actions[bot] is trusted, so only the run witness counts
             if (typeof guard.effectiveAllowlist === 'function' && process.env.REVIEW_IDENTITY === 'actions') {
               const headRepo = pr.head && pr.head.repo && pr.head.repo.full_name;
               let touchesMachinery; // undefined ⇒ unknown ⇒ never widens
@@ -436,8 +445,65 @@ jobs:
                 actor: context.actor,
               });
               allowlist = eff.allowlist;
+              actionsArm = eff.widened === true;
               core.info(`REVIEWER IDENTITY: ${eff.widened ? 'widened' : 'not widened'} — ${eff.reason}`);
             }
+
+            // ── SPEC-268 review finding (#4079) — the ONLY pass witness in the widened arm ──
+            // github-actions[bot] is the login of EVERY GITHUB_TOKEN in this repo, so once
+            // it is allowlisted a label, an `ai-review/pass` status or an `ai-review`
+            // check-run could have been written by any workflow - CI running this PR's own
+            // tests included. In this arm none of them is evidence of a review. The pass
+            // counts only when the ai-review.yml `pull_request` run on THIS head, read
+            // through the Actions API (written by GitHub, not by a token), recorded it in
+            // its witness step (guard.selectReviewRun / verifyReviewRunWitness). Every
+            // missing piece - a base guard without the verifier, a failed read, no run, a
+            // run still going, a skipped witness step - is "not verified": fail closed.
+            let reviewRunWitness; // memo: read once per gate run
+            const readReviewRunWitness = async () => {
+              if (reviewRunWitness) return reviewRunWitness;
+              if (typeof guard.selectReviewRun !== 'function' || typeof guard.verifyReviewRunWitness !== 'function') {
+                reviewRunWitness = { verified: false, reason: 'the base guard cannot verify the ai-review run witness (SPEC-268)' };
+                return reviewRunWitness;
+              }
+              try {
+                const runs = await withRetry('ai-review runs read', () =>
+                  github.paginate(github.rest.actions.listWorkflowRuns, {
+                    owner,
+                    repo,
+                    workflow_id: path.basename(guard.REVIEW_WORKFLOW_PATH),
+                    head_sha: pr.head.sha,
+                    event: 'pull_request',
+                    per_page: 100,
+                  }),
+                );
+                const sel = guard.selectReviewRun({
+                  runs,
+                  headSha: pr.head.sha,
+                  prNumber: pr.number,
+                  repoFullName: `${owner}/${repo}`,
+                });
+                if (!sel.run) {
+                  reviewRunWitness = { verified: false, reason: sel.reason };
+                  return reviewRunWitness;
+                }
+                const jobs = await withRetry('ai-review run jobs read', () =>
+                  github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+                    owner,
+                    repo,
+                    run_id: sel.run.id,
+                    filter: 'latest',
+                    per_page: 100,
+                  }),
+                );
+                reviewRunWitness = guard.verifyReviewRunWitness({ run: sel.run, jobs, headSha: pr.head.sha });
+              } catch (e) {
+                core.warning(`could not read the ai-review run on ${pr.head.sha}: ${e.message} — no pass witness (fail closed)`);
+                reviewRunWitness = { verified: false, reason: 'could not read the ai-review run on this head (fail closed)' };
+              }
+              core.info(`REVIEW RUN WITNESS: ${reviewRunWitness.verified ? 'verified' : 'not verified'} — ${reviewRunWitness.reason}`);
+              return reviewRunWitness;
+            };
 
             // ── Active-cleanup decisions (pure) ────────────────────────────
             const provenance = guard.decideProvenanceRevert({
@@ -503,6 +569,11 @@ jobs:
                     'treating the pass as stale, as before (#1688)',
                 );
               }
+            }
+            // In the widened arm a "completed pass round" check-run is github-actions-made
+            // and so forgeable: stand the strip down only if the run witness agrees.
+            if (actionsArm && headRound && headRound.complete === true && !(await readReviewRunWitness()).verified) {
+              headRound = undefined;
             }
             const staleness = guard.decideStalenessStrip({ action, labels, headRound });
             if (headRound && headRound.complete === true && !staleness.strip) {
@@ -605,7 +676,14 @@ jobs:
             const hasWitnessVerifier =
               typeof guard.verifyHeadPassWitness === 'function' ||
               typeof guard.verifyHeadPassStatus === 'function';
-            if (
+            if (actionsArm) {
+              // Widened arm: statuses and check-runs are ignored as evidence (see the
+              // run-witness block above); the run witness is ALWAYS required.
+              headStatus = { verified: false, reason: 'no ai-review:pass to bind' };
+              if (labels.includes(guard.PASS) && !provenance.revert && !staleness.strip) {
+                headStatus = await readReviewRunWitness();
+              }
+            } else if (
               hasWitnessVerifier &&
               labels.includes(guard.PASS) &&
               !provenance.revert &&

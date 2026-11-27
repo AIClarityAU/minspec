@@ -139,7 +139,9 @@ describe('RECURRENCE GATE: adopters need only the Claude secret (#2982)', () => 
     const out = path.join(dir, 'out');
     fs.writeFileSync(out, '');
     const res = spawnSync('bash', ['-c', guardRun(AI_REVIEW_WORKFLOW)], {
-      env: { PATH: process.env.PATH, GITHUB_OUTPUT: out, OAUTH_TOKEN: 'x-shape-only-not-a-credential', APP_ID: '', APP_KEY: '' },
+      // REVIEW_JOB_ARM: the guard runs inside `runner-actions` for a no-App adopter (the
+      // GITHUB_TOKEN-arm job, #4079 review finding) and refuses any other arm.
+      env: { PATH: process.env.PATH, GITHUB_OUTPUT: out, OAUTH_TOKEN: 'x-shape-only-not-a-credential', APP_ID: '', APP_KEY: '', REVIEW_JOB_ARM: 'actions' },
       encoding: 'utf-8',
     });
     expect(res.status).toBe(0);

@@ -25,6 +25,11 @@ const {
   effectiveAllowlist,
   FALLBACK_REVIEWER_LOGIN,
   pathsTouchMachinery,
+  selectReviewRun,
+  verifyReviewRunWitness,
+  REVIEW_WORKFLOW_PATH,
+  REVIEW_ACTIONS_JOB,
+  PASS_WITNESS_STEP,
   isAuthorizedReviewer,
   decideProvenanceRevert,
   decideStalenessStrip,
@@ -123,6 +128,113 @@ test('pathsTouchMachinery: same MACHINERY_PATH_RE as the diff predicate, failing
   assert.equal(pathsTouchMachinery(undefined), true);
   assert.equal(pathsTouchMachinery(['src/a.ts'], 3), true);
   assert.equal(pathsTouchMachinery(['src/a.ts', null]), true);
+});
+
+// ── SPEC-268 review finding (#4079): the no-App pass witness is the ai-review RUN ──
+// In the GITHUB_TOKEN arm every token in the repo writes as github-actions[bot], so a
+// label, a commit status or a check-run proves nothing about WHO wrote it. The only
+// witness accepted there is the ai-review.yml workflow run itself, read through the
+// Actions API: its jobs and steps are written by GitHub, never by a token.
+const W_HEAD = 'a'.repeat(40);
+const W_REPO = 'OWNER/REPO';
+const wRun = (over = {}) => ({
+  id: 101,
+  path: REVIEW_WORKFLOW_PATH,
+  event: 'pull_request',
+  head_sha: W_HEAD,
+  head_repository: { full_name: W_REPO },
+  pull_requests: [{ number: 7 }],
+  status: 'completed',
+  conclusion: 'success',
+  run_attempt: 1,
+  created_at: '2026-11-27T01:00:00Z',
+  ...over,
+});
+const wJob = (over = {}, stepOver = {}) => ({
+  run_id: 101,
+  run_attempt: 1,
+  name: REVIEW_ACTIONS_JOB,
+  head_sha: W_HEAD,
+  status: 'completed',
+  conclusion: 'success',
+  steps: [
+    { name: 'Check reviewer is configured (skip cleanly if not)', status: 'completed', conclusion: 'success' },
+    { name: PASS_WITNESS_STEP, status: 'completed', conclusion: 'success', ...stepOver },
+  ],
+  ...over,
+});
+const wSel = (runs, over = {}) => selectReviewRun({ runs, headSha: W_HEAD, prNumber: 7, repoFullName: W_REPO, ...over });
+
+test('selectReviewRun: a genuine ai-review.yml pull_request run on this head is selected', () => {
+  const s = wSel([wRun()]);
+  assert.equal(s.run && s.run.id, 101);
+});
+
+test('selectReviewRun: runs that are not the ai-review.yml pull_request run on this head, for this PR, are never selected', () => {
+  for (const over of [
+    { path: '.github/workflows/ci.yml' },
+    { path: undefined },
+    { event: 'workflow_dispatch' },
+    { event: 'push' },
+    { head_sha: 'b'.repeat(40) },
+    { head_repository: { full_name: 'someone/REPO' } },
+    { head_repository: undefined },
+    { pull_requests: [{ number: 8 }] },
+    { pull_requests: [] },
+    { pull_requests: undefined },
+  ]) {
+    const s = wSel([wRun(over)]);
+    assert.equal(s.run, null, JSON.stringify(over));
+    assert.match(s.reason, /no ai-review/);
+  }
+});
+
+test('selectReviewRun: the LATEST run decides; running, cancelled or failed latest => no run (fail closed)', () => {
+  const older = wRun({ id: 100, created_at: '2026-11-27T00:00:00Z' });
+  for (const over of [{ status: 'in_progress', conclusion: null }, { conclusion: 'cancelled' }, { conclusion: 'failure' }]) {
+    const s = wSel([older, wRun(over)]);
+    assert.equal(s.run, null, JSON.stringify(over));
+  }
+  // An older failure does not shadow a newer success.
+  assert.equal(wSel([wRun({ id: 100, created_at: '2026-11-27T00:00:00Z', conclusion: 'failure' }), wRun()]).run.id, 101);
+});
+
+test('selectReviewRun: unreadable or malformed input fails closed', () => {
+  assert.equal(wSel(undefined).run, null);
+  assert.equal(wSel('nope').run, null);
+  assert.equal(wSel([wRun()], { headSha: 'short' }).run, null);
+  assert.equal(wSel([wRun()], { prNumber: undefined }).run, null);
+  assert.equal(wSel([wRun()], { repoFullName: '' }).run, null);
+  assert.equal(selectReviewRun().run, null);
+});
+
+test('verifyReviewRunWitness: the witness step succeeded in the GITHUB_TOKEN-arm job of the selected run => verified', () => {
+  const v = verifyReviewRunWitness({ run: wRun(), jobs: [wJob()], headSha: W_HEAD });
+  assert.equal(v.verified, true, v.reason);
+});
+
+test('verifyReviewRunWitness: skipped / missing witness step, wrong job, wrong run, wrong head => not verified', () => {
+  const cases = [
+    { jobs: [wJob({}, { conclusion: 'skipped' })] },
+    { jobs: [wJob({}, { status: 'in_progress', conclusion: null })] },
+    { jobs: [wJob({}, { name: 'something else' })] },
+    { jobs: [wJob({ name: 'runner' })] },
+    { jobs: [wJob({ run_id: 999 })] },
+    { jobs: [wJob({ head_sha: 'b'.repeat(40) })] },
+    { jobs: [wJob({ conclusion: 'failure' })] },
+    { jobs: [wJob({ run_attempt: 2 })] },
+    { jobs: [wJob(), wJob()] },
+    { jobs: [] },
+    { jobs: undefined },
+    { jobs: [wJob({ steps: undefined })] },
+  ];
+  for (const c of cases) {
+    const v = verifyReviewRunWitness({ run: wRun(), headSha: W_HEAD, ...c });
+    assert.equal(v.verified, false, JSON.stringify(c).slice(0, 120));
+    assert.ok(v.reason);
+  }
+  assert.equal(verifyReviewRunWitness({ run: null, jobs: [wJob()], headSha: W_HEAD }).verified, false);
+  assert.equal(verifyReviewRunWitness().verified, false);
 });
 
 // ── isAuthorizedReviewer ─────────────────────────────────────────────────────

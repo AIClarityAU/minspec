@@ -139,7 +139,10 @@
 #      `MINSPEC_APP_PRIVATE_KEY` set, every write below uses the built-in
 #      GITHUB_TOKEN and posts as `github-actions[bot]`; ready-to-merge.yml trusts that
 #      identity only in a repo without the App, only on same-repo, non-machinery PRs,
-#      and only while `AI_REVIEW_BOT_LOGINS` is unset (DR-115). With BOTH set:
+#      and only while `AI_REVIEW_BOT_LOGINS` is unset (DR-115), and even then
+#      counts a pass only from this workflow's own run on the head (its
+#      `runner-actions` job's pass witness step, read via the Actions API),
+#      never from a label, status or check-run alone. With BOTH set:
 #      confirm `MINSPEC_APP_PRIVATE_KEY` is the RAW PEM (create-github-app-token
 #      needs raw, not base64), and the App is installed on the repo with
 #      `pull-requests: write` + `issues: write` (labels/comments use the issues
@@ -196,19 +199,20 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
-# The workflow's OWN token. In the App arm (both MinSpec App secrets set) every PR
-# post/label uses the App token (steps.app-token), never this GITHUB_TOKEN — that is
-# what gives the label its minspec-sdd[bot] provenance. In the Actions arm (SPEC-268,
-# no App) the same writes use this token, so it carries exactly the scopes they need.
-# Every write step selects its token through ONE expression:
+# The workflow's OWN token: read-only by default. In the App arm (both MinSpec App
+# secrets set) every PR post/label uses the App token (steps.app-token), never this
+# GITHUB_TOKEN — that is what gives the label its minspec-sdd[bot] provenance — so the
+# App arm's job keeps `contents: read`. In the Actions arm (SPEC-268, no App) the same
+# writes use this token, so ONLY that arm's job (`runner-actions`, below) is granted the
+# write scopes they need. Permissions cannot be chosen by an expression, so the arm is
+# decided by a tiny `arm` job first and exactly one of the two review jobs runs; both
+# run the SAME steps (a YAML anchor), and the guard step refuses to go on if its own
+# decision disagrees with the job it is in. Every write step selects its token through
+# ONE expression:
 #   steps.guard.outputs.identity == 'actions' && github.token || steps.app-token.outputs.token
 # so the App arm never silently falls back to this token.
 permissions:
   contents: read
-  pull-requests: write
-  issues: write
-  checks: write
-  statuses: write
 
 # One review in flight per PR; a new push supersedes the previous run.
 concurrency:
@@ -216,13 +220,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # SPEC-268 review finding (#4079) — which review job runs. Mirrors the guard step's
+  # identity rule (builder mode without both App secrets ⇒ `actions`, anything else ⇒
+  # `app`); the guard re-decides inside the review job and fails red on a mismatch, so
+  # a drift between the two copies can never review with the wrong token scopes. Only
+  # the word `app`/`actions` leaves this job, never a secret value.
+  arm:
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      arm: ${{ steps.arm.outputs.arm }}
+    steps:
+      - name: Decide the reviewer arm (App or GITHUB_TOKEN)
+        id: arm
+        env:
+          REVIEW_APP_MODE: ${{ vars.AI_REVIEW_APP }}
+          APP_ID: ${{ secrets.MINSPEC_APP_ID }}
+          APP_KEY: ${{ secrets.MINSPEC_APP_PRIVATE_KEY }}
+        run: |
+          set -eu
+          mode="$(printf '%s' "${REVIEW_APP_MODE:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+          if { [ "$mode" = "" ] || [ "$mode" = "builder" ]; } && { [ -z "${APP_ID}" ] || [ -z "${APP_KEY}" ]; }; then
+            echo "arm=actions" >> "$GITHUB_OUTPUT"
+          else
+            echo "arm=app" >> "$GITHUB_OUTPUT"
+          fi
+
   # Renamed from `ai-review` → `runner` so its implicit "did the job exit 0"
   # check-run is NOT called `ai-review` (see the NOTE at the top of this file).
   # The authoritative `ai-review` check is posted explicitly by the final step,
   # with a conclusion that mirrors the verdict.
+  # `runner` is the App arm (and every case that is not the GITHUB_TOKEN arm, such as
+  # an unknown AI_REVIEW_APP, which the guard fails red): its own token stays
+  # `contents: read`. `runner-actions` (below) runs the same steps in the GITHUB_TOKEN arm.
   runner:
+    needs: arm
+    if: needs.arm.outputs.arm != 'actions'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      REVIEW_JOB_ARM: app
+    # The anchor sits on its own line, before the list, so line-based scanners that
+    # read `steps:` as a key with an empty value still see every step below.
     steps:
+      &review-steps
       # Secrets can't be read inside `if:`, so copy them into a step env and set an
       # output. Empty (unset secret, or a fork PR) → skip the rest with a NOTICE,
       # never a failure. Keeps this workflow safe to merge before the credentials
@@ -276,9 +318,8 @@ jobs:
             echo "configured=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "configured=true" >> "$GITHUB_OUTPUT"
           if [ "$mode" = "review" ] || { [ -n "${APP_ID}" ] && [ -n "${APP_KEY}" ]; }; then
-            echo "identity=app" >> "$GITHUB_OUTPUT"
+            identity=app
           else
             if [ -n "${APP_ID}" ]; then
               echo "::warning title=MinSpec App half-configured::MINSPEC_APP_PRIVATE_KEY is missing, so the App cannot be used. Reviews post with GITHUB_TOKEN as github-actions[bot]."
@@ -287,8 +328,18 @@ jobs:
             else
               echo "::notice title=Reviewing with GITHUB_TOKEN::App secrets absent: using GITHUB_TOKEN (reviews post as github-actions[bot])."
             fi
-            echo "identity=actions" >> "$GITHUB_OUTPUT"
+            identity=actions
           fi
+          # The job's token scopes were fixed by the `arm` job before this one started
+          # (`runner` = App arm, contents: read; `runner-actions` = GITHUB_TOKEN arm,
+          # write scopes). If this decision disagrees with the job it runs in, the
+          # token holds the wrong scopes: stop red, before anything is posted.
+          if [ "${REVIEW_JOB_ARM:-}" != "$identity" ]; then
+            echo "::error title=Reviewer arm mismatch::This job was started for the '${REVIEW_JOB_ARM:-unset}' arm but the secrets decide '${identity}'. Refusing to review with a token scoped for the other arm."
+            exit 1
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+          echo "identity=${identity}" >> "$GITHUB_OUTPUT"
 
       # STEP NAMES that say `as minspec-sdd[bot]` are kept verbatim: gate manifests and
       # tests address these steps by name. They mean "as the reviewer App", which is
@@ -1660,6 +1711,18 @@ jobs:
             gh pr edit "$PR_NUMBER" --repo "$REPO" --add-reviewer "$REVIEWERS" 2>/dev/null || true
           fi
 
+      # SPEC-268 review finding (#4079): the pass witness ready-to-merge.yml reads in a
+      # repo without the App. There, every GITHUB_TOKEN in the repo writes as
+      # github-actions[bot], so the label, status and check-run above cannot tell this
+      # workflow from any other; the merge gate instead reads THIS step's conclusion from
+      # the Actions API (guard.verifyReviewRunWitness), which only GitHub writes. It runs
+      # only when everything above succeeded and posted a non-machinery `ai-review:pass`;
+      # in every other case it is skipped, and a skipped witness is no pass. The NAME is
+      # matched verbatim by the guard (PASS_WITNESS_STEP); a test binds the two.
+      - name: Record the ai-review:pass witness for the merge gate (SPEC-268)
+        if: steps.guard.outputs.configured == 'true' && steps.review.outputs.label == 'ai-review:pass' && steps.review.outputs.is_machinery != 'true'
+        run: echo "ai-review:pass recorded by run ${GITHUB_RUN_ID} (attempt ${GITHUB_RUN_ATTEMPT})"
+
       # Backstop: if ANY step above errored (install, mint, review, post…), request
       # changes as the bot so an error never yields a green. If the token mint
       # itself failed there is no bot identity to post as — fail red (still no
@@ -1717,3 +1780,20 @@ jobs:
           gh pr edit "$PR_NUMBER" --repo "$REPO" --add-reviewer "$REVIEWERS" 2>/dev/null || true
           # Re-fail so the job status honestly reflects the error (label recovered).
           exit 1
+
+  # The GITHUB_TOKEN arm (SPEC-268): the SAME steps as `runner`, in a job whose own token
+  # carries exactly the write scopes those steps use when no App token exists.
+  # ready-to-merge.yml's pass witness names this job (guard.REVIEW_ACTIONS_JOB).
+  runner-actions:
+    needs: arm
+    if: needs.arm.outputs.arm == 'actions'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      checks: write
+      statuses: write
+    env:
+      REVIEW_JOB_ARM: actions
+    steps: *review-steps

@@ -1258,6 +1258,101 @@ function effectiveAllowlist({ raw, identity, varSet, isFork, touchesMachinery, p
   };
 }
 
+// ── SPEC-268 review finding (#4079): what proves a pass in the GITHUB_TOKEN arm ──
+//
+// In a repo without the MinSpec App the reviewer writes with GITHUB_TOKEN, and so does
+// EVERY other workflow in the repo: CI's `npm test`, which runs the PR's own code, holds
+// a token that writes as github-actions[bot] wherever that token can write. A label, a
+// commit status or a check-run carrying that login therefore says nothing about which
+// workflow wrote it, and a check-run's check suite cannot bind it either: GitHub
+// attaches a GITHUB_TOKEN-created check-run to an arbitrary Actions suite on the commit
+// (the suite id is ignored on create). So in this arm the gate accepts ONE witness: the
+// ai-review.yml workflow RUN itself, read through the Actions API. A run's path, event,
+// head and jobs/steps are written by GitHub from the workflow file, never by a token, so
+// a pass counts only when the latest ai-review.yml `pull_request` run on this PR's head
+// finished green AND its GITHUB_TOKEN-arm job ran the witness step, whose `if:` holds
+// only for a posted, non-machinery `ai-review:pass`.
+//
+// What this does NOT defend (and the App arm does not either): someone who can push a
+// workflow file can run any workflow they like, including one at this path via a PR
+// against a base of their own. That needs the `workflows` permission, the same bar as
+// forging a pass with the App's secrets. The widening already refuses PRs that touch
+// machinery. Deleting a newer failed run (actions: write) re-exposes an older pass on
+// the SAME head, which buys nothing a close/reopen re-review does not.
+const REVIEW_WORKFLOW_PATH = '.github/workflows/ai-review.yml';
+// The ai-review.yml job that runs in the GITHUB_TOKEN arm (the App arm's job is
+// `runner`; only this one holds write scopes on its own token).
+const REVIEW_ACTIONS_JOB = 'runner-actions';
+// The step name, verbatim from ai-review.yml. A test binds the two.
+const PASS_WITNESS_STEP = 'Record the ai-review:pass witness for the merge gate (SPEC-268)';
+
+/**
+ * Pick the ai-review run that speaks for this head (pure). Fail closed: anything
+ * missing, malformed or not yet finished returns `{ run: null, reason }`.
+ */
+function selectReviewRun({ runs, headSha, prNumber, repoFullName } = {}) {
+  if (!isCommitSha(headSha) || !Number.isInteger(prNumber) || typeof repoFullName !== 'string' || repoFullName === '') {
+    return { run: null, reason: 'no head, pull request or repository to bind the ai-review run to' };
+  }
+  if (!Array.isArray(runs)) return { run: null, reason: 'the ai-review workflow runs could not be read' };
+  const mine = runs.filter(
+    (r) =>
+      r &&
+      r.path === REVIEW_WORKFLOW_PATH &&
+      r.event === 'pull_request' &&
+      r.head_sha === headSha &&
+      r.head_repository &&
+      r.head_repository.full_name === repoFullName &&
+      Array.isArray(r.pull_requests) &&
+      r.pull_requests.some((p) => p && p.number === prNumber),
+  );
+  if (mine.length === 0) {
+    return { run: null, reason: `no ai-review run (${REVIEW_WORKFLOW_PATH}) on this head for this pull request` };
+  }
+  const t = (r) => {
+    const v = Date.parse(r.created_at || '');
+    return Number.isFinite(v) ? v : -Infinity;
+  };
+  const latest = mine.reduce((a, b) => (t(b) > t(a) || (t(b) === t(a) && (b.id || 0) > (a.id || 0)) ? b : a));
+  if (latest.status !== 'completed') {
+    return { run: null, reason: `the latest ai-review run on this head is still '${sanitizeLogin(latest.status)}'` };
+  }
+  if (latest.conclusion !== 'success') {
+    return { run: null, reason: `the latest ai-review run on this head concluded '${sanitizeLogin(latest.conclusion)}'` };
+  }
+  return { run: latest, reason: 'latest ai-review run on this head completed successfully' };
+}
+
+/**
+ * Did the selected run record a pass? (pure) `jobs` is that run's job list (latest
+ * attempt). Verified only when exactly one `REVIEW_ACTIONS_JOB` job of this run, on this
+ * head and attempt, completed green with the witness step completed `success`. A
+ * skipped witness step (no pass, or a machinery PR) or any missing field is no pass.
+ */
+function verifyReviewRunWitness({ run, jobs, headSha } = {}) {
+  const no = (reason) => ({ verified: false, reason });
+  if (!run || typeof run !== 'object') return no('no ai-review run to read the pass witness from');
+  if (!Array.isArray(jobs)) return no('the ai-review run jobs could not be read');
+  const mine = jobs.filter((j) => j && j.name === REVIEW_ACTIONS_JOB && j.run_id === run.id);
+  if (mine.length !== 1) {
+    return no(`expected one \`${REVIEW_ACTIONS_JOB}\` job in the ai-review run, found ${mine.length}`);
+  }
+  const job = mine[0];
+  if (job.head_sha !== headSha) return no('the ai-review job ran on a different head');
+  if (typeof run.run_attempt === 'number' && job.run_attempt !== run.run_attempt) {
+    return no('the ai-review job is from a different attempt of the run');
+  }
+  if (job.status !== 'completed' || job.conclusion !== 'success') {
+    return no(`the \`${REVIEW_ACTIONS_JOB}\` job is '${sanitizeLogin(job.conclusion || job.status)}', not success`);
+  }
+  const steps = Array.isArray(job.steps) ? job.steps.filter((s) => s && s.name === PASS_WITNESS_STEP) : [];
+  if (steps.length !== 1) return no('the ai-review run has no pass witness step');
+  if (steps[0].status !== 'completed' || steps[0].conclusion !== 'success') {
+    return no(`the ai-review pass witness step is '${sanitizeLogin(steps[0].conclusion || steps[0].status)}' - no pass was recorded`);
+  }
+  return { verified: true, reason: 'the ai-review run on this head recorded a pass (Actions run witness)' };
+}
+
 /**
  * May the verdict on the previous head be carried to this one? (#1688)
  *
@@ -2361,6 +2456,11 @@ module.exports = {
   decideVerdictCarry,
   inputTouchesMachinery,
   pathsTouchMachinery,
+  selectReviewRun,
+  verifyReviewRunWitness,
+  REVIEW_WORKFLOW_PATH,
+  REVIEW_ACTIONS_JOB,
+  PASS_WITNESS_STEP,
   MACHINERY_PATH_RE,
   renderCarriedComment,
   carriedLabelFault,
