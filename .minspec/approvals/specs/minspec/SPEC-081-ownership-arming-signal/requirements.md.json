@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-081-ownership-arming-signal/requirements.md",
+  "specHash": "056b5f93360850b8319f117af7b4bc4e2e59cc5b0b39f52f5402aa3790a27da6",
+  "approvedAt": "2026-10-31T03:50:57.288Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/specifying-1025",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3083#issuecomment-6537527421"
+}

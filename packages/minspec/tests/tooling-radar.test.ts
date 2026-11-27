@@ -37,10 +37,16 @@ import {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-ignore — plain .mjs, no type declarations
 } from '../../../scripts/tooling-radar/parse-scan.mjs';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite's own `bash()` wrapper around execFileSync is called per-case; the
+// literal call-site count alone understates it.
+useShellTimeout();
 
 const RADAR_DIR = path.resolve(__dirname, '../../../scripts/tooling-radar');
 const runRadarSh = fs.readFileSync(path.join(RADAR_DIR, 'run-radar.sh'), 'utf8');
 const radarPrompt = fs.readFileSync(path.join(RADAR_DIR, 'radar-prompt.md'), 'utf8');
+const filerSource = fs.readFileSync(path.join(RADAR_DIR, 'file-findings.mjs'), 'utf8');
 
 /** A minimal valid finding; individual tests override one field at a time. */
 const validFinding = (over: Record<string, unknown> = {}) => ({
@@ -63,6 +69,8 @@ function recordingRun() {
   const calls: Array<{ cmd: string; args: string[]; input?: string }> = [];
   const run = (cmd: string, args: string[], opts: { input?: string } = {}) => {
     calls.push({ cmd, args, input: opts.input });
+    // `gh label list` is the preflight probe; every repo has the labels by default.
+    if (args.includes('label')) return '[{"name":"idea"},{"name":"inbox"}]';
     // `gh issue list` is the dedupe probe; default to "not filed before".
     if (args.includes('list')) return '[]';
     return 'https://github.com/AIClarityAU/minspec/issues/999\n';
@@ -199,6 +207,30 @@ describe('tooling radar — the scan prompt and the filer agree on the category 
     expect(rule, 'radar-prompt.md must carry the category routing rule').not.toBeNull();
     expect(rule![0]).toMatch(/act: false/);
   });
+
+  it('scans AI-dev practice and model capability as scan area 5', () => {
+    expect(radarPrompt).toMatch(/^5\. AI-dev practice and model capability/m);
+  });
+
+  it('lets a token or cost finding be actionable under minspec, not forced watch-only', () => {
+    // Token spend is a core tenet; forcing every such finding to `act: false` meant the
+    // area could never produce work. The rule must say they route to `minspec` and may act.
+    const rule = radarPrompt.match(/- `category` routes the issue to a repo\.[\s\S]*?\n(?=- `)/);
+    expect(rule![0]).toMatch(/filed under `minspec`/);
+    expect(rule![0]).toMatch(/`act: true`/);
+    expect(radarPrompt).not.toMatch(/never with `act: true`/);
+  });
+
+  it('has the filer side agree: its policy comment does not call cost findings watch-only', () => {
+    // The prompt and the filer are one contract. The prompt routes cost findings to
+    // `minspec` with `act: true`; a filer comment still claiming they land as `act: false`
+    // is a false signpost for the next editor.
+    expect(filerSource).not.toMatch(/lands? as a watch item/);
+    expect(filerSource).toMatch(/cost\/measurement finding[\s\S]*`minspec`[\s\S]*`act: true`/);
+    // Behaviour: the filer does not force such a finding to watch-only.
+    const plan = planFinding(validFinding({ category: 'minspec', title: 'Cut token spend' }), 0);
+    expect(plan.repo).toBe(CATEGORY_REPO.minspec);
+  });
 });
 
 describe('tooling radar — field validation', () => {
@@ -277,6 +309,7 @@ describe('tooling radar — filing behaviour', () => {
     const calls: Array<{ args: string[] }> = [];
     const run = (_cmd: string, args: string[]) => {
       calls.push({ args });
+      if (args.includes('label')) return '[{"name":"idea"},{"name":"inbox"}]';
       return args.includes('list') ? '[{"number": 1183}]' : 'https://example.com/1\n';
     };
     const logs: string[] = [];
@@ -307,6 +340,36 @@ describe('tooling radar — filing behaviour', () => {
     expect(() =>
       runMain([validFinding(), validFinding({ key: 'ok-two', category: 'nope' })]),
     ).toThrow(/unknown category/);
+  });
+
+  it('files nothing when a target repo lacks a label, instead of failing mid-batch', () => {
+    const calls: Array<{ args: string[] }> = [];
+    const run = (_cmd: string, args: string[]) => {
+      calls.push({ args });
+      if (args.includes('label')) {
+        return args.includes('AIClarityAU/sealbox')
+          ? '[{"name":"inbox"}]'
+          : '[{"name":"idea"},{"name":"inbox"}]';
+      }
+      return args.includes('list') ? '[]' : 'https://example.com/1\n';
+    };
+    const sealboxCategory = Object.entries(CATEGORY_REPO).find(
+      ([, repo]) => repo === 'AIClarityAU/sealbox',
+    )![0];
+    expect(() =>
+      main(['findings.json'], {
+        run,
+        log: () => {},
+        warn: () => {},
+        readFile: () =>
+          findingsFile([
+            validFinding(),
+            validFinding({ key: 'seal-tool', category: sealboxCategory }),
+          ]),
+        tokenCmd: '/bin/false',
+      }),
+    ).toThrow(/AIClarityAU\/sealbox has no 'idea' label.*gh label create idea --repo AIClarityAU\/sealbox/);
+    expect(calls.some((c) => c.args.includes('create') && c.args.includes('issue'))).toBe(false);
   });
 
   it('refuses to fall back to the ambient gh credential when the App token fails', () => {

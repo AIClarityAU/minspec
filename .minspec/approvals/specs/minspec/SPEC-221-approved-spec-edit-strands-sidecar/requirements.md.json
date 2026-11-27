@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-221-approved-spec-edit-strands-sidecar/requirements.md",
+  "specHash": "e4c119e138ed508d0977904b1eed7c65a2cae95200f2f6772e1befc9a3302b91",
+  "approvedAt": "2026-11-12T05:39:05.836Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-pile-1112a-implements",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3630#issuecomment-6815532762"
+}

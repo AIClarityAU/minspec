@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-130-checkbox-state-hash-exit/requirements.md",
+  "specHash": "cd36fbb654852fb01f9ac0ec84b900fef059367579173fcce73000126ca03734",
+  "approvedAt": "2026-10-24T04:12:42.860Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "4e996e520977ab9196ecf5b23c8231627ee3d0e5"
+}

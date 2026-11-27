@@ -43,8 +43,9 @@
 #     entirely. It is allowlisted in the guard for that reason.
 #   * `git push` — push identity comes from git credentials and commit
 #     authorship, not from `gh`. Out of scope.
-#   * `--admin` merges — remain a HUMAN action (founder decision, 2026-07-28).
-#     Nothing here grants or eases that.
+#   * `--admin` merges — only through the runner helper under the bot-merge
+#     decision record (DR-112, bot merges under three conditions); nothing here
+#     grants or eases that.
 #
 # ── Failure policy: closed and loud, at STARTUP ───────────────────────────────
 # If a token cannot be minted, scripts abort before doing any work rather than
@@ -144,7 +145,7 @@ _gh_bot_adopt() {
 # dispatch, for hours (#2066).
 #
 # The stamp is fingerprint-VERIFIED, not merely present, because a marker outlives the
-# token it describes: scripts/review-churn-report.sh assigns GH_TOKEN from the broker
+# token it describes: the review-churn report script assigns GH_TOKEN from the broker
 # itself, and an unverified stamp inherited from an ancestor would then claim ownership
 # of a credential this file never minted.
 #

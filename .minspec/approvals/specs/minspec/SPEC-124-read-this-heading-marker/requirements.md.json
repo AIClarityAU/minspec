@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-124-read-this-heading-marker/requirements.md",
+  "specHash": "a65cb661443fe0df3a88c21cd392e0927bdad2395bca1283c093f3a9ff60ed7e",
+  "approvedAt": "2026-11-23T20:19:38.340Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1123",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4024#issuecomment-7112005209"
+}

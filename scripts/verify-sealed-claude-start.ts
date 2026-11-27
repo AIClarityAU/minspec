@@ -86,6 +86,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import type { ChildProcess, ExecFileOptions, ExecFileOptionsWithStringEncoding } from 'child_process';
 import { promisify } from 'util';
 import { randomBytes, createHash } from 'crypto';
 
@@ -269,12 +270,11 @@ function installPatches(): void {
   const nodePromisified = promisify(cp.execFile);
   const customSymbol = (promisify as unknown as { custom: symbol }).custom;
 
-  const patchedExecFile = (..._args: unknown[]): never => {
-    throw new Error('verify-sealed-claude-start: execFile was called callback-style, which was not expected');
-  };
-  const patched = async (command: string, args: readonly string[], options: cp.ExecFileOptions = {}) => {
-    if (args.includes('--version')) return nodePromisified(command as string, args as string[], options as cp.ExecFileOptionsWithStringEncoding);
+  const realExecFile = cp.execFile;
 
+  // The recording both shapes share: one `RecordedStart` per sealed start, and the
+  // arguments with this script's own additions applied.
+  const record = (args: readonly string[], options: ExecFileOptions): { start: RecordedStart; finalArgs: string[] } => {
     const cwd = typeof options.cwd === 'string' ? options.cwd : undefined;
     const cwdExistedAtCall = cwd !== undefined && fs.existsSync(cwd);
     const start: RecordedStart = {
@@ -290,11 +290,38 @@ function installPatches(): void {
     const keepTranscript = keepTranscriptForNextCall;
     keepTranscriptForNextCall = false;
     const sealedArgs = keepTranscript ? args.filter((a) => a !== '--no-session-persistence') : args;
-    const finalArgs = [...sealedArgs, ...extraArgs];
+    return { start, finalArgs: [...sealedArgs, ...extraArgs] };
+  };
+
+  // Callback style: what `proposeAI` uses since #2575, because it has to reach the
+  // child's stdin to write the prompt. Records, then starts the real thing.
+  const patchedExecFile = (command: string, args: readonly string[], options: ExecFileOptions, callback: (...a: unknown[]) => void) => {
+    if (args.includes('--version')) return (realExecFile as unknown as (...a: unknown[]) => ChildProcess)(command, args, options, callback);
+    const { start, finalArgs } = record(args, options);
+    return (realExecFile as unknown as (...a: unknown[]) => ChildProcess)(command, finalArgs, options, (err: unknown, stdout: unknown, stderr: unknown) => {
+      start.stdout = typeof stdout === 'string' ? stdout : '';
+      if (err) start.errorMessage = String((err as Error).message ?? err);
+      callback(err, stdout, stderr);
+    });
+  };
+
+  // Promise style, for this script's own row A. `input` is the prompt: written to the
+  // child's stdin and the pipe closed, the way `proposeAI` hands it over (#2575). It
+  // is not an `execFile` option and is removed before the real call.
+  const patched = async (command: string, args: readonly string[], options: ExecFileOptions & { input?: string } = {}) => {
+    if (args.includes('--version')) return nodePromisified(command as string, args as string[], options as ExecFileOptionsWithStringEncoding);
+
+    const { input, ...execOptions } = options;
+    const { start, finalArgs } = record(args, execOptions);
 
     try {
-      const result = await nodePromisified(command as string, finalArgs as string[], options as cp.ExecFileOptionsWithStringEncoding);
-      start.stdout = result.stdout;
+      const pending = nodePromisified(command as string, finalArgs as string[], execOptions as ExecFileOptionsWithStringEncoding);
+      // A `claude` that exits before draining stdin must not take this script down
+      // with an EPIPE; its exit still reaches the catch below with the real error.
+      pending.child.stdin?.on('error', () => {});
+      pending.child.stdin?.end(input ?? '');
+      const result = await pending;
+      start.stdout = String(result.stdout);
       return result;
     } catch (err) {
       const e = err as { stdout?: unknown; message?: unknown };
@@ -416,14 +443,20 @@ async function runDirectRow(
   fs.chmodSync(dir, 0o700);
 
   const startIndex = recordedStarts.length;
-  const execFileAsync = promisify(cp.execFile);
+  // Typed for the one option (`input`) the installed wrapper takes beyond `execFile`'s.
+  const execFileAsync = promisify(cp.execFile) as unknown as (
+    file: string,
+    args: readonly string[],
+    options: ExecFileOptions & { input?: string },
+  ) => Promise<{ stdout: string; stderr: string }>;
   const details: string[] = [];
   try {
-    const { stdout } = await execFileAsync('claude', lib.aiPassArgs(prompt), {
+    const { stdout } = await execFileAsync('claude', lib.aiPassArgs(), {
       cwd: dir,
       timeout: 180_000,
       maxBuffer: 4 * 1024 * 1024,
       env: lib.aiPassEnv(),
+      input: prompt,
     });
     const hits = canaryHits(stdout, canaries);
     if (anyHit(hits)) details.push(`canary leaked into the reply: ${JSON.stringify(hits)}`);

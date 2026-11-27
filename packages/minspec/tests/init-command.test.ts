@@ -118,9 +118,43 @@ describe('initCommand() — write-failure surfacing (#153)', () => {
     await initCommand('/tmp/ws');
 
     expect(scaffold).toHaveBeenCalledWith('/tmp/ws');
-    expect(generateHarnessFiles).toHaveBeenCalledWith('/tmp/ws');
+    expect(generateHarnessFiles).toHaveBeenCalledWith('/tmp/ws', []);
     expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
     expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  // #2399 / G-8: a hook init staged into the git index is shown, as on refresh.
+  it('shows the exec-bit notice when init staged a hook into the index', async () => {
+    vi.mocked(generateHarnessFiles).mockImplementationOnce((_dir, notices) => {
+      notices?.push({
+        outputPath: '.minspec/hooks/pre-commit',
+        message: 'STAGED-NOTICE-TEXT',
+        kind: 'exec-bit-recorded',
+      });
+      return [];
+    });
+
+    await initCommand('/tmp/ws');
+
+    const shown = vi.mocked(vscode.window.showInformationMessage).mock.calls.map((c) => String(c[0]));
+    expect(shown.some((m) => m.includes('STAGED-NOTICE-TEXT'))).toBe(true);
+  });
+
+  it('coalesces several staged-hook notices into ONE dialog naming every path', async () => {
+    vi.mocked(generateHarnessFiles).mockImplementationOnce((_dir, notices) => {
+      for (const p of ['.minspec/hooks/pre-commit', '.minspec/hooks/commit-msg', 'scripts/validate.py']) {
+        notices?.push({ outputPath: p, message: `per-file ${p}`, kind: 'exec-bit-recorded' });
+      }
+      return [];
+    });
+
+    await initCommand('/tmp/ws');
+
+    const shown = vi.mocked(vscode.window.showInformationMessage).mock.calls.map((c) => String(c[0]));
+    const combined = shown.filter((m) => m.includes('executable (100755)'));
+    expect(combined).toHaveLength(1);
+    for (const p of ['pre-commit', 'commit-msg', 'validate.py']) expect(combined[0]).toContain(p);
+    expect(shown.some((m) => m.includes('per-file'))).toBe(false);
   });
 });
 
@@ -289,7 +323,7 @@ describe('initRefreshCommand() — write-failure surfacing (#153)', () => {
  * T3 — REGRESSION (#1546). SPEC-025 FR-6 still holds; what changed is WHO emits it.
  *
  * The advisory had two producers. The compliant one lives in `extension.ts` and
- * carries "Propose draft", "Generate with AI…" and "Don't ask again", honouring the
+ * carries "Propose draft", "Prepare AI prompt…" and "Don't ask again", honouring the
  * per-workspace skip flag. The one deleted here fired from the init command as a bare
  * `showInformationMessage` — no actions, and structurally unable to read the skip flag
  * (it took only a folder path, never an ExtensionContext), so it silently overrode the

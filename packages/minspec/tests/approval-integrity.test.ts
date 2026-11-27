@@ -21,6 +21,11 @@ import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { specHash } from '../../shared/src/canonical';
 import { evaluateApprovalIntegrity, type ReadBase } from '../../../scripts/approval-integrity';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #2598: this suite's own `git()` wrapper around execFileSync is called repeatedly to
+// build a real git history; the literal call-site count alone understates it.
+useShellTimeout();
 
 const SPEC_REL = 'specs/minspec/SPEC-900-fixture/requirements.md';
 const SIDECAR_REL = `.minspec/approvals/${SPEC_REL}.json`;

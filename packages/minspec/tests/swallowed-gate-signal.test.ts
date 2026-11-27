@@ -46,7 +46,7 @@ describe('INV-1: the motivating defect is caught in the real tree', () => {
   // display path at all but the one-shot early-exit gate, so it was fixed too. Every
   // repoint here is a defect leaving the tree.
   //
-  // Now on `open_prs` (the PR sweep), the same two-line brace-group shape, still
+  // Now on `open_rows` (the PR sweep; was `open_prs` before #2975), the same two-line brace-group shape, still
   // annotated `swallow-known: #1855`. When that one is fixed, repoint again or retire
   // the assertion deliberately — never soften it into "find any, skip if none",
   // because a lint about fail-open signals cannot have a fail-open test. The day the
@@ -55,7 +55,7 @@ describe('INV-1: the motivating defect is caught in the real tree', () => {
   it('flags drain-inbox.sh ready-set query, which spans two lines', () => {
     const source = readFileSync(join(REPO, 'scripts/drain-inbox.sh'), 'utf8');
     const readySet = findSwallowedGateSignals('scripts/drain-inbox.sh', source).find(
-      (f) => f.variable === 'open_prs',
+      (f) => f.variable === 'open_rows',
     );
 
     expect(readySet, 'the #1855 ready-set capture is no longer detected').toBeDefined();

@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-201-citation-rot-validator/requirements.md",
+  "specHash": "fa668ae01a891a87e8c45f3726c80db1af88cb160b5b4bffd56a67917a6341ae",
+  "approvedAt": "2026-11-02T17:18:43.180Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-settle-1031",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3399#issuecomment-6537247262"
+}

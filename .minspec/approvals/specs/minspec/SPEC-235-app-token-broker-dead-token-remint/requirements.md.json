@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-235-app-token-broker-dead-token-remint/requirements.md",
+  "specHash": "99f42dced0a082c6aeff56c36041fe1ea5fea194c35094f912c1bd932ff56eb2",
+  "approvedAt": "2026-10-31T08:50:08.908Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-b",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3181#issuecomment-6541017306"
+}

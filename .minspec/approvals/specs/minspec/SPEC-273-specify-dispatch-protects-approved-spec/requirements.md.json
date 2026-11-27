@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-273-specify-dispatch-protects-approved-spec/requirements.md",
+  "specHash": "133325fbcf5bbdfb2ad0b8f4b6547148c1b96b48e6152d2e641bbe28db2e84af",
+  "approvedAt": "2026-11-02T02:53:02.531Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-on-rec-1028",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3229#issuecomment-6541165991"
+}

@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-249-spec-gate-sibling-verdict/requirements.md",
+  "specHash": "cfdc0322230e034dbebfd751765167368fef3c69baa1b1bfae63b0b75287596f",
+  "approvedAt": "2026-10-30T06:22:55.821Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-c",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3182#issuecomment-6515774347"
+}

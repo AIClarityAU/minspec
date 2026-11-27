@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-338-prototype-digest-binding/requirements.md",
+  "specHash": "727c6062eb56112b8f9d8b6ee99be1706c36bad80fa47bc62cb4e3c39dac3b08",
+  "approvedAt": "2026-11-21T13:13:40.397Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/implements-fm-1121b",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3918#issuecomment-7058896016"
+}

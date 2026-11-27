@@ -4,6 +4,15 @@ import { createEpic, writeEpicIndex, setEpicStatus } from '../lib/epic-manager';
 import type { EpicSummary } from '../lib/epic-manager';
 import { resolveTargetFolder, folderForFile } from '../lib/resolve-folder';
 import { commitApprovalIfEnabled } from './commit-on-approve';
+import { declaredTier } from './adr';
+import {
+  assertHumanApprover,
+  canonicalSpecHash,
+  gitConfigEmail,
+  specRelPath,
+} from '../lib/approval';
+import type { Tier } from '../lib/config';
+import { sidecarPath, writeRecord } from '../lib/approval-store';
 
 /** Tree node carrying the epic this group represents (from EpicGroupNode). */
 interface EpicNodeLike {
@@ -25,8 +34,35 @@ export async function acceptEpicCommand(node?: EpicNodeLike): Promise<void> {
     return;
   }
   try {
-    setEpicStatus(epic.filePath, 'active');
     const folder = folderForFile(epic.filePath);
+    // Accepting an epic is a human act: gate on the approver identity BEFORE any
+    // write, exactly as Accept Decision does (#2993).
+    const approver = gitConfigEmail(folder ?? path.dirname(epic.filePath));
+    assertHumanApprover(approver);
+    setEpicStatus(epic.filePath, 'active');
+    // Hash-locked sidecar (`.minspec/approvals/<epic path>.json`), hashed AFTER the
+    // flip so it covers the committed bytes. Records the acceptance as a
+    // human-attributed, hash-locked artifact, like Accept Decision (#2993); the
+    // review-side provenance witness reads it (see adr.ts applyStatus).
+    // Epics declare no `tier:`, but the store's reader rejects a record without
+    // one, so fall back to 'T1' (an epic is not tier-classified work).
+    let sidecarAbs: string | undefined;
+    if (folder) {
+      const hash = canonicalSpecHash(epic.filePath);
+      if (hash === null) throw new Error(`cannot read ${epic.id} to hash its acceptance`);
+      const tier = (declaredTier(epic.filePath) ?? 'T1') as Tier;
+      const rel = specRelPath(folder, epic.filePath);
+      writeRecord(folder, {
+        specPath: rel,
+        specHash: hash,
+        approvedAt: new Date().toISOString(),
+        approvedBy: approver,
+        tier,
+        migrated: false,
+        baselineBlob: '',
+      });
+      sidecarAbs = sidecarPath(folder, rel);
+    }
     if (folder) {
       try { writeEpicIndex(folder); } catch { /* index regen best-effort */ }
     }
@@ -39,7 +75,7 @@ export async function acceptEpicCommand(node?: EpicNodeLike): Promise<void> {
       suffix = (
         await commitApprovalIfEnabled(
           folder,
-          [epic.filePath, indexPath],
+          sidecarAbs ? [epic.filePath, indexPath, sidecarAbs] : [epic.filePath, indexPath],
           `chore(accept): ${epic.id} activated`,
         )
       ).suffix;

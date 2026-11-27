@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-336-base-update-fast-lane/requirements.md",
+  "specHash": "4ce0eb014472a6d215183bcd37f42f2415e7324adde1784619d7e891a5f15fab",
+  "approvedAt": "2026-11-16T07:05:40.321Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec336-advance-1116",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3768#issuecomment-6909352089"
+}

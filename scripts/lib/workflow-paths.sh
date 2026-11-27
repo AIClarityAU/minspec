@@ -150,8 +150,14 @@ push_credential_is_app_token() {
     *) return 1 ;;
   esac
 
+  # Every prompt channel is closed, not just the terminal (#1926). git's prompt
+  # path tries an askpass program first (GIT_ASKPASS, core.askPass, SSH_ASKPASS)
+  # and only then consults GIT_TERMINAL_PROMPT, so an ambient SSH_ASKPASS (KDE sets
+  # one) would launch a GUI dialog or block with no display. An empty askpass
+  # value is skipped by git, which is what neutralises each channel.
   user=$(printf 'url=%s\n\n' "$url" \
-         | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null \
+         | GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= \
+           git -c core.askPass= credential fill 2>/dev/null \
          | sed -n 's/^username=//p' \
          | head -1) || return 1
   [ "$user" = "x-access-token" ]

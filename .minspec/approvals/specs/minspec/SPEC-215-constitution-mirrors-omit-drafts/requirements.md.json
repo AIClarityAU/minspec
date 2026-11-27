@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-215-constitution-mirrors-omit-drafts/requirements.md",
+  "specHash": "4ac6ca437ff726c5ead0ede49a33e8fcec923cc41ad930b201f8a69d61aa6085",
+  "approvedAt": "2026-10-27T02:10:41.756Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-selections-1027",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3118#issuecomment-6428979181"
+}

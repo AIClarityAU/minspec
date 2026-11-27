@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-416-relayed-text-held-out-of-dispatch/requirements.md",
+  "specHash": "b3ecb18fdb73693bee00b1e816b1309022528db45ca9e673c4990deaadda6d4b",
+  "approvedAt": "2026-11-25T14:20:40.564Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:agent/issue-2692",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4058#issuecomment-7164665444"
+}

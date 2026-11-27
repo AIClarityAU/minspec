@@ -35,7 +35,7 @@ beforeAll(() => {
   // The script calls `git rev-parse` and `date` before it ever looks for Go. Link just
   // those, so `command -v go` is genuinely a miss rather than accidentally finding a
   // real toolchain from the developer's own PATH.
-  for (const tool of ['git', 'date', 'sh', 'uname', 'mkdir', 'ls', 'rm', 'sort', 'tail']) {
+  for (const tool of ['git', 'date', 'sh', 'uname', 'mkdir', 'ls', 'rm', 'sort', 'tail', 'sed', 'mktemp', 'grep', 'cat']) {
     const found = spawnSync('sh', ['-c', `command -v ${tool}`], { encoding: 'utf-8' }).stdout.trim();
     if (found) {
       try {
@@ -76,6 +76,7 @@ function runScript(opts: { home: string; pathDirs: string[]; goBin?: string }): 
   const env: NodeJS.ProcessEnv = {
     HOME: opts.home,
     PATH: [...opts.pathDirs, basePathDir].join(':'),
+    CGO_ENABLED: '0', // compiler probe (#1913) is covered in check-supply-chain-cc.test.ts
     GO_SHIM_LOG: logFile,
   };
   if (opts.goBin !== undefined) env.GO_BIN = opts.goBin;

@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-280-json-state-byte-order-mark/requirements.md",
+  "specHash": "99e72be8ae6a72c099d7fdcb714505602c2b4049f20fa06d83d845f79a1d9ff4",
+  "approvedAt": "2026-11-02T19:41:31.391Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-settle-1031",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3399#issuecomment-6537247262"
+}

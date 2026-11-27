@@ -29,7 +29,8 @@
 // SCOPE
 //   node:test discovery only. Vitest and Python have their own controllers with
 //   different resolution rules; see EXPECTED below for what is deliberately not
-//   covered here.
+//   covered here. One exception (#1185): a RUNNABILITY check that no repo-root entry
+//   shadows a module the Python controller's adapter imports.
 //
 // USAGE
 //   node scripts/check-testing-panel-discovery.mjs          # assert, exit 1 on gap
@@ -39,12 +40,24 @@ import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { createRequire } from 'node:module';
+import { findShadowingEntries, pythonModuleInstalled } from './lib/pythonpath-shadow.mjs';
 
 const require = createRequire(import.meta.url);
-// picomatch is what the extension itself bundles and calls. Using the same library
-// (rather than re-implementing glob semantics) is the point: a re-implementation
-// would be a second thing that can drift from the extension.
+// picomatch is the library `atkeson.nodejs-testing` bundles and calls. Using the same
+// LIBRARY (rather than re-implementing glob semantics) avoids a second, hand-written
+// matcher that could drift.
+//
+// CAVEAT — PARITY IS ASSUMED, NOT VERIFIED (#1159). This is OUR copy of picomatch
+// (a devDependency, `^4.0.4`). Nothing here establishes that it behaves like the copy
+// vendored inside the installed extension: `^` can float onto a later 4.x while the
+// extension stays pinned to whatever it shipped, and the extension's version lives in a
+// minified bundle that is not reliably readable. If the two diverge on a matching edge
+// case, this check can report PASS while the panel is empty. Treat a PASS as "matches
+// picomatch <version printed at run time>", not as proof about the installed extension.
+// To close the gap, compare the printed version against the extension's bundle by hand
+// after upgrading either side.
 const picomatch = require('picomatch');
+const PICOMATCH_VERSION = require('picomatch/package.json').version;
 
 const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const WORKSPACE_ROOT = path.resolve(REPO_ROOT, '..');
@@ -202,6 +215,11 @@ function main() {
     process.exit(1);
   }
 
+  console.log(
+    `note: using picomatch ${PICOMATCH_VERSION}; parity with the copy bundled in ` +
+      `atkeson.nodejs-testing is ASSUMED, not verified.\n`,
+  );
+
   let failures = 0;
   let checked = 0;
 
@@ -246,6 +264,26 @@ function main() {
     console.log();
   }
 
+  // RUNNABILITY (#1185): discovery says a suite appears, not that it can start. The
+  // Python controller's Coverage profile injects PYTHONPATH=<workspace root>; a root
+  // entry named like a module its adapter imports (Vitest's `coverage/` report dir)
+  // shadows it and errors EVERY python test at once. Assert the hostile thing is absent.
+  // Scope: this repo's root only (#1185). Sibling folders (sealbox, scroogellm) are
+  // other repos whose layout this check does not own.
+  const roots = [REPO_ROOT];
+  let shadowed = 0;
+  let shadowFailed = false;
+  for (const root of roots) {
+    for (const h of findShadowingEntries(root, undefined, pythonModuleInstalled)) {
+      shadowed++;
+      console.log(`  FAIL  ${root}/${h.entry} shadows python module "${h.module}" on the injected PYTHONPATH`);
+    }
+  }
+  shadowFailed = shadowed > 0;
+  if (!shadowFailed) {
+    console.log(`runnability: no repo-root entry shadows a python adapter module.\n`);
+  }
+
   console.log(`known gaps (no Testing-panel controller):`);
   for (const g of KNOWN_GAPS) console.log(`  - ${g}`);
 
@@ -263,6 +301,17 @@ function main() {
         '      This is a failure, not a pass: a discovery gate that verifies nothing\n' +
         '      reports green over an unverified claim. Likely causes: no config file\n' +
         '      resolved, or every expected folder is missing from disk.',
+    );
+    process.exit(1);
+  }
+
+  if (shadowFailed) {
+    console.error(
+      `FAIL  ${shadowed} repo-root entr${shadowed === 1 ? 'y' : 'ies'} would break the Python controller's ` +
+        `Coverage profile (every python test reports "error"; CLI and Run profile still pass).\n` +
+        `      Fix: delete/move the entry, or install the real module (Vitest's coverage/ report\n` +
+        `      dir is harmless once coverage.py is installed — a bare directory only wins\n` +
+        `      when no regular package of that name exists).`,
     );
     process.exit(1);
   }

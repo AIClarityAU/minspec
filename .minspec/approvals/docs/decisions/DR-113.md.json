@@ -1,0 +1,14 @@
+{
+  "specPath": "docs/decisions/DR-113.md",
+  "specHash": "93ffea4f7d8856d889630afc0097f63edbb19e6d8247018a1576ac047735adf8",
+  "approvedAt": "2026-10-27T02:11:17.174Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "engineering-dr-acceptance",
+  "author": "session:cos/c182-record-1027",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3132#issuecomment-6428686177"
+}

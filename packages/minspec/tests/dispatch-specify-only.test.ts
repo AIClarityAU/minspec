@@ -270,3 +270,20 @@ describe('scripts/roles/triage.md — the routing rule the agent reads (#1169)',
     expect(triageRole).toMatch(/decision:\s*agent-ready \| needs-review \| needs-info/);
   });
 });
+
+describe('awaiting-spec-signoff label creation (#3389)', () => {
+  const src = fs.readFileSync(path.join(findScriptsDir(), 'dispatch-issue.sh'), 'utf8');
+  const m = src.match(/gh label create "awaiting-spec-signoff"[\s\S]*?--description "([^"]*)"/);
+
+  it('description fits GitHub 100-char limit', () => {
+    expect(m).not.toBeNull();
+    expect(m![1].length).toBeLessThanOrEqual(100);
+  });
+
+  it('does not swallow every error from the create', () => {
+    const idx = src.indexOf('gh label create "awaiting-spec-signoff"');
+    const block = src.slice(idx, src.indexOf('if [[ "$SPECIFY_ONLY"', idx));
+    expect(block).not.toMatch(/\|\| true/);
+    expect(block).toMatch(/already exists/);
+  });
+});

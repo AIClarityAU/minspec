@@ -3,7 +3,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from '../lib/config';
 import { resolveTargetFolder } from '../lib/resolve-folder';
-import { ensureDirectory, NotOptedInError } from '../lib/opt-in';
+import { ensureDirectory } from '../lib/opt-in';
+import { showedOptInRefusal } from './opt-in-refusal';
 
 /**
  * Generate an example spec file demonstrating all four tiers.
@@ -42,8 +43,7 @@ export async function generateExampleCommand(): Promise<void> {
     // directory is not under `.minspec/` by default). It reaches the refusal only
     // when `minspec.specsDir` points inside `.minspec/` in a folder that has not
     // opted in, and then it shows the same refusal as any other command.
-    if (!(err instanceof NotOptedInError)) throw err;
-    vscode.window.showErrorMessage(err.message);
+    if (!showedOptInRefusal(err)) throw err;
     return;
   }
   // Stamp `created` at CALL time. Building the content here (not as a

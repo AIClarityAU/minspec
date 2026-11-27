@@ -37,15 +37,13 @@ const SEARCH_ROOTS = [
  * allowlist entry is a filed debt rather than a silent carve-out. Empty is the goal.
  */
 const ALLOWLIST: Record<string, string> = {
-  'scripts/dispatch-issue.sh':
-    '#1445 — dispatch pipeline, a different surface from ai-review; these two sed calls feed a rendered summary, not a merge-gating label.',
   'scripts/review-decide.sh':
     '#1157 — the AMBIGUITY COUNTER is broad BY DESIGN and must stay so; see the asymmetry test below. Its extractor IS anchored.',
 };
 
 const MARKER = /REVIEW_VERDICT_BEGIN|REVIEW_VERDICT_END|REVIEW_UNAVAILABLE_BEGIN|REVIEW_UNAVAILABLE_END/;
 /** A line that USES a marker as a match predicate (grep/sed), not one that PRINTS it. */
-const IS_PREDICATE = /(grep[^|]*|sed\s+-n\s*)['"][^'"]*(REVIEW_VERDICT_|REVIEW_UNAVAILABLE_)/;
+const IS_PREDICATE = /(grep[^|]*|sed\s+-n\s*|awk\s+)['"][^'"]*(REVIEW_VERDICT_|REVIEW_UNAVAILABLE_)/;
 const IS_ANCHORED = /\[\[:space:\]\]\*(REVIEW_VERDICT_|REVIEW_UNAVAILABLE_)/;
 
 function walk(dir: string): string[] {

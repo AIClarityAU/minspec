@@ -12,11 +12,12 @@
  * the real `jose` path; only the JWKS lookup and the App-token factory are injected. A
  * mocked verifier would prove the mock was called.
  */
-import { describe, it, expect } from 'vitest';
-import { generateKeyPair, SignJWT, exportJWK, createLocalJWKSet } from 'jose';
+import { describe, it, expect, afterEach } from 'vitest';
+import { generateKeyPair, SignJWT, exportJWK, exportPKCS8, createLocalJWKSet } from 'jose';
 import { createFetchHandler, TOKEN_PATH, type BrokerEnv } from '../../broker/src/index';
 import { GITHUB_OIDC_ISSUER } from '../../broker/src/verify';
 import { REVIEW_PERMISSIONS, type InstallationTokenFactory } from '../../broker/src/mint';
+import { makeInstallationTokenFactory } from '../../broker/src/app-auth';
 
 const AUD = 'https://broker.minspec.dev';
 const REPO = 'AIClarityAU/voip-sms-inbox';
@@ -240,5 +241,98 @@ describe('SPEC-034 task 1.4 — broker live path', () => {
       expect(res.status).toBe(401);
       expect(readersEntered).toEqual([]);
     });
+  });
+});
+
+/**
+ * SPEC-034 task 2.1 (FR-4, AC-4) — App not installed ⇒ 403 with an install reason.
+ *
+ * Runs the REAL `makeInstallationTokenFactory` (signing a real App JWT with a throwaway
+ * key) behind the real handler; only `fetch` is stubbed, standing in for GitHub's
+ * `GET /repos/{owner}/{repo}/installation`. A fake factory throwing the error type would
+ * prove the mapping but not that the key-holding edge ever produces it.
+ *
+ * NOT COVERED: a genuine GitHub 404 from a real repository without the App. That needs a
+ * deployed broker and the network, and is observed with task 1.4b.
+ */
+describe('SPEC-034 task 2.1 — App not installed', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  async function realFactory(): Promise<InstallationTokenFactory> {
+    const { privateKey } = await generateKeyPair('RS256', { extractable: true });
+    const f = makeInstallationTokenFactory({
+      MINSPEC_APP_ID: '4212099',
+      MINSPEC_APP_PRIVATE_KEY: await exportPKCS8(privateKey),
+    });
+    if (!f) throw new Error('factory should exist with both credentials bound');
+    return f;
+  }
+
+  /** Stub GitHub: answer the installation lookup with `status`, count every call. */
+  function stubLookup(status: number): { calls: string[] } {
+    const seen = { calls: [] as string[] };
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      seen.calls.push(String(url));
+      return new Response('{"message":"Not Found"}', { status });
+    }) as unknown as typeof fetch;
+    return seen;
+  }
+
+  it('answers 403 app_not_installed with a reason telling the caller to install the App', async () => {
+    const { privateKey, jwks } = await keyring();
+    const jwt = await sign(privateKey, { repository: REPO, repository_owner: 'AIClarityAU' });
+    const seen = stubLookup(404);
+    const res = await callWith({ jwt, body: VALID_BODY, jwks, factory: await realFactory() });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as { error: string; reason: string; token?: unknown };
+    expect(body.error).toBe('app_not_installed');
+    // AC-4: an install-the-App reason, not a generic error.
+    expect(body.reason).toMatch(/install/i);
+    expect(body.reason).toMatch(/minspec-sdd/);
+    expect(body.token).toBeUndefined();
+    // Never quotes App or installation identifiers back (AC-5 spirit: public slug only).
+    expect(JSON.stringify(body)).not.toMatch(/4212099|144283146|ghs_/);
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    // The lookup ran and nothing after it did.
+    expect(seen.calls).toEqual([
+      'https://api.github.com/repos/AIClarityAU/voip-sms-inbox/installation',
+    ]);
+  });
+
+  it('keeps any other lookup failure a 502 mint_failed — the control for the 403', async () => {
+    const { privateKey, jwks } = await keyring();
+    const jwt = await sign(privateKey, { repository: REPO, repository_owner: 'AIClarityAU' });
+    stubLookup(500);
+    const res = await callWith({ jwt, body: VALID_BODY, jwks, factory: await realFactory() });
+    expect(res.status).toBe(502);
+    expect((await res.json()) as { error: string }).toMatchObject({ error: 'mint_failed' });
+  });
+
+  it('never reveals installation state to a caller whose claim does not match', async () => {
+    // Ordering: the installation lookup sits after claim matching, so a caller holding a
+    // valid token for repo A cannot probe whether the App is installed on repo B.
+    const { privateKey, jwks } = await keyring();
+    const jwt = await sign(privateKey, {
+      repository: 'someone-else/other-repo',
+      repository_owner: 'someone-else',
+    });
+    const seen = stubLookup(404);
+    const res = await callWith({ jwt, body: VALID_BODY, jwks, factory: await realFactory() });
+    expect(res.status).toBe(403);
+    expect((await res.json()) as { error: string }).toMatchObject({
+      error: 'repo_claim_mismatch',
+    });
+    expect(seen.calls).toEqual([]);
+  });
+
+  it('never reveals installation state to an unauthenticated caller', async () => {
+    const seen = stubLookup(404);
+    const res = await callWith({ jwt: null, body: VALID_BODY, factory: await realFactory() });
+    expect(res.status).toBe(401);
+    expect(seen.calls).toEqual([]);
   });
 });

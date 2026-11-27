@@ -357,6 +357,34 @@ describe('FR-13 — cross-cutting edges', () => {
     expect(dangling[0].refs).toStrictEqual(['SPEC-001', 'SPEC-777']);
   });
 
+  it('#2614-retired-source-not-dangling (status): a superseded spec\'s dangling depends_on is not corruption', () => {
+    // sealbox SPEC-001: status: superseded, depends_on a decision record that
+    // lives in another repo's register and so never resolves locally. The spec
+    // is on its way out — its own dangling depends_on must not surface as a
+    // top gate-violation telling a human to "approve" a retired spec.
+    const g = graph({
+      specs: [mkSpec('SPEC-001', 'superseded', 'unapproved')],
+      edges: [{ kind: 'depends_on', from: 'SPEC-001', to: 'DR-029' }],
+    });
+    expect(resolveCorruption(g).filter((c) => c.kind === 'dangling-ref')).toHaveLength(0);
+    expect(resolvePipeline(g)).toHaveLength(0);
+    expect(resolveNextTask(g)).toBeNull();
+  });
+
+  it('#2614-retired-source-not-dangling (literalStatusTerminal): same, when only the raw frontmatter is terminal', () => {
+    // #2370's case: `status` derives non-terminal (e.g. missing/empty `phases:`
+    // block ⇒ 'new') but the literal `status:` line already reads done/archived/
+    // superseded. The approve command refuses it either way, so the dangling
+    // depends_on from this source is equally moot.
+    const g = graph({
+      specs: [mkSpec('SPEC-002', 'new', 'unapproved', { literalStatusTerminal: true })],
+      edges: [{ kind: 'supersedes', from: 'SPEC-002', to: 'DR-030' }],
+    });
+    expect(resolveCorruption(g).filter((c) => c.kind === 'dangling-ref')).toHaveLength(0);
+    expect(resolvePipeline(g)).toHaveLength(0);
+    expect(resolveNextTask(g)).toBeNull();
+  });
+
   it('FR-13-blocks: a depends_on dependent ranks below its blocker (blocker has HIGHER id)', () => {
     // The blocker SPEC-009 has a HIGHER id than the dependent SPEC-001, so a pass
     // cannot be a coincidence of id-ordering — it proves the depends_on flooring.
@@ -372,6 +400,25 @@ describe('FR-13 — cross-cutting edges', () => {
     expect(resolveNextTask(g)!.targetId).toBe('SPEC-009');
     const ids = resolvePipeline(g).map((t) => t.targetId);
     expect(ids.indexOf('SPEC-009')).toBeLessThan(ids.indexOf('SPEC-001'));
+  });
+
+  it('FR-13-blocks-cross-class (#3836): a blocked-ready dependent ranks below its pending blocker', () => {
+    // SPEC-001 (active epic, unapproved) is blocked-ready; its blocker SPEC-009 has
+    // no active epic so is merely pending. Class order alone puts SPEC-001 first;
+    // FR-13 "MUST rank below an un-cleared target" needs flooring across classes.
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'specifying', 'unapproved', { epic: 'EPIC-001' }),
+        mkSpec('SPEC-009', 'specifying', 'unapproved'),
+      ],
+      edges: [{ kind: 'depends_on', from: 'SPEC-001', to: 'SPEC-009' }],
+    });
+    const pipe = resolvePipeline(g);
+    const ids = pipe.map((t) => t.targetId);
+    expect(ids.indexOf('SPEC-009')).toBeGreaterThanOrEqual(0);
+    expect(ids.indexOf('SPEC-009')).toBeLessThan(ids.indexOf('SPEC-001'));
+    expect(resolveNextTask(g)!.targetId).toBe('SPEC-009');
   });
 
   it('FR-13-blocks-transitive: a depends_on chain floors blocker-first, against id order', () => {

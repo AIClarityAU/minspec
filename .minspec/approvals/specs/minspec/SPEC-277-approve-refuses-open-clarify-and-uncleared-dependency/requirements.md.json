@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-277-approve-refuses-open-clarify-and-uncleared-dependency/requirements.md",
+  "specHash": "2b589bcee3d8447d9350574a70b6410a46bc39feffdcc1fd389851edf3d8d5ea",
+  "approvedAt": "2026-11-02T12:28:41.588Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:fix/3390-clarify-wording",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3391#issuecomment-6571380443"
+}

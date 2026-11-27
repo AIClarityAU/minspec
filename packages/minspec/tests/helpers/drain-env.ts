@@ -40,6 +40,11 @@ export function isDrainKnob(name: string): boolean {
   return DRAIN_KNOB_PREFIXES.some((prefix) => name.startsWith(prefix));
 }
 
+/** The one knob drainBaseEnv() SETS rather than removes: no quota boost (in72), see below. */
+export const NO_QUOTA_BOOST: Readonly<Record<string, string>> = {
+  MINSPEC_QUOTA_BOOST_FILE: '/nonexistent/minspec-test-no-quota-boost',
+};
+
 /**
  * `source` (the test process's own environment unless told otherwise) with every drain and
  * quota knob removed. Spread this, then add what the test sets:
@@ -56,6 +61,11 @@ export function drainBaseEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.Pr
   for (const [name, value] of Object.entries(source)) {
     if (!isDrainKnob(name)) env[name] = value;
   }
+  // The quota boost (in72) is a FILE whose default path is in the primary checkout's git
+  // dir, shared by every worktree, so removing the knob would not remove the boost: a live
+  // boost would reach every test. Point it at a path that never exists; a test that means
+  // to set a boost passes its own.
+  Object.assign(env, NO_QUOTA_BOOST);
   return env;
 }
 

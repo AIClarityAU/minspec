@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-241-governance-transition-second-witness/requirements.md",
+  "specHash": "345e1d5c96412a01d7dc8c8a6d337e2a866222531afdab3551a7f6491c0254b6",
+  "approvedAt": "2026-10-30T05:54:23.255Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-c",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3182#issuecomment-6515774347"
+}

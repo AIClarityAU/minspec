@@ -28,7 +28,8 @@ import {
 } from '../lib/traceability';
 import { loadConfig, resolveAndValidate } from '../lib/config';
 import { parseSpec } from '../lib/spec';
-import { hasOptInMarker, notOptedInMessage, NotOptedInError } from '../lib/opt-in';
+import { hasOptInMarker, notOptedInMessage } from '../lib/opt-in';
+import { showedOptInRefusal } from '../commands/opt-in-refusal';
 
 // --- CodeLens Provider ---
 
@@ -562,8 +563,7 @@ export async function linkToSpecCommand(workspaceRoot: string): Promise<void> {
     // then refuses, and that refusal is shown here rather than left to the
     // editor's handling of a rejected command (SPEC-096 FR-8). No "Linked"
     // follows it.
-    if (!(err instanceof NotOptedInError)) throw err;
-    vscode.window.showErrorMessage(err.message);
+    if (!showedOptInRefusal(err)) throw err;
     return;
   }
 

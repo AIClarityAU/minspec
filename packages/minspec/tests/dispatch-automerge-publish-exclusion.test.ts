@@ -243,11 +243,18 @@ describe('dispatch-issue.sh — publish-path auto-merge exclusion (#981)', () =>
     });
 
     it('the arm site names the publish mandate in the withhold message (never-wrong)', () => {
-      const guardIdx = content.indexOf('if native_automerge_enabled; then');
-      const armBlock = content.slice(guardIdx);
+      // Anchored at the ARM, not the first occurrence (the pure seam) (#1781).
+      const armIdx = content.indexOf('--squash --auto');
+      const guardIdx = content.lastIndexOf('if native_automerge_enabled; then', armIdx);
+      expect(guardIdx).toBeGreaterThan(0);
+      const armBlock = content.slice(guardIdx, armIdx);
       expect(armBlock).toMatch(/merging IS publishing \(#981\)/);
-      // the classifier — not a second, driftable predicate — remains the decision
-      expect(armBlock).toMatch(/paths_have_approvable_doc <<<"\$changed_files"/);
+      // the classifier — not a second, driftable predicate — remains the decision;
+      // since #1614 it is reached through autonomy_may_merge, not called in the arm
+      expect(armBlock).toMatch(/autonomy_may_merge "[^"\n]*" "\$changed_files"/);
+      const populator = content.match(/^autonomy_stop_classes_for_paths\(\) \{\n([\s\S]*?)\n\}/m);
+      expect(populator, 'autonomy_stop_classes_for_paths() not found').not.toBeNull();
+      expect(populator![1]).toMatch(/paths_have_approvable_doc <<<"\$changed_files"/);
     });
 
     it('still fails CLOSED on an unknown/unreadable changed-set (unchanged, re-pinned)', () => {

@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-209-action-item-actor/requirements.md",
+  "specHash": "7a3046521e5259421ceca87f3e1c66a6c81a94170532037ab875a5c948a98c7a",
+  "approvedAt": "2026-11-02T02:53:15.922Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/specapprove-1028",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3231#issuecomment-6541272955"
+}

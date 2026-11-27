@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-400-remediation-budget-ledger-identity-independent/requirements.md",
+  "specHash": "c6315e76c5bed860ec58ac59de1544fc01758fa29910e0d602693ee528b050cb",
+  "approvedAt": "2026-11-23T20:54:40.729Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-picks-1123",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4024#issuecomment-7112005209"
+}

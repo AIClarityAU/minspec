@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-216-design-scope-gate/requirements.md",
+  "specHash": "af2343886e3f15aad98621129e216b9e71a7cd62cc4b5ee0b7b2ddbcc8c77544",
+  "approvedAt": "2026-10-31T03:51:46.032Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/specifying-1025",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3083#issuecomment-6537527421"
+}

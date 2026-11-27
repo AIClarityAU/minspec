@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-288-dr-acceptance-record-commit-gate/requirements.md",
+  "specHash": "75065338fe99b96fa3c35f6d093a57bfb3f4b15b2f556a6c688ff4873ca392b0",
+  "approvedAt": "2026-11-02T22:04:55.924Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-settle-1031",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3399#issuecomment-6537247262"
+}

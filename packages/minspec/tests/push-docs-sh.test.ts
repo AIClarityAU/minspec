@@ -188,6 +188,26 @@ describe('push-docs.sh — mixed add+delete lane push (#798)', () => {
   });
 });
 
+describe('push-docs.sh — untracked directory (#1119)', () => {
+  it('expands an untracked sidecar directory to its files instead of cp-ing the directory', () => {
+    const { root, origin, primary } = setupRepo({ 'README.md': 'seed\n' });
+    const callsLog = path.join(root, 'gh-calls.log');
+    const dir = '.minspec/approvals/specs/minspec/SPEC-047-x';
+    fs.mkdirSync(path.join(primary, dir, 'nested'), { recursive: true });
+    fs.writeFileSync(path.join(primary, dir, 'requirements.md.json'), '{"a":1}\n');
+    fs.writeFileSync(path.join(primary, dir, 'nested', 'b.json'), '{"b":2}\n');
+    // Porcelain reports the topmost untracked directory, not the files inside it.
+    expect(git(primary, 'status', '--porcelain')).toBe('?? .minspec/');
+
+    const out = runPushDocs(primary, root, ['-m', 'docs: first approval sidecar']);
+    expect(out).toMatch(/push-docs: opened/);
+
+    const branch = branchFromGhLog(callsLog);
+    expect(git(origin, 'show', `${branch}:${dir}/requirements.md.json`)).toBe('{"a":1}');
+    expect(git(origin, 'show', `${branch}:${dir}/nested/b.json`)).toBe('{"b":2}');
+  });
+});
+
 /**
  * push-docs.sh — governance status-transition gate (#2158).
  *

@@ -104,6 +104,8 @@ const NETWORK_FEATURES: readonly NetworkFeature[] = [
   { module: 'lib/github.ts', feature: PARK, kind: 'command', consent: 'gesture', trigger: 'first step of the command the user ran' },
   { module: 'lib/github.ts', feature: SCORE, kind: 'command', consent: 'gesture', trigger: 'first step of the command the user ran' },
   { module: 'lib/github.ts', feature: TRIAGE, kind: 'command', consent: 'gesture', trigger: 'first step of the command the user ran' },
+  // lib/github.ts - `gh api user`, the read behind the Getting Started page's Verify button (SPEC-042 D4).
+  { module: 'lib/github.ts', feature: 'Verify against GitHub', kind: 'button', consent: 'gesture', trigger: 'the user clicks the button on the Getting Started page' },
 
   // lib/parking-lot.ts - `gh issue list --search`, `gh issue create`, `gh issue comment`.
   { module: 'lib/parking-lot.ts', feature: PARK, kind: 'command', consent: 'gesture', trigger: 'the user runs Park Topic' },
@@ -149,6 +151,7 @@ const LOCAL_ONLY: Readonly<Record<string, string>> = {
   'lib/git-analyzer.ts': 'local git diff, status and show through the simple-git library',
   'lib/approval.ts': 'git hash-object, update-ref, cat-file, log, show, config user.email',
   'lib/approve-commit.ts': 'git add and git commit of the approval, and local ref reads; never pushes',
+  'lib/dr-index-scope.ts': 'git show of the committed INDEX.md (a local read) to confine an approval commit to one decision; never fetches or pushes',
   'lib/scaffold.ts': 'git ls-files, git rm --cached, git config --local core.hooksPath',
   'lib/presence.ts': 'git worktree list, branch --show-current, rev-parse --show-toplevel',
   'lib/tidy-primary.ts': 'git status, rev-parse, rev-list, cat-file, show, checkout -- <path>; never fetches',

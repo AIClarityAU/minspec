@@ -25,6 +25,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1385 — this suite runs the real drain loop in bash; process startup scales with machine
+// load, so the 5s default flakes (ENOENT/timeouts under a loaded box). Declared once at
+// module scope so the intent is visible, not tuned per case.
+useShellTimeout();
 
 // Module scope: nothing in this file may depend on drain or quota knobs in the surrounding
 // environment, so it runs with hostile ones planted there (#2574, helpers/drain-env.ts).
@@ -213,11 +219,32 @@ exit 0
       MINSPEC_DRAIN_LOCK: path.join(h.dir, 'lock'),
       MINSPEC_QUOTA_FILE: h.quota,
     };
-    const out = execFileSync('bash', ['-c', `
-      pid=$(bash "${DRAIN}" --once 2>&1 | grep -oP 'PID \\K[0-9]+')
-      while kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
-    `], { encoding: 'utf-8', env, stdio: ['ignore', 'pipe', 'ignore'] });
-    void out;
+    // The wait is BOUNDED (#1666). An unbounded `kill -0` spin cannot fail, only hang:
+    // if the spawned loop never exits (e.g. it is stuck behind something a foreign drain
+    // holds), the spin runs in a child shell outside vitest's per-test timer and
+    // `npm test` produces no output at all. A deadline turns that into a named failure.
+    const deadlineSec = 60;
+    try {
+      execFileSync('bash', ['-c', `
+        pid=$(bash "${DRAIN}" --once 2>&1 | grep -oP 'PID \\K[0-9]+')
+        end=$((SECONDS + ${deadlineSec}))
+        while kill -0 "$pid" 2>/dev/null; do
+          if (( SECONDS >= end )); then
+            echo "drain loop PID $pid still alive after ${deadlineSec}s; drains on machine: $(pgrep -af 'drain-inbox.sh' | tr '\\n' ';')" >&2
+            kill "$pid" 2>/dev/null
+            exit 124
+          fi
+          sleep 0.05
+        done
+      `], {
+        encoding: 'utf-8', env, stdio: ['ignore', 'pipe', 'pipe'],
+        // Backstop outside the shell: kills bash itself if even the deadline logic wedges.
+        timeout: (deadlineSec + 15) * 1000,
+      });
+    } catch (e) {
+      const err = e as { stderr?: string; message: string };
+      throw new Error(`drain --once cycle did not finish: ${err.stderr?.trim() || err.message}`);
+    }
     return { elapsedMs: Date.now() - t0, log: fs.readFileSync(h.log(width), 'utf-8') };
   }
 

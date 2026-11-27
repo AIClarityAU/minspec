@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-324-phaseless-ownership-backfill-and-dial-join/requirements.md",
+  "specHash": "bbd3d7aa19eaf8dc861c02d10e3039664813d50744ac03c6a6667459d003ddd9",
+  "approvedAt": "2026-11-15T20:10:00.154Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/implements-1114",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3744#issuecomment-6900291597"
+}

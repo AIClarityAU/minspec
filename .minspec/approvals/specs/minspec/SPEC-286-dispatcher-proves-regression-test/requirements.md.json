@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-286-dispatcher-proves-regression-test/requirements.md",
+  "specHash": "eabd5e72f463973e2a3c74c7487268b86ccb9e7e35476979682838d3f449b80a",
+  "approvedAt": "2026-11-02T22:04:42.393Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-settle-1031",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3399#issuecomment-6537247262"
+}

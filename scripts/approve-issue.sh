@@ -271,19 +271,27 @@ gh issue edit "$ISSUE" --repo "$REPO" --add-label "agent-ready" >/dev/null
 # `approve-issue-countermanding-labels.test.ts`, which extracts both lists from source
 # and fails if they diverge by anything other than the named exception above — a
 # comment claiming alignment is not a check (#2644).
-CLEAR_LABELS="needs-review,needs-info,needs-human-review,inbox,agent-done,agent-escalated"
+CLEAR_LABELS="needs-review,needs-info,needs-human-review,inbox,agent-done,agent-escalated,agent-crashed"
 if ! gh issue edit "$ISSUE" --repo "$REPO" \
      --remove-label "$CLEAR_LABELS" >/dev/null 2>&1; then
   # `gh` fails the whole request if ANY named label is absent from the repo, which
   # would leave every one of them in place. Retry singly so one unknown name cannot
   # veto the rest.
   failed=""
-  for one in needs-review needs-info needs-human-review inbox agent-done agent-escalated; do
+  for one in needs-review needs-info needs-human-review inbox agent-done agent-escalated agent-crashed; do
     gh issue edit "$ISSUE" --repo "$REPO" --remove-label "$one" >/dev/null 2>&1 || failed+="${one} "
   done
   if [[ -n "$failed" ]]; then
     echo "WARNING: could not clear label(s) on #${ISSUE}: ${failed}— if a human-gate label lingers it will keep countermanding this approval at dispatch; clear it by hand." >&2
   fi
+fi
+
+# `awaiting-spec-signoff` is not in the set above because it countermands nothing. It is
+# cleared because this approval starts a build, and that state ends here (#3351 review).
+# Only when carried: a repo with no specify run yet has no such label to name.
+if grep -qx "awaiting-spec-signoff" <<<"$CURRENT_LABELS" \
+   && ! gh issue edit "$ISSUE" --repo "$REPO" --remove-label "awaiting-spec-signoff" >/dev/null 2>&1; then
+  echo "WARNING: could not clear awaiting-spec-signoff on #${ISSUE}; clear it by hand. The build's own completion also removes it." >&2
 fi
 
 echo "Approved #${ISSUE} as ${APPROVER} (lifted hold:${V_HOLD}). It is now dispatchable."

@@ -1,6 +1,6 @@
 /**
- * ownership-advance-guard.ts — SPEC-051's refusal, in one place, reachable from BOTH
- * actors that cross a spec into the Plan build-band (#1446).
+ * ownership-advance-guard.ts — SPEC-051's refusal, in one place, reachable from every
+ * actor that crosses a spec into the Plan build-band (#1446, #1806).
  *
  * WHY A SEPARATE MODULE. The guard needs `violationsIntroducedByApproval`
  * (`spec-validator`). `approveSpec` lives in `approval.ts`, which value-imports
@@ -13,13 +13,21 @@
  *                          │                                      ╎
  *                          └───────── (type-only, erased) ────────┘
  *
- * One implementation, two call sites, no cycle — rather than two copies that drift, or a
- * lazy `require` that hides a cycle from `check-import-cycles.ts` instead of removing it.
+ * One implementation, no cycle — rather than copies that drift, or a lazy `require`
+ * that hides a cycle from `check-import-cycles.ts` instead of removing it.
+ *
+ * THREE CALL SITES (#1806). `spec.ts` and `approval.ts` are both `src/lib/` and share
+ * the cycle constraint diagrammed above. `commands/approve.ts` — the UI a human
+ * actually drives — is a leaf consumer with no cycle risk, but until #1806 it called
+ * `violationsIntroducedByApproval` directly instead of this guard: a second,
+ * independently-maintained implementation of the same refusal, the exact duplication
+ * shape #1520 already bit this codebase on. It now calls this function too, before
+ * `advanceSpecToImplementing` runs — so there is one enforcement point, not one-per-actor.
  */
 import * as fs from 'fs';
 import * as path from 'path';
 import type { ParsedSpec } from './spec';
-import { violationsIntroducedByApproval } from './spec-validator';
+import { violationsIntroducedByApproval, violationsIntroducedByPhases } from './spec-validator';
 import { loadConfig } from './config';
 
 /**
@@ -58,6 +66,12 @@ function repoRootFor(specFilePath: string): string | undefined {
 export function assertOwnershipDeclaredForAdvance(
   specFilePath: string,
   parsed: ParsedSpec,
+  /**
+   * The phase map the caller is about to write (#1380). Omitted = the approval advance
+   * (`phasesForApproval`); `transitionPhase` and any future phase-map writer pass the
+   * map their own transition produced, so the gate judges the move actually made.
+   */
+  newPhases?: ParsedSpec['frontmatter']['phases'],
 ): void {
   let introduced;
   try {
@@ -80,9 +94,11 @@ export function assertOwnershipDeclaredForAdvance(
     // false claim (a spec whose advance lands it on `implement: in-progress` while its
     // declared `implements:` paths don't exist). `fs`/`path` are already this module's
     // own imports (see header) — the resolver itself is trivial.
-    introduced = violationsIntroducedByApproval(parsed, loadConfig(rootDir), {
-      pathExists: (relPath) => fs.existsSync(path.join(rootDir, relPath)),
-    });
+    const options = { pathExists: (relPath: string) => fs.existsSync(path.join(rootDir, relPath)) };
+    const config = loadConfig(rootDir);
+    introduced = newPhases
+      ? violationsIntroducedByPhases(parsed, config, newPhases, options)
+      : violationsIntroducedByApproval(parsed, config, options);
   } catch (err) {
     console.warn(
       `[minspec] ownership pre-check skipped for ${path.basename(specFilePath)} — the ` +

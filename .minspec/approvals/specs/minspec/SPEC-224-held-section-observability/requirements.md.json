@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-224-held-section-observability/requirements.md",
+  "specHash": "7e4ec023318a93f36b83d54f94b67b4b92ec0d805693620d8cc9b6d43c9c35d8",
+  "approvedAt": "2026-10-31T06:04:13.962Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/specifying-1025",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3083#issuecomment-6537527421"
+}

@@ -92,7 +92,7 @@ async function recoverOnProtectedBranch(
   message: string,
   current: string,
   baseBranch: string | undefined,
-): Promise<{ suffix: string } | 'declined' | undefined> {
+): Promise<{ suffix: string } | 'declined' | { failed: string } | undefined> {
   // DR-078 §4 — the SINGLE accessor, not `pushOnApproveMode()`. This path read the
   // VS Code setting DIRECTLY while its sibling `pushApprovalIfEnabled` read the
   // project-local preference first, so a user who had answered "always push from now
@@ -105,18 +105,35 @@ async function recoverOnProtectedBranch(
   if (mode === 'prompt') {
     // Non-modal (project preference: never steal focus from the artifact being
     // approved). Names the destination, so the click is informed consent.
+    //
+    // #2258 / SPEC-050 FR-8 parity: the FIRST time only, the standing-consent option
+    // rides along, same label, same project-local store (`enableAlwaysPush`), same
+    // show-once memory as `pushApprovalIfEnabled`. Approving on the default branch
+    // (the DR-051 norm) never reaches that function, so without this the offer was
+    // unreachable for exactly those users. The lead action stays the one-shot
+    // (DR-071 condition 1): escaping the prompt is a deliberate second choice.
+    const alreadyOffered = await pushAlwaysOfferAlreadyMade(rootDir);
+    const actions = alreadyOffered
+      ? [RECOVER_ACTION, 'Not now']
+      : [RECOVER_ACTION, ALWAYS_PUSH_ACTION, 'Not now'];
     const choice = await vscode.window.showWarningMessage(
       `Approval written but NOT committed: '${current}' is the default branch. ` +
         `Save it on a branch and push, so the sign-off is not stranded here?`,
-      RECOVER_ACTION,
-      'Not now',
+      ...actions,
     );
-    // 'declined', NOT undefined: the caller must not then show its own
-    // near-identical "NOT committed / default branch" warning. The user has just
-    // read that sentence and answered it — repeating it is the nagging the
-    // constitution warns about, and it makes a deliberate choice look like an
-    // error. The suffix still reports the honest state (#1255 review nit).
-    if (choice !== RECOVER_ACTION) return 'declined';
+    // Record on every resolution, dismiss included (#883) — show-once.
+    if (!alreadyOffered) await recordPushAlwaysOfferMade(rootDir);
+    if (choice === ALWAYS_PUSH_ACTION) {
+      // Persist the consent, then fall through and recover: the user just said yes.
+      await enableAlwaysPush(rootDir);
+    } else if (choice !== RECOVER_ACTION) {
+      // 'declined', NOT undefined: the caller must not then show its own
+      // near-identical "NOT committed / default branch" warning. The user has just
+      // read that sentence and answered it — repeating it is the nagging the
+      // constitution warns about, and it makes a deliberate choice look like an
+      // error. The suffix still reports the honest state (#1255 review nit).
+      return 'declined';
+    }
   }
 
   const slug = (absPaths[0] ?? message).split(/[\\/]/).slice(-2).join('-').replace(/\.[a-z]+$/i, '');
@@ -141,7 +158,15 @@ async function recoverOnProtectedBranch(
     // Every non-success falls back to the honest warning, with the reason logged.
     // NOT surfaced as a success suffix: the files really are still only local.
     console.warn(`MinSpec: approval recovery ${res.outcome} — ${res.error ?? 'no detail'}`);
-    return undefined;
+    // in97: hand the reason back so the fallback toast can NAME it. A console line is
+    // invisible to the founder; on 2026-11-22 five recoveries failed on a pre-commit gate
+    // and the only visible text was "NOT committed". Only a real `failed` outcome is
+    // named: `nothing-to-commit` / `no-remote` / `offline` are not failures of saving,
+    // so they keep the plain fallback wording. First line only - hook stderr can run to
+    // pages, and the full text stays in the console line above.
+    if (res.outcome !== 'failed') return undefined;
+    const firstLine = (res.error ?? '').split(/\r?\n/).find((l) => l.trim() !== '')?.trim();
+    return { failed: firstLine ?? 'no detail' };
   }
 
   // Success — the approval is committed on a branch and pushed. FINISH it into a PR
@@ -175,6 +200,24 @@ async function recoverOnProtectedBranch(
   return { suffix };
 }
 
+/** Max paths named verbatim in a refusal message before truncating (#1133). */
+const MAX_NAMED_PATHS = 3;
+
+/**
+ * Human-readable list of repo-relative paths, e.g. `DR-064.md and INDEX.md`;
+ * past {@link MAX_NAMED_PATHS} names the first few then "and N more". Basenames
+ * are used when unambiguous, otherwise the full relative path. '' when none.
+ */
+export function describePaths(paths: readonly string[] | undefined): string {
+  if (!paths || paths.length === 0) return '';
+  const bases = paths.map((p) => path.basename(p));
+  const names = paths.map((p, i) => (bases.filter((b) => b === bases[i]).length > 1 ? p : bases[i]));
+  if (names.length <= MAX_NAMED_PATHS) {
+    return names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  }
+  return `${names.slice(0, MAX_NAMED_PATHS).join(', ')} and ${names.length - MAX_NAMED_PATHS} more`;
+}
+
 /**
  * Commit the approval paths when the setting is on, returning a toast suffix.
  *
@@ -184,6 +227,9 @@ async function recoverOnProtectedBranch(
  *   ' · not committed (merge/cherry-pick …)'  — git refuses a partial commit mid-operation (#1112)
  *   ' · commit failed — approval saved …'     — git/hook rejected; approval on disk, uncommitted, unstaged
  *
+ * `stranded: true` marks every outcome where the approval is on disk but in NO commit
+ * (#1163), so a caller can refuse to present it as a plain success.
+ *
  * Never rejects (delegates to `commitApproval`, which never rejects). A failed or
  * refused commit is surfaced (never-wrong: the user must know the approval is
  * uncommitted), with the full git/hook stderr logged for diagnosis.
@@ -192,7 +238,7 @@ export async function commitApprovalIfEnabled(
   rootDir: string,
   absPaths: readonly string[],
   message: string,
-): Promise<{ suffix: string; result?: CommitApprovalResult }> {
+): Promise<{ suffix: string; result?: CommitApprovalResult; stranded?: boolean }> {
   if (!commitOnApproveEnabled()) return { suffix: '' };
   const result = await commitApproval(rootDir, absPaths, message);
   switch (result.outcome) {
@@ -234,6 +280,7 @@ export async function commitApprovalIfEnabled(
       // §4a) — approval-recover.ts copies into a separate worktree with a separate
       // index, and this arm still stages nothing in the primary.
       const current = result.branch?.current ?? 'the default branch';
+      const named = describePaths(result.paths);
       const recovery = await recoverOnProtectedBranch(
         rootDir,
         absPaths,
@@ -247,16 +294,20 @@ export async function commitApprovalIfEnabled(
         return {
           suffix: ` · NOT committed (on ${current} — files left in your working tree)`,
           result,
+          stranded: true,
         };
       }
-      if (recovery) return { ...recovery, result };
+      if (recovery && 'suffix' in recovery) return { ...recovery, result };
+      const recoveryFailure = recovery && 'failed' in recovery ? recovery.failed : undefined;
 
       // Fallback — unchanged: consent withheld, or recovery failed. Say plainly what
       // happened and what state the files are in; never a bare console.warn.
       void vscode.window.showWarningMessage(
         `Approval written but NOT committed: '${current}' is the default branch, ` +
-          `so a commit there could not be pushed. Your files are saved in the working ` +
-          `tree — commit them on a branch to keep them.`,
+          `so a commit there could not be pushed. ` +
+          (recoveryFailure ? `Saving it on a branch failed: ${recoveryFailure}. ` : '') +
+          (named ? `${named} ${result.paths && result.paths.length === 1 ? 'is' : 'are'} in your working tree, uncommitted — ` : `Your files are saved in the working tree — `) +
+          `commit ${named ? 'all of them' : 'them'} on a branch to keep them.`,
         SHOW_FILES_ACTION,
       ).then((choice) => {
         if (choice === SHOW_FILES_ACTION) void vscode.commands.executeCommand('workbench.view.scm');
@@ -264,11 +315,12 @@ export async function commitApprovalIfEnabled(
       return {
         suffix: ` · NOT committed (on ${current} — files left in your working tree)`,
         result,
+        stranded: true,
       };
     }
     case 'detached-head':
       // A commit here would be orphaned by the next checkout — refuse and say so.
-      return { suffix: ' · not committed (detached HEAD — switch to a branch)', result };
+      return { suffix: ' · not committed (detached HEAD — switch to a branch)', result, stranded: true };
     case 'merge-in-progress': {
       // #1112: git itself refuses a PARTIAL (pathspec) commit while a merge or
       // cherry-pick is in progress — a real git constraint, not a MinSpec
@@ -281,7 +333,7 @@ export async function commitApprovalIfEnabled(
       void vscode.window.showWarningMessage(
         `Approval saved — finish the ${op} in progress, then commit it.`,
       );
-      return { suffix: ` · not committed (${op} in progress — finish it, then commit)`, result };
+      return { suffix: ` · not committed (${op} in progress — finish it, then commit)`, result, stranded: true };
     }
     case 'failed':
       // Log the detail (incl. hook stderr); keep the toast short. The approval
@@ -292,7 +344,7 @@ export async function commitApprovalIfEnabled(
       // deliberately NOT left in the index. The old wording described the
       // behaviour before that invariant existed and had become false.
       console.warn(`MinSpec: commit-on-approve failed — ${result.error ?? 'git error'}`);
-      return { suffix: ' · commit failed — approval saved in your working tree (see console)', result };
+      return { suffix: ' · commit failed — approval saved in your working tree (see console)', result, stranded: true };
     default:
       // 'not-a-repo' | 'nothing-to-commit' — no net change worth reporting.
       return { suffix: '', result };
@@ -1069,6 +1121,13 @@ export async function commitBornIfUntracked(
   const result = await commitApproval(rootDir, [filePath], message);
   if (result.outcome === 'failed') {
     console.warn(`MinSpec: born commit failed — ${result.error ?? 'git error'}`);
+  } else if (result.outcome === 'protected-branch') {
+    // #1133: this refusal used to fall through unreported. The born commit exists so
+    // the accept lands as a Modify (#577); on the default branch it cannot happen.
+    console.warn(
+      `MinSpec: born commit refused — '${result.branch?.current ?? 'the default branch'}' is the ` +
+        `default branch; ${describePaths(result.paths) || path.basename(filePath)} left uncommitted in your working tree`,
+    );
   }
   return result;
 }

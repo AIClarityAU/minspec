@@ -5,6 +5,7 @@ import * as path from 'path';
 import { createHash } from 'crypto';
 import { execFileSync as run } from 'child_process';
 import { specHash } from '@aiclarity/shared';
+import { TSX_BIN } from './helpers/run-tsx-cli';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AC-9 (FR-5 migration). T0 — written before running the real migration.
@@ -23,13 +24,9 @@ import { specHash } from '@aiclarity/shared';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const SCRIPT = path.join(REPO_ROOT, 'scripts', 'migrate-approvals.ts');
-// Resolved local binary, NOT `npx tsx`: `runMigration()` spawns with cwd set to a
-// throwaway temp workspace (outside the repo), so `npx` — which only searches the
-// child's own cwd upward for `node_modules/.bin` — can never see this repo's
-// locally-installed `tsx` and falls back to fetching it from the registry
-// mid-test (#1037). An absolute path to the repo's own binary resolves offline
-// regardless of the child's cwd.
-const TSX_BIN = path.join(REPO_ROOT, 'node_modules', '.bin', 'tsx');
+// Resolved by walking up / primary-checkout fallback (helpers/run-tsx-cli), NOT a path
+// pinned under this tree: a git worktree has no node_modules of its own (#1191). Not
+// `npx tsx` either: the child's cwd is a temp workspace, which would fetch tsx (#1037).
 
 let ws: string;
 

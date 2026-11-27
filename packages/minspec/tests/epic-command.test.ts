@@ -39,6 +39,18 @@ vi.mock('../src/lib/resolve-folder', () => ({
   folderForFile: vi.fn(),
 }));
 
+vi.mock('../src/lib/approval', () => ({
+  assertHumanApprover: vi.fn(),
+  canonicalSpecHash: vi.fn(() => 'sha256:abc'),
+  gitConfigEmail: vi.fn(() => 'human@example.com'),
+  specRelPath: vi.fn((_f: string, p: string) => p.replace('/tmp/ws/', '')),
+}));
+
+vi.mock('../src/lib/approval-store', () => ({
+  sidecarPath: vi.fn((_f: string, rel: string) => `/tmp/ws/.minspec/approvals/${rel}.json`),
+  writeRecord: vi.fn(),
+}));
+
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
 import * as vscode from 'vscode';
@@ -53,6 +65,8 @@ import {
   setEpicStatus,
 } from '../src/lib/epic-manager';
 import { resolveTargetFolder, folderForFile } from '../src/lib/resolve-folder';
+import { writeRecord } from '../src/lib/approval-store';
+import { assertHumanApprover } from '../src/lib/approval';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -142,6 +156,55 @@ describe('acceptEpicCommand()', () => {
     expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
   });
 
+  it('writes an approval sidecar with the post-flip specHash (#2993)', async () => {
+    const node = {
+      epic: {
+        id: 'EPIC-010',
+        slug: 'x',
+        title: 'X',
+        status: 'proposed' as const,
+        order: 10,
+        filePath: '/tmp/ws/docs/epics/EPIC-010.md',
+      },
+    };
+    vi.mocked(folderForFile).mockReturnValue('/tmp/ws');
+
+    await acceptEpicCommand(node);
+
+    expect(writeRecord).toHaveBeenCalledWith(
+      '/tmp/ws',
+      expect.objectContaining({
+        specPath: 'docs/epics/EPIC-010.md',
+        specHash: 'sha256:abc',
+        approvedBy: 'human@example.com',
+        tier: 'T1',
+      }),
+    );
+  });
+
+  it('denied approver: no status flip, no sidecar (#2993)', async () => {
+    const node = {
+      epic: {
+        id: 'EPIC-011',
+        slug: 'x',
+        title: 'X',
+        status: 'proposed' as const,
+        order: 11,
+        filePath: '/tmp/ws/docs/epics/EPIC-011.md',
+      },
+    };
+    vi.mocked(folderForFile).mockReturnValue('/tmp/ws');
+    vi.mocked(assertHumanApprover).mockImplementationOnce(() => {
+      throw new Error('denied');
+    });
+
+    await acceptEpicCommand(node);
+
+    expect(setEpicStatus).not.toHaveBeenCalled();
+    expect(writeRecord).not.toHaveBeenCalled();
+    expect(vscode.window.showErrorMessage).toHaveBeenCalled();
+  });
+
   it('success path: does not call writeEpicIndex when folderForFile returns undefined', async () => {
     const node = {
       epic: {
@@ -162,6 +225,29 @@ describe('acceptEpicCommand()', () => {
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
       'MinSpec: EPIC-003 → active',
     );
+  });
+
+  it('gates the approver even when folderForFile returns undefined (#2993)', async () => {
+    const node = {
+      epic: {
+        id: 'EPIC-005',
+        slug: 'gate',
+        title: 'Gate',
+        status: 'proposed' as const,
+        order: 5,
+        filePath: '/tmp/ws/docs/epics/EPIC-005.md',
+      },
+    };
+    vi.mocked(folderForFile).mockReturnValue(undefined);
+    vi.mocked(assertHumanApprover).mockImplementationOnce(() => {
+      throw new Error('denied');
+    });
+
+    await acceptEpicCommand(node);
+
+    expect(assertHumanApprover).toHaveBeenCalled();
+    expect(setEpicStatus).not.toHaveBeenCalled();
+    expect(vscode.window.showErrorMessage).toHaveBeenCalled();
   });
 
   it('success path: swallows writeEpicIndex throws (best-effort index regen)', async () => {

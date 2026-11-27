@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-208-approval-recovery-loan-repayment/requirements.md",
+  "specHash": "fd5a37d41495312a16f0963381248571daedc6d2f27f57fabf8f6b22aaa88c7d",
+  "approvedAt": "2026-10-30T21:56:23.745Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-record-1027",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3125#issuecomment-6429269983"
+}

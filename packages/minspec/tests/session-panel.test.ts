@@ -648,6 +648,100 @@ suite('a session is told when its own panel is gone (UserPromptSubmit)', () => {
   });
 });
 
+suite('a session already told once is BLOCKED on its later prompts (#2651)', () => {
+  /**
+   * The advisory above is text in a prompt, and on 2026-10-09 the orphaned supervisor
+   * ran a full tick AFTER that advice was in its context: advice alone does not stop a
+   * session from acting. So the first headless prompt runs (it is the one chance to
+   * act on the advice) and every later one, while the input still has no writer, is
+   * refused outright — a prompt hook CAN block, so nothing has to trust the model to
+   * stop on its own.
+   */
+  it('runs the first headless prompt, then BLOCKS the second on the same synthetic pipe with no writer', async () => {
+    const f = await fake('headless');
+    register({ ...f, sessionId: OTHER });
+    const first = unit('self', promptInput(OTHER));
+    expect(first.status).toBe(0);
+    expect(first.out).toContain(NO_PANEL);
+
+    const second = unit('self', promptInput(OTHER));
+    expect(second.status).toBe(2);
+    expect(second.out).toMatch(/BLOCKED/);
+    expect(second.out).toContain('#2651');
+
+    // And it stays blocked — this is not a one-shot flip back to advisory.
+    const third = unit('self', promptInput(OTHER));
+    expect(third.status).toBe(2);
+    expect(third.out).toMatch(/BLOCKED/);
+  });
+
+  it('never blocks the one handover turn for a session that has not been told yet', async () => {
+    // The control: a session told for the very first time must not be blocked on
+    // that same prompt — only on a LATER one.
+    const f = await fake('headless');
+    register({ ...f, sessionId: OTHER });
+    const { out, status } = unit('self', promptInput(OTHER));
+    expect(status).toBe(0);
+    expect(out).toContain(NO_PANEL);
+    expect(out).not.toMatch(/already used its one/);
+  });
+
+  it('does not block a DIFFERENT session that has never been warned', async () => {
+    const warned = await fake('headless');
+    const fresh = await fake('headless');
+    register({ ...warned, sessionId: OTHER });
+    register({ ...fresh, sessionId: THIRD });
+    unit('self', promptInput(OTHER)); // OTHER uses its one turn
+    expect(unit('self', promptInput(OTHER)).status).toBe(2); // and is now blocked
+
+    const { out, status } = unit('self', promptInput(THIRD));
+    expect(status).toBe(0);
+    expect(out).toContain(NO_PANEL);
+  });
+
+  it('clears the mark once the session is seen attached again, so a later loss gets a fresh turn', async () => {
+    // Simulated reattachment: the marker this unit wrote for an earlier loss must not
+    // survive a prompt observed while the session IS attached, or a loss after that
+    // reattachment would be blocked immediately instead of earning its own handover turn.
+    // Each step removes the PREVIOUS fixture's registry file before registering the
+    // next one under the same session id: the fixture processes stay alive until
+    // afterEach, and own_process must not be left to pick between two "alive" entries
+    // that both claim this session id.
+    const f = await fake('headless');
+    register({ ...f, sessionId: OTHER });
+    unit('self', promptInput(OTHER));
+    expect(unit('self', promptInput(OTHER)).status).toBe(2);
+
+    fs.rmSync(registryFile(f.pid));
+    const reattached = await fake('attached');
+    register({ ...reattached, sessionId: OTHER });
+    expect(unit('self', promptInput(OTHER)).out).toBe('');
+
+    fs.rmSync(registryFile(reattached.pid));
+    const lostAgain = await fake('headless');
+    register({ ...lostAgain, sessionId: OTHER });
+    const { out, status } = unit('self', promptInput(OTHER));
+    expect(status).toBe(0);
+    expect(out).toContain(NO_PANEL);
+  });
+
+  it('wires through scope-check.sh: exit 2, with the block reason on stderr', async () => {
+    const f = await fake('headless');
+    register({ ...f, sessionId: OTHER });
+    const cwd = fs.mkdtempSync(path.join(scratch, 'cwd-'));
+    const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
+    delete env.CLAUDE_CONFIG_DIR;
+    const first = spawnSync('bash', [PROMPT_HOOK], { input: JSON.stringify(promptInput(OTHER)), encoding: 'utf-8', env, cwd, timeout: 20_000 });
+    expect(first.status).toBe(0);
+    expect(first.stdout).toContain(NO_PANEL);
+
+    const second = spawnSync('bash', [PROMPT_HOOK], { input: JSON.stringify(promptInput(OTHER)), encoding: 'utf-8', env, cwd, timeout: 20_000 });
+    expect(second.status).toBe(2);
+    expect(second.stderr).toMatch(/BLOCKED/);
+    expect(second.stdout).not.toMatch(/BLOCKED/);
+  });
+});
+
 suite('a new session is told which sessions lost their panel (SessionStart)', () => {
   let me: Fake;
   beforeEach(async () => {
@@ -1074,6 +1168,12 @@ suite('hook wiring, by execution', () => {
     fs.copyFileSync(UNIT, path.join(dir, 'session-panel.py'));
     return path.join(dir, 'session-start.sh');
   }
+  /** scope-check.sh sources lib/session-scope.sh from beside itself, so a copy needs the lib too. */
+  function copyPromptHook(dir: string): void {
+    fs.copyFileSync(PROMPT_HOOK, path.join(dir, 'scope-check.sh'));
+    fs.mkdirSync(path.join(dir, 'lib'), { recursive: true });
+    fs.copyFileSync(path.join(path.dirname(PROMPT_HOOK), 'lib', 'session-scope.sh'), path.join(dir, 'lib', 'session-scope.sh'));
+  }
   const hookEnv = (): NodeJS.ProcessEnv => {
     const env: NodeJS.ProcessEnv = { ...process.env, HOME: home };
     delete env.CLAUDE_CONFIG_DIR;
@@ -1126,7 +1226,7 @@ suite('hook wiring, by execution', () => {
     expect(start.stdout).not.toContain('\u001b');
     expect(start.stdout).toContain('Session Start');
 
-    fs.copyFileSync(PROMPT_HOOK, path.join(path.dirname(hook), 'scope-check.sh'));
+    copyPromptHook(path.dirname(hook));
     const prompt = spawnSync('bash', [path.join(path.dirname(hook), 'scope-check.sh')], {
       input: JSON.stringify(promptInput(OTHER)),
       encoding: 'utf-8',
@@ -1141,13 +1241,29 @@ suite('hook wiring, by execution', () => {
     expect(prompt.stdout).toContain('No scope declared');
   });
 
+  it('does not block a prompt when python cannot even open the unit (exit 2 without the BLOCKED banner)', () => {
+    const hook = isolatedHook();
+    fs.rmSync(path.join(path.dirname(hook), 'session-panel.py'));
+    copyPromptHook(path.dirname(hook));
+    const cwd = fs.mkdtempSync(path.join(scratch, 'cwd-'));
+    const prompt = spawnSync('bash', [path.join(path.dirname(hook), 'scope-check.sh')], {
+      input: JSON.stringify(promptInput(OTHER)),
+      encoding: 'utf-8',
+      env: hookEnv(),
+      cwd,
+      timeout: 20_000,
+    });
+    expect(prompt.status).toBe(0);
+    expect(prompt.stdout).toMatch(/No-panel check did not run \(exit 2/);
+  });
+
   it('neither hook prints an interpreter warning from a unit that ran', () => {
     // The error stream is captured so a failure can say why. A warning is not a
     // failure, and this runs at every start and before every prompt.
     const hook = isolatedHook();
     const noisy = 'import warnings\nwarnings.warn("a deprecation nobody asked about")\n';
     fs.writeFileSync(path.join(path.dirname(hook), 'session-panel.py'), noisy);
-    fs.copyFileSync(PROMPT_HOOK, path.join(path.dirname(hook), 'scope-check.sh'));
+    copyPromptHook(path.dirname(hook));
     const cwd = fs.mkdtempSync(path.join(scratch, 'cwd-'));
     const start = spawnSync('bash', [hook], { input: JSON.stringify(startInput()), encoding: 'utf-8', env: hookEnv(), cwd, timeout: 20_000 });
     const prompt = spawnSync('bash', [path.join(path.dirname(hook), 'scope-check.sh')], {
@@ -1167,9 +1283,12 @@ suite('hook wiring, by execution', () => {
   });
 
   it('scope-check.sh tells a headless session at its next prompt, scope file or not', async () => {
-    const f = await fake('headless');
-    register({ ...f, sessionId: OTHER });
+    // Two DISTINCT sessions (a second prompt to the SAME session is now its second
+    // turn, which #2651 blocks — see the dedicated suite below) so this stays a test
+    // of "scope file or not", unaffected by the handover-turn state.
     const cwd = fs.mkdtempSync(path.join(scratch, 'cwd-'));
+    const withoutScope = await fake('headless');
+    register({ ...withoutScope, sessionId: OTHER });
     // No .claude/.session-scope here: that branch exits early, and the notice must
     // not depend on which branch the scope reminder takes.
     const without = spawnSync('bash', [PROMPT_HOOK], { input: JSON.stringify(promptInput(OTHER)), encoding: 'utf-8', env: hookEnv(), cwd, timeout: 20_000 });
@@ -1177,9 +1296,11 @@ suite('hook wiring, by execution', () => {
     expect(without.stdout).toContain(NO_PANEL);
     fs.mkdirSync(path.join(cwd, '.claude'));
     fs.writeFileSync(path.join(cwd, '.claude', '.session-scope'), 'scope: a test\n');
-    const withScope = spawnSync('bash', [PROMPT_HOOK], { input: JSON.stringify(promptInput(OTHER)), encoding: 'utf-8', env: hookEnv(), cwd, timeout: 20_000 });
-    expect(withScope.status).toBe(0);
-    expect(withScope.stdout).toContain(NO_PANEL);
+    const withScope = await fake('headless');
+    register({ ...withScope, sessionId: THIRD });
+    const withScopeRun = spawnSync('bash', [PROMPT_HOOK], { input: JSON.stringify(promptInput(THIRD)), encoding: 'utf-8', env: hookEnv(), cwd, timeout: 20_000 });
+    expect(withScopeRun.status).toBe(0);
+    expect(withScopeRun.stdout).toContain(NO_PANEL);
   });
 
   it('scope-check.sh still does its own job, and adds nothing for an attached session', async () => {

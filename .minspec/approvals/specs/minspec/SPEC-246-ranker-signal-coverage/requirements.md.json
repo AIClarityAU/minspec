@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-246-ranker-signal-coverage/requirements.md",
+  "specHash": "80a395582e03030404e240f792309ef798a749bb52d0de1104eb6678e6237809",
+  "approvedAt": "2026-10-30T06:22:19.266Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-c",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3182#issuecomment-6515774347"
+}

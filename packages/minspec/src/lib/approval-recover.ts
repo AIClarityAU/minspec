@@ -22,7 +22,9 @@
  *     `switch`, `merge`, `rebase` or `reset` ever runs, and nothing is staged in
  *     the primary's index. Only read-only probes, a `fetch` (which moves a
  *     remote-tracking ref, not HEAD), and `worktree add`/`remove` (a SEPARATE
- *     worktree with a SEPARATE index).
+ *     worktree with a SEPARATE index). The only primary-side artifact is a
+ *     symlink INSIDE that temp worktree to the primary's node_modules (step 4b);
+ *     nothing is written to the primary.
  *   INV-2 (never throws). Every failure — no remote, offline, hook rejection,
  *     timeout, unreadable file — returns a typed result. An approval must never
  *     be lost or obscured by a recovery failure, and the caller's existing
@@ -52,6 +54,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { compareUrlFor, approvalBranchName } from './approve-push';
+import { spliceDrIndexEntry } from './dr-index-splice';
 
 const execFileAsync = promisify(execFile);
 
@@ -132,6 +135,53 @@ function isNetworkError(message: string): boolean {
   return /could ?n'?t? resolve host|resolve host|network is unreachable|temporary failure in name resolution|failed to connect|could not connect|connection (refused|reset|timed out)|unable to access|operation timed out|timed out|no route to host|dial tcp|proxy|ssl|tls/i.test(
     message,
   );
+}
+
+/**
+ * For a register INDEX.md in the approval set, write into `dst` the base INDEX
+ * (already checked out in the worktree) with only the target decision's entry
+ * applied. The target id comes from the sibling `DR-NNN*.md` path(s) in the same
+ * set. Returns false (caller copies the file as before) when no single target id,
+ * no base INDEX, or no matching entry can be found — never throws.
+ */
+function spliceTargetEntry(rel: readonly string[], indexRel: string, src: string, dst: string): boolean {
+  try {
+    const dir = path.dirname(indexRel);
+    const ids = new Set<string>();
+    for (const p of rel) {
+      if (path.dirname(p) !== dir) continue;
+      const m = /^(DR-\d+)/.exec(path.basename(p));
+      if (m) ids.add(m[1]);
+    }
+    if (ids.size === 0 || !fs.existsSync(dst)) return false;
+    let text = fs.readFileSync(dst, 'utf-8');
+    const working = fs.readFileSync(src, 'utf-8');
+    for (const id of ids) {
+      const next = spliceDrIndexEntry(text, working, id);
+      if (next === null) return false;
+      text = next;
+    }
+    fs.writeFileSync(dst, text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Symlink `<rootDir>/node_modules` into the recovery worktree when the primary has one
+ * and the worktree does not. Never throws: a missing source or a refused symlink leaves
+ * the worktree as it was (see step 4b).
+ */
+function linkPrimaryNodeModules(rootDir: string, wt: string): void {
+  try {
+    const src = path.join(rootDir, 'node_modules');
+    const dst = path.join(wt, 'node_modules');
+    if (!fs.existsSync(src) || fs.existsSync(dst)) return;
+    fs.symlinkSync(src, dst, 'junction');
+  } catch {
+    // best-effort; the commit proceeds and a hook refusal is still a typed `failed`
+  }
 }
 
 export interface RecoverOptions {
@@ -218,13 +268,32 @@ export async function recoverProtectedBranchApproval(
         return { outcome: 'failed', error: describeError(err) };
       }
 
+      // 4b. Give the commit's hooks the primary's toolchain (in97, 2026-11-22). A hook
+      //     run here resolves its tools from THIS checkout: this repo's approval-race
+      //     gate looks for `<checkout>/node_modules/.bin/tsx` and otherwise falls back
+      //     to `npx --no-install tsx`, which works only where an npx-cache entry happens
+      //     to hold tsx. Every approval commit stages a sidecar, so every recovery
+      //     reached that gate, failed closed on the founder's host, and left an empty
+      //     `approvals/*` branch with the approval still uncommitted. A symlink to the
+      //     primary's installed `node_modules` is the same thing a build worktree does
+      //     by hand. It is never staged (step 6 adds exact paths only) and cleanup
+      //     unlinks it without following it. Best-effort: with no `node_modules` in the
+      //     primary, or a filesystem that refuses symlinks, the commit runs exactly as
+      //     before and any hook refusal is still reported as `failed`.
+      linkPrimaryNodeModules(rootDir, wt);
+
       // 5. Copy each approval path in from the primary WORKING TREE (these files
       //    are uncommitted there — copying is the only way to reach them).
       try {
         for (const f of rel) {
           const dst = path.join(wt, f);
           fs.mkdirSync(path.dirname(dst), { recursive: true });
-          fs.copyFileSync(path.join(rootDir, f), dst);
+          const src = path.join(rootDir, f);
+          // #2912: the shared checkout's INDEX.md is regenerated from EVERY DR on
+          // disk, so copying it wholesale drags in other decisions' uncommitted
+          // rows. Splice only the target DR's entry onto origin/<base>'s INDEX.
+          if (path.basename(f) === 'INDEX.md' && spliceTargetEntry(rel, f, src, dst)) continue;
+          fs.copyFileSync(src, dst);
         }
       } catch (err) {
         return { outcome: 'failed', error: describeError(err) };
@@ -239,7 +308,9 @@ export async function recoverProtectedBranchApproval(
       }
 
       // 7. Nothing differing from the base → the approval already landed (e.g. a
-      //    re-approve of unchanged content). Report it; never make an empty commit.
+      //    re-approve of unchanged content — reachable since #1371: `approveSpec` no
+      //    longer re-stamps `approvedAt` on an unchanged approval). Report it; never
+      //    make an empty commit.
       //    `diff --cached --quiet` REJECTS when there IS a delta.
       let hasDelta = false;
       try {
@@ -250,9 +321,9 @@ export async function recoverProtectedBranchApproval(
       if (!hasDelta) return { outcome: 'nothing-to-commit', paths: rel };
 
       // 8. Commit. DR_INDEX_GATE_OFF=1 (NOT --no-verify) for the same reason
-      //    push-docs.sh uses it: the ephemeral worktree has no node_modules, so
-      //    ONLY the pre-commit hook's `npm run validate` step crashes on module
-      //    load. That step has this dedicated kill-switch. The two pure-bash gates
+      //    push-docs.sh uses it: the ephemeral worktree has no real node_modules
+      //    install (step 4b links only the primary's, for tsx), so the pre-commit
+      //    hook's `npm run validate` step crashes on module load. That step has this dedicated kill-switch. The two pure-bash gates
       //    (DR-029 born-`proposed`, and commit-msg RCDD) stay ACTIVE, and CI re-runs
       //    `npm run validate` on the resulting PR — no invariant hole.
       try {

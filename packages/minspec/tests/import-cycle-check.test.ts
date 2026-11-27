@@ -496,7 +496,12 @@ describe('findValueImportCycles — traversal', () => {
   });
 });
 
-describe('the real packages/minspec/src tree', () => {
+// Every test below parses the whole real src tree with the TS parser (#3580):
+// 5.8s was measured on a loaded CI runner against vitest's 5s default, and the
+// cost grows with the tree. 60s leaves ~10x headroom without hiding a hang.
+const REAL_TREE_TIMEOUT = 60_000;
+
+describe('the real packages/minspec/src tree', { timeout: REAL_TREE_TIMEOUT }, () => {
   it('has ZERO runtime import cycles — the gate ships green (AC-4/AC-5)', () => {
     expect(chains(findValueImportCycles(REAL_SRC_ROOT))).toEqual([]);
   });

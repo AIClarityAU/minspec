@@ -100,7 +100,10 @@ describe('nextTaskCommand', () => {
     );
     await nextTaskCommand(ROOT)();
     expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith('/tmp/ws/specs/SPEC-001.md');
-    expect(vscode.window.showTextDocument).toHaveBeenCalled();
+    expect(vscode.window.showTextDocument).toHaveBeenCalledWith(expect.anything(), {
+      preview: true,
+      preserveFocus: false,
+    });
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith('MinSpec: Approve SPEC-001');
   });
 

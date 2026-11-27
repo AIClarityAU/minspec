@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-214-reviewer-dr-id-reservations/requirements.md",
+  "specHash": "8e27a23fac57bb1708700d275e0033771a49b025083f242b688ab76ac9e05cf1",
+  "approvedAt": "2026-10-27T02:10:53.543Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clarify-record-1027",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3125#issuecomment-6429269983"
+}

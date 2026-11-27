@@ -712,7 +712,7 @@ interface SealedStart {
 const SEALED_START_UNDER_VERIFICATION: SealedStart[] = [
   {
     file: VERIFIER,
-    is: "const { stdout } = await execFileAsync('claude', lib.aiPassArgs(prompt), {",
+    is: "const { stdout } = await execFileAsync('claude', lib.aiPassArgs(), {",
     kind: 'carries a prompt',
     why: "the verifier's direct row: the product's own argument list and environment, handed to the real CLI whole",
   },
@@ -958,13 +958,17 @@ describe('T0: no start of the CLI anywhere under scripts/ goes round the allowli
     expect(end, 'and the call it opens is closed').toBeGreaterThan(at);
     // The argument list is the product's, whole: the line is matched whole, so this is
     // what the file says. Nothing is spread into it and nothing follows it.
-    expect(entry!.is).toContain("('claude', lib.aiPassArgs(prompt), {");
+    expect(entry!.is).toContain("('claude', lib.aiPassArgs(), {");
     // The options, one to a line, each `name: value,`. Nothing is spread in, so nothing
     // can bring a second environment with it, and there is no shell.
     const options = lines.slice(at + 1, end).map((l) => l.text.trim());
     const given = options.map((o) => /^([A-Za-z]+): (.+),$/.exec(o));
     expect(given.every((m) => m !== null), options.join(' | ')).toBe(true);
-    expect(given.map((m) => m![1]).sort(), options.join(' | ')).toEqual(['cwd', 'env', 'maxBuffer', 'timeout']);
+    expect(given.map((m) => m![1]).sort(), options.join(' | ')).toEqual(['cwd', 'env', 'input', 'maxBuffer', 'timeout']);
+    // The prompt travels on the child's stdin, as in `proposeAI` (#2575): `aiPassArgs`
+    // carries none, so without this option the CLI would start with no prompt at all
+    // and the verifier would pass on an empty conversation.
+    expect(options).toContain('input: prompt,');
     // The environment is the product's builder, called with nothing: so with the
     // environment of whoever runs the script, and not one the script chose instead.
     expect(options).toContain('env: lib.aiPassEnv(),');
@@ -977,7 +981,9 @@ describe('T0: no start of the CLI anywhere under scripts/ goes round the allowli
   });
 
   it("the product's argument list asks for no tool and no MCP server, and its environment is all of the one it is given", () => {
-    const args = aiPassArgs('a prompt');
+    const args = aiPassArgs();
+    // No prompt in the list (#2575): it goes to stdin, so nothing but switches is here.
+    expect(args.filter((a) => !a.startsWith('-') && a !== '')).toEqual([]);
     // `--tools` takes a list: the empty string straight after it is "none".
     expect(args.slice(args.indexOf('--tools'), args.indexOf('--tools') + 2)).toEqual(['--tools', '']);
     expect(args.filter((a) => a === '--tools')).toHaveLength(1);
@@ -1171,6 +1177,12 @@ const unquoted = (t: string) => t.replace(/'[^']*'/g, "''");
  * second command cannot ride on the end of an accepted one.
  */
 const WORKTREE_SHAPES: { name: string; is: (t: string) => boolean }[] = [
+  {
+    // The install runs through "$AGENT_LAUNCH_ENV" inside the helper, in the agent's scrubbed
+    // environment with the tree's lifecycle scripts off; the line only hands the path over.
+    name: 'has its dependencies installed in the agent environment, or the run is skipped',
+    is: (t) => t === 'if [[ "$ACTION" != "rebase-only" ]] && ! provision_worktree_modules "$WORKTREE"; then',
+  },
   { name: 'asks whether it exists', is: (t) => /^if \[\[ -d "\$WORKTREE" \]\]; then$/.test(t) },
   // Words only: the path is printed, in a message or in a prompt.
   { name: 'says where it is', is: (t) => /^echo "[^"`]*"(?: >&2)?$/.test(t) && !/\$\(/.test(t) },
@@ -1251,6 +1263,7 @@ describe('T0: a launcher runs nothing as itself out of a worktree it gave an age
       'launcher_git -C "$REPO_ROOT" worktree remove "$WORKTREE" --force 2>/dev/null || true',
       'launcher_git -C "$REPO_ROOT" worktree add -b "$BRANCH" "$WORKTREE" origin/main',
       'agent_worktree_pin "$WORKTREE"',
+      'if [[ "$ACTION" != "rebase-only" ]] && ! provision_worktree_modules "$WORKTREE"; then',
       'if ! MATCHES=$(agent_worktree_function agent_egress_scan "$WORKTREE" "$PRE_SHA" "${WORKTREE}/.agent-summary.md"); then',
       '(cd "$WORKTREE" && bash "$AGENT_LAUNCH_ENV" claude -p "$fix_prompt" --model "$RUN_MODEL" 2>&1 | tee -a "$LOG") || true',
       'if ( cd "$WORKTREE" && timeout --kill-after=30s "${budget}s" bash "$AGENT_LAUNCH_ENV" "$@" >/dev/null 2>&1 ); then',
@@ -1469,7 +1482,8 @@ describe('T0: what runs on an adopter\'s bash 3.2 uses nothing bash 3.2 lacks', 
     const names = r.stdout.split('\n').filter(Boolean).map((l) => l.replace(/=.*/, ''));
     // Nothing bash made up for itself on the way (a default PATH, a TERM, a SHELL) is
     // among them: those are the shell's, and were never handed to the launcher.
-    for (const n of names) expect(['PWD', 'OLDPWD', 'SHLVL', '_'], n).toContain(n);
+    // MINSPEC_HEADLESS_AGENT (#1914) is the one name the program stamps itself.
+    for (const n of names) expect(['PWD', 'OLDPWD', 'SHLVL', '_', 'MINSPEC_HEADLESS_AGENT'], n).toContain(n);
   });
 
   it('a variable that only resembles a listed name does not make the listed one appear', () => {

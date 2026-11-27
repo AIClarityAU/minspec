@@ -67,7 +67,7 @@ export const STOP_CLASSES: readonly StopClassSpec[] = Object.freeze([
   {
     id: 'approval-or-acceptance',
     summary:
-      'T3/T4 spec approval and DR acceptance — the read-before-build moments. The agent cannot sign these without forging the human.',
+      'T3/T4 spec approval and DR acceptance — the read-before-build moments. Never signed under the human\'s identity; once DR-108 is accepted and wired, a live delegation may clear this class (and only this class) for a bot-recorded approval.',
     source: 'DR-086 §2.2 (DR-076 keep, DR-029, DR-056)',
   },
   {
@@ -210,6 +210,266 @@ export function readAutonomy(repoRoot: string, env: NodeJS.ProcessEnv = process.
     return 'ask';
   }
   return typeof raw === 'string' ? resolveAutonomy(raw) : 'ask';
+}
+
+// ─── delegated approval under the bot's own name (DR-108) ───────────────────
+//
+// WHAT THIS SEPARATES. Two acts used to be treated as one by the
+// approval-or-acceptance stop class:
+//
+//   - IMPERSONATION: a record naming the founder as the actor on something he did
+//     not do. Banned, unconditionally, and nothing here relaxes it.
+//   - DELEGATION: the bot acts, records ITSELF as the actor, and cites a
+//     delegation the founder gave once in his own recorded words.
+//
+// `evaluateDelegation` answers "does a live delegation cover this one approval?".
+// `stopClassesAfterDelegation` is the ONLY way its answer changes a stop list, and
+// it can remove exactly one class. Every other class (irreversible acts and
+// `--admin` above all) is untouchable by construction, not by caller discipline.
+//
+// INERT UNTIL ACCEPTED. A delegation names its decision record, and covers
+// nothing until that record's status is `accepted` - the founder's own act
+// through *MinSpec: Accept ADR*. Writing `.minspec/delegations.json` therefore
+// activates nothing, and an agent can never make a delegation live by writing
+// it. `.minspec/delegations.json` is also a boundary path in
+// `scripts/auto-merge-gate.ts`, so no edit to it can auto-merge.
+//
+// CONSUMED BY (#2854). The approval record carries `actor` / `basis` (DR-012
+// Amendment): `scripts/lib/approval-actor.ts` judges a bot record with this function,
+// `scripts/approval-integrity.ts` runs that judgement on every approval sidecar, and
+// `scripts/lib/delegated-approval.ts` is the only path that writes a bot record (after
+// an independent AI review pass). The repeat-fix share comes from
+// `scripts/lib/repeat-fix-share.ts`.
+
+/** The only actor a delegation admits. Exact match: no trimming, no casing. */
+export const BOT_ACTOR = 'minspec-sdd[bot]';
+
+/** Acts a delegation may cover. Anything else in a record drops the record. */
+export type DelegatedAct = 'spec-approval' | 'engineering-dr-acceptance';
+const DELEGATED_ACTS: readonly DelegatedAct[] = ['spec-approval', 'engineering-dr-acceptance'];
+
+export type Tier = 'T1' | 'T2' | 'T3' | 'T4';
+const TIERS: readonly Tier[] = ['T1', 'T2', 'T3', 'T4'];
+
+export interface Delegation {
+  readonly id: string;
+  /** The decision record whose acceptance makes this delegation live. */
+  readonly decision: string;
+  /** The founder's words, verbatim. */
+  readonly words: string;
+  /** ISO date the words were said. */
+  readonly said: string;
+  /** Where the words are recorded. */
+  readonly source: string;
+  /** `owner/name`, exact (case-insensitive). One repo per entry. */
+  readonly repo: string;
+  readonly covers: readonly DelegatedAct[];
+  readonly tiers: readonly Tier[];
+  /** ISO date after which the delegation lapses until renewed. */
+  readonly reviewBy: string;
+  /** Suspends the delegation when the measured share exceeds `max`. */
+  readonly tripwire: { readonly metric: 'repeat-fix-share'; readonly max: number };
+}
+
+export interface DelegationRequest {
+  readonly repo: string;
+  readonly act: DelegatedAct;
+  readonly tier: Tier;
+  /** Who will be recorded as having approved. */
+  readonly actor: string;
+  /** Who wrote the artifact being approved. */
+  readonly author: string;
+  /** Who gave the independent verdict the approval rests on. */
+  readonly verdictBy: string;
+  /** For a DR acceptance: the record's `kind:`. Absent reads as `direction`. */
+  readonly drKind?: 'direction' | 'engineering';
+  /** Current repeat-fix share (0..1). Unknown is not permission. */
+  readonly repeatFixShare: number | undefined;
+  /** ISO date, `YYYY-MM-DD`. */
+  readonly today: string;
+  /** Repo-relative paths the approval would cover. */
+  readonly paths: readonly string[];
+}
+
+export interface DelegationVerdict {
+  readonly covered: boolean;
+  readonly reason:
+    | 'covered'
+    | 'repo-never-delegated'
+    | 'actor-not-bot'
+    | 'no-independent-verdict'
+    | 'verdict-by-author'
+    | 'direction-record'
+    | 'no-paths'
+    | 'touches-governance'
+    | 'tripwire-unknown'
+    | 'tripwire-tripped'
+    | 'no-live-delegation';
+  readonly detail: string;
+  readonly delegationId?: string;
+}
+
+/**
+ * Repos no delegation can ever cover, whatever a record says. memory-fabric stays
+ * the founder's (queue item ctg, change 8). Matched on the repo NAME so an org
+ * move cannot slip it out.
+ */
+const NEVER_DELEGATED_REPO_NAMES: ReadonlySet<string> = new Set(['memory-fabric']);
+
+/**
+ * Files whose approval is never delegated: the constitution, the stop list and
+ * this module, the delegation records and the decision that creates them, and the
+ * autonomy setting. A delegation that could approve its own widening is the
+ * self-amending shape DR-086 §2.6 exists to refuse.
+ */
+const GOVERNANCE_PATHS: ReadonlySet<string> = new Set([
+  '.minspec/constitution.md',
+  '.minspec/delegations.json',
+  '.minspec/config.json',
+  'scripts/lib/autonomy.ts',
+  'scripts/lib/autonomy.sh',
+  'docs/decisions/DR-086.md',
+  'docs/decisions/DR-108.md',
+]);
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const normPath = (p: string) => p.replace(/\\/g, '/').replace(/^\.\//, '');
+
+/**
+ * Does a live delegation cover this one approval? Pure. Fails closed at every
+ * branch: the cost of a wrong "no" is one founder round-trip, the cost of a wrong
+ * "yes" is an approval nobody gave.
+ *
+ * @param decisionStatus resolves a DR id to its frontmatter `status:`.
+ */
+export function evaluateDelegation(
+  delegations: readonly Delegation[],
+  decisionStatus: (drId: string) => string | undefined,
+  r: DelegationRequest,
+): DelegationVerdict {
+  const no = (reason: DelegationVerdict['reason'], detail: string): DelegationVerdict => ({
+    covered: false,
+    reason,
+    detail,
+  });
+
+  const repoName = r.repo.split('/').pop()?.toLowerCase() ?? '';
+  if (NEVER_DELEGATED_REPO_NAMES.has(repoName)) {
+    return no('repo-never-delegated', `${r.repo} is never delegated; its approvals stay the founder's.`);
+  }
+  if (r.actor !== BOT_ACTOR) {
+    return no('actor-not-bot', `a delegated approval is recorded under ${BOT_ACTOR} only, never "${r.actor}".`);
+  }
+  if (r.verdictBy.trim() === '') {
+    return no('no-independent-verdict', 'no independent verdict: a delegated approval rests on a second AI.');
+  }
+  if (r.verdictBy === r.author || r.verdictBy === r.actor) {
+    return no('verdict-by-author', 'the author (or the recorder) never gives the verdict on its own work.');
+  }
+  if (r.act === 'engineering-dr-acceptance' && r.drKind !== 'engineering') {
+    return no('direction-record', 'direction records (and records with no `kind:`) are accepted by the founder.');
+  }
+  if (r.paths.length === 0) {
+    return no('no-paths', 'no paths stated: an approval with no stated scope cannot be checked.');
+  }
+  const gov = r.paths.map(normPath).filter((p) => GOVERNANCE_PATHS.has(p));
+  if (gov.length > 0) {
+    return no('touches-governance', `governance files are never approved on a delegation: ${gov.join(', ')}`);
+  }
+  if (r.repeatFixShare === undefined || !Number.isFinite(r.repeatFixShare)) {
+    return no('tripwire-unknown', 'repeat-fix share unknown: the ratio tripwire cannot be checked.');
+  }
+  if (!ISO_DATE.test(r.today)) {
+    return no('no-live-delegation', `unreadable date "${r.today}".`);
+  }
+
+  for (const d of delegations) {
+    if (d.repo.toLowerCase() !== r.repo.toLowerCase()) continue;
+    if (!d.covers.includes(r.act) || !d.tiers.includes(r.tier)) continue;
+    if (decisionStatus(d.decision) !== 'accepted') continue;
+    if (!ISO_DATE.test(d.reviewBy) || r.today > d.reviewBy) continue;
+    if (r.repeatFixShare > d.tripwire.max) {
+      return no(
+        'tripwire-tripped',
+        `${d.id} suspended: repeat-fix share ${r.repeatFixShare} exceeds ${d.tripwire.max}.`,
+      );
+    }
+    return {
+      covered: true,
+      reason: 'covered',
+      detail: `covered by ${d.id} (${d.decision}), recorded as ${BOT_ACTOR}.`,
+      delegationId: d.id,
+    };
+  }
+  return no('no-live-delegation', 'no accepted, unexpired delegation covers this repo, act and tier.');
+}
+
+/**
+ * The only bridge from a delegation to the stop list. Removes
+ * `approval-or-acceptance` when, and only when, the verdict is `covered`.
+ * Every other class passes through untouched - `--admin` and every irreversible
+ * act stay stops whatever any delegation says.
+ */
+export function stopClassesAfterDelegation(
+  classes: readonly StopClass[],
+  verdict: DelegationVerdict,
+): StopClass[] {
+  if (!verdict.covered) return [...classes];
+  return classes.filter((c) => c !== 'approval-or-acceptance');
+}
+
+function isDelegation(x: unknown): x is Delegation {
+  if (typeof x !== 'object' || x === null) return false;
+  const d = x as Record<string, unknown>;
+  const str = (k: string) => typeof d[k] === 'string' && (d[k] as string).trim() !== '';
+  if (!['id', 'decision', 'words', 'said', 'source', 'repo', 'reviewBy'].every(str)) return false;
+  if (!/^DR-\d+$/.test(d.decision as string)) return false;
+  if (!Array.isArray(d.covers) || d.covers.length === 0) return false;
+  if (!d.covers.every((c) => DELEGATED_ACTS.includes(c as DelegatedAct))) return false;
+  if (!Array.isArray(d.tiers) || d.tiers.length === 0) return false;
+  if (!d.tiers.every((t) => TIERS.includes(t as Tier))) return false;
+  const t = d.tripwire as Record<string, unknown> | undefined;
+  if (typeof t !== 'object' || t === null) return false;
+  if (t.metric !== 'repeat-fix-share') return false;
+  if (typeof t.max !== 'number' || !Number.isFinite(t.max) || t.max < 0 || t.max > 1) return false;
+  return true;
+}
+
+/**
+ * Read `.minspec/delegations.json`. Every failure (missing file, malformed JSON,
+ * unknown version) yields NO delegations, and an entry that fails validation is
+ * dropped rather than repaired: an entry we cannot read is not permission, and an
+ * unknown act in `covers` must never widen what an entry grants.
+ */
+export function readDelegations(repoRoot: string): Delegation[] {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(repoRoot, '.minspec', 'delegations.json'), 'utf8');
+  } catch {
+    return [];
+  }
+  return parseDelegations(text) ?? [];
+}
+
+/**
+ * Parse the TEXT of `.minspec/delegations.json`, for callers that read it from somewhere
+ * other than the working tree (the merge base, in `scripts/approval-integrity.ts`).
+ *
+ * Returns `undefined` when the document itself is unreadable (malformed JSON, unknown
+ * version, no `delegations` array), so a caller can tell "the witness is missing" from
+ * "the witness grants nothing". Entries that fail validation are dropped, as in
+ * `readDelegations`.
+ */
+export function parseDelegations(text: string): Delegation[] | undefined {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  const doc = raw as { version?: unknown; delegations?: unknown } | null;
+  if (doc?.version !== 1 || !Array.isArray(doc.delegations)) return undefined;
+  return doc.delegations.filter(isDelegation);
 }
 
 // ─── the CLI seam (#1614) ────────────────────────────────────────────────────

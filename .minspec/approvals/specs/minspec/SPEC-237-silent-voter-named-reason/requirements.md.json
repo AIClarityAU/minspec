@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-237-silent-voter-named-reason/requirements.md",
+  "specHash": "4dd788ac52c8da98477e4727e0df1aad69954548d5bb8591a791c7c3d12d0945",
+  "approvedAt": "2026-11-01T21:14:13.105Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-b",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3181#issuecomment-6541017306"
+}

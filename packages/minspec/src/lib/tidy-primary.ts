@@ -160,13 +160,33 @@ function gitOk(rootDir: string, args: string[]): boolean {
   }
 }
 
-/** Raw bytes of `ref:path`, or null on any failure (missing ref, missing path, …). */
-function gitShowBytes(rootDir: string, ref: string, relPath: string): Buffer | null {
+/** Object id of the blob at `ref:path`, or null on any failure (missing ref, missing path, …). */
+function gitBlobId(rootDir: string, ref: string, relPath: string): string | null {
   try {
-    return execFileSync('git', ['show', `${ref}:${relPath}`], {
+    const id = execFileSync('git', ['rev-parse', '--verify', '-q', `${ref}:${relPath}`], {
       cwd: rootDir,
       stdio: ['ignore', 'pipe', 'ignore'],
-    });
+    }).toString().trim();
+    return id || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Object id git WOULD commit for the working-tree file `relPath` (#2472).
+ * `git hash-object <path>` applies the same clean conversion a commit would
+ * (`core.autocrlf`, `.gitattributes` filters), so a CRLF working copy of
+ * LF-stored text hashes to the blob's id; binary files stay byte-exact.
+ * Null on any failure.
+ */
+function gitWorktreeId(rootDir: string, relPath: string): string | null {
+  try {
+    const id = execFileSync('git', ['hash-object', '--', relPath], {
+      cwd: rootDir,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).toString().trim();
+    return id || null;
   } catch {
     return null;
   }
@@ -255,11 +275,13 @@ export function classifyPrimary(rootDir: string): PrimaryClassification | null {
       if (!existsUpstream) {
         kind = 'ORPHAN'; // content not on origin at all
       } else {
-        const upstreamBytes = gitShowBytes(topLevel, originRef, p);
-        const localBytes = safeReadFile(path.join(topLevel, p));
-        // Any read failure ⇒ can't prove equality ⇒ ORPHAN (fail toward keeping
+        // Compare what git would commit, not raw disk bytes (#2472): under
+        // core.autocrlf=true the working file is CRLF while the blob is LF.
+        const upstreamId = gitBlobId(topLevel, originRef, p);
+        const localId = gitWorktreeId(topLevel, p);
+        // Any failure ⇒ can't prove equality ⇒ ORPHAN (fail toward keeping
         // it, mirroring isCheckoutOccupied's "any error ⇒ occupied" direction).
-        kind = upstreamBytes !== null && localBytes !== null && upstreamBytes.equals(localBytes)
+        kind = upstreamId !== null && localId !== null && upstreamId === localId
           ? 'REDUNDANT'
           : 'ORPHAN';
       }
@@ -272,14 +294,6 @@ export function classifyPrimary(rootDir: string): PrimaryClassification | null {
   }
 
   return { ...empty, originRef, behind, ahead, redundant, orphans };
-}
-
-function safeReadFile(absPath: string): Buffer | null {
-  try {
-    return fs.readFileSync(absPath);
-  } catch {
-    return null;
-  }
 }
 
 /**

@@ -445,7 +445,7 @@ function parseResetInstant(text, nowMs) {
 //
 // WHAT THIS SECTION IS. The ai-review workflow embeds a `patch-fingerprint:` marker -
 // a hash of the three-dot diff - in the verdict check-run's output. It is a
-// MEASUREMENT record: `scripts/review-churn-report.sh` reads it back to count how often
+// MEASUREMENT record: the review-churn report script reads it back to count how often
 // a round re-reviewed a patch an earlier round had already passed.
 //
 // WHAT READS IT TO SKIP A REVIEW: nothing. `findReattestableVerdict` below is
@@ -489,6 +489,87 @@ function patchFingerprint(diffText) {
   return require('crypto').createHash('sha256').update(norm, 'utf8').digest('hex');
 }
 
+/**
+ * The line `review-branch.sh --print-input` closes the diff block with. Inside the diff
+ * no line can equal it: every body line starts with ' ', '+', '-' or '\', and the
+ * script defangs the tag in the payload before wrapping it. A test pins this literal
+ * against the script.
+ */
+const REVIEW_INPUT_DIFF_CLOSE = '</untrusted_diff>';
+
+/**
+ * A line that marks a file section of `git diff` as binary: the plain form review-branch.sh
+ * prints, and the `--binary` form in case that ever changes. In a text section no body
+ * line can match, since each starts with ' ', '+', '-' or '\'.
+ */
+const BINARY_DIFF_MARKER = /^(?:Binary files .* differ|GIT binary patch)$/;
+
+/**
+ * Fingerprint of the reviewable input, as the verdict carry keys it (#1688; queue item
+ * tm1, founder "go" 2026-10-17). It is `patchFingerprint` over the input with exactly two
+ * things taken out, and only inside the diff block:
+ *
+ *   - the blob ids on a diff's `index <old>..<new> <mode>` line (the mode stays), and
+ *   - the START line numbers on a hunk header `@@ -a,b +c,d @@` (the lengths, and the
+ *     function text git prints after the second `@@`, stay).
+ *
+ * WHY. Both follow the BASE copy of a file, not the change. When main edits a file the
+ * pull request also edits, anywhere outside the hunk's context, a base merge leaves every
+ * added, removed and context line identical and still moves the old blob id and the line
+ * numbers. Hashing them refused the carry on exactly the push it exists for: measured
+ * 2026-10-18, 2 of the 4 base merges refused in a 26-push sample.
+ *
+ * WHAT IT STILL SEES. Every body line byte-for-byte, whitespace included (which is why
+ * this is not `git patch-id`); the context lines, so a base edit next to the change is
+ * reviewed again; the hunk lengths and the function text in the header; file headers,
+ * modes, renames; and the approval facts after the diff block, untouched.
+ *
+ * BINARY FILES KEEP THEIR BLOB IDS (#2926 security finding). `review-branch.sh` runs a
+ * plain `git diff`, so a changed binary file is one constant line ("Binary files a/x and
+ * b/x differ") and its blob ids are the only trace of what changed. The ids are dropped
+ * only from a file section that shows its content as text hunks and has no binary
+ * marker; a binary section, or any section with no hunk at all, is hashed as written.
+ *
+ * WHAT IT ACCEPTS, stated: a change whose text is identical but that now sits at a
+ * different line, with identical context, carries. The voters would read the same
+ * lines with different numbers. This is NOT a class DR-104 accepted: DR-104 rejected a
+ * position-insensitive identity, and this reversal is recorded, proposed, in DR-110.
+ *
+ * A malformed input (no closing line) is hashed with nothing taken out: never wider
+ * than before. Empty is null, as for patchFingerprint.
+ */
+function reviewInputFingerprint(inputText) {
+  const text = String(inputText == null ? '' : inputText).replace(/\r\n?/g, '\n');
+  if (patchFingerprint(text) === null) return null;
+  const lines = text.split('\n');
+  const end = lines.indexOf(REVIEW_INPUT_DIFF_CLOSE);
+  if (end === -1) return patchFingerprint(text);
+  const HUNK = /^@@ -\d+(,\d+)? \+\d+(,\d+)? @@(.*)$/;
+  // Walk one file section (`diff --git` up to the next one) at a time. The blob ids are
+  // dropped only from a section whose content is shown as text hunks and that carries no
+  // binary marker; anywhere else they are the only trace of the content and stay.
+  let start = 0;
+  while (start < end) {
+    let stop = start + 1;
+    while (stop < end && !lines[stop].startsWith('diff --git ')) stop += 1;
+    const section = lines.slice(start, stop);
+    const shownAsText =
+      section.some((l) => HUNK.test(l)) && !section.some((l) => BINARY_DIFF_MARKER.test(l));
+    for (let i = start; i < stop; i += 1) {
+      const line = lines[i];
+      let m = /^index [0-9a-f]+\.\.[0-9a-f]+((?: [0-7]{6})?)$/.exec(line);
+      if (m) {
+        if (shownAsText) lines[i] = `index ..${m[1]}`;
+        continue;
+      }
+      m = HUNK.exec(line);
+      if (m) lines[i] = `@@ -${m[1] || ''} +${m[2] || ''} @@${m[3]}`;
+    }
+    start = stop;
+  }
+  return patchFingerprint(`review-input/v2\n${lines.join('\n')}`);
+}
+
 /** Render the marker embedded in a check-run's output so a later run can read it. */
 function renderPatchFingerprint(fp) {
   return fp ? `${PATCH_FINGERPRINT_PREFIX}${fp}` : '';
@@ -501,10 +582,14 @@ function parsePatchFingerprint(text) {
 }
 
 // The review protocol's control tokens. Named here so this module has ONE definition
-// instead of two, and so a cross-file test can pin them against the other sites that
-// hardcode the same literals - scripts/review-decide.sh, scripts/review-branch.sh and
-// .github/workflows/ai-review.yml. They cannot be IMPORTED there (two of the three are
-// bash), so a shared constant cannot be the mechanism; the test is (#2163 review).
+// instead of two. The other sites that hardcode the same literals -
+// scripts/review-decide.sh, scripts/review-branch.sh and .github/workflows/ai-review.yml -
+// cannot IMPORT them (two of the three are bash), so a shared constant cannot be the
+// mechanism; a cross-file test that reads those files is (#2163 review). One case per
+// (site, token) pins them, for example:
+//   ai-review-guard.test.js: "review protocol tokens: scripts/review-decide.sh still uses REVIEW_VERDICT_BEGIN"
+//   ai-review-guard.test.js: "review protocol tokens: scripts/review-branch.sh still uses REVIEW_UNAVAILABLE"
+//   ai-review-guard.test.js: "review protocol tokens: .github/workflows/ai-review.yml still uses REVIEW_VERDICT_END"
 const VERDICT_BEGIN_TOKEN = 'REVIEW_VERDICT_BEGIN';
 const VERDICT_END_TOKEN = 'REVIEW_VERDICT_END';
 const UNAVAILABLE_TOKEN = 'REVIEW_UNAVAILABLE';
@@ -633,8 +718,10 @@ function parseVoterRecords(text) {
  * reuse happened "within ONE head SHA" while the code compared only the patch
  * fingerprint and never looked at `head_sha` - so it reused across commits whenever the
  * diff matched, which IS the base-moved case #1840 was closed over, justified by a
- * sentence saying it was not. Three voters caught it; the diff's own test reused across
- * two SHAs and proved it.
+ * sentence saying it was not. Three voters caught it; the first version's own test fed
+ * runs on two different SHAs, asserted reuse across them, and so proved the defect. What
+ * pins the fix now:
+ *   ai-review-guard.test.js: "selectVotersToRun: refuses to reuse a record from a DIFFERENT head SHA, same patch or not"
  *
  * The fix narrows the CODE to the claim rather than widening the claim to the code,
  * because the claim is what makes the feature safe and the narrowing costs nothing:
@@ -650,7 +737,10 @@ function parseVoterRecords(text) {
  * Among candidates on that SHA, the MOST RECENT wins, by `checkRunTime` - the same
  * ordering verifyHeadPassCheckRun uses, so a re-run's fresher record supersedes an
  * earlier one. Caller array order is deliberately NOT load-bearing: it was, and the
- * test asserting recency passed only because the fixture happened to be ordered.
+ * first recency check passed only because its fixture happened to be ordered. Pinned now,
+ * with the fixture ordered oldest first and then reversed:
+ *   ai-review-guard.test.js: "selectVotersToRun: reuses the MOST RECENT record on this head, by timestamp not array order"
+ *   ai-review-guard.test.js: "selectVotersToRun: is order-independent: the same inputs reversed give the same answer"
  */
 function selectVotersToRun({ roles, checkRuns, patchHash, allowlist, headSha } = {}) {
   const wanted = Array.isArray(roles) ? roles.slice() : [];
@@ -736,7 +826,7 @@ function findReattestableVerdict({ checkRuns, patchHash, allowlist } = {}) {
     if (c.status !== 'completed' || c.conclusion !== 'success') continue;
     const slug = c.app && c.app.slug;
     const identities = [slug, slug ? `${slug}[bot]` : null].filter(Boolean);
-    if (!identities.some((i) => allowed.includes(i))) continue;
+    if (!identities.some((i) => isAuthorizedReviewer(i, allowed))) continue;
     const text = [c.output && c.output.title, c.output && c.output.summary, c.output && c.output.text]
       .filter(Boolean)
       .join('\n');
@@ -833,7 +923,10 @@ function findReattestableVerdict({ checkRuns, patchHash, allowlist } = {}) {
 // NOT BOUND, AND SAID SO: project context the reviewer CLI loads by convention
 // (CLAUDE.md and the like) and every other file in the base checkout. They are the
 // same class as "the base moved" above. PANEL_KEY_PATHS is the review machinery the
-// scripts name explicitly, and a test pins it to what review-branch.sh reads.
+// scripts name explicitly. No shipped test checks that list against what
+// review-branch.sh actually reads; what is pinned is narrower - a listing that cannot be
+// read, or lacks a required path, yields no key, so nothing carries:
+//   ai-review-guard.test.js: "#1688 panel key: an unreadable or incomplete listing yields NO key, so nothing carries"
 
 /** The disclosure label a carried verdict wears. NOT a verdict label (see VERDICT_LABELS). */
 const CARRIED = 'ai-review:carried';
@@ -1071,6 +1164,202 @@ function latestHeadRound({ listing, allowlist, headSha } = {}) {
 }
 
 /**
+ * The machinery path set, as a regex over ONE repo-relative path (#3178). THIRD hand-copy
+ * of `buildMachineryRegexSource()` in packages/minspec/src/lib/machinery-paths.ts (the
+ * others: ai-review.yml's `grep -qE` and scripts/dispatch-issue.sh MACHINERY_PATH_RE); a
+ * test pins this one to the canonical module. It does NOT honour MACHINERY_CARVE_OUTS: a
+ * carved-out path here only costs a fresh review, never a carried pass, which is the safe
+ * direction for a predicate that exists to REFUSE a carry.
+ */
+const MACHINERY_PATH_RE =
+  /^\.github\/|^scripts\/|^\.githooks\/|^\.circleci\/|^\.buildkite\/|^\.husky\/|^packages\/minspec\/src\/lib\/(template-registry|ci-review-templates|machinery-paths)\.ts$/;
+
+/**
+ * Does the reviewable input touch machinery? (#3178) Read from the `diff --git` headers
+ * of the input the voters would be given, so no extra input (and no workflow change) is
+ * needed. FAIL TOWARD "yes": no header at all, or a header that cannot be split into its
+ * two paths, counts as machinery, so an unreadable file list is a fresh review and never
+ * a carry.
+ */
+function inputTouchesMachinery(inputText) {
+  const text = String(inputText == null ? '' : inputText).replace(/\r\n?/g, '\n');
+  const headers = text.split('\n').filter((l) => l.startsWith('diff --git '));
+  if (headers.length === 0) return true;
+  for (const h of headers) {
+    const rest = h.slice('diff --git '.length);
+    // Unquoted `a/<p> b/<p>` only. A quoted path (special characters) or an ambiguous
+    // split is not parsed; it is treated as machinery.
+    const m = /^a\/(\S+) b\/(\S+)$/.exec(rest);
+    if (!m) return true;
+    if (MACHINERY_PATH_RE.test(m[1]) || MACHINERY_PATH_RE.test(m[2])) return true;
+  }
+  return false;
+}
+
+/**
+ * Does a pull request's changed-file list touch machinery? (SPEC-268 FR6) The same
+ * MACHINERY_PATH_RE as {@link inputTouchesMachinery}, applied to the file names the
+ * pulls API returns, so there is one predicate, not a second hand-written copy.
+ *
+ * FAIL TOWARD "yes": a missing or empty list, a non-string entry, or a listing shorter than
+ * `expectedCount` (the API caps the listing; `pr.changed_files` says how many there are)
+ * is machinery, because a gate that cannot see every path must not widen anything.
+ *
+ * `listedCount` is the number of file ENTRIES the API returned. Pass it whenever `paths`
+ * also carries rename sources (`previous_filename`): those add a second path per renamed
+ * entry, so `paths.length` can reach `expectedCount` on a truncated listing and hide a
+ * machinery file in the unlisted tail. Without it, `paths.length` is measured (legacy).
+ */
+function pathsTouchMachinery(paths, expectedCount, listedCount) {
+  if (!Array.isArray(paths) || paths.length === 0) return true;
+  const listed = typeof listedCount === 'number' ? listedCount : paths.length;
+  if (typeof expectedCount === 'number' && listed < expectedCount) return true;
+  for (const p of paths) {
+    if (typeof p !== 'string' || p === '') return true;
+    if (MACHINERY_PATH_RE.test(p)) return true;
+  }
+  return false;
+}
+
+// SPEC-268 - the identity GITHUB_TOKEN writes carry: labels, statuses, comments as this
+// login, check-runs under the `github-actions` App slug (matched by `slug[bot]`).
+const FALLBACK_REVIEWER_LOGIN = 'github-actions[bot]';
+
+/**
+ * The reviewer allowlist the merge gate applies (SPEC-268 FR5/FR6).
+ *
+ * The parsed AI_REVIEW_BOT_LOGINS list, widened by {@link FALLBACK_REVIEWER_LOGIN} ONLY
+ * when every one of these holds; anything else (including a missing or unexpected value)
+ * leaves the list exactly as configured:
+ *   - `identity === 'actions'`   the repo has no MinSpec App, so reviews post as
+ *                                github-actions[bot];
+ *   - `varSet === false`         no operator-set AI_REVIEW_BOT_LOGINS (an explicit list is
+ *                                never widened behind its owner's back);
+ *   - `isFork === false`         a fork run reads every secret as empty, which would
+ *                                otherwise read as `actions`;
+ *   - neither `prAuthor` nor `actor` is `dependabot[bot]`: a Dependabot-triggered run gets
+ *                                Dependabot secrets, never Actions secrets, so an App repo's
+ *                                Dependabot PR (same-repo branch, non-machinery bump) would
+ *                                otherwise read as `actions` too;
+ *   - `touchesMachinery === false` a PR touching `.github/` or `scripts/` could add a
+ *                                workflow that posts a fake pass as github-actions.
+ */
+const DEPENDABOT_LOGIN = 'dependabot[bot]';
+function effectiveAllowlist({ raw, identity, varSet, isFork, touchesMachinery, prAuthor, actor } = {}) {
+  const allowlist = parseAllowlist(raw);
+  const isDependabot = (l) => typeof l === 'string' && l.trim().toLowerCase() === DEPENDABOT_LOGIN;
+  let reason;
+  if (identity !== 'actions') reason = 'reviewer identity is not the GITHUB_TOKEN fallback';
+  else if (varSet !== false) reason = 'AI_REVIEW_BOT_LOGINS is set explicitly; it is used as written';
+  else if (isDependabot(prAuthor) || isDependabot(actor))
+    reason = 'Dependabot pull request or run: its secrets are withheld, so the identity mode cannot be read from them';
+  else if (isFork !== false) reason = 'fork pull request (or head repository unknown)';
+  else if (touchesMachinery !== false) reason = 'the pull request touches machinery paths, or its file list could not be read in full';
+  if (reason) return { allowlist, widened: false, reason };
+  if (!allowlist.includes(FALLBACK_REVIEWER_LOGIN)) allowlist.push(FALLBACK_REVIEWER_LOGIN);
+  return {
+    allowlist,
+    widened: true,
+    reason: `no MinSpec App configured: reviews post as ${FALLBACK_REVIEWER_LOGIN}, so it is trusted for this pull request`,
+  };
+}
+
+// ── SPEC-268 review finding (#4079): what proves a pass in the GITHUB_TOKEN arm ──
+//
+// In a repo without the MinSpec App the reviewer writes with GITHUB_TOKEN, and so does
+// EVERY other workflow in the repo: CI's `npm test`, which runs the PR's own code, holds
+// a token that writes as github-actions[bot] wherever that token can write. A label, a
+// commit status or a check-run carrying that login therefore says nothing about which
+// workflow wrote it, and a check-run's check suite cannot bind it either: GitHub
+// attaches a GITHUB_TOKEN-created check-run to an arbitrary Actions suite on the commit
+// (the suite id is ignored on create). So in this arm the gate accepts ONE witness: the
+// ai-review.yml workflow RUN itself, read through the Actions API. A run's path, event,
+// head and jobs/steps are written by GitHub from the workflow file, never by a token, so
+// a pass counts only when the latest ai-review.yml `pull_request` run on this PR's head
+// finished green AND its GITHUB_TOKEN-arm job ran the witness step, whose `if:` holds
+// only for a posted, non-machinery `ai-review:pass`.
+//
+// What this does NOT defend (and the App arm does not either): someone who can push a
+// workflow file can run any workflow they like, including one at this path via a PR
+// against a base of their own. That needs the `workflows` permission, the same bar as
+// forging a pass with the App's secrets. The widening already refuses PRs that touch
+// machinery. Deleting a newer failed run (actions: write) re-exposes an older pass on
+// the SAME head, which buys nothing a close/reopen re-review does not.
+const REVIEW_WORKFLOW_PATH = '.github/workflows/ai-review.yml';
+// The ai-review.yml job that runs in the GITHUB_TOKEN arm (the App arm's job is
+// `runner`; only this one holds write scopes on its own token).
+const REVIEW_ACTIONS_JOB = 'runner-actions';
+// The step name, verbatim from ai-review.yml. A test binds the two.
+const PASS_WITNESS_STEP = 'Record the ai-review:pass witness for the merge gate (SPEC-268)';
+
+/**
+ * Pick the ai-review run that speaks for this head (pure). Fail closed: anything
+ * missing, malformed or not yet finished returns `{ run: null, reason }`.
+ */
+function selectReviewRun({ runs, headSha, prNumber, repoFullName } = {}) {
+  if (!isCommitSha(headSha) || !Number.isInteger(prNumber) || typeof repoFullName !== 'string' || repoFullName === '') {
+    return { run: null, reason: 'no head, pull request or repository to bind the ai-review run to' };
+  }
+  if (!Array.isArray(runs)) return { run: null, reason: 'the ai-review workflow runs could not be read' };
+  const mine = runs.filter(
+    (r) =>
+      r &&
+      r.path === REVIEW_WORKFLOW_PATH &&
+      r.event === 'pull_request' &&
+      r.head_sha === headSha &&
+      r.head_repository &&
+      r.head_repository.full_name === repoFullName &&
+      Array.isArray(r.pull_requests) &&
+      r.pull_requests.some((p) => p && p.number === prNumber),
+  );
+  if (mine.length === 0) {
+    return { run: null, reason: `no ai-review run (${REVIEW_WORKFLOW_PATH}) on this head for this pull request` };
+  }
+  const t = (r) => {
+    const v = Date.parse(r.created_at || '');
+    return Number.isFinite(v) ? v : -Infinity;
+  };
+  const latest = mine.reduce((a, b) => (t(b) > t(a) || (t(b) === t(a) && (b.id || 0) > (a.id || 0)) ? b : a));
+  if (latest.status !== 'completed') {
+    return { run: null, reason: `the latest ai-review run on this head is still '${sanitizeLogin(latest.status)}'` };
+  }
+  if (latest.conclusion !== 'success') {
+    return { run: null, reason: `the latest ai-review run on this head concluded '${sanitizeLogin(latest.conclusion)}'` };
+  }
+  return { run: latest, reason: 'latest ai-review run on this head completed successfully' };
+}
+
+/**
+ * Did the selected run record a pass? (pure) `jobs` is that run's job list (latest
+ * attempt). Verified only when exactly one `REVIEW_ACTIONS_JOB` job of this run, on this
+ * head and attempt, completed green with the witness step completed `success`. A
+ * skipped witness step (no pass, or a machinery PR) or any missing field is no pass.
+ */
+function verifyReviewRunWitness({ run, jobs, headSha } = {}) {
+  const no = (reason) => ({ verified: false, reason });
+  if (!run || typeof run !== 'object') return no('no ai-review run to read the pass witness from');
+  if (!Array.isArray(jobs)) return no('the ai-review run jobs could not be read');
+  const mine = jobs.filter((j) => j && j.name === REVIEW_ACTIONS_JOB && j.run_id === run.id);
+  if (mine.length !== 1) {
+    return no(`expected one \`${REVIEW_ACTIONS_JOB}\` job in the ai-review run, found ${mine.length}`);
+  }
+  const job = mine[0];
+  if (job.head_sha !== headSha) return no('the ai-review job ran on a different head');
+  if (typeof run.run_attempt === 'number' && job.run_attempt !== run.run_attempt) {
+    return no('the ai-review job is from a different attempt of the run');
+  }
+  if (job.status !== 'completed' || job.conclusion !== 'success') {
+    return no(`the \`${REVIEW_ACTIONS_JOB}\` job is '${sanitizeLogin(job.conclusion || job.status)}', not success`);
+  }
+  const steps = Array.isArray(job.steps) ? job.steps.filter((s) => s && s.name === PASS_WITNESS_STEP) : [];
+  if (steps.length !== 1) return no('the ai-review run has no pass witness step');
+  if (steps[0].status !== 'completed' || steps[0].conclusion !== 'success') {
+    return no(`the ai-review pass witness step is '${sanitizeLogin(steps[0].conclusion || steps[0].status)}' - no pass was recorded`);
+  }
+  return { verified: true, reason: 'the ai-review run on this head recorded a pass (Actions run witness)' };
+}
+
+/**
  * May the verdict on the previous head be carried to this one? (#1688)
  *
  * Deny by default: every path that is not the one carry returns `{ carry: false,
@@ -1089,15 +1378,21 @@ function latestHeadRound({ listing, allowlist, headSha } = {}) {
  * @param {object|null} o.listing  the check-runs API response for `beforeSha`, exactly as
  *                                 GitHub returned it (`{ total_count, check_runs }`); one
  *                                 that is unreadable or not provably whole is a refusal
+ * @param {boolean} o.touchesMachinery  the change touches machinery paths (#3178); anything
+ *                                 but an explicit `false` refuses, so a caller that cannot
+ *                                 say gets a fresh review
  * @param {string[]} o.allowlist  parsed AI_REVIEW_BOT_LOGINS
  */
-function decideVerdictCarry({ action, runAttempt, headSha, beforeSha, inputHash, panelKey, listing, allowlist } = {}) {
+function decideVerdictCarry({ action, runAttempt, headSha, beforeSha, inputHash, panelKey, listing, allowlist, touchesMachinery } = {}) {
   const no = (reason) => ({ carry: false, reason });
   if (action !== 'synchronize') {
     return no('only a push to an open pull request can carry a verdict; a newly opened or reopened one is always reviewed');
   }
   if (String(runAttempt).trim() !== '1') {
     return no('this is a re-run of the workflow, which always gets a fresh review');
+  }
+  if (touchesMachinery !== false) {
+    return no('the change touches machinery paths (or its file list is unreadable), so it always gets fresh voters: the merge helper needs a REVIEW_VERDICT block bound to this head (#3178)');
   }
   if (!isCommitSha(headSha)) return no('the head commit under review is not known');
   if (!isCommitSha(beforeSha)) return no('the push reports no previous head commit');
@@ -1216,7 +1511,7 @@ function carriedLabelFault({ current = [], carried } = {}) {
  */
 function planVerdictCarry(raw) {
   const o = raw && typeof raw === 'object' ? raw : {};
-  const inputHash = patchFingerprint(o.inputText);
+  const inputHash = reviewInputFingerprint(o.inputText);
   const panelKey = reviewPanelKey({ lsTree: o.lsTree, coverage: o.coverage });
 
   // The response is handed on WHOLE - count and all - and never unwrapped to its
@@ -1238,6 +1533,7 @@ function planVerdictCarry(raw) {
     panelKey,
     listing,
     allowlist: parseAllowlist(o.allowlistRaw),
+    touchesMachinery: inputTouchesMachinery(o.inputText),
   });
   const comment = d.carry
     ? renderCarriedComment({
@@ -1278,6 +1574,75 @@ function parseAllowlist(raw) {
     .split(/[\s,]+/)
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
+}
+
+// #4078 — which App writes the verdicts, and so which logins the gates believe.
+//
+// Two shapes, chosen by the repo/org Actions variable `AI_REVIEW_APP`:
+//   • unset (or `builder`) — the shipped single-App default (DR-054): the verdicts are
+//     posted by the same App that builds, `minspec-sdd[bot]`, and the allowlist is
+//     whatever AI_REVIEW_BOT_LOGINS resolves to (the workflows default it to that
+//     login). Every scaffolded repo runs this way until a separate decision says
+//     otherwise.
+//   • `review` — a SECOND App, used only by ai-review.yml, writes the verdicts, so the
+//     builder App every agent session can obtain can no longer post one that counts
+//     (#2589). Here the builder login on the allowlist is a misconfiguration that would
+//     re-open exactly that hole, so it is REFUSED: the allowlist resolves to empty and
+//     every gate reading it fails closed, with this reason on it.
+// Any other value is a typo, never a silent fall-back to the builder (constitution
+// invariant 2): it resolves to an empty allowlist with a fault naming the value.
+//
+// Pure. `raw` is the AI_REVIEW_BOT_LOGINS string AFTER the workflow's own default.
+const SHIPPED_REVIEWER_LOGIN = 'minspec-sdd[bot]';
+const REVIEW_APP_MODE = 'review';
+function resolveReviewerAllowlist({ mode, raw } = {}) {
+  const m = String(mode == null ? '' : mode).trim().toLowerCase();
+  if (m !== '' && m !== 'builder' && m !== REVIEW_APP_MODE) {
+    return {
+      mode: m,
+      allowlist: [],
+      fault:
+        `AI_REVIEW_APP is \`${sanitizeLogin(m)}\`, which is neither \`${REVIEW_APP_MODE}\` nor unset - ` +
+        'the reviewer identity cannot be resolved',
+    };
+  }
+  const allowlist = parseAllowlist(raw);
+  if (m === REVIEW_APP_MODE) {
+    const builderSlug = SHIPPED_REVIEWER_LOGIN.replace(/\[bot\]$/, '');
+    if (allowlist.some((l) => l === SHIPPED_REVIEWER_LOGIN || l === builderSlug)) {
+      return {
+        mode: m,
+        allowlist: [],
+        fault:
+          `AI_REVIEW_APP is \`${REVIEW_APP_MODE}\` but AI_REVIEW_BOT_LOGINS still names the builder App ` +
+          `\`${SHIPPED_REVIEWER_LOGIN}\` - set it to the review App's login only`,
+      };
+    }
+    if (allowlist.length === 0) {
+      return {
+        mode: m,
+        allowlist: [],
+        fault: `AI_REVIEW_APP is \`${REVIEW_APP_MODE}\` but AI_REVIEW_BOT_LOGINS is empty - set it to the review App's login`,
+      };
+    }
+  }
+  return { mode: m === '' ? 'builder' : m, allowlist, fault: '' };
+}
+
+// #4078 (PR #4086 review) — the ONE reviewer-identity rule, from the same two inputs the
+// workflows read, with the workflows' own default applied. ai-review.yml and
+// ready-to-merge.yml pass `vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]'` and
+// `vars.AI_REVIEW_APP` into resolveReviewerAllowlist; a caller outside a workflow (the
+// delegated approval and merge paths in scripts/lib/delegated-approval.ts) passes its
+// environment here and gets the identical answer, so the two can never trust different
+// Apps for the same configuration. Pure: `env` is a plain object (`process.env` or a
+// test fixture); nothing here reads the process.
+function resolveReviewerFromEnv(env) {
+  const e = env && typeof env === 'object' ? env : {};
+  // `||`, not `??`: an EMPTY variable takes the default, exactly as the workflow
+  // expression `vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]'` does.
+  const raw = e.AI_REVIEW_BOT_LOGINS || SHIPPED_REVIEWER_LOGIN;
+  return resolveReviewerAllowlist({ mode: e.AI_REVIEW_APP, raw });
 }
 
 // Is `login` one of the configured reviewer identities?
@@ -1341,6 +1706,90 @@ function decideStalenessStrip({ action, labels, headRound } = {}) {
   };
 }
 
+// #3015 — GitHub API rate limits on the gate's provenance reads.
+//
+// The gate shares one installation token with every other workflow in the repo, so a
+// burst of PR updates can exhaust it mid-run (PR 2557, run 40139595165: core limit
+// 5000/5000, reset ~5 min out). Every read then threw, was swallowed into a warning,
+// and the gate reported a provenance finding it never made. The status POST then hit
+// the same limit, so the run died without posting at all.
+//
+// A rate limit is: 429, or 403 carrying `retry-after` or `x-ratelimit-remaining: 0`.
+// A plain 403 (missing permission) is NOT one - retrying it only delays a real fault.
+function errorHeaders(e) {
+  return (e && e.response && e.response.headers) || {};
+}
+
+function isRateLimitError(e) {
+  if (!e) return false;
+  const status = Number(e.status || (e.response && e.response.status));
+  if (status === 429) return true;
+  if (status !== 403) return false;
+  const h = errorHeaders(e);
+  return h['retry-after'] !== undefined || String(h['x-ratelimit-remaining']) === '0';
+}
+
+// How long GitHub says to wait, in ms, or null when it does not say. `retry-after`
+// (seconds, secondary limits) wins; else `x-ratelimit-reset` (epoch seconds) plus a
+// one-second pad against runner/GitHub clock skew, floored at that pad.
+const RATE_LIMIT_SKEW_PAD_MS = 1000;
+function rateLimitWaitMs(e, nowMs) {
+  const h = errorHeaders(e);
+  const after = Number(h['retry-after']);
+  if (h['retry-after'] !== undefined && Number.isFinite(after) && after >= 0) return after * 1000;
+  const reset = Number(h['x-ratelimit-reset']);
+  if (h['x-ratelimit-reset'] !== undefined && Number.isFinite(reset)) {
+    return Math.max(0, reset * 1000 - nowMs) + RATE_LIMIT_SKEW_PAD_MS;
+  }
+  return null;
+}
+
+// Run `fn`, retrying ONLY rate-limit failures with bounded backoff that honours the
+// wait GitHub names. Fails closed: when attempts run out, or GitHub's named wait is
+// beyond the remaining budget (not worth holding a runner for), the last error is
+// rethrown with `rateLimited = true` so the caller can say "re-run", not "forged".
+// Any other error is rethrown on the first attempt, untouched.
+async function withRateLimitRetry(
+  fn,
+  {
+    sleep,
+    now = Date.now,
+    maxAttempts = 4,
+    maxTotalWaitMs = 5 * 60 * 1000,
+    defaultBackoffMs = [5000, 15000, 30000],
+    onRetry,
+  } = {},
+) {
+  if (typeof sleep !== 'function') throw new TypeError('withRateLimitRetry needs a sleep function');
+  let waited = 0;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (!isRateLimitError(e)) throw e;
+      const named = rateLimitWaitMs(e, now());
+      const wait =
+        named !== null
+          ? named
+          : defaultBackoffMs[Math.min(attempt - 1, defaultBackoffMs.length - 1)];
+      if (attempt >= maxAttempts || waited + wait > maxTotalWaitMs) {
+        e.rateLimited = true;
+        throw e;
+      }
+      if (typeof onRetry === 'function') onRetry({ attempt, waitMs: wait, error: e });
+      await sleep(wait);
+      waited += wait;
+    }
+  }
+}
+
+function readFailureReason(what, e) {
+  if (e && (e.rateLimited === true || isRateLimitError(e))) {
+    return `GitHub API rate-limited reading ${what}, not a provenance finding — re-run once the limit resets`;
+  }
+  return `could not read ${what} — provenance unverifiable until it can be read`;
+}
+
 // #359 + #397 (durable) — provenance-recency verification of a *surviving* pass.
 //
 // The revert/strip guards above are add-time / push-time *cleanup* and can fail
@@ -1366,7 +1815,19 @@ function decideStalenessStrip({ action, labels, headRound } = {}) {
 // is covered defence-in-depth by the `synchronize` staleness strip (which now
 // fails the run if it cannot remove the label) and by the allowlist check a
 // forger cannot satisfy; the primary trust anchor here is the applier identity.
-function verifyPassProvenance({ labelActor, labelAppliedAt, headCommittedAt, allowlist } = {}) {
+//
+// #3015 — `timelineReadError` / `headReadError` are the errors (if any) the workflow
+// caught reading the label timeline / head commit. They never make a pass verify;
+// they only stop a failed READ being reported as a provenance FINDING ("no record of
+// who applied"), which sent readers hunting a forged label when a re-run was the fix.
+function verifyPassProvenance({
+  labelActor,
+  labelAppliedAt,
+  headCommittedAt,
+  allowlist,
+  timelineReadError,
+  headReadError,
+} = {}) {
   const list = Array.isArray(allowlist) ? allowlist : [];
   if (list.length === 0) {
     return {
@@ -1376,6 +1837,9 @@ function verifyPassProvenance({ labelActor, labelAppliedAt, headCommittedAt, all
     };
   }
   if (!labelActor) {
+    if (timelineReadError) {
+      return { verified: false, reason: readFailureReason('the PR label timeline', timelineReadError) };
+    }
     return {
       verified: false,
       reason: 'no record of who applied ai-review:pass — provenance unverifiable',
@@ -1389,6 +1853,9 @@ function verifyPassProvenance({ labelActor, labelAppliedAt, headCommittedAt, all
   }
   const applied = Date.parse(labelAppliedAt);
   const committed = Date.parse(headCommittedAt);
+  if (!Number.isFinite(committed) && headReadError) {
+    return { verified: false, reason: readFailureReason('the head commit', headReadError) };
+  }
   if (!Number.isFinite(applied) || !Number.isFinite(committed)) {
     return {
       verified: false,
@@ -1993,19 +2460,39 @@ module.exports = {
   wholeCheckRunListing,
   latestHeadRound,
   decideVerdictCarry,
+  inputTouchesMachinery,
+  pathsTouchMachinery,
+  selectReviewRun,
+  verifyReviewRunWitness,
+  REVIEW_WORKFLOW_PATH,
+  REVIEW_ACTIONS_JOB,
+  PASS_WITNESS_STEP,
+  MACHINERY_PATH_RE,
   renderCarriedComment,
   carriedLabelFault,
   planVerdictCarry,
+  reviewInputFingerprint,
+  REVIEW_INPUT_DIFF_CLOSE,
   parseResetInstant,
   VERDICT_SCHEMA,
   defangProtocolTokens,
   renderVerdictBlock,
   parseCliVerdict,
   parseAllowlist,
+  effectiveAllowlist,
+  FALLBACK_REVIEWER_LOGIN,
+  resolveReviewerAllowlist,
+  resolveReviewerFromEnv,
+  SHIPPED_REVIEWER_LOGIN,
+  REVIEW_APP_MODE,
   isAuthorizedReviewer,
   decideProvenanceRevert,
   decideStalenessStrip,
   verifyPassProvenance,
+  isRateLimitError,
+  rateLimitWaitMs,
+  withRateLimitRetry,
+  readFailureReason,
   verifyHeadPassStatus,
   verifyHeadPassCheckRun,
   verifyHeadPassWitness,

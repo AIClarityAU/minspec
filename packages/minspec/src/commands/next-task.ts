@@ -65,7 +65,9 @@ export function nextTaskCommand(workspaceRoot: string): () => Promise<void> {
     if (filePath) {
       try {
         const doc = await vscode.workspace.openTextDocument(filePath);
-        await vscode.window.showTextDocument(doc, { preview: false });
+        // Preview tab (reused across clicks, #906) that takes focus. The toast
+        // below is not awaited, so it cannot steal focus from the editor.
+        await vscode.window.showTextDocument(doc, { preview: true, preserveFocus: false });
       } catch {
         // Opening failed — still surface the imperative below.
       }

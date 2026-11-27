@@ -31,8 +31,19 @@ import {
   extractObservedCheckRuns,
   extractRequiredCheckPins,
   hasIntegrationIdMismatch,
+  isShortCheckRunsPage,
+  CHECK_RUNS_PAGE_SIZE,
   type PinAuditFinding,
 } from '../packages/minspec/src/lib/ruleset-integration-audit';
+
+/**
+ * `CHECK_RUNS_PAGE_SIZE` (imported) is the page size requested for the
+ * `commits/{sha}/check-runs` read (#2639). GitHub's default is 30; asking for
+ * more makes a short page far less likely, but does not remove it.
+ * `isShortCheckRunsPage` is what flags a page that is demonstrably short (fewer
+ * runs than `total_count`) or full with no usable `total_count`; a full page
+ * whose `total_count` equals its run count is trusted as whole.
+ */
 
 interface Args {
   owner: string;
@@ -127,10 +138,18 @@ async function main(): Promise<void> {
   }
 
   const checkRunsResponses: unknown[] = [];
+  const shortShas: string[] = [];
   for (const sha of shas) {
     try {
-      const raw = await gh(['api', `repos/${args.owner}/${args.repo}/commits/${sha}/check-runs`]);
-      checkRunsResponses.push(JSON.parse(raw) as unknown);
+      const raw = await gh([
+        'api',
+        `repos/${args.owner}/${args.repo}/commits/${sha}/check-runs?per_page=${CHECK_RUNS_PAGE_SIZE}`,
+      ]);
+      const parsed = JSON.parse(raw) as unknown;
+      if (isShortCheckRunsPage(parsed)) {
+        shortShas.push(sha);
+      }
+      checkRunsResponses.push(parsed);
     } catch (e) {
       log(`could not fetch check-runs for ${sha}: ${(e as Error).message}`);
     }
@@ -140,6 +159,22 @@ async function main(): Promise<void> {
   const findings = auditRequiredCheckPins(pins, observed);
 
   process.stdout.write(renderReport(findings) + '\n');
+
+  // #2639: a short check-runs page can only make a pin look safer than it is —
+  // a context's disproving run sitting past the cut reads as `unobserved`
+  // (inconclusive, exits 0) instead of the `mismatch` it should be. Refuse to
+  // let that pass silently: fail closed and say exactly why, same shape as
+  // `wholeCheckRunListing` in .github/scripts/ai-review-guard.js for this same
+  // endpoint. This is independent of (and checked in addition to) the mismatch
+  // check below — a short page does not invalidate an already-proven mismatch.
+  if (shortShas.length > 0) {
+    log(
+      `check-runs listing was short (fewer runs returned than total_count) for: ${shortShas.join(
+        ', ',
+      )} — the sample is incomplete, so any 'unobserved' pin above could be an unreported mismatch past the first page. Refusing to pass.`,
+    );
+    process.exitCode = 1;
+  }
 
   if (hasIntegrationIdMismatch(findings)) {
     log('one or more required-check pins are unsatisfiable (#560 bug shape) — see ✗ findings above.');

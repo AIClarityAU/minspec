@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-254-dispatch-ambient-context-load/requirements.md",
+  "specHash": "5fc7fd57b208b7188f6d66f83823e63e0e7637a79866243eabfdadee41185a9a",
+  "approvedAt": "2026-10-30T07:06:50.817Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/clr1028-d",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3183#issuecomment-6515893280"
+}

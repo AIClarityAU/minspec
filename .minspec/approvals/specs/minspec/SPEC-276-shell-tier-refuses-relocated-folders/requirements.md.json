@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-276-shell-tier-refuses-relocated-folders/requirements.md",
+  "specHash": "73da165a3654e36d47fe5e214e4c0a06ebb89b58c6c7442c5891e9bef648c88e",
+  "approvedAt": "2026-11-12T04:38:03.462Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/spec-pile-1112a-signpost",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3629#issuecomment-6814507333"
+}
