@@ -294,4 +294,15 @@ if grep -qx "awaiting-spec-signoff" <<<"$CURRENT_LABELS" \
   echo "WARNING: could not clear awaiting-spec-signoff on #${ISSUE}; clear it by hand. The build's own completion also removes it." >&2
 fi
 
+# #4169: the dispatcher leaves a local `minspec-held` marker in a held issue's worktree
+# as a second witness. This approval IS the human release of that hold, so clear it —
+# else the next dispatch refuses [held] and re-holds. Not for a security quarantine:
+# `agent-quarantined` is retired only explicitly (see CLEAR_LABELS above), so the
+# marker stays while that label is carried. Failure is loud, never swallowed.
+if ! grep -qx "agent-quarantined" <<<"$CURRENT_LABELS"; then
+  if ! "$READY_CHECK" --clear-held "$ISSUE"; then
+    echo "WARNING: could not clear the minspec-held marker for #${ISSUE}; delete it by hand or dispatch will keep refusing [held]." >&2
+  fi
+fi
+
 echo "Approved #${ISSUE} as ${APPROVER} (lifted hold:${V_HOLD}). It is now dispatchable."

@@ -175,7 +175,7 @@ describe('the sign-off label cannot outlive the spec stage (#3351 review)', () =
     expect(stampOf(calls)[0]).not.toContain('--add-label agent-done,awaiting-spec-signoff');
   });
 
-  const clearSpan = between(approveSrc, 'if grep -qx "awaiting-spec-signoff"', 'echo "Approved #${ISSUE} as');
+  const clearSpan = between(approveSrc, 'if grep -qx "awaiting-spec-signoff"', '# #4169: the dispatcher leaves a local');
   const CARRIED = `REPO=o/r; ISSUE=42; CURRENT_LABELS=$'agent-done\\nawaiting-spec-signoff\\nhold:specify'`;
 
   it('an approval clears the label when the issue carries it, because a build follows', () => {
