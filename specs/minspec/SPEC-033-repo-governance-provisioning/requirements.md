@@ -1,11 +1,19 @@
 ---
 id: SPEC-033
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness — guardrails a shared repo must carry
 relates_to: [SPEC-024, SPEC-030, SPEC-034, SPEC-063, DR-058, DR-061]  # SPEC-024 auto-merge gate consumes the `ai-review:pass` label this propagates · SPEC-030 is the init-time non-modal offer pattern this reuses · SPEC-034 (OIDC broker, not yet shipped) will shrink FR-4's checklist once live · SPEC-063 (clean uninstall) mirrors this spec's inventory and must stay in lockstep · DR-058 + DR-061 are the two auto-merge decisions FR-7 now rests on
+implements: [packages/minspec/src/commands/check-repo-governance.ts, packages/minspec/tests/check-repo-governance.test.ts]  # greenfield: the `MinSpec: Check Repo Governance` command (FR-2) and its fixture-repo test (AC-2); both new, so no other spec owns them
+affects: [packages/minspec/src/lib/ruleset-advisor.ts, packages/minspec/src/lib/template-registry.ts, packages/minspec/src/commands/init.ts]  # modified in place, never owned: shared files whose owner or sibling specs list them under affects: only
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — Repo Governance Provisioning (ai-review + branch protection on init/refresh) — Requirements
@@ -32,8 +40,14 @@ relates_to: [SPEC-024, SPEC-030, SPEC-034, SPEC-063, DR-058, DR-061]  # SPEC-024
 > names a **symbol** first and gives the line only as it stood at `8bfc5cc5`, because a
 > line number alone rots silently; the line-level reference gap is #1252).
 >
-> **What a reader should check:** D-11 (the one open human decision), the rewritten FR-7 /
+> **What a reader should check:** D-11 (option (a), the recommended option, with both lines of the founder's relayed answer quoted; ratified at approval), the rewritten FR-7 /
 > INV-9 / AC-6, and the rewritten AC-2. Everything else is an anchor or wording correction.
+>
+> **Revision 2026-11-26 (D-11 recorded with the founder's relayed words).** D-11 carries
+> option (a), the option marked (rec), and quotes both lines of the founder's answer as
+> relayed through runner-queue item in108. His toggle line is a requirement of
+> [SPEC-420](../SPEC-420-automerge-owner-toggle/requirements.md) (owner-facing auto-merge
+> toggle), not of this spec; see D-11.
 >
 > Note on protection reads: verify `main` protection via
 > `repos/{owner}/{repo}/rules/branches/main` (rulesets). This org uses rulesets, not classic
@@ -41,7 +55,7 @@ relates_to: [SPEC-024, SPEC-030, SPEC-034, SPEC-063, DR-058, DR-061]  # SPEC-024
 > unprotected branch.
 
 **Date:** 2026-07-07 (clarify refinements applied 2026-07-14; re-checked and corrected 2026-10-01 — both [#703](https://github.com/AIClarityAU/minspec/issues/703))
-**Status:** Specifying (the 2026-08-07 approval, #1367, was against the pre-correction bytes; one open decision, D-11)
+**Status:** Planning (the 2026-08-07 approval, #1367, was against the pre-correction bytes; D-11 has a recorded selection, pending ratification at approval)
 **Triggered by:** [#557](https://github.com/AIClarityAU/minspec/issues/557) — "provision repo governance (branch protection + ai-review) on init/refresh — detect & offer to fix."
 **Builds on:** [DR-037](../../../docs/decisions/DR-037.md) — the managed-region template mechanism this rides · [DR-050](../../../docs/decisions/DR-050.md) — shelling the user's own `gh` on consent (FR-3) · [DR-058](../../../docs/decisions/DR-058.md) + [DR-061](../../../docs/decisions/DR-061.md) — the two auto-merge decisions FR-7 rests on · the ai-review workflow set ([#342](https://github.com/AIClarityAU/minspec/issues/342) / [#428](https://github.com/AIClarityAU/minspec/issues/428) / [#480](https://github.com/AIClarityAU/minspec/issues/480)), propagated **unchanged**, not rewritten.
 **Relates:** [SPEC-024](../SPEC-024-auto-merge-eligibility/requirements.md) — the auto-merge gate that only becomes meaningful once the `ai-review:pass` label it consumes is actually produced on every repo, which today it is not.
@@ -242,7 +256,8 @@ finding: the gate checks the thing it happens to know about and is silent on the
 
   **The "then flip" half is no longer a standing instruction — it is D-11.** Its stated
   condition has, per the 2026-08-05 audit, already fired, and DR-061 changed what a flip
-  would mean. Until D-11 is answered this spec ships deny on both switches and no flip.
+  would mean. **D-11 has a recorded selection (2026-11-26, option (a), awaiting ratification at approval):** this spec ships deny on both
+  switches and no flip.
   A per-repo setting always wins over the scaffold default in either direction (INV-9).
 - **FR-8 — Workspace-wide init offer (added 2026-07-12; refined 2026-07-14 per #703).** When
   `Initialize SDD Structure` runs with a multi-root `*.code-workspace` open, offer (non-modal)
@@ -291,6 +306,11 @@ finding: the gate checks the thing it happens to know about and is silent on the
   it inflates scope, it is cleanly separable to its own T2 issue — the governance-content FRs
   do not depend on it.)*
 
+- *Not a requirement here:* the owner-facing, off-by-default auto-merge toggle on the
+  onboarding/setup page that the founder asked for with D-11 is specified under
+  [SPEC-420](../SPEC-420-automerge-owner-toggle/requirements.md) (owner-facing auto-merge
+  toggle; tracked in [#4088](https://github.com/AIClarityAU/minspec/issues/4088)).
+
 ### Out of scope (explicitly)
 
 - **The reviewer's internal logic / workflow security model** — already built and reviewed
@@ -333,7 +353,7 @@ finding: the gate checks the thing it happens to know about and is silent on the
   unreadable, or unrecognised resolves to hold (the resolvers' existing behaviour,
   `auto-merge-gate.ts:79`, `dispatch-issue.sh:75-88` — propagation must not weaken it). A
   value the repo's owner set is never overwritten by re-init/refresh, in **either**
-  direction. This holds unless D-11 is answered with an option that explicitly amends it.
+  direction. D-11's recorded selection, option (a), keeps this invariant as written.
 - **INV-10 — Workspace-wide offer is declared, not discovered (FR-8).** The offer never
   touches a folder outside the workspace's declared `folders` array; it lists each folder **by
   name** with its state before running, and running it twice is a no-op for already-current
@@ -357,9 +377,32 @@ finding: the gate checks the thing it happens to know about and is silent on the
 
 ## Decisions needed (Clarify — human-only)
 
-### Open — needs the founder before this can be re-approved
+### Recorded selection — D-11 (agent-recorded, ratified at approval)
 
-- **D-11 — What auto-merge posture does a freshly scaffolded repo get, now that the #703
+- **D-11 — Recorded selection (answered, not ratified).** **Recorded selection: option (a),
+  Off, owner opts in:** deny on both auto-merge switches in a freshly scaffolded repo, no
+  automatic flip; turning either on stays a deliberate per-repo act by its owner. It is the
+  option marked (rec).
+  **The founder's answer, relayed through the runner queue (item in108, 2026-11-26).** The
+  item records his pick in the proxy's AskUserQuestion, verbatim: "SPEC-033 D-11: founder
+  picked (a) Off, owner opts in (Recommended): deny on both auto-merge switches in a freshly
+  scaffolded repo, no automatic flip; turning either on stays a deliberate per-repo act by
+  its owner". A later update to the same item records the line he added, verbatim: "it
+  should be off by default, but shown in the onboarding/setup page as one of several easy
+  toggles".
+  **What this record can and cannot claim.** Both lines reached this spec through the queue,
+  which any session can write, and no provenance mechanism in this repo attests a queue
+  answer (the review panel's trusted provenance covers approval sidecars and DR acceptance
+  only), so a queue item alone cannot carry consent (DR-123). This spec therefore records
+  option (a) in DR-123's form: the selection is copied from the relayed answer, it matches
+  the (rec) option, and the founder's approval of SPEC-033 ratifies it; he may change it
+  before approving. His added line asks for the toggle surface, which this spec does not
+  own: it is a requirement of
+  [SPEC-420](../SPEC-420-automerge-owner-toggle/requirements.md) (owner-facing auto-merge
+  toggle), which quotes the same line. Options (b) and (c) are not selected; INV-9 and FR-7
+  stand as written.
+  Original question and options follow.
+  **What auto-merge posture does a freshly scaffolded repo get, now that the #703
   flip condition has fired?** #703 resolved: `pr-gate` until #489/#490/#491/#466 close,
   then flip to `consequence-hybrid`. Two things have changed since.
   *The condition fired.* The 2026-08-05 audit (#1271) recorded all four closed, and this
@@ -395,15 +438,27 @@ D-1, D-2, D-4 and D-5 below were in this form when the spec was approved on 2026
 observation only: D-2's recommended shape (advise by default, write only on an explicit
 confirm) is what `ruleset-advisor.ts` does today (see *What exists*).
 
+*Added 2026-11-26.* The repo's Clarify check (`scripts/lib/clarify-open.ts`) reads D-1, D-2,
+D-4, D-5 and D-7 as still open, because none of them carries a recorded selection. So each
+now carries one. D-1, D-2 and D-4 use the form DR-123 sets for a T3 spec: an agent copied the
+option the item recommends, and approving this spec ratifies the pick (the
+approver may change it first). D-5 names no option, so no agent pick is possible; it is
+answered by an accepted decision record it already cites, the way D-3 is. D-7 is closed by
+D-11's recorded selection.
+
 
 - **D-1 — Tier: T3 or T4?** Half (A) is T3-shaped (files + one command). Half (B) adds a
   GitHub-API **write** with a repo-admin credential — a new external-integration boundary
   that arguably makes the feature T4 and warrants a security review of the protection-write
   path. *Recommendation:* keep (A) T3; treat (B) as its own security-reviewed slice.
+  **Recorded selection: the recommendation** (keep (A) T3; treat (B) as its own
+  security-reviewed slice). An agent copied it (DR-123); no human chose it.
 - **D-2 — Branch protection: ever write, or advise-only?** Does the extension actually call
   `gh api` to set protection (needs admin), or does it **only** ever surface the steps? This
   is an authority question, not just UX. *Recommendation:* advise-only by default; opt-in
   write behind explicit confirm + present-token check.
+  **Recorded selection: the recommendation** (advise-only by default; opt-in write behind an
+  explicit confirm and a present-token check). An agent copied it (DR-123); no human chose it.
 - **D-3 — Secret-name convention. → RESOLVED (2026-07-12) by DR-054/SPEC-034, not by this
   spec.** `CLAUDE_CODE_OAUTH_TOKEN` stays a fixed, per-repo customer secret (Tier-1 model
   credential, DR-054 §2 — untouched by the identity question). The GitHub-identity secrets
@@ -419,10 +474,17 @@ confirm) is what `ruleset-advisor.ts` does today (see *What exists*).
   `packages/**` changes (a monorepo-ism). Ship as-is (harmless no-op elsewhere) or
   generalize to a configurable path glob? *Recommendation:* ship as-is now; generalize later
   if a consuming repo needs it.
+  **Recorded selection: the recommendation** (ship as-is now; generalize later if a consuming
+  repo needs it). An agent copied it (DR-123); no human chose it.
 - **D-5 — Tier-0 positioning.** ai-review runs `claude -p` **in CI**, not in the extension
   runtime. Confirm this is consistent with MinSpec's Tier-0/air-gapped stance
   ([DR-004](../../../docs/decisions/DR-004.md)) — inference lives in the repo's CI, which the
   user owns, not inside the shipped extension.
+  **Resolved: consistent, by [DR-004](../../../docs/decisions/DR-004.md) (accepted), not by a
+  new choice.** DR-004's Tier 0 rule is that no code in `packages/minspec` or
+  `packages/shared` imports a networking module; a workflow file scaffolded into the user's
+  own CI is not extension code, and the extension still makes no call of its own. No agent
+  picked an option here: D-5 names none.
 - **D-6 — Triage/drain/dispatch scope-fit. → RESOLVED (2026-07-12, Paul Harvey): new FR-6 in
   this spec**, not a separate spec — same epic (EPIC-009), same "propagate minspec's own
   automation" concern as FR-1. Accepted that this is a bigger lift than FR-1 (a portability
@@ -438,6 +500,7 @@ confirm) is what `ruleset-advisor.ts` does today (see *What exists*).
   follow-up once those close. A per-repo override still wins in either direction (INV-9).
   **→ Condition since met and overtaken by DR-061; the flip is re-opened as D-11
   (2026-10-01). The `pr-gate`-by-default half stands and is what FR-7 ships.**
+  **→ Resolved: closed by D-11's recorded selection (2026-11-26, option (a), agent-recorded under DR-123).**
 - **D-10 — Collapse the two init/refresh palette commands into one? → RESOLVED (2026-07-14,
   Paul Harvey, #703): yes — one state-detecting command (FR-9).** `initCommand` (first-run +
   onboarding) and `initRefreshCommand` (merge-preserving) do genuinely different things, but
@@ -512,7 +575,14 @@ confirm) is what `ruleset-advisor.ts` does today (see *What exists*).
   lockstep.** It inventories this spec's FR-1/FR-3/FR-6/FR-7 as its removal checklist and
   names FR-9's command; FR-7's artifact is now a generated bundle rather than the raw
   `scripts/auto-merge-gate.ts`, and D-11 may add or remove a config write. SPEC-063 must be
-  re-read against whatever D-11 decides.
+  re-read against whatever D-11 decides. **Re-read 2026-11-26 against D-11's recorded
+  selection:** option (a) adds no scaffold write, so SPEC-063's removal list needs nothing for
+  it.
+- **Owner-facing auto-merge toggle (founder request, 2026-11-26).** Not in this spec: it is
+  specified under [SPEC-420](../SPEC-420-automerge-owner-toggle/requirements.md)
+  (owner-facing auto-merge toggle) on SPEC-030's surface (DR-061 Follow-ups), with SPEC-042 /
+  SPEC-063 amendments at their next revision. Any ruleset write it needs stays inside D-1/D-2's security-reviewed opt-in slice.
+  Tracked in [#4088](https://github.com/AIClarityAU/minspec/issues/4088).
 - **FR-9 command-merge is separable** (D-10) — if Plan finds collapsing the two init/refresh
   commands inflates SPEC-033, split it to its own T2 issue; the governance-content FRs
   (FR-1/2/3/4/6/7) do not depend on it.
@@ -541,3 +611,17 @@ Recorded because nobody reviewed these choices live (DR-086 §4).
   id would leave two specs both claiming FR-7.
 - **Edit the body but leave `status: implementing`.** Rejected: the stored approval hash
   covers the old bytes, so the file would claim an approval it no longer has.
+
+## Alternatives rejected in the 2026-11-26 revision (D-11 recorded with the founder's relayed words)
+
+Recorded because nobody reviewed these choices live (DR-086 §4).
+
+- **Record D-11 as the founder's own answer, with consent claimed in this spec.** Rejected:
+  no provenance mechanism in this repo attests a queue answer and a queue item cannot carry
+  consent (DR-123), so D-11 keeps DR-123's form of the (rec) option, ratified at approval.
+  His words are still recorded, both lines verbatim, labelled as relayed through the queue.
+- **Keep the founder's toggle request here as a new requirement.** Rejected: DR-123 lets an
+  agent record only the recommended option, not turn an extra request into binding scope;
+  the `autoMerge.native` owner surface already belongs to SPEC-030 (DR-061 Follow-ups); and
+  a ruleset write would cut across D-1/D-2's separate security-reviewed slice. The request
+  is kept, not dropped: [#4088](https://github.com/AIClarityAU/minspec/issues/4088).

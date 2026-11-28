@@ -1,7 +1,7 @@
 ---
 id: SPEC-119
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - the rule scopes SPEC-001 Invariant 5, which lives in that epic
@@ -13,9 +13,9 @@ implements: [packages/minspec/tests/blocking-scope-crossref.test.ts, packages/mi
 # Modified, not owned: the two specs that gain a one-sentence pointer (FR-4, FR-5).
 affects: [specs/minspec/requirements.md, specs/agent-execute/SPEC-019-execution-substrate/requirements.md]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -310,7 +310,7 @@ below are written under its recommended option.
   it and failing on a wrong verdict - is work in the SealBox repository and is out of scope
   here. This spec requires only that it is tracked: a SealBox issue that names the case file,
   its `schemaVersion`, and the two expected results, linked from #147 and from this spec's
-  Follow-ups. This dispatch could not file it (no network); see
+  Follow-ups. It is filed as AIClarityAU/sealbox#55; see
   [Follow-ups](#follow-ups-tracked).
 
 ## Acceptance Criteria
@@ -513,11 +513,10 @@ number comes from the collision gate, not from the files on disk.
 
 ## Follow-ups (tracked)
 
-Neither item below has an issue number yet: this dispatch has no network and could not file
-them. Both must be filed before this spec is approved, and the numbers written here.
+Both items below are filed (2026-11-23) and carry the issue numbers written here.
 
-- **Consume the case in the reviewer's evaluation** (FR-10) - SealBox repository, linked from #147.
-- **Does Invariant 5's last sentence need rewording, given row B-2?** - this repository. Raised
+- **Consume the case in the reviewer's evaluation** (FR-10) - SealBox repository, AIClarityAU/sealbox#55, linked from #147.
+- **Does Invariant 5's last sentence need rewording, given row B-2?** - this repository, #3979. Raised
   by DQ-2 Option A; a separate decision from scoping, and a separate re-approval.
 
 ## Traceability

@@ -855,7 +855,7 @@ async function surfaceBuildSkewAdvisory(
     const verdict = detectBuildSkew(folder, isMinspecRepo);
     if (verdict.kind !== 'stale') return;
 
-    const skipKey = `${BUILD_SKEW_SKIP_PREFIX}${verdict.sha}`;
+    const skipKey = `${BUILD_SKEW_SKIP_PREFIX}${verdict.sha}${verdict.dirty ? '-dirty' : ''}`;
     if (context.workspaceState.get<boolean>(skipKey, false)) return;
 
     const DISMISS = "Don't warn for this build";
@@ -877,7 +877,7 @@ const CONSTITUTION_PROPOSE_NUDGE_SKIP = 'minspec.constitutionProposeNudge.skip';
 
 /**
  * #320: surface the empty-constitution nudge with two offer-to-fix actions — a
- * deterministic "Propose draft" seed and an LLM-powered "Generate with AI…"
+ * deterministic "Propose draft" seed and an LLM-powered "Prepare AI prompt…"
  * hand-off — plus "Don't ask again".
  *
  * Best-effort + advisory: a failure here never affects activation, the toast is

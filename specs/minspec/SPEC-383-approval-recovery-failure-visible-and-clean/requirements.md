@@ -9,6 +9,9 @@ aspects: [approval, protected-branch, recovery, no-silent-gate, cleanup, failure
 depends_on: [SPEC-208, SPEC-050]
 relates_to: ["#3880", "#1022", "#2974", "#3515", "#1115", SPEC-140, SPEC-208, SPEC-050, DR-080, DR-123]
 affects: [packages/minspec/src/lib/approval-recover.ts, packages/minspec/src/commands/commit-on-approve.ts]
+implements: none
+implements_reason: >-
+  Specify phase only. Which files this spec will own is decided at Plan, after Decision D-1. Expected surface: `packages/minspec/src/lib/approval-recover.ts` and `packages/minspec/src/commands/commit-on-approve.ts`.
 ---
 
 # SPEC-383: A failed protected-branch approval recovery cleans up after itself and fails visibly
@@ -153,7 +156,12 @@ Claims below cite code. What is NOT knowable from code is stated as such.
   per-checkout, so the container cannot see the founder host's primary unless it is mounted.
   (b) also open a GitHub issue automatically; cost: a new network act needing consent, and it
   fails exactly when the network is the problem.
+
+  **Recorded selection: the recommended option,** (a), a git-ignored file under `.minspec/`, for example `.minspec/recovery-failures.json`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 - **D-3: Landing order with SPEC-208 and SPEC-140.** (a) **(rec)** land this first because it is
   small and fixes a live leak; cost: SPEC-208's transport rewrite must absorb the cleanup logic
   and may need a merge. (b) fold into SPEC-208; cost: the leak persists until a larger spec is
   planned and built.
+
+  **Recorded selection: the recommended option,** (a), land this spec first, ahead of SPEC-208 and SPEC-140. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.

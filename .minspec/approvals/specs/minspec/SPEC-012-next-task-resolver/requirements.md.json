@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-012-next-task-resolver/requirements.md",
-  "specHash": "72144e0acc3d5c91498c0604373ffa7918233cf3d16b83eb952f445b60e00a20",
-  "approvedAt": "2026-09-22T21:26:56.944Z",
+  "specHash": "f505bd02c34bc9cc8db0e850536b97db47a364142bccc653de0e69bc084b7d2a",
+  "approvedAt": "2026-11-22T04:57:12.456Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T4",
   "migrated": false,
-  "baselineBlob": "bbbd6563d2d4a6cc55ae04dbc8d4bc9cdf898796"
+  "baselineBlob": "939c4e42e441a2c7fe3fe26c22a93e0ef727eb13"
 }

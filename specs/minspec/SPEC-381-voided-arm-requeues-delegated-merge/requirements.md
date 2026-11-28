@@ -1,7 +1,7 @@
 ---
 id: SPEC-381
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute - the dev-time autonomous build/merge pipeline; the delegated merge lane is part of the drain
@@ -14,9 +14,9 @@ implements_reason: >-
   scripts/dispatch-issue.sh (label removal after arming) and `arm_delegated_spec_merges` in
   scripts/drain-inbox.sh (candidate selection). None of it is changed.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

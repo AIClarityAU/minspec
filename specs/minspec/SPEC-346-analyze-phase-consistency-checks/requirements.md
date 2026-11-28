@@ -7,6 +7,9 @@ product: minspec
 epic: EPIC-002  # Signpost Integrity — see Decisions needed D5 (epic fit unverified)
 aspects: [lifecycle, analyze, tier-0, static-check, diagnostics]
 relates_to: [SPEC-012, SPEC-054, SPEC-041, DR-004, DR-001]
+implements: none
+implements_reason: >-
+  Specify phase only. Which files this spec will own is decided at Plan. Expected surface: a new analyzer module under `packages/minspec/src/lib/` (Decision D3) and an `analyze` member of the phase enum in `config.ts` (owned elsewhere).
 ---
 
 # MinSpec — `/analyze` phase: static cross-artifact consistency checks (Requirements)
@@ -102,3 +105,11 @@ Add a deterministic, offline **analyze** phase between `tasks` and `implement` t
   frontmatter, so this changes a cross-boundary contract - cost: T4 makes Clarify required
   (`config.ts:176`) and takes the spec out of the T3 lane where an agent pick closes Clarify. The
   tier decides the approval class, so it is the founder's.
+  **Open, reserved for the founder:** the tier decides the approval class, so no agent pick is
+  recorded (founder decision, queue item clarsel, exception for questions a spec reserves; DR-123
+  section 3 keeps such a question open). Asked as queue item q346d6, 2026-11-23. The founder's
+  answer, recorded from task-queue item cq346d6 on 2026-11-24: "4 T4 (Recommended) = SPEC-346 is
+  T4; I sign it off". A queue answer is not consent (DR-108 section 4), so this question stays
+  open, and the frontmatter keeps `tier: T3`, until the founder confirms T4 himself. Moving to T4
+  also takes this spec out of the T3 lane that D1 to D5's agent picks rely on (DR-123 section 4),
+  so those picks would need his answer too.

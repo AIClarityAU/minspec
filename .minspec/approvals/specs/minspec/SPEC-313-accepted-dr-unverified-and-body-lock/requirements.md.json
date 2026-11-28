@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-313-accepted-dr-unverified-and-body-lock/requirements.md",
+  "specHash": "b917eb5a0458059d5875d9feca57bbdb6d3755493145fa92d58e3c844975bf0a",
+  "approvedAt": "2026-11-26T02:57:03.634Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/c313d1-clarify",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/4076#issuecomment-7180503320"
+}

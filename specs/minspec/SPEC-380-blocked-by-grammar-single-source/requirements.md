@@ -1,7 +1,7 @@
 ---
 id: SPEC-380
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — two parsers answering one question drift into a false signpost
@@ -13,6 +13,12 @@ implements:
   - scripts/lib/issue-rank.ts
   - packages/minspec/tests/issue-rank.test.ts
   - packages/minspec/src/lib/ci-review-templates.ts
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-380: One blocked-by grammar, imported by both the ai-review guard and the issue ranker (Requirements)

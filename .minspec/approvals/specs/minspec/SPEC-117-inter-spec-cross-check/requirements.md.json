@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-117-inter-spec-cross-check/requirements.md",
+  "specHash": "69d625b8254a7cae4370f29c3a022823a6b97be992c4a687ee512baa676fcd1e",
+  "approvedAt": "2026-11-23T08:32:28.912Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:clarify-picks-a-1121",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3933#issuecomment-7071221736"
+}

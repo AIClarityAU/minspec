@@ -47,6 +47,7 @@
 #   scripts/drain-inbox.sh --quota-cap                      # "open|closed 7d U% vs C%; 5h U% vs C% | <gate>", 0 / 42
 #   scripts/drain-inbox.sh --quota-sleep                    # secs to wait for the window
 #   scripts/drain-inbox.sh --quota-signal-sleep [<streak>]  # "<secs> <verdict> <meter>" after a TEXT signal
+#   scripts/drain-inbox.sh --quota-gate-sleep               # "<secs> <cleared|held> <meter>" after the gate deferred (#3466)
 #
 # Env knobs (all optional):
 #   MINSPEC_DRAIN_CONTINUOUS=0     — force pure one-shot even on --auto/--continuous
@@ -269,6 +270,25 @@ DRAIN_RUN_DIR="${MINSPEC_DRAIN_RUN_DIR-/tmp/minspec-drain-run}"
 # can point it at a hermetic fixture without a full git clone.
 PRIMARY_ROOT="${MINSPEC_DRAIN_PRIMARY_ROOT:-$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "${SCRIPT_DIR}/.." && pwd))}"
 
+# short_sha: 7-char display of a SHA, but a non-SHA sentinel (norun/noorigin) is
+# printed whole - truncating it to "noorigi" read as a mangled SHA (#2006).
+short_sha() {
+  if [[ "$1" =~ ^[0-9a-f]{40,64}$ ]]; then printf '%s' "${1:0:7}"; else printf '<unresolved:%s>' "$1"; fi
+}
+
+# assert_primary_is_worktree: PRIMARY_ROOT is used as a git repo throughout. If it
+# is not one, every `git -C "$PRIMARY_ROOT" rev-parse origin/main` fails and the
+# #773 freshness comparison can never succeed - a configuration error, so say so
+# loudly (once per call) instead of hiding it behind a sentinel (#2006). Returns 1
+# when it is not a work tree; callers keep their fail-safe fallback.
+assert_primary_is_worktree() {
+  if [[ "$(git -C "$PRIMARY_ROOT" rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
+    return 0
+  fi
+  echo "[drain] ERROR: PRIMARY_ROOT ($PRIMARY_ROOT) is not a git work tree - configuration error (check MINSPEC_DRAIN_PRIMARY_ROOT / the script's checkout). The origin/main freshness check cannot succeed until fixed (#2006)." >&2
+  return 1
+}
+
 # ── Continuous-loop tunables (env-overridable) ───────────────────────────────
 INTERVAL="${MINSPEC_DRAIN_INTERVAL:-1200}"           # 20 min between cycles
 QUOTA_BACKOFF="${MINSPEC_DRAIN_QUOTA_BACKOFF:-1800}"  # 30 min pause on a quota hit
@@ -408,6 +428,10 @@ QUOTA_CONTRADICT_MAX="${MINSPEC_QUOTA_CONTRADICT_MAX:-1}"
 # child's text alone). QUOTA_CONTRADICTED_STREAK counts contradicted signals since the
 # last clean cycle.
 QUOTA_PAUSE_CAUSE=""
+# 1 once any child's usage-limit TEXT was seen this cycle, whatever QUOTA_PAUSE_CAUSE says: the
+# cause keeps an earlier `gate` (the `:-signal` assignments never overwrite it), so on its own
+# it cannot tell a gate hold from a gate hold PLUS a real limit notice. Reset at cycle start.
+QUOTA_TEXT_SEEN=0
 QUOTA_CONTRADICTED_STREAK=0
 # Neither configuration nor loop state: where _quota_cap and _quota_admit_wait leave
 # their answers. They are asked some twenty times in a row when the gate works out how
@@ -509,6 +533,10 @@ _DISPATCH_RC_STARTED=76
 # The dispatcher's own first `gh` call got a 401, before any claim (#3176). Told by status
 # alone, never by the dispatcher's output, which carries the build agent's prose (#2233).
 _DISPATCH_RC_AUTH_FAILED=78
+# The dispatcher's build was killed at its time bound while the quota meter said the window
+# was closed (#1713). A quota pause, never a failure: a build that waits out a usage limit
+# prints no notice for the text classifier, so the dispatcher answers by status.
+_DISPATCH_RC_QUOTA_PAUSED=79
 
 # _dispatch_own_status <dispatcher's status> [<status of each later stage>...]
 # Prints the one status to judge a dispatch by, from the PIPESTATUS of
@@ -546,6 +574,7 @@ _dispatch_outcome() {
   case "${1-}" in
     "$_DISPATCH_RC_DECLINED") printf 'declined' ;;
     "$_DISPATCH_RC_STARTED")  printf 'started' ;;
+    "$_DISPATCH_RC_QUOTA_PAUSED") printf 'quota' ;;
     0)                        printf 'unanswered' ;;
     *)                        printf 'failed' ;;
   esac
@@ -1000,6 +1029,9 @@ ensure_fresh_run_dir() {
         return 0 ;;
   esac
 
+  # Before EITHER origin/main comparison below (the run-dir path returns early, so a check
+  # placed later never ran in production).
+  assert_primary_is_worktree || true   # swallow-ok: it already printed a loud ERROR; the fail-safe fallback below (children re-check, #481) is the intended behaviour
   GIT_TERMINAL_PROMPT=0 git -C "$PRIMARY_ROOT" fetch origin main -q 2>/dev/null || true
 
   # Executing FROM the run dir (drain-service.sh starts it there, #3747): never create,
@@ -1015,7 +1047,7 @@ ensure_fresh_run_dir() {
     here_origin="$(git -C "$PRIMARY_ROOT" rev-parse origin/main 2>/dev/null || echo 'noorigin')"
     if [[ "$here_head" != "$here_origin" ]]; then
       RUN_DIR_RESTART=true
-      echo "[drain] origin/main moved (run=${here_head:0:7} origin=${here_origin:0:7}) and this drain executes from the run dir — not refreshing it under the running script; ending the loop so drain-service.sh refreshes it and starts the new code (#3747)."
+      echo "[drain] origin/main moved (run=$(short_sha "$here_head") origin=$(short_sha "$here_origin")) and this drain executes from the run dir — not refreshing it under the running script; ending the loop so drain-service.sh refreshes it and starts the new code (#3747)."
       return 0
     fi
   fi
@@ -1080,7 +1112,7 @@ ensure_fresh_run_dir() {
       echo "[drain] STALE: run dir verified at origin/main (${run_head:0:7}) but the executing scripts/ tree ($SCRIPT_DIR) differs from origin/main's — the drain's own logic or a lib it sources is NOT current; run it from the run dir (drain-service.sh does) (#3747)." >&2
     fi
   else
-    echo "[drain] WARNING: run dir NOT verified at origin/main (run=${run_head:0:7} origin=${origin_head:0:7}) — running in place; children re-check freshness (#481)." >&2
+    echo "[drain] WARNING: run dir NOT verified at origin/main (run=$(short_sha "$run_head") origin=$(short_sha "$origin_head")) — running in place; children re-check freshness (#481)." >&2
   fi
   return 0
 }
@@ -1909,7 +1941,7 @@ sweep_open_prs() {
         fi
         if is_quota <<<"$rout"; then
           echo "[drain] Claude usage-limit signal while remediating PR #$pr — pausing this cycle (will back off, not fail)."
-          QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
+          QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"; QUOTA_TEXT_SEEN=1
           return 42
         fi
       done
@@ -2343,6 +2375,9 @@ run_cycle() {
   # runs before ensure_fresh_run_dir so a deferred cycle costs nothing at all —
   # no git, no gh, no dispatch. Returning 42 reuses the existing quota-pause arm
   # in run_loop, which sleeps and retries rather than counting a failure.
+  # QUOTA_TEXT_SEEN is per-cycle: a text signal this cycle routes the rest to the
+  # #2233 path. Reset BEFORE the gate, so a gate hold never reads last cycle's value.
+  QUOTA_TEXT_SEEN=0
   if ! quota_verdict=$(quota_gate); then
     echo "[drain] $quota_verdict"
     QUOTA_PAUSE_CAUSE="gate"
@@ -2822,6 +2857,11 @@ run_cycle() {
     case "$what" in
       started) started_count=$(( started_count + 1 )) ;;
       failed)  dispatch_failures=$(( dispatch_failures + 1 )) ;;
+      quota)
+        # Killed at its bound with the window closed (#1713): neither work done nor a
+        # failure, so it is in neither count. The slot is spent; the caller pauses.
+        echo "[drain] dispatch of #$n was killed at its time bound with the quota window closed — a quota pause, not a failure (#1713)." >&2
+        ;;
       *)
         # No answer, or an outcome this function was never taught: both are "unknown".
         # Said here, by number, the moment it happens. The cycle's own summary is hours
@@ -2897,7 +2937,16 @@ run_cycle() {
       break
       done
       book_dispatch "$n" "$outcome" "${verdict:0:1}"
-      [[ "${verdict:1:1}" == "1" ]] && saw_quota=1
+      # Only a TEXT signal (the verdict's quota bit) marks the cycle text-seen (#3466), exactly
+      # as the parallel path does: a status-witness pause (#1713) is the meter's own word, so a
+      # cleared gate hold must not be re-routed onto the #2233 text-signal path by it.
+      if [[ "${verdict:1:1}" == "1" ]]; then
+        saw_quota=1
+        QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"; QUOTA_TEXT_SEEN=1
+      fi
+      # A dispatch that said, by status, that the window closed under it (#1713). The meter
+      # was the witness, so no text signal may shorten the rest.
+      if [[ "$outcome" == "quota" ]]; then saw_quota=1; QUOTA_PAUSE_CAUSE="gate"; fi
       if (( saw_quota )); then
         echo "[drain] Claude usage-limit signal while dispatching #$n — pausing this cycle (will back off, not fail)."
         QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
@@ -3017,8 +3066,9 @@ run_cycle() {
       book_dispatch "$n" "$outcome" "${verdict:0:1}"
       if [[ "${verdict:1:1}" == "1" ]]; then
         saw_quota=1
-        QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
+        QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"; QUOTA_TEXT_SEEN=1
       fi
+      if [[ "$outcome" == "quota" ]]; then saw_quota=1; QUOTA_PAUSE_CAUSE="gate"; fi
 
       # A quota signal or a tripped breaker stops us LAUNCHING more, but never
       # abandons work already in flight — an orphaned build would hold its claim
@@ -3909,6 +3959,47 @@ quota_signal_backoff_sleep() {
   esac
 }
 
+# quota_gate_sleep_decision: the rest after quota_gate itself deferred (#3466). Prints
+# "<secs> <cleared|held> <the meter's own verdict>". Pure: reads QUOTA_FILE only.
+#   cleared — the gate NOW admits (another producer refreshed the reading while in-flight
+#             work drained, e.g. after a defer:stale): the hold is over, rest QUOTA_SLEEP_MIN.
+#             Sleeping to the 5h reset here would be wrong: _quota_sleep_plan reads "room on
+#             the meter" as "a text signal sent us", which is only false when no usage-limit
+#             text was seen this cycle. With text seen (QUOTA_TEXT_SEEN=1 / $1=1) the verdict is
+#             `text-signal` and quota_gate_backoff_sleep hands the rest to the #2233 path.
+#   held    — the gate still defers, stale or missing included: quota_sleep_secs, as before.
+quota_gate_sleep_decision() {
+  local meter secs text_seen="${1:-0}"
+  if meter=$(_quota_meter_admits); then
+    if [[ "$text_seen" == "1" ]]; then
+      printf '0 text-signal %s\n' "$meter"
+      return 0
+    fi
+    secs="$QUOTA_SLEEP_MIN"
+    [[ "$secs" =~ ^[0-9]+$ ]] || secs=60
+    printf '%d cleared %s\n' "$secs" "$meter"
+  else
+    printf '%d held %s\n' "$(quota_sleep_secs)" "$meter"
+  fi
+}
+
+# quota_gate_backoff_sleep: the rc=42 rest when quota_gate itself deferred. The gate is
+# asked again first, because the reading can have moved during the wait for in-flight work.
+quota_gate_backoff_sleep() {
+  local decision secs verdict meter
+  decision=$(quota_gate_sleep_decision "$QUOTA_TEXT_SEEN")
+  read -r secs verdict meter <<<"$decision"
+  if [[ "$verdict" == "text-signal" ]]; then
+    echo "[drain] quota hold cleared (${meter}) but a usage-limit notice arrived this cycle — taking the text-signal path, not the short rest (#2233, #3466)."
+    quota_signal_backoff_sleep
+  elif [[ "$verdict" == "cleared" ]]; then
+    echo "[drain] quota hold already cleared (${meter}) — resting ${secs}s, not sleeping to the published reset (#3466)."
+    wait_interval "$secs"
+  else
+    quota_backoff_sleep
+  fi
+}
+
 # quota_health: one line, once per loop, saying whether admission control is actually
 # SEEING DATA. A STALE reading, or a MISSING one whose bootstrap allowance is
 # exhausted, correctly HOLDS the gate shut (defers every cycle, #1775) rather than
@@ -4246,7 +4337,7 @@ run_loop() {
         if [[ "$QUOTA_PAUSE_CAUSE" == "signal" ]]; then
           quota_signal_backoff_sleep
         else
-          quota_backoff_sleep
+          quota_gate_backoff_sleep
         fi
         ;;
       *)
@@ -4329,6 +4420,11 @@ case "$1" in
     # "<secs> <contradicted|overruled|confirmed> <quota_gate's verdict>". Offline,
     # reads QUOTA_FILE only, and never spends a bootstrap admit.
     quota_signal_sleep_decision "${2:-0}"; exit 0
+    ;;
+  --quota-gate-sleep)
+    # Pure seam (#3466): the rest after quota_gate itself deferred. Prints
+    # "<secs> <cleared|held|text-signal> <quota_gate's verdict>"; optional arg <text_seen 0|1>. Offline, reads QUOTA_FILE only.
+    quota_gate_sleep_decision "${2:-0}"; exit 0
     ;;
   --session-alive)
     # Pure seam: is the session (or any pid) still alive?

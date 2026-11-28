@@ -263,6 +263,14 @@ GQL
 # well-formed view: a field that is missing, an account with no number, a history shorter
 # than its own count, a document that does not parse, two documents where one belongs, no
 # jq to parse it with. None of those is evidence about who wrote the issue, so none passes.
+# The ONE place the words of a real refusal ("an account is not on the list") are written.
+# The provenance check builds its refusal sentences from it and dispatch_issue_refusal_mark
+# recognises a real refusal by it, so rewording it moves both together and marking cannot
+# silently stop matching (#2694). It starts "is not on ..." so a "who " prefix reads on.
+_dispatch_not_listed_phrase() {
+  printf '%s' 'is not on the dispatch author list'
+}
+
 dispatch_issue_provenance_check() {
   local provenance="${1-}" view="${2-}" listed out
   if ! listed="$(_dispatch_trusted_identities_json 2>/dev/null)" || [[ -z "$listed" ]]; then
@@ -273,7 +281,7 @@ dispatch_issue_provenance_check() {
   # answer and one view, never two documents that together number two. Read from a file
   # descriptor, so neither meets the limit on the length of one argument.
   out=""
-  if ! out="$(jq -rn --argjson listed "$listed" --arg unreadable "$(_dispatch_unreadable)" \
+  if ! out="$(jq -rn --argjson listed "$listed" --arg unreadable "$(_dispatch_unreadable)" --arg notlisted "$(_dispatch_not_listed_phrase)" \
         --slurpfile answers <(printf '%s' "$provenance") --slurpfile views <(printf '%s' "$view") \
         "$(_dispatch_gate_jq_defs)"'
       def no($why): "no\t" + $why;
@@ -292,7 +300,7 @@ dispatch_issue_provenance_check() {
               elif ($i.author | key) == null
               then no("its author could not be read, and an author that cannot be read is never trusted")
               elif ($i.author | listed | not)
-              then no("its author \($i.author | shown) is not on the dispatch author list")
+              then no("its author \($i.author | shown) " + $notlisted)
               else $i.userContentEdits as $e | $i.timelineItems as $r
                 | if ($e | type) != "object" or ($e.totalCount | type) != "number" or ($e.nodes | type) != "array"
                      or ($r | type) != "object" or ($r.totalCount | type) != "number" or ($r.nodes | type) != "array"
@@ -310,11 +318,11 @@ dispatch_issue_provenance_check() {
                       elif any($editors[]; key == null)
                       then no("an account that edited its body could not be read, and what cannot be read is never trusted")
                       elif any($editors[]; listed | not)
-                      then no("its body was edited by \(first($editors[] | select(listed | not)) | shown), who is not on the dispatch author list")
+                      then no("its body was edited by \(first($editors[] | select(listed | not)) | shown), who " + $notlisted)
                       elif any($renamers[]; key == null)
                       then no("an account that changed its title could not be read, and what cannot be read is never trusted")
                       elif any($renamers[]; listed | not)
-                      then no("its title was changed by \(first($renamers[] | select(listed | not)) | shown), who is not on the dispatch author list")
+                      then no("its title was changed by \(first($renamers[] | select(listed | not)) | shown), who " + $notlisted)
                       else "ok\t\($i.author.login | tostring | printable) (\($i.author | key | sub(":"; " ")))"
                       end
                   end
@@ -351,6 +359,65 @@ dispatch_issue_gate() {
     return 1
   fi
   dispatch_issue_provenance_check "$provenance" "$view"
+}
+
+# dispatch_issue_refusal_mark <owner/repo> <issue-number> <reason> <issue-view-json>
+#
+# Make an author-gate refusal VISIBLE on the issue (#2694). A refusal is otherwise a line in
+# the drain's log, and an issue filed by an account that is not on the list (the daily
+# supply-chain scan files as `github-actions[bot]`) waits for a person with nothing telling
+# that person it is waiting. Leaving that account refused is decided; this makes the
+# refusal countable: one label, `author-refused`, and one comment naming the reason.
+#
+# ONCE PER ISSUE. The label is the marker: an issue that already carries it is left alone,
+# so a drain that refuses it every cycle writes nothing after the first.
+#
+# ONLY A REAL REFUSAL IS MARKED, that is a reason saying an account "is not on the dispatch
+# author list". An unreadable answer, an outage, or an issue edited mid-check is transient
+# and is offered again, so it is neither labelled nor commented.
+#
+# The reason is the gate's own sentence: its only quoted account name has been cut down to
+# the characters a login can have, so it is safe to post. Marking is best-effort ONLY in
+# that it never changes the refusal and never fails its caller (the refusal already
+# happened and is the gate); a write that fails is said on stderr, never swallowed.
+# Writes go through `gh`, which the launchers arm as the pipeline's App (lib/gh-bot.sh).
+# gh-bot.sh is sourced and armed INSIDE the writing function, not at file scope: this is a
+# library, and the verdict functions must stay usable without HOME or a token script (sourcing
+# gh-bot.sh reads $HOME), and must not shadow `gh` process-wide. gh_bot_init is idempotent
+# and offline (#1355).
+dispatch_issue_refusal_mark() {
+  local repo="${1-}" issue="${2-}" reason="${3-}" view="${4-}" label="author-refused" have phrase
+  if [[ "$repo" != */* || ! "$issue" =~ ^[0-9]+$ ]]; then
+    return 0
+  fi
+  phrase="$(_dispatch_not_listed_phrase)"
+  case "$reason" in
+    *"$phrase"*) ;;
+    *) return 0 ;;
+  esac
+  # The labels come from the issue view the caller already holds: no second read per
+  # refused issue per cycle. A view that cannot be read marks nothing and says so.
+  if ! have="$(printf '%s' "$view" | jq -r '[(.labels // [])[].name] | index("author-refused") != null' 2>/dev/null)" \
+     || [[ "$have" != "true" && "$have" != "false" ]]; then
+    echo "dispatch-author-gate: could not tell whether #${issue} is already marked ${label}; it was not marked this cycle." >&2
+    return 0
+  fi
+  [[ "$have" == "false" ]] || return 0
+  # shellcheck source=scripts/lib/gh-bot.sh
+  source "${BASH_SOURCE[0]%/*}/gh-bot.sh"
+  gh_bot_init   # arm bot attribution before this function's GitHub writes (#1355)
+  if ! gh label create "$label" --repo "$repo" --color d93f0b \
+        --description "Refused by the dispatch author gate (#2694); needs a person" >/dev/null 2>&1; then
+    : # already exists, or cannot be created: the add below says which
+  fi
+  if ! gh issue edit "$issue" --repo "$repo" --add-label "$label" >/dev/null 2>&1; then
+    echo "dispatch-author-gate: could not add ${label} to #${issue}; no comment was posted either, so it is tried again next cycle." >&2
+    return 0
+  fi
+  if ! gh issue comment "$issue" --repo "$repo" --body "Refused by the dispatch author gate: ${reason}. No triage or agent was started on it, and it will not be until a person picks it up, or it is filed again under an account on the list (scripts/lib/dispatch-author-gate.sh). This comment is posted once; the \`${label}\` label marks it." >/dev/null 2>&1; then
+    echo "dispatch-author-gate: added ${label} to #${issue} but could not post the explaining comment." >&2
+  fi
+  return 0
 }
 
 # dispatch_issue_label_events_query: the newest hundred label applications on an issue,

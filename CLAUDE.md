@@ -77,6 +77,10 @@ Report the state you already observed; re-reading it from the git host is ordina
 A session here never offers `m` merge on its own pull request: report the observed state and stop (keys: `c` close, `d` diff, `r` re-review). Your job is unchanged - drive your PR to greenlit, then stop.
 Full rule, rationale and the stopgap caveat (#2056): `docs/claude-md-details.md#merge-funnel`; funnel spec: SPEC-044 FR-4b.
 
+## Workflow files are founder-push only
+
+An agent cannot push any change under `.github/workflows/` (no `workflows` permission, by design). Commit the fix on a branch and hand the push to the founder as one step. Detail: `docs/claude-md-details.md#workflows-permission-boundary`; DR-097, DR-103.
+
 ## Commands and locations
 
 MinSpec is a **VS Code extension, not a CLI.** Every command runs from the Command Palette

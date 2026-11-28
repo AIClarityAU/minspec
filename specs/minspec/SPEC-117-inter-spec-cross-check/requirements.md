@@ -1,7 +1,7 @@
 ---
 id: SPEC-117
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — one spec stating something false about another is a false signpost no single-spec check can see
@@ -16,9 +16,9 @@ relates_to: [DR-029, DR-030, DR-004, DR-015, DR-003, DR-053, DR-088, SPEC-016, S
 # unapproved (I have read that note, not re-measured the gate). FR-15 makes the Plan add them.
 implements: [packages/minspec/src/lib/corpus-cross-check.ts, packages/minspec/tests/corpus-cross-check.test.ts]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

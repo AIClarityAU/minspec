@@ -7,6 +7,9 @@ product: minspec
 epic: EPIC-002  # Signpost Integrity — commit ↔ spec-task ↔ DR links must not lie or go missing
 aspects: [traceability, commits, hooks, status-bar, tier-0]
 relates_to: [DR-003, DR-066]
+implements: none
+implements_reason: >-
+  Specify phase only. Which files this spec will own is decided at Plan. Expected surface: an active-spec resolver, a Suggest Commit Prefix palette command, a status-bar warning, and an extension of `.githooks/commit-msg` (Decision D2).
 phases:
   specify: in-progress
   clarify: pending

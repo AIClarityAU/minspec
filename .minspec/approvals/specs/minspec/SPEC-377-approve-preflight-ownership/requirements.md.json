@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-377-approve-preflight-ownership/requirements.md",
+  "specHash": "be220fcd1fc8f4fa92db26dbdaa9560f0a13f4ba2336bddf7955afd4d03f29db",
+  "approvedAt": "2026-11-22T05:23:33.235Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:cos/implements-1122",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3956#issuecomment-7074562376"
+}

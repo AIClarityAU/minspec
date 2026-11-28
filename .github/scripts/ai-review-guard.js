@@ -1197,6 +1197,169 @@ function inputTouchesMachinery(inputText) {
 }
 
 /**
+ * Does a pull request's changed-file list touch machinery? (SPEC-268 FR6) The same
+ * MACHINERY_PATH_RE as {@link inputTouchesMachinery}, applied to the file names the
+ * pulls API returns, so there is one predicate, not a second hand-written copy.
+ *
+ * FAIL TOWARD "yes": a missing or empty list, a non-string entry, or a listing shorter than
+ * `expectedCount` (the API caps the listing; `pr.changed_files` says how many there are)
+ * is machinery, because a gate that cannot see every path must not widen anything.
+ *
+ * `listedCount` is the number of file ENTRIES the API returned. Pass it whenever `paths`
+ * also carries rename sources (`previous_filename`): those add a second path per renamed
+ * entry, so `paths.length` can reach `expectedCount` on a truncated listing and hide a
+ * machinery file in the unlisted tail. Without it, `paths.length` is measured (legacy).
+ */
+function pathsTouchMachinery(paths, expectedCount, listedCount) {
+  if (!Array.isArray(paths) || paths.length === 0) return true;
+  const listed = typeof listedCount === 'number' ? listedCount : paths.length;
+  if (typeof expectedCount === 'number' && listed < expectedCount) return true;
+  for (const p of paths) {
+    if (typeof p !== 'string' || p === '') return true;
+    if (MACHINERY_PATH_RE.test(p)) return true;
+  }
+  return false;
+}
+
+// SPEC-268 - the identity GITHUB_TOKEN writes carry: labels, statuses, comments as this
+// login, check-runs under the `github-actions` App slug (matched by `slug[bot]`).
+const FALLBACK_REVIEWER_LOGIN = 'github-actions[bot]';
+
+/**
+ * The reviewer allowlist the merge gate applies (SPEC-268 FR5/FR6).
+ *
+ * The parsed AI_REVIEW_BOT_LOGINS list, widened by {@link FALLBACK_REVIEWER_LOGIN} ONLY
+ * when every one of these holds; anything else (including a missing or unexpected value)
+ * leaves the list exactly as configured:
+ *   - `identity === 'actions'`   the repo has no MinSpec App, so reviews post as
+ *                                github-actions[bot];
+ *   - `varSet === false`         no operator-set AI_REVIEW_BOT_LOGINS (an explicit list is
+ *                                never widened behind its owner's back);
+ *   - `isFork === false`         a fork run reads every secret as empty, which would
+ *                                otherwise read as `actions`;
+ *   - neither `prAuthor` nor `actor` is `dependabot[bot]`: a Dependabot-triggered run gets
+ *                                Dependabot secrets, never Actions secrets, so an App repo's
+ *                                Dependabot PR (same-repo branch, non-machinery bump) would
+ *                                otherwise read as `actions` too;
+ *   - `touchesMachinery === false` a PR touching `.github/` or `scripts/` could add a
+ *                                workflow that posts a fake pass as github-actions.
+ */
+const DEPENDABOT_LOGIN = 'dependabot[bot]';
+function effectiveAllowlist({ raw, identity, varSet, isFork, touchesMachinery, prAuthor, actor } = {}) {
+  const allowlist = parseAllowlist(raw);
+  const isDependabot = (l) => typeof l === 'string' && l.trim().toLowerCase() === DEPENDABOT_LOGIN;
+  let reason;
+  if (identity !== 'actions') reason = 'reviewer identity is not the GITHUB_TOKEN fallback';
+  else if (varSet !== false) reason = 'AI_REVIEW_BOT_LOGINS is set explicitly; it is used as written';
+  else if (isDependabot(prAuthor) || isDependabot(actor))
+    reason = 'Dependabot pull request or run: its secrets are withheld, so the identity mode cannot be read from them';
+  else if (isFork !== false) reason = 'fork pull request (or head repository unknown)';
+  else if (touchesMachinery !== false) reason = 'the pull request touches machinery paths, or its file list could not be read in full';
+  if (reason) return { allowlist, widened: false, reason };
+  if (!allowlist.includes(FALLBACK_REVIEWER_LOGIN)) allowlist.push(FALLBACK_REVIEWER_LOGIN);
+  return {
+    allowlist,
+    widened: true,
+    reason: `no MinSpec App configured: reviews post as ${FALLBACK_REVIEWER_LOGIN}, so it is trusted for this pull request`,
+  };
+}
+
+// ── SPEC-268 review finding (#4079): what proves a pass in the GITHUB_TOKEN arm ──
+//
+// In a repo without the MinSpec App the reviewer writes with GITHUB_TOKEN, and so does
+// EVERY other workflow in the repo: CI's `npm test`, which runs the PR's own code, holds
+// a token that writes as github-actions[bot] wherever that token can write. A label, a
+// commit status or a check-run carrying that login therefore says nothing about which
+// workflow wrote it, and a check-run's check suite cannot bind it either: GitHub
+// attaches a GITHUB_TOKEN-created check-run to an arbitrary Actions suite on the commit
+// (the suite id is ignored on create). So in this arm the gate accepts ONE witness: the
+// ai-review.yml workflow RUN itself, read through the Actions API. A run's path, event,
+// head and jobs/steps are written by GitHub from the workflow file, never by a token, so
+// a pass counts only when the latest ai-review.yml `pull_request` run on this PR's head
+// finished green AND its GITHUB_TOKEN-arm job ran the witness step, whose `if:` holds
+// only for a posted, non-machinery `ai-review:pass`.
+//
+// What this does NOT defend (and the App arm does not either): someone who can push a
+// workflow file can run any workflow they like, including one at this path via a PR
+// against a base of their own. That needs the `workflows` permission, the same bar as
+// forging a pass with the App's secrets. The widening already refuses PRs that touch
+// machinery. Deleting a newer failed run (actions: write) re-exposes an older pass on
+// the SAME head, which buys nothing a close/reopen re-review does not.
+const REVIEW_WORKFLOW_PATH = '.github/workflows/ai-review.yml';
+// The ai-review.yml job that runs in the GITHUB_TOKEN arm (the App arm's job is
+// `runner`; only this one holds write scopes on its own token).
+const REVIEW_ACTIONS_JOB = 'runner-actions';
+// The step name, verbatim from ai-review.yml. A test binds the two.
+const PASS_WITNESS_STEP = 'Record the ai-review:pass witness for the merge gate (SPEC-268)';
+
+/**
+ * Pick the ai-review run that speaks for this head (pure). Fail closed: anything
+ * missing, malformed or not yet finished returns `{ run: null, reason }`.
+ */
+function selectReviewRun({ runs, headSha, prNumber, repoFullName } = {}) {
+  if (!isCommitSha(headSha) || !Number.isInteger(prNumber) || typeof repoFullName !== 'string' || repoFullName === '') {
+    return { run: null, reason: 'no head, pull request or repository to bind the ai-review run to' };
+  }
+  if (!Array.isArray(runs)) return { run: null, reason: 'the ai-review workflow runs could not be read' };
+  const mine = runs.filter(
+    (r) =>
+      r &&
+      r.path === REVIEW_WORKFLOW_PATH &&
+      r.event === 'pull_request' &&
+      r.head_sha === headSha &&
+      r.head_repository &&
+      r.head_repository.full_name === repoFullName &&
+      Array.isArray(r.pull_requests) &&
+      r.pull_requests.some((p) => p && p.number === prNumber),
+  );
+  if (mine.length === 0) {
+    return { run: null, reason: `no ai-review run (${REVIEW_WORKFLOW_PATH}) on this head for this pull request` };
+  }
+  const t = (r) => {
+    const v = Date.parse(r.created_at || '');
+    return Number.isFinite(v) ? v : -Infinity;
+  };
+  const latest = mine.reduce((a, b) => (t(b) > t(a) || (t(b) === t(a) && (b.id || 0) > (a.id || 0)) ? b : a));
+  if (latest.status !== 'completed') {
+    return { run: null, reason: `the latest ai-review run on this head is still '${sanitizeLogin(latest.status)}'` };
+  }
+  if (latest.conclusion !== 'success') {
+    return { run: null, reason: `the latest ai-review run on this head concluded '${sanitizeLogin(latest.conclusion)}'` };
+  }
+  return { run: latest, reason: 'latest ai-review run on this head completed successfully' };
+}
+
+/**
+ * Did the selected run record a pass? (pure) `jobs` is that run's job list (latest
+ * attempt). Verified only when exactly one `REVIEW_ACTIONS_JOB` job of this run, on this
+ * head and attempt, completed green with the witness step completed `success`. A
+ * skipped witness step (no pass, or a machinery PR) or any missing field is no pass.
+ */
+function verifyReviewRunWitness({ run, jobs, headSha } = {}) {
+  const no = (reason) => ({ verified: false, reason });
+  if (!run || typeof run !== 'object') return no('no ai-review run to read the pass witness from');
+  if (!Array.isArray(jobs)) return no('the ai-review run jobs could not be read');
+  const mine = jobs.filter((j) => j && j.name === REVIEW_ACTIONS_JOB && j.run_id === run.id);
+  if (mine.length !== 1) {
+    return no(`expected one \`${REVIEW_ACTIONS_JOB}\` job in the ai-review run, found ${mine.length}`);
+  }
+  const job = mine[0];
+  if (job.head_sha !== headSha) return no('the ai-review job ran on a different head');
+  if (typeof run.run_attempt === 'number' && job.run_attempt !== run.run_attempt) {
+    return no('the ai-review job is from a different attempt of the run');
+  }
+  if (job.status !== 'completed' || job.conclusion !== 'success') {
+    return no(`the \`${REVIEW_ACTIONS_JOB}\` job is '${sanitizeLogin(job.conclusion || job.status)}', not success`);
+  }
+  const steps = Array.isArray(job.steps) ? job.steps.filter((s) => s && s.name === PASS_WITNESS_STEP) : [];
+  if (steps.length !== 1) return no('the ai-review run has no pass witness step');
+  if (steps[0].status !== 'completed' || steps[0].conclusion !== 'success') {
+    return no(`the ai-review pass witness step is '${sanitizeLogin(steps[0].conclusion || steps[0].status)}' - no pass was recorded`);
+  }
+  return { verified: true, reason: 'the ai-review run on this head recorded a pass (Actions run witness)' };
+}
+
+/**
  * May the verdict on the previous head be carried to this one? (#1688)
  *
  * Deny by default: every path that is not the one carry returns `{ carry: false,
@@ -1411,6 +1574,75 @@ function parseAllowlist(raw) {
     .split(/[\s,]+/)
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
+}
+
+// #4078 — which App writes the verdicts, and so which logins the gates believe.
+//
+// Two shapes, chosen by the repo/org Actions variable `AI_REVIEW_APP`:
+//   • unset (or `builder`) — the shipped single-App default (DR-054): the verdicts are
+//     posted by the same App that builds, `minspec-sdd[bot]`, and the allowlist is
+//     whatever AI_REVIEW_BOT_LOGINS resolves to (the workflows default it to that
+//     login). Every scaffolded repo runs this way until a separate decision says
+//     otherwise.
+//   • `review` — a SECOND App, used only by ai-review.yml, writes the verdicts, so the
+//     builder App every agent session can obtain can no longer post one that counts
+//     (#2589). Here the builder login on the allowlist is a misconfiguration that would
+//     re-open exactly that hole, so it is REFUSED: the allowlist resolves to empty and
+//     every gate reading it fails closed, with this reason on it.
+// Any other value is a typo, never a silent fall-back to the builder (constitution
+// invariant 2): it resolves to an empty allowlist with a fault naming the value.
+//
+// Pure. `raw` is the AI_REVIEW_BOT_LOGINS string AFTER the workflow's own default.
+const SHIPPED_REVIEWER_LOGIN = 'minspec-sdd[bot]';
+const REVIEW_APP_MODE = 'review';
+function resolveReviewerAllowlist({ mode, raw } = {}) {
+  const m = String(mode == null ? '' : mode).trim().toLowerCase();
+  if (m !== '' && m !== 'builder' && m !== REVIEW_APP_MODE) {
+    return {
+      mode: m,
+      allowlist: [],
+      fault:
+        `AI_REVIEW_APP is \`${sanitizeLogin(m)}\`, which is neither \`${REVIEW_APP_MODE}\` nor unset - ` +
+        'the reviewer identity cannot be resolved',
+    };
+  }
+  const allowlist = parseAllowlist(raw);
+  if (m === REVIEW_APP_MODE) {
+    const builderSlug = SHIPPED_REVIEWER_LOGIN.replace(/\[bot\]$/, '');
+    if (allowlist.some((l) => l === SHIPPED_REVIEWER_LOGIN || l === builderSlug)) {
+      return {
+        mode: m,
+        allowlist: [],
+        fault:
+          `AI_REVIEW_APP is \`${REVIEW_APP_MODE}\` but AI_REVIEW_BOT_LOGINS still names the builder App ` +
+          `\`${SHIPPED_REVIEWER_LOGIN}\` - set it to the review App's login only`,
+      };
+    }
+    if (allowlist.length === 0) {
+      return {
+        mode: m,
+        allowlist: [],
+        fault: `AI_REVIEW_APP is \`${REVIEW_APP_MODE}\` but AI_REVIEW_BOT_LOGINS is empty - set it to the review App's login`,
+      };
+    }
+  }
+  return { mode: m === '' ? 'builder' : m, allowlist, fault: '' };
+}
+
+// #4078 (PR #4086 review) — the ONE reviewer-identity rule, from the same two inputs the
+// workflows read, with the workflows' own default applied. ai-review.yml and
+// ready-to-merge.yml pass `vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]'` and
+// `vars.AI_REVIEW_APP` into resolveReviewerAllowlist; a caller outside a workflow (the
+// delegated approval and merge paths in scripts/lib/delegated-approval.ts) passes its
+// environment here and gets the identical answer, so the two can never trust different
+// Apps for the same configuration. Pure: `env` is a plain object (`process.env` or a
+// test fixture); nothing here reads the process.
+function resolveReviewerFromEnv(env) {
+  const e = env && typeof env === 'object' ? env : {};
+  // `||`, not `??`: an EMPTY variable takes the default, exactly as the workflow
+  // expression `vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]'` does.
+  const raw = e.AI_REVIEW_BOT_LOGINS || SHIPPED_REVIEWER_LOGIN;
+  return resolveReviewerAllowlist({ mode: e.AI_REVIEW_APP, raw });
 }
 
 // Is `login` one of the configured reviewer identities?
@@ -2229,6 +2461,12 @@ module.exports = {
   latestHeadRound,
   decideVerdictCarry,
   inputTouchesMachinery,
+  pathsTouchMachinery,
+  selectReviewRun,
+  verifyReviewRunWitness,
+  REVIEW_WORKFLOW_PATH,
+  REVIEW_ACTIONS_JOB,
+  PASS_WITNESS_STEP,
   MACHINERY_PATH_RE,
   renderCarriedComment,
   carriedLabelFault,
@@ -2241,6 +2479,12 @@ module.exports = {
   renderVerdictBlock,
   parseCliVerdict,
   parseAllowlist,
+  effectiveAllowlist,
+  FALLBACK_REVIEWER_LOGIN,
+  resolveReviewerAllowlist,
+  resolveReviewerFromEnv,
+  SHIPPED_REVIEWER_LOGIN,
+  REVIEW_APP_MODE,
   isAuthorizedReviewer,
   decideProvenanceRevert,
   decideStalenessStrip,

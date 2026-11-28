@@ -1,28 +1,29 @@
 ---
 id: SPEC-268
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - guardrails a repo must carry, provisionable without hand-set secrets
 aspects: [scaffold, ci-review, reviewer-identity, ready-to-merge, no-silent-gate, provenance]
 depends_on: []
-relates_to: ["#2982", "#1567", "#559", "#397", "#810", "#1973", "SPEC-033", "SPEC-034", "DR-054", "DR-115"]
+relates_to: ["#2982", "#1567", "#559", "#397", "#810", "#1973", "#4078", "#4079", "#4140", "SPEC-033", "SPEC-034", "DR-054", "DR-115", "DR-123"]
 implements: none
 implements_reason: >-
-  Specify phase only. Which files this spec will own is decided at Plan, after Decisions D1-D3.
+  Plan phase: the plan and implementation are in PR #4079, not yet merged. Which files this
+  spec owns is set when that PR lands.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
 
 # SPEC-268: The scaffolded review stack runs with only the Claude secret; the MinSpec App secrets become optional, falling back to `GITHUB_TOKEN`
 
-> **This is a SPECIFICATION ONLY.** Written for issue #2982. Nothing is built until a human
-> reads it, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
+> **Specification for issue #2982.** The implementation is in PR #4079 (unmerged), which lands
+> only after a human reads this spec, resolves [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it.
 > Design rationale and the accepted trust-model costs: [DR-115](../../../docs/decisions/DR-115.md)
 > (amends DR-054, the reviewer-identity decision).
 
@@ -33,12 +34,19 @@ the Claude login (`CLAUDE_CODE_OAUTH_TOKEN`) and the two MinSpec App secrets
 (`MINSPEC_APP_ID`, `MINSPEC_APP_PRIVATE_KEY`). After this change only the Claude login is
 required. With the App secrets absent, the review workflows use the repo's built-in
 `GITHUB_TOKEN`: comments and labels post as `github-actions[bot]` instead of
-`minspec-sdd[bot]`, and the merge gate (`ready-to-merge`) still turns green on a real pass.
-With the App secrets present, nothing changes.
+`minspec-sdd[bot]`, and the merge gate (`ready-to-merge`) still turns green on a real pass
+(fail closed in the rare cases FR7 lists, never a false green).
+With the App secrets present, reviews still post as the reviewer App (`minspec-sdd[bot]`, or the
+review-only App when `AI_REVIEW_APP=review`) under the same gate rules, with two additions:
+`ready-to-merge` re-checks the gate once more when each review finishes (D2), and the review's
+own job token gains the write scopes FR4 needs, so the review drops its checkout credential
+before the reviewers run, refusing to review if it cannot (FR3).
 
 The founder decided this on 2026-10-21 (queue item av1) and accepted three costs, recorded in
 DR-115: a different poster identity, a new trigger for the merge gate, and an easier forged
-pass in a repo without the App.
+pass in a repo without the App. On 2026-11-26 (UTC) he also chose D2 option (b), which adds that
+re-check to repos with the App as well (see D2). That supersedes DR-115's plain-terms line that
+App repos "behave exactly as before"; correcting DR-115 itself is tracked separately (#4141).
 
 ## Grounding (observed, `file:line` at base `118548be`)
 
@@ -77,7 +85,8 @@ pass in a repo without the App.
 
 **FR1 — Only the Claude secret gates the review.** In every scaffolded workflow, the
 "reviewer configured" guard requires `CLAUDE_CODE_OAUTH_TOKEN` only. Absent it, the workflow
-skips with the existing NOTICE (unchanged). `MINSPEC_APP_ID` / `MINSPEC_APP_PRIVATE_KEY`
+skips with a NOTICE (text updated per FR10), unless FR2's review-mode misconfiguration
+applies, which is checked first and fails visibly instead of skipping. `MINSPEC_APP_ID` / `MINSPEC_APP_PRIVATE_KEY`
 never cause a skip.
 
 **FR2 — Identity mode is decided once per run and exposed as a step output.** The guard step
@@ -85,11 +94,23 @@ emits `identity=app` when BOTH App secrets are non-empty, and `identity=actions`
 Exactly one App secret set (the other empty) is `identity=actions` **plus** a `::warning`
 naming the missing one — a half-configured App is reported, never silently treated as
 configured or silently ignored. Every later step that writes to GitHub selects its token by
-this output, through one expression, not per-step re-derivation.
+this output, through one expression, not per-step re-derivation. `vars.AI_REVIEW_APP=review`
+(the review-only App, #4078) is always `identity=app` and uses the `MINSPEC_REVIEW_APP_*`
+secrets; missing review secrets or an unknown `AI_REVIEW_APP` value fail the run visibly, and
+review mode never takes the `GITHUB_TOKEN` arm or widens the allowlist.
 
-**FR3 — App arm is unchanged.** With `identity=app`, the App token is minted and used for
-every write exactly as today: same steps, same actor (`minspec-sdd[bot]`), same labels,
-comments, check-runs and commit statuses, same `ready-to-merge` behaviour.
+**FR3 — App arm keeps its actor and gate rules; two changes are added.** With
+`identity=app`, the App token is minted and used for every `ai-review.yml` write as today (`ready-to-merge`
+writes with its own `GITHUB_TOKEN`, as every `ready-to-merge` run already does): the same
+reviewer App actor (`minspec-sdd[bot]`, or the review-only App when `AI_REVIEW_APP=review`,
+#4078), and the same labels, comments, check-runs and commit statuses. Two changes reach this
+arm. First, D2 option (b): when a review completes, the FR7 trigger runs one more gate
+evaluation with the same allowlist and witness checks as a non-label gate run, against the
+current head and base from fresh API state; it does not run the provenance revert or stale-pass
+strip, and it reads pass provenance from the timeline (FR7 (i)-(ii)). It writes what such a run writes (the `ready-to-merge` status
+and the `awaiting-approval`/`blocked-by` label sync). Its residuals are listed in FR7 (i)-(iv), and AC2 confirms they apply in this arm too. Second,
+in both arms the job's own `GITHUB_TOKEN` carries the FR4 scopes, and the persisted checkout
+credential is removed before any voter runs, refusing to review if it cannot be removed.
 
 **FR4 — Actions arm posts the same artifacts.** With `identity=actions`, no App token is
 minted, and every write the App arm performs (label self-heal and `ai-review:pending` clear,
@@ -102,19 +123,29 @@ downgraded to best-effort) in the Actions arm.
 
 **FR5 — The merge gate accepts the fallback identity only in a no-App repo.**
 `ready-to-merge` computes the same identity mode (FR2) and:
-- `identity=app` → allowlist is exactly today's (`vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]'`).
+- `identity=app` → allowlist is exactly today's (`vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]'`);
+  in review mode it is resolved by `resolveReviewerAllowlist` (#4078), so an empty list or one
+  that still names `minspec-sdd[bot]` posts `failure` with the reason.
 - `identity=actions` → allowlist is today's plus `github-actions[bot]` (and the `github-actions`
   check-run app slug), unless `vars.AI_REVIEW_BOT_LOGINS` is set, in which case the variable
   wins unchanged (an operator's explicit allowlist is never widened behind their back).
 - A pull request whose head repository differs from the base repository (a fork) never widens
   the allowlist, whatever the secrets read as (fork runs see empty secrets, which would
   otherwise read as `identity=actions`).
+- A pull request authored by `dependabot[bot]`, or a run whose triggering actor is
+  `dependabot[bot]`, never widens the allowlist either. Dependabot-triggered runs get
+  Dependabot secrets, never Actions secrets, so in an App repo they would otherwise read as
+  `identity=actions` on a same-repo, non-machinery branch. In a no-App repo a Dependabot PR's
+  review normally skips, because Dependabot secrets do not carry the Claude secret unless the
+  operator adds it there. If the operator does, the review posts as `github-actions[bot]` but
+  the gate never widens for it, so that PR stays red (fail closed) and needs a human merge.
 
 **FR6 — A machinery PR cannot go green through the fallback identity.** In `identity=actions`,
 `ready-to-merge` (running from the trusted base) refuses to count a `github-actions`-attributed
 pass witness on any PR whose changed set touches the machinery paths `ai-review.yml` already
 classifies (`.github/`, `scripts/`), and on any PR whose changed set cannot be computed (fail
-closed). The classification reuses the guard's existing machinery predicate
+closed). The one exception is an operator-set `AI_REVIEW_BOT_LOGINS` that names
+`github-actions[bot]` itself: FR5 uses an explicit list as written. The classification reuses the guard's existing machinery predicate
 (`ai-review-guard.js` `inputTouchesMachinery`, `:1172`) or a single shared source — never a
 second hand-written copy. This is parity with the App arm, where a machinery PR never receives
 a pass witness; it closes the "PR adds a workflow that posts a fake `ai-review` pass as
@@ -124,7 +155,9 @@ a pass witness; it closes the "PR adds a workflow that posts a fake `ai-review` 
 A new trigger (see D1) re-runs the `ready-to-merge` gate for the PR when an `ai-review` run
 completes. Requirements on it, whichever mechanism D1 picks:
 - It pins the guard checkout to the PR's **current** base SHA read from the API at run time,
-  and fails closed (posts `failure`, names the reason) if it cannot resolve the PR or the base.
+  and fails visibly if it cannot: a PR read failure posts `failure` on the reviewed head and
+  fails the run; a missing base or a failed re-read fails the run red and leaves the PR's last
+  status in place.
 - It shares the existing per-PR concurrency group (`ready-to-merge-<PR number>`,
   `cancel-in-progress: false`, #1973), so it can never race a `pull_request`-triggered run on
   the same `(sha, context)`.
@@ -134,6 +167,16 @@ completes. Requirements on it, whichever mechanism D1 picks:
   `ready-to-merge` itself.
 - If the completed run maps to no open same-repo PR, it exits with a NOTICE and posts nothing
   (the PR's last status, posted `failure` on `opened`/`synchronize`, stands — red, not pending).
+- **Known residuals, in both arms (tracked in #4140), all failing closed, never a false
+  green:** (i) it reads pass provenance from the issue timeline, which can lag, so it may post
+  `failure` over a fresh `success`, and nothing re-runs, so a passing PR stays red until its
+  next push or label event; (ii) a `labeled`/`synchronize` run that it replaces in the
+  concurrency queue does not run its provenance revert or stale-pass strip; (iii) a PR read
+  failure posts `failure` on the reviewed head, not the current one; (iv) if it replaced a newer
+  head's queued `synchronize` run and then cannot read the PR or base, that head has no
+  `ready-to-merge` status until the next gate run for that head that writes one (normally its
+  own review's FR7 run; otherwise its next push or label event): absent for that window, never
+  green.
 
 **FR8 — The setup probe and its report follow the new rule (#1567).**
 - `REVIEWER_SECRETS` becomes `['CLAUDE_CODE_OAUTH_TOKEN']`; the App secret names move to a
@@ -146,9 +189,15 @@ completes. Requirements on it, whichever mechanism D1 picks:
   it states the identity mode in words: `App secrets absent: using GITHUB_TOKEN (reviews post as
   github-actions[bot])`, or `MINSPEC_APP_PRIVATE_KEY missing: App half-configured, using
   GITHUB_TOKEN`. Absence of the App secrets is reported, never a failure and never silent.
+- The probe reads secret NAMES only, so it cannot see `vars.AI_REVIEW_APP` (#4078). Its
+  identity describes the builder mode (`AI_REVIEW_APP` unset). When the review-only App's
+  secrets (`MINSPEC_REVIEW_APP_*`) are present, the sentence says so: that poster holds while
+  `AI_REVIEW_APP` is unset, and with `AI_REVIEW_APP=review` the review-only App posts instead.
 
 **FR9 — `ai-review-retry.yml` keeps working in both arms.** It needs no App secret today; the
 requirement is that a re-run of an `identity=actions` review still triggers FR7 when it completes.
+If GitHub does not fire `workflow_run` for a token-made re-run (unverified; PR #4079, its design.md R6), the
+gate keeps its last red status, never a false green, until the next push.
 
 **FR10 — Setup docs and NOTICE text stop demanding the App secrets.** The skip NOTICE in
 `ai-review.yml`, the `ready-to-merge.yml` header, and any scaffolded README/setup prose list
@@ -160,24 +209,37 @@ with the identity consequence.
 - **AC1 (Actions arm, end to end).** A repo scaffolded by MinSpec with only
   `CLAUDE_CODE_OAUTH_TOKEN` set: opening a non-machinery PR runs the review; the verdict comment,
   `ai-review:pass` label, `ai-review` check-run and `ai-review/pass` status are posted by
-  `github-actions[bot]`; `ready-to-merge` turns `success` without any human label action.
-- **AC2 (App arm, unchanged).** With all three secrets set, the posted artifacts, actors, and
-  `ready-to-merge` outcomes are identical to base `118548be` on the same PR fixtures; the FR7
-  trigger posts no `ready-to-merge` status of its own in this arm unless D1 resolves otherwise.
+  `github-actions[bot]`; `ready-to-merge` turns `success` without any human label action (subject to FR7 residual
+  (i): under timeline lag it stays red, never a false green, until the next push or label event).
+- **AC2 (App arm, same actor and gate rules).** With all three secrets set, and apart from the
+  two departures below, every artifact the App arm posts on main without this change (the
+  implementing PR's merge base) is posted by the same actor with the same content on the same PR
+  fixtures. The departures (FR3):
+  1. The FR7 trigger re-evaluates the gate in this arm too (D2, option (b)) when an `ai-review`
+     run completes for an open same-repo PR, and writes what a gate run writes, by those
+     checks, with the FR7 residuals (i)-(iv) (#4140), which apply in this arm too.
+  2. The job's `GITHUB_TOKEN` carries the FR4 write scopes (`pull-requests`, `issues`, `checks`,
+     `statuses`) in this arm too, because workflow-level permissions cannot differ per arm; the
+     review removes the persisted checkout credential before any voter runs, and refuses the
+     review (the fail-closed request-changes path) if it cannot be removed. No actor or
+     artifact changes otherwise.
 - **AC3 (fallback is the mutating arm — tested explicitly).** Tests drive the Actions arm
   directly: guard output `identity=actions` for (none set), (ID only), (key only); each write step
   resolves to `GITHUB_TOKEN`; the ready-to-merge allowlist gains `github-actions[bot]` only in
   that arm. A mutation that drops `github-actions[bot]` from the fallback allowlist, or that makes
   the guard still require an App secret, must fail a test.
-- **AC4 (forge narrowing).** In `identity=actions`, a PR touching `.github/` with a
+- **AC4 (forge narrowing).** In `identity=actions`, with `AI_REVIEW_BOT_LOGINS` unset, a PR touching `.github/` with a
   `github-actions`-attributed `ai-review` success check-run and `ai-review:pass` label yields
   `ready-to-merge` = `failure`. A fork PR never widens the allowlist.
 - **AC5 (trigger cannot silently not fire).** A test proves that after an `identity=actions`
   review completes with a pass, the FR7 trigger runs the gate and posts `success`; and that an
-  unresolvable PR/base yields a visible `failure` or NOTICE, never an absent status.
+  unresolvable PR/base yields a visible `failure`, a red run, or a NOTICE, never a green status;
+  the one absent-status case is FR7 residual (iv), which lasts until the next gate run for that
+  head that writes a status (#4140).
 - **AC6 (probe).** `probeReviewerConfigured` is `true` with only `CLAUDE_CODE_OAUTH_TOKEN`, and
   the user-facing report contains the identity-mode sentence of FR8 for each of the three
-  secret states (all, none, half).
+  secret states (all, none, half); with the review-only App's secrets present, the sentence
+  names `AI_REVIEW_APP` and the review-only App.
 - **AC7 (template parity).** `ci-stack-portability` / generated-template checks stay green: the
   scaffolded copies equal the regenerated sources, and this repo (which has the App secrets)
   observably keeps running the App arm.
@@ -185,7 +247,8 @@ with the identity consequence.
 ## Invariants this change must not break
 
 - **Constitution INV-2 — no silent gate.** No path where `ready-to-merge` is never written
-  (pending forever) or a pass witness is accepted without provenance. Half-configured App is a
+  (pending forever) or a pass witness is accepted without provenance. FR7 residual (iv) is an
+  absent status until the next gate run for that head that writes one, not forever. Half-configured App is a
   visible warning. Load-bearing writes in the Actions arm are not wrapped in `|| true`.
 - **Constitution INV-3 — blast radius.** Only scaffolded files in repos that opted in
   (`.minspec/`) change; no org- or machine-wide setting is touched; the probe stays a read of
@@ -195,7 +258,10 @@ with the identity consequence.
 - **Single writer of `ready-to-merge`** (`ready-to-merge.yml:14-16`) and its base-pinned
   self-forge defence (`:68-77`).
 - **SHA-bound pass witness** (#466/#810): a pass counts only for the head it was posted on.
-- **App arm byte-for-byte behaviour** when both App secrets are present (issue #2982 "Keep").
+- **App arm behaviour** when both App secrets are present (issue #2982 "Keep"): same actor,
+  same artifacts, same gate rules, except the two departures FR3 lists and AC2 details: D2
+  option (b) (one extra gate evaluation per completed review) and the FR4 job-token scopes with
+  the persisted-credential removal before the voters run. The founder's approval of this text is what accepts both.
 - **SPEC-034 shared-App broker remains the long-term route**; nothing here removes or blocks it.
 
 ## Out of scope
@@ -221,12 +287,19 @@ with the identity consequence.
 - (c) `ai-review.yml` posts `ready-to-merge` itself in the Actions arm. Rejected: breaks the
   single-writer invariant and moves the security decision onto PR-head code.
 
+**Recorded selection: the recommended option,** (a), a `workflow_run` trigger on `ai-review` `completed`, added to `ready-to-merge.yml`. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 **D2 — In the App arm, does the new trigger also re-evaluate the gate?**
 - **(a) The trigger fires in both arms but exits early, posting nothing, when the App secrets
-  are present (rec).** Keeps the App arm's writes identical to today (acceptance "identical to
-  today"). Cost: one empty Actions run (seconds) per review in App repos.
+  are present (rec at Specify; withdrawn at Plan, see the selection below).** Keeps the App arm's writes identical to today (#2982's acceptance
+  "identical to today", carried into the original AC2 as "identical to base `118548be`",
+  amended when (b) was chosen). Cost: one empty Actions run (seconds) per
+  review in App repos. Found unsound at Plan: under the shared per-PR concurrency group an
+  early-exit run can replace a queued gate run and post nothing (see the selection below).
 - (b) It re-evaluates in both arms. A redundant second evaluation could rescue a missed
   `labeled` event, but it changes App-arm behaviour, which the issue asked to keep identical.
+
+**Recorded selection: option (b),** the non-recommended option, chosen by the founder on 2026-11-26 at 21:56 UTC (2026-11-27 in Sydney). He answered "Spec matches code" to a chief-of-staff question asked after review of PR #4079 found the plan had departed from the earlier pick of (a). That chat answer is not recorded in the repo; the checkable record of this choice is the founder's own approval of this text (`.minspec/approvals/specs/minspec/SPEC-268-review-app-secrets-optional/requirements.md.json`, written in the same commit). It is a human choice, not an agent pick under DR-123, which covers only the recommended option, and it is never ratified by a delegated approval. It supersedes the agent-recorded pick of (a) (2026-11-22, under DR-123). The question put to him gave this reason for departing from #2982's Keep line ("When the App secrets ARE present, behaviour is unchanged"): this workflow shares one per-PR concurrency group, and GitHub keeps only one pending run per group, replacing the older pending run with the newer one. An App-arm `workflow_run` that exits early posting nothing could therefore replace a queued `labeled`/`synchronize` run and leave `ready-to-merge` unwritten (PR #4079, its `design.md` R3). Re-evaluating in both arms removes that failure whenever the re-evaluation can read the PR and its base; the remaining no-status window is FR7 residual (iv). Cost: App repos get one extra gate evaluation per completed review. His approval of this text is what accepts the departure. The FR7 residuals were found afterwards (pre-review, 2026-11-26 UTC, which was 2026-11-27 in Sydney, #4140); his approval of this text is what accepts them.
 
 **D3 — Record the trust change as a new DR or as an amendment to DR-054?**
 - **(a) New DR-115, `proposed`, citing DR-054 as amended (rec; drafted in this PR).** A
@@ -235,11 +308,13 @@ with the identity consequence.
 - (b) Append an amendment to accepted DR-054. Keeps one record, but an amendment inside an
   accepted record is the state #2613 / SPEC-266 shows readers cannot see as pending.
 
+**Recorded selection: the recommended option,** (a), a new decision record, `proposed`, citing DR-054 as amended. Agent pick of the recommended option, no human chose it; founder decision, queue item clarsel (2026-11-17), DR-123, recorded 2026-11-22; sign-off ratifies it.
+
 ## Rejected alternatives (recorded per DR-086 §4)
 
 - **Mode by explicit repo variable** (e.g. `MINSPEC_REVIEW_IDENTITY=actions`) instead of secret
   presence (FR2/FR5): rejected because it re-adds a hand-set setup step, the thing #2982 removes;
-  the fork case it would guard is closed by FR5's head-repo check instead.
+  the cases where secrets read empty are closed by FR5's head-repo and Dependabot checks instead.
 - **Always allowlist `github-actions[bot]`** regardless of mode: rejected — it would weaken the
   App arm's forge defence (`ai-review-guard.js:1695-1700`) in every repo, not only no-App ones.
 - **Skip FR6 (founder accepted an easier forge):** rejected as the default because FR6 is

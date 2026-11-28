@@ -116,7 +116,8 @@ triage_issue() {
   # A refusal is a decision about this issue and not a fault of this script, so it
   # returns 0: the whole-inbox form below runs under `set -e`, and a non-zero here would
   # end the pass at the first issue a stranger opened, for every issue behind it. It
-  # writes nothing either. The issue keeps `inbox` and is refused again each cycle, at
+  # writes nothing about triage; only dispatch_issue_refusal_mark labels it `author-refused`
+  # and comments once (#2694). The issue keeps `inbox` and is refused again each cycle, at
   # the cost of these two reads, until it is closed or filed again by a listed account.
   #
   # The title is printed further down, after this, because it is the author's text too:
@@ -124,7 +125,8 @@ triage_issue() {
   # ready, and a title can be made to look like one.
   local AUTHOR_REASON
   if ! AUTHOR_REASON="$(dispatch_issue_gate "$REPO" "$ISSUE" "$ISSUE_JSON")"; then
-    echo "Refusing #$ISSUE — ${AUTHOR_REASON:-who wrote it could not be checked}. Not triaged: no model was started on it and none of its labels were changed. It stays in the inbox until it is closed, or filed again under an account on the list (scripts/lib/dispatch-author-gate.sh)."
+    echo "Refusing #$ISSUE — ${AUTHOR_REASON:-who wrote it could not be checked}. Not triaged: no model was started on it and its triage labels were not changed (a real refusal is only labelled author-refused and commented once). It stays in the inbox until it is closed, or filed again under an account on the list (scripts/lib/dispatch-author-gate.sh)."
+    dispatch_issue_refusal_mark "$REPO" "$ISSUE" "$AUTHOR_REASON" "$ISSUE_JSON"
     return 0
   fi
 
@@ -359,11 +361,33 @@ CONTENT
   CURRENT_LABELS=$(echo "$ISSUE_JSON" | jq -r '[.labels[].name] | join(",")')
   for h in human tier specify info built-spec unknown; do
     [[ "hold:${h}" == "$HOLD_LABEL" ]] && continue
-    [[ ",${CURRENT_LABELS}," == *",hold:${h},"* ]] || continue
     SUPERSEDED="${SUPERSEDED},hold:${h}"
   done
 
-  if ! gh issue edit "$ISSUE" --repo "$REPO" --remove-label "$SUPERSEDED" >/dev/null 2>&1; then
+  # Removing a label the issue does not carry is a no-op, not a failure (#4097):
+  # `agent-crashed` and friends do not exist repo-wide, so naming them made `gh`
+  # reject the request and the retry warn "could not clear" on every release.
+  # Keep only the labels this issue actually wears; a present label that then
+  # fails to clear still warns below.
+  #
+  # Filter against a FRESH read, not ISSUE_JSON: that was read before the slow classify
+  # call, and a label added meanwhile (`needs-human-review` from dispatch, a ready label
+  # from a concurrent triage) would otherwise never be removed - a stale human-gate label
+  # then blocks the valid verdict at dispatch. If the re-read fails, fall back to the
+  # earlier snapshot rather than skip the clear.
+  local _kept="" _l _now _fresh
+  local -a _cand
+  if _fresh=$(gh issue view "$ISSUE" --repo "$REPO" --json labels 2>/dev/null) \
+     && _now=$(echo "$_fresh" | jq -r '[.labels[].name] | join(",")' 2>/dev/null); then
+    CURRENT_LABELS="$_now"
+  fi
+  IFS=',' read -r -a _cand <<< "$SUPERSEDED"
+  for _l in "${_cand[@]}"; do
+    [[ ",${CURRENT_LABELS}," == *",${_l},"* ]] && _kept+="${_kept:+,}${_l}"
+  done
+  SUPERSEDED="$_kept"
+
+  if [[ -n "$SUPERSEDED" ]] && ! gh issue edit "$ISSUE" --repo "$REPO" --remove-label "$SUPERSEDED" >/dev/null 2>&1; then
     # `gh` resolves label NAMES against the repo's label set and fails the whole
     # request if any one of them does not exist there — which would leave EVERY
     # superseded label in place, `inbox` included, re-triaging this issue forever.

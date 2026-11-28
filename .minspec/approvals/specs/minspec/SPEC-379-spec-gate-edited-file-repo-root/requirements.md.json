@@ -1,0 +1,14 @@
+{
+  "specPath": "specs/minspec/SPEC-379-spec-gate-edited-file-repo-root/requirements.md",
+  "specHash": "5eda356cfcdd404f50c9ba3235cf0ef1e6b7c80d1725bba9481c0f75ceb400fe",
+  "approvedAt": "2026-11-23T11:07:34.392Z",
+  "approvedBy": "minspec-sdd[bot]",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "",
+  "actor": "minspec-sdd[bot]",
+  "basis": "delegation:DLG-001",
+  "act": "spec-approval",
+  "author": "session:specfix-1123-text",
+  "verdictBy": "https://github.com/AIClarityAU/minspec/pull/3980#issuecomment-7095556064"
+}
