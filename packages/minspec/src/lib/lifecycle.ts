@@ -178,6 +178,22 @@ export function getSpecStatus(phases: PhaseState): SpecStatus {
 }
 
 /**
+ * Does approving a spec in this literal `status:` ADVANCE its phase map?
+ *
+ * The single predicate for that question (in97, 2026-11-22). Approval moves only a
+ * pre-implementation spec (`new` / `specifying`) into the build band; re-approving a
+ * spec already at `planning`/`implementing` after an edit records a fresh hash and
+ * writes no phase. `commands/approve.ts` used this test inline to decide whether to call
+ * `advanceSpecToImplementing`, while the ownership guard in front of it simulated the
+ * advance for EVERY spec. The two disagreed, so a spec approved before SPEC-038 existed
+ * (still `plan: pending`, no `implements:`) was refused over a phase write that would
+ * never happen. Every caller that asks "will this approval advance the map?" reads this.
+ */
+export function approvalAdvancesPhaseMap(status: SpecStatus | string | undefined): boolean {
+  return status === 'new' || status === 'specifying';
+}
+
+/**
  * Phase map after approving a spec for implementation (#148). Approval moves a
  * spec out of the *specifying* band into the *implementing* band; this returns the
  * phase map that makes `getSpecStatus` derive `implementing`, so the literal

@@ -7,6 +7,7 @@ import { readSpecFile, advanceSpecToImplementing } from '../lib/spec';
 import { loadConfig } from '../lib/config';
 import { validateSpec } from '../lib/spec-validator';
 import { assertOwnershipDeclaredForAdvance } from '../lib/ownership-advance-guard';
+import { approvalAdvancesPhaseMap } from '../lib/lifecycle';
 import { epicRefSet } from '../lib/epic-manager';
 import { readShardIdFiles } from '../lib/spec-layout';
 import {
@@ -314,8 +315,14 @@ export async function approveSpecCommand(
   // advance introduces and refuse" that could silently drift apart. One
   // enforcement point now, reached from all three actors that cross a spec into
   // the Plan build band (UI, `approveSpec`, `advanceSpecToImplementing` itself).
+  //
+  // in97: only when the approval WILL advance. The same predicate decides the call to
+  // `advanceSpecToImplementing` below; a re-approval of a spec already in the build band
+  // writes no phase, so refusing it for one would block the founder over a state the
+  // approval never creates (SPEC-023 / SPEC-026, approved before SPEC-038 existed).
+  const wasPreImpl = approvalAdvancesPhaseMap(parsed.frontmatter.status);
   try {
-    assertOwnershipDeclaredForAdvance(spec.filePath, parsed);
+    if (wasPreImpl) assertOwnershipDeclaredForAdvance(spec.filePath, parsed);
   } catch (err) {
     const choice = await vscode.window.showErrorMessage(
       `MinSpec: ${spec.id} is not ready for the status it would be approved into — approval refused.`,
@@ -381,8 +388,8 @@ export async function approveSpecCommand(
     // or re-flip an already-implementing spec being re-approved after an edit.
     // advanceSpecToImplementing also advances the `phases:` map (when present) so
     // the status line and the phases-derived status cannot diverge (#148).
-    const wasPreImpl =
-      parsed.frontmatter.status === 'new' || parsed.frontmatter.status === 'specifying';
+    // `wasPreImpl` is computed once, above the ownership guard (in97), from
+    // `approvalAdvancesPhaseMap` - the guard and the advance cannot disagree.
     // mirror; phases-aware, no longer affects the hash. Returns the new derived status
     // (DR-069 / #886: 'planning' when the implement phase hasn't started, else 'implementing').
     // #1371: no UI early-return here — a repeat press must still reach the commit

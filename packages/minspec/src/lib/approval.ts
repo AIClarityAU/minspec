@@ -27,6 +27,7 @@ import type { Tier } from './config';
 // creates no runtime cycle. Verified by scripts/check-import-cycles.ts.
 import { parseSpec } from './spec';
 import { assertOwnershipDeclaredForAdvance } from './ownership-advance-guard';
+import { approvalAdvancesPhaseMap } from './lifecycle';
 import { assertOptedIn, ensureDirectory } from './opt-in';
 import {
   readRecord,
@@ -550,7 +551,16 @@ export function approveSpec(
   //
   // Placed after the read (not a side effect) and before the hash/mint/write, so a refusal
   // leaves nothing half-written.
-  assertOwnershipDeclaredForAdvance(specFilePath, parseSpec(raw));
+  //
+  // in97: only for a spec this approval would advance (`approvalAdvancesPhaseMap`, the
+  // predicate `commands/approve.ts` uses to call `advanceSpecToImplementing`). A spec
+  // already at planning/implementing is re-approved without a phase write, so the state
+  // this guard exists to stop is never created; refusing it locked the founder out of
+  // re-approving specs approved before SPEC-038 existed.
+  const parsedForGuard = parseSpec(raw);
+  if (approvalAdvancesPhaseMap(parsedForGuard.frontmatter.status)) {
+    assertOwnershipDeclaredForAdvance(specFilePath, parsedForGuard);
+  }
 
   const hash = specHash(raw); // canonical-hash boundary (SPEC-022)
 
