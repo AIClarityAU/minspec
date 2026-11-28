@@ -1,7 +1,7 @@
 ---
 id: SPEC-038
 type: tasks
-status: specifying
+status: done
 product: minspec
 epic: EPIC-003  # SDD Core Methodology
 ---

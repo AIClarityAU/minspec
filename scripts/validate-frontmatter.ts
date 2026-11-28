@@ -50,6 +50,7 @@ import { listOrphanedRecords, listRecords } from '../packages/minspec/src/lib/ap
 import { canonicalSpecHash } from '../packages/minspec/src/lib/approval';
 import { classifyApprovablePath } from '../packages/minspec/src/lib/approvable';
 import { findStaleSidecars } from './lib/stale-sidecar';
+import { validateSiblingStatusLag, type SiblingStatusFile } from '../packages/minspec/src/lib/spec-validator';
 import { checkStatusParity, inspectStatusLine, inspectAllStatusClaims } from '../packages/minspec/src/lib/status-parity';
 import { checkManagedRegionMarkers, MINSPEC_GITIGNORE_ENTRIES } from '../packages/minspec/src/lib/scaffold';
 import { missingGitignoreEntries } from './lib/gitignore-entries';
@@ -1430,6 +1431,28 @@ if (existsSync(join(ROOT, '.minspec'))) {
     }
   } catch (err) {
     fail(giPath, `gitignore-entries check could not run (${err instanceof Error ? err.message : String(err)}) - failing closed (#383).`);
+  }
+}
+
+// Rule 28 (FATAL, #972): within one spec-set directory, design.md/tasks.md `status:` must not
+// lag requirements.md. Approve writes status to requirements.md only, so siblings drift behind
+// and the status answer depended on which file you opened (false signpost).
+{
+  const byDir = new Map<string, SiblingStatusFile[]>();
+  const specFiles = listCorpus('Rule 28', specsDir, '.md', true);
+  eachFile('Rule 28', specFiles, true, (file) => {
+    const fm = parseFrontmatter(readFileSync(file, 'utf-8'));
+    const type = (fm.type ?? '').trim().toLowerCase();
+    if (type !== 'requirements' && type !== 'design' && type !== 'tasks') return;
+    const dir = dirname(file);
+    const list = byDir.get(dir) ?? [];
+    list.push({ file: relative(ROOT, file), type, status: fm.status });
+    byDir.set(dir, list);
+  });
+  for (const [dir, group] of byDir) {
+    for (const v of validateSiblingStatusLag(group)) {
+      fail(relative(ROOT, dir), `sibling status lag (#972) — ${v.message} ${v.fixHint ?? ''}`);
+    }
   }
 }
 

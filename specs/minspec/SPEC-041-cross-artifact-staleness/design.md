@@ -1,7 +1,7 @@
 ---
 id: SPEC-041
 type: design
-status: specifying
+status: implementing
 product: minspec
 epic: EPIC-002  # Signpost Integrity — approval validity
 ---
