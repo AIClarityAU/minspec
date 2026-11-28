@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-033-repo-governance-provisioning/requirements.md",
-  "specHash": "474594062e09f5c17712ad3e883d50d09d8b34b2b8c205edb262c98bcf636001",
-  "approvedAt": "2026-08-07T02:46:10.525Z",
+  "specHash": "e2f49c6529ac83293d2f8d22c2445cdaf8566273c86e134d770950460032c82c",
+  "approvedAt": "2026-11-27T23:46:59.100Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T3",
   "migrated": false,
-  "baselineBlob": "e275840484c99e0aab3445818d0f756a6f44395e"
+  "baselineBlob": "cc69ebeda505263352be80e5873aad4f9dc7aa5e"
 }
