@@ -10,9 +10,10 @@
  * A downstream consumer (the drain-sweep / agent-execute, #732/#734/#735 — not
  * built by this change) dequeues and performs the actual generation. Writing is
  * path-keyed and idempotent by construction (re-enqueuing the same spec
- * overwrites its one request file with a fresh timestamp) — full dedup by
- * upstream spec hash is `.minspec/queue/`'s own follow-up (#731/#738), not
- * needed here since this producer only ever writes its own key.
+ * overwrites its one request file with a fresh timestamp). #731 adds dedup by
+ * (spec path + upstream spec hash): a request already queued for the same
+ * upstream hash is a no-op, while a spec re-approved after an edit (new hash)
+ * replaces the stale request.
  */
 
 import * as fs from 'fs';
@@ -31,7 +32,15 @@ export interface PhaseAdvanceRequest {
   /** ISO timestamp of the request. */
   readonly requestedAt: string;
   readonly source: PhaseAdvanceSource;
+  /**
+   * Canonical hash of the spec at enqueue time (the "upstream" hash). Absent
+   * when the producer could not compute one — such a request is never deduped.
+   */
+  readonly upstreamHash?: string;
 }
+
+/** Outcome of an enqueue: written, or skipped because an identical request is in flight. */
+export type EnqueueResult = 'enqueued' | 'duplicate';
 
 /** The request file path for a spec — pure function of (rootDir, repo-relative spec path). */
 export function queueRequestPath(rootDir: string, specRelPath: string): string {
@@ -54,15 +63,33 @@ export function enqueuePhaseAdvance(
   rootDir: string,
   specRelPath: string,
   source: PhaseAdvanceSource,
-): void {
+  upstreamHash?: string | null,
+): EnqueueResult {
   const p = queueRequestPath(rootDir, specRelPath);
+  const hash = upstreamHash || undefined;
+  // Opt-in is checked by ensureDirectory below, so a not-opted-in folder still
+  // throws NotOptedInError even when a dedup read would have found nothing.
   ensureDirectory(path.dirname(p));
+  if (hash !== undefined && readUpstreamHash(p) === hash) return 'duplicate';
   const req: PhaseAdvanceRequest = {
     specPath: toPosixRel(specRelPath),
     requestedAt: new Date().toISOString(),
     source,
+    ...(hash !== undefined ? { upstreamHash: hash } : {}),
   };
   fs.writeFileSync(p, JSON.stringify(req, null, 2) + '\n', 'utf-8');
+  return 'enqueued';
+}
+
+/** The upstream hash recorded in an existing request file; undefined if absent/unreadable/corrupt. */
+function readUpstreamHash(requestFile: string): string | undefined {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(requestFile, 'utf-8')) as Partial<PhaseAdvanceRequest>;
+    return typeof parsed.upstreamHash === 'string' ? parsed.upstreamHash : undefined;
+  } catch {
+    // Missing or corrupt request → treat as not in flight, so it is (re)written.
+    return undefined;
+  }
 }
 
 /** One pending request as seen by the visibility surfaces (status bar / viewer). */

@@ -17,6 +17,7 @@ import {
   checkApprover,
   parseAgentIdentities,
   specRelPath,
+  canonicalSpecHash,
   type ApprovalStatus,
 } from '../lib/approval';
 import { sidecarPath } from '../lib/approval-store';
@@ -191,7 +192,12 @@ function enableAdvancePhaseOnApprove(rootDir: string): void {
  */
 function enqueuePhaseAdvanceSafely(rootDir: string, specRel: string): void {
   try {
-    enqueuePhaseAdvance(rootDir, specRel, 'alt-a-toast');
+    enqueuePhaseAdvance(
+      rootDir,
+      specRel,
+      'alt-a-toast',
+      canonicalSpecHash(path.join(rootDir, specRel)),
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.warn(`MinSpec: phase-advance enqueue failed — ${message}`);
