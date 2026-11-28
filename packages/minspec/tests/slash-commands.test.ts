@@ -52,6 +52,15 @@ describe('slash-commands', () => {
     });
   });
 
+  describe('clarify command and phases.clarify (#3414)', () => {
+    it('never instructs writing phases.clarify: done; only approval writes it', () => {
+      for (const shim of [buildClaudeShim('clarify'), buildCursorShim('clarify')]) {
+        expect(shim).not.toMatch(/set `phases\.clarify: done`/);
+        expect(shim).toContain('Do not edit `phases.clarify`');
+      }
+    });
+  });
+
   describe('buildClaudeShim()', () => {
     it('emits valid front-matter and command heading for each command', () => {
       for (const cmd of SPEC_KIT_COMMANDS) {
