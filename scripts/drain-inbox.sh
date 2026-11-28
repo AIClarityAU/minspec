@@ -768,6 +768,30 @@ checkout_occupied() {
   return 0                             # a live peer claims it ⇒ occupied
 }
 
+# report_parked_primary <root> <branch> <origin_ref> (#1901). G1/G4 refuse to move a
+# primary that is off the default branch — exactly the state that needs moving — so that
+# skip is made LOUD instead: one line per cycle on stderr (never deduplicated), naming the
+# repo, the branch, whether work is stranded on it, and the one command that returns it.
+# Report-only: the tree-level HEAD move stays a human act (DR-065). Stranded is decided
+# from `git diff --numstat <origin>..HEAD` insertions, NEVER `git cherry`, which is blind
+# to squash merges (it showed `+` for commits whose diff was 0 insertions). A binary file
+# reports `-` and counts as stranded. Detached HEAD is reported as "(detached)".
+report_parked_primary() {
+  local root="$1" branch="$2" origin_ref="$3" ins="" add rest ahead stranded
+  [[ "$branch" == "HEAD" || -z "$branch" ]] && branch="(detached)"
+  ahead="$(launcher_worktree_git "$PRIMARY_ROOT" "$root" rev-list --count "${origin_ref}..HEAD" 2>/dev/null)" || ahead="?"
+  if ins="$(launcher_worktree_git "$PRIMARY_ROOT" "$root" diff --numstat "${origin_ref}..HEAD" 2>/dev/null)"; then
+    stranded="no"
+    while IFS=$'\t' read -r add rest; do
+      [[ -z "$add" ]] && continue
+      if [[ "$add" == "-" || "$add" -gt 0 ]] 2>/dev/null; then stranded="yes"; break; fi
+    done <<<"$ins"
+  else
+    stranded="unknown"
+  fi
+  echo "[drain] WARNING: PARKED PRIMARY $root is on '${branch}', not ${origin_ref#origin/} — the drain will not move it (G1). Stranded work: ${stranded} (${ahead} commit(s) ahead of ${origin_ref}; judged by diff insertions, not git cherry). Return it with: git -C '$root' switch ${origin_ref#origin/}" >&2
+}
+
 # sync_shared_checkouts (#168 / DR-051 §4a; reconciles "keep checkouts current"
 # with rule #8 "never mutate a live session's tree"). For EACH checkout git tracks,
 # ff to origin/<default> ONLY when ALL hold; else fetch-only:
@@ -782,7 +806,7 @@ checkout_occupied() {
 # corruption (unrecoverable). Kill-switch MINSPEC_DRAIN_GATED_FF=0.
 sync_shared_checkouts() {
   [[ "${MINSPEC_DRAIN_GATED_FF:-1}" == "0" ]] && return 0
-  local db origin_ref root head_sha origin_sha base
+  local db origin_ref root head_sha origin_sha base cur_branch
   # `|| true` inside the substitution: under `set -euo pipefail` an unset origin/HEAD
   # makes symbolic-ref exit 128, which would otherwise abort the whole drain.
   db="$(git -C "$PRIMARY_ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"  # swallow-ok: the next line defaults empty to main via ${db:-main}, so a failed lookup and an unset origin/HEAD land on the same correct default
@@ -805,7 +829,13 @@ sync_shared_checkouts() {
       # from THIS repository's record of the worktree and the hooks from this tree
       # (lib/agent-worktree.sh, #1203). A root with no such record is skipped.
       launcher_worktree_git_dir "$PRIMARY_ROOT" "$root" >/dev/null || continue
-      [[ "$(launcher_worktree_git "$PRIMARY_ROOT" "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$db" ]] || continue   # G1
+      cur_branch="$(launcher_worktree_git "$PRIMARY_ROOT" "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" || cur_branch=""
+      if [[ "$cur_branch" != "$db" ]]; then
+        # G1 skips this checkout by design; the skip must not be silent for the PRIMARY (#1901).
+        [[ "$(readlink -m -- "$root" 2>/dev/null)" == "$(readlink -m -- "$PRIMARY_ROOT" 2>/dev/null)" ]] \
+          && report_parked_primary "$root" "$cur_branch" "$origin_ref"
+        continue   # G1
+      fi
       [[ -z "$(launcher_worktree_git "$PRIMARY_ROOT" "$root" status --porcelain 2>/dev/null)" ]] || continue                   # G2
       checkout_occupied "$root" && continue                                                     # G3 (occupied ⇒ skip)
       head_sha="$(launcher_worktree_git "$PRIMARY_ROOT" "$root" rev-parse HEAD 2>/dev/null)" || continue
