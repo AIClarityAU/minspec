@@ -55,7 +55,7 @@ import {
   type DelegationWitnesses,
 } from './approval-actor';
 import { readRepeatFixShare, utcToday } from './repeat-fix-share';
-import { openClarifyDetail } from './clarify-open';
+import { openClarifyDetail, clarifyPhaseDetail } from './clarify-open';
 import { readContentPullRequest } from './content-pr';
 import { readSpecFile, parseSpec, advanceSpecToImplementing } from '../../packages/minspec/src/lib/spec';
 import { deriveStatus, phasesForApproval } from '../../packages/minspec/src/lib/lifecycle';
@@ -272,6 +272,8 @@ export function planDelegatedApproval(input: PlanInput): PlanResult {
   if (act === 'spec-approval') {
     const open = openClarifyDetail(artifactContent);
     if (open !== undefined) return no('clarify-open', open);
+    const phase = clarifyPhaseDetail(artifactContent, tier);
+    if (phase !== undefined) return no('clarify-pending', phase);
   }
   // The delegation to cite: the first that covers this repo and act. `checkApprovalActor`
   // re-judges it in full, so picking a non-covering one only produces a refusal.
@@ -617,7 +619,8 @@ function main(): number {
   if (onDisk === null || specHash(onDisk) !== plan.record.specHash) {
     return deny('working-tree-differs', `${artifact} in the working tree differs from ${base}`);
   }
-  // Everything the founder's Approve Spec refuses, this refuses too.
+  // Everything the founder's Approve Spec refuses, this refuses too - plus the Clarify-phase
+  // witness, which the founder path lacks on purpose (no human reads a delegated approval).
   if (plan.record.act === 'spec-approval') {
     const unready = specNotApprovable(repoRoot, abs);
     if (unready !== undefined) return deny('spec-not-approvable', unready);
@@ -646,11 +649,17 @@ function main(): number {
  * `content`, when given, is judged instead of the bytes at `abs`: the caller pre-checks
  * the base's bytes before any worktree exists (`abs` still locates the spec's directory,
  * config and sibling shards under `repoRoot`). One predicate for both, so they cannot drift.
+ *
+ * Beyond the founder's refusals it also applies the Clarify-phase witness (`clarifyPhaseDetail`),
+ * which `validateSpec` has no rule for: no human reads a delegated approval. The tier is the raw
+ * frontmatter value (as in `planDelegatedApproval`), never `parseSpec`'s defaulted one.
  */
 export function specNotApprovable(repoRoot: string, abs: string, content?: string): string | undefined {
   const parsed = content === undefined ? readSpecFile(abs) : parseSpec(content);
   const status = parsed.frontmatter.status;
   if (isTerminalSpecStatus(status)) return `the spec is ${String(status)}, past the approval gate`;
+  const clarify = clarifyPhaseDetail(parsed.raw, frontmatterField(parsed.raw, 'tier'));
+  if (clarify !== undefined) return clarify;
   // The approval hash covers the body, and the lifecycle write rewrites a body status word
   // (setBodyStatusToken) to the derived status. A delegated approval must leave the body untouched (DR-081 s5:
   // the exemption covers the record, never the approvable), so refuse up front.
