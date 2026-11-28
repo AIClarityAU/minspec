@@ -2882,6 +2882,7 @@ const LOCALIZED_MACHINERY_COMMENT: readonly string[] = [
   '# UNIVERSAL — present in any repo that scaffolds this stack:',
   '#   .github/   — the review workflows and their scripts',
   '#   scripts/   — dispatch, review, remediation, the lease',
+  '#   .minspec/hooks/ — the DR-037 commit-gate hooks scaffolded into this repo',
   '#',
   "# INHERITED FROM MINSPEC — the remaining alternations name files in MinSpec's own",
   '# repo. Unless this repo happens to have files at those exact paths they never match,',

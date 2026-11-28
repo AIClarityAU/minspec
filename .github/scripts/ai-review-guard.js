@@ -1172,7 +1172,7 @@ function latestHeadRound({ listing, allowlist, headSha } = {}) {
  * direction for a predicate that exists to REFUSE a carry.
  */
 const MACHINERY_PATH_RE =
-  /^\.github\/|^scripts\/|^\.githooks\/|^\.circleci\/|^\.buildkite\/|^\.husky\/|^packages\/minspec\/src\/lib\/(template-registry|ci-review-templates|machinery-paths)\.ts$/;
+  /^\.github\/|^scripts\/|^\.githooks\/|^\.circleci\/|^\.buildkite\/|^\.husky\/|^\.minspec\/hooks\/|^packages\/minspec\/src\/lib\/(template-registry|ci-review-templates|machinery-paths)\.ts$/;
 
 /**
  * Does the reviewable input touch machinery? (#3178) Read from the `diff --git` headers
