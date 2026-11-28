@@ -1,13 +1,19 @@
 ---
 id: SPEC-033
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness — guardrails a shared repo must carry
 relates_to: [SPEC-024, SPEC-030, SPEC-034, SPEC-063, DR-058, DR-061]  # SPEC-024 auto-merge gate consumes the `ai-review:pass` label this propagates · SPEC-030 is the init-time non-modal offer pattern this reuses · SPEC-034 (OIDC broker, not yet shipped) will shrink FR-4's checklist once live · SPEC-063 (clean uninstall) mirrors this spec's inventory and must stay in lockstep · DR-058 + DR-061 are the two auto-merge decisions FR-7 now rests on
 implements: [packages/minspec/src/commands/check-repo-governance.ts, packages/minspec/tests/check-repo-governance.test.ts]  # greenfield: the `MinSpec: Check Repo Governance` command (FR-2) and its fixture-repo test (AC-2); both new, so no other spec owns them
 affects: [packages/minspec/src/lib/ruleset-advisor.ts, packages/minspec/src/lib/template-registry.ts, packages/minspec/src/commands/init.ts]  # modified in place, never owned: shared files whose owner or sibling specs list them under affects: only
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — Repo Governance Provisioning (ai-review + branch protection on init/refresh) — Requirements
@@ -49,7 +55,7 @@ affects: [packages/minspec/src/lib/ruleset-advisor.ts, packages/minspec/src/lib/
 > unprotected branch.
 
 **Date:** 2026-07-07 (clarify refinements applied 2026-07-14; re-checked and corrected 2026-10-01 — both [#703](https://github.com/AIClarityAU/minspec/issues/703))
-**Status:** Specifying (the 2026-08-07 approval, #1367, was against the pre-correction bytes; D-11 has a recorded selection, pending ratification at approval)
+**Status:** Planning (the 2026-08-07 approval, #1367, was against the pre-correction bytes; D-11 has a recorded selection, pending ratification at approval)
 **Triggered by:** [#557](https://github.com/AIClarityAU/minspec/issues/557) — "provision repo governance (branch protection + ai-review) on init/refresh — detect & offer to fix."
 **Builds on:** [DR-037](../../../docs/decisions/DR-037.md) — the managed-region template mechanism this rides · [DR-050](../../../docs/decisions/DR-050.md) — shelling the user's own `gh` on consent (FR-3) · [DR-058](../../../docs/decisions/DR-058.md) + [DR-061](../../../docs/decisions/DR-061.md) — the two auto-merge decisions FR-7 rests on · the ai-review workflow set ([#342](https://github.com/AIClarityAU/minspec/issues/342) / [#428](https://github.com/AIClarityAU/minspec/issues/428) / [#480](https://github.com/AIClarityAU/minspec/issues/480)), propagated **unchanged**, not rewritten.
 **Relates:** [SPEC-024](../SPEC-024-auto-merge-eligibility/requirements.md) — the auto-merge gate that only becomes meaningful once the `ai-review:pass` label it consumes is actually produced on every repo, which today it is not.
