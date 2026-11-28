@@ -16,7 +16,7 @@ import { assertOwnershipDeclaredForAdvance } from '../../minspec/src/lib/ownersh
 import { isTerminalSpecStatus } from '../../minspec/src/lib/spec-vocabulary';
 import { formatNextTaskLabel, resolveNextTask } from '../../shared/src/next-task';
 import { buildArtifactGraph } from '../../minspec/src/lib/artifact-graph';
-import { deriveStatus, explicitTerminalOf } from '../../minspec/src/lib/lifecycle';
+import { approvalAdvancesPhaseMap, deriveStatus, explicitTerminalOf } from '../../minspec/src/lib/lifecycle';
 import { advanceSpecToImplementing, parseSpec, readSpecFile } from '../../minspec/src/lib/spec';
 import { loadConfig } from '../../minspec/src/lib/config';
 import { epicRefSet } from '../../minspec/src/lib/epic-manager';
@@ -282,19 +282,21 @@ const approveOperation: Operation = {
         .map((v) => ({ file: relFile, rule: v.rule, severity: v.severity, message: v.message, fixHint: v.fixHint }));
       return { ...refuse('incomplete', `${summary.id} is not complete - approval refused`), findings };
     }
-    // 4. What the advance would introduce.
-    try {
-      assertOwnershipDeclaredForAdvance(file, parsed);
-    } catch (e) {
-      return refuse('not-ready-for-advance', errorMessage(e));
+    // 4. What the advance would introduce - only for a spec this approval will advance.
+    const advances = approvalAdvancesPhaseMap(parsed.frontmatter.status);
+    if (advances) {
+      try {
+        assertOwnershipDeclaredForAdvance(file, parsed);
+      } catch (e) {
+        return refuse('not-ready-for-advance', errorMessage(e));
+      }
     }
     // 5. Approver identity: the clone's git user.email, checked before any write.
     const email = gitConfigEmail(ctx.root);
     const check = checkApprover(email, parseAgentIdentities(process.env.MINSPEC_AGENT_IDENTITIES));
     if (!check.ok) return refuse('approver-denied', `Approval refused for ${summary.id} - ${check.reason}`);
     // 6. Status/phases mirror, only from a pre-implementation status.
-    const wasPreImpl = parsed.frontmatter.status === 'new' || parsed.frontmatter.status === 'specifying';
-    if (wasPreImpl) advanceSpecToImplementing(file);
+    if (advances) advanceSpecToImplementing(file);
     // 7. The record.
     const record = approveSpec(ctx.root, file, summary.tier, email);
     const specRel = path.relative(ctx.root, file).split(path.sep).join('/');
